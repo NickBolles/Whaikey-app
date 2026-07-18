@@ -195,7 +195,37 @@ Sections, top to bottom:
 
 ---
 
-## 10. Stats, Delight & Retention
+## 10. Whiskey School — Learning, Quizzes & Guided Tastings
+
+Inspired by Vivino's "Wine Adventures" (gamified guided tasting journeys, a Premium hook) and Dram's Duolingo-style lessons — but with a twist neither has: **our lessons are grounded in your actual bar and your actual pours**, not generic content.
+
+### 10.1 Micro-lessons (🟡 Phase 3)
+- 2–3 minute cards: "What is mash bill?", "Why does proof matter?", "Sherry casks explained", "Scotch regions", "How to nose a glass."
+- AI-personalized ordering: lessons surface based on what you actually drink ("You own 4 wheated bourbons — here's why wheat changes the flavor").
+- Progressive tracks: Whiskey 101 → Bourbon Deep Dive → Scotch Regions → Cask Science → Blind Tasting Skills.
+- Content pipeline: expert-reviewed base curriculum + AI-generated personalization layer (AI never invents facts into lessons; it selects and contextualizes reviewed content).
+
+### 10.2 Quizzes & knowledge checks (🟡 Phase 3)
+- End-of-lesson quizzes (3–5 questions, Duolingo-style); spaced-repetition review of missed concepts.
+- **"Guess from your bar"** mode: quiz questions generated from bottles you own ("Which of YOUR bottles is a wheated bourbon?") — zero-content-cost, infinitely personal.
+- XP, levels, badges tied to knowledge (regions mastered, styles identified) — never to consumption volume (guardrails §8.3 apply: streaks/rewards must not incentivize drinking).
+
+### 10.3 Guided tastings — where learning meets the glass (🔵 Phase 3–4)
+- Structured tasting exercises using a bottle you own: step-by-step nosing/tasting prompts, wheel input at each step, then compare your notes to community/expert consensus.
+- **Palate training**: "Can you find the vanilla?" exercises; blind-mode variants with a friend pouring.
+- **Taste-along flights**: curated multi-bottle journeys ("The 5 Scotch regions") — works with what you own, suggests affordable fills for gaps (a natural, honest commerce hook later).
+- Calibration payoff: guided tastings feed the palate profile with higher-quality signal than casual pours.
+
+### 10.4 AI tutor mode (🔵)
+- The chat concierge in teaching mode: Socratic follow-ups after quizzes, "explain like I'm new" toggles, and pour-side coaching ("You're drinking the Redbreast 12 — want the 60-second version of what pot still means?").
+
+**Monetization fit:** free tier gets Whiskey 101 + occasional quizzes; full tracks, guided tastings, and tutor mode are Pro (mirrors Vivino gating Wine Adventures behind Premium — see PLAN.md §6).
+
+**Retention fit:** lessons and quizzes give non-drinking-day engagement — the app has a reason to open even when you're not pouring, without any consumption-incentive mechanics.
+
+---
+
+## 11. Stats, Delight & Retention
 
 - 🟡 **Stats page**: pours over time, category breakdown, average rating by region, spend charts.
 - 🔵 **Whiskey Wrapped** (yearly recap, shareable, opt-in on the spend slide 😅).
@@ -204,7 +234,7 @@ Sections, top to bottom:
 
 ---
 
-## 11. Platform & Non-functional Requirements
+## 12. Platform & Non-functional Requirements
 
 | Area | Requirement |
 |---|---|
@@ -217,7 +247,7 @@ Sections, top to bottom:
 
 ---
 
-## 12. Feature dependency graph (build order rationale)
+## 13. Feature dependency graph (build order rationale)
 
 ```
 Bottle DB ──▶ Search ──▶ Bottle Detail ──▶ Own/Tried/Wishlist ──▶ My Bar ($)
