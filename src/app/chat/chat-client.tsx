@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { MessageCircle, Plus, PanelLeft, Send, Wrench, X } from "lucide-react";
+import { History, MessageCircle, Plus, Send, Wrench, X } from "lucide-react";
 
 interface ToolCall {
   name: string;
@@ -30,12 +30,19 @@ const SUGGESTIONS = [
 
 function SetupCard() {
   return (
-    <div className="flex flex-col items-center justify-center min-h-[70dvh] px-6 text-center gap-4">
-      <div className="text-5xl">🔌</div>
-      <h1 className="text-2xl font-bold">AI features are not configured</h1>
-      <div className="rounded-xl bg-surface border border-border-subtle p-4 text-left text-sm text-muted max-w-md">
-        <p className="mb-2">The concierge needs an Anthropic API key. To enable it:</p>
-        <ol className="list-decimal list-inside flex flex-col gap-1">
+    <div className="flex flex-col items-center justify-center min-h-[70dvh] px-6 text-center gap-6">
+      <div aria-hidden className="text-5xl drop-shadow-[0_0_24px_rgba(232,161,60,0.25)]">🔌</div>
+      <div>
+        <h1 className="font-display text-3xl font-semibold tracking-tight">
+          The concierge is off duty
+        </h1>
+        <p className="text-muted mt-3 max-w-sm leading-relaxed">
+          AI features are not configured on this server yet.
+        </p>
+      </div>
+      <div className="card p-5 text-left text-sm max-w-md w-full">
+        <p className="section-label mb-3">To open the bar</p>
+        <ol className="list-decimal list-inside flex flex-col gap-2 text-muted leading-relaxed">
           <li>
             Set <code className="text-accent">ANTHROPIC_API_KEY</code> in your environment (e.g.{" "}
             <code>.env.local</code>).
@@ -56,11 +63,11 @@ function ToolChips({ toolCalls }: { toolCalls: ToolCall[] }) {
     <div className="flex flex-wrap gap-1.5 mt-1.5">
       {toolCalls.map((call, i) => (
         <details key={i} className="group">
-          <summary className="flex items-center gap-1 cursor-pointer list-none rounded-full bg-surface border border-border-subtle px-2 py-0.5 text-[11px] text-muted hover:text-foreground transition-colors">
-            <Wrench size={10} aria-hidden />
+          <summary className="chip flex items-center gap-1 cursor-pointer list-none px-2.5 py-1 text-[11px] hover:text-foreground">
+            <Wrench size={10} strokeWidth={1.8} aria-hidden />
             used: {call.name}
           </summary>
-          <pre className="mt-1 max-w-full overflow-x-auto rounded-lg bg-surface border border-border-subtle p-2 text-[10px] text-muted">
+          <pre className="mt-1.5 max-w-full overflow-x-auto rounded-xl bg-surface border border-border-subtle p-2.5 text-[10px] text-muted">
             {JSON.stringify({ input: call.input, result: call.result }, null, 2)}
           </pre>
         </details>
@@ -71,11 +78,11 @@ function ToolChips({ toolCalls }: { toolCalls: ToolCall[] }) {
 
 function TypingIndicator() {
   return (
-    <div className="flex items-center gap-1 rounded-2xl rounded-bl-sm bg-surface border border-border-subtle px-4 py-3 w-fit">
+    <div className="card-flat rounded-2xl rounded-bl-md! flex items-center gap-1.5 px-4 py-3.5 w-fit">
       {[0, 1, 2].map((i) => (
         <span
           key={i}
-          className="h-1.5 w-1.5 rounded-full bg-muted animate-bounce"
+          className="h-1.5 w-1.5 rounded-full bg-accent/70 animate-bounce"
           style={{ animationDelay: `${i * 150}ms` }}
         />
       ))}
@@ -93,6 +100,7 @@ export function ChatClient({ aiConfigured }: { aiConfigured: boolean }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const refreshSessions = useCallback(async () => {
     try {
@@ -153,6 +161,11 @@ export function ChatClient({ aiConfigured }: { aiConfigured: boolean }) {
     setDrawerOpen(false);
   }, []);
 
+  const pickSuggestion = useCallback((text: string) => {
+    setInput(text);
+    inputRef.current?.focus();
+  }, []);
+
   const send = useCallback(
     async (text: string) => {
       const message = text.trim();
@@ -204,50 +217,52 @@ export function ChatClient({ aiConfigured }: { aiConfigured: boolean }) {
   return (
     <div className="flex flex-col h-[calc(100dvh-4rem)] relative">
       {/* Header */}
-      <header className="flex items-center justify-between gap-2 px-4 py-3 border-b border-border-subtle">
-        <button
-          type="button"
-          onClick={() => setDrawerOpen(true)}
-          className="flex items-center gap-2 rounded-lg p-2 hover:bg-surface transition-colors"
-          aria-label="Open conversation list"
-        >
-          <PanelLeft size={18} className="text-accent" aria-hidden />
-        </button>
-        <div className="flex items-center gap-2 font-semibold">
-          <MessageCircle size={18} className="text-accent" aria-hidden />
-          Whiskey concierge
+      <header className="flex items-center justify-between gap-2 pl-4 pr-2 py-3 border-b border-border-subtle">
+        <div>
+          <h1 className="font-display text-xl font-semibold leading-tight">Concierge</h1>
+          <p className="text-[11px] text-muted mt-0.5">Knows your bar. Pours straight answers.</p>
         </div>
-        <button
-          type="button"
-          onClick={newChat}
-          className="flex items-center gap-1 rounded-lg p-2 hover:bg-surface transition-colors"
-          aria-label="New chat"
-        >
-          <Plus size={18} className="text-accent" aria-hidden />
-        </button>
+        <div className="flex items-center">
+          <button
+            type="button"
+            onClick={() => setDrawerOpen(true)}
+            className="flex items-center justify-center h-11 w-11 rounded-xl text-muted hover:text-foreground hover:bg-surface transition-colors"
+            aria-label="Open conversation list"
+          >
+            <History size={20} strokeWidth={1.8} aria-hidden />
+          </button>
+          <button
+            type="button"
+            onClick={newChat}
+            className="flex items-center justify-center h-11 w-11 rounded-xl text-muted hover:text-foreground hover:bg-surface transition-colors"
+            aria-label="New chat"
+          >
+            <Plus size={20} strokeWidth={1.8} aria-hidden />
+          </button>
+        </div>
       </header>
 
       {/* Session drawer */}
       {drawerOpen && (
         <div className="absolute inset-0 z-20 flex">
           <div className="w-72 max-w-[80%] bg-surface border-r border-border-subtle h-full flex flex-col">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-border-subtle">
-              <span className="font-semibold text-sm">Conversations</span>
+            <div className="flex items-center justify-between pl-4 pr-2 py-2.5 border-b border-border-subtle">
+              <span className="section-label">Conversations</span>
               <button
                 type="button"
                 onClick={() => setDrawerOpen(false)}
                 aria-label="Close conversation list"
-                className="rounded-lg p-1 hover:bg-surface-raised transition-colors"
+                className="flex items-center justify-center h-11 w-11 rounded-xl text-muted hover:text-foreground hover:bg-surface-raised transition-colors"
               >
-                <X size={16} aria-hidden />
+                <X size={18} strokeWidth={1.8} aria-hidden />
               </button>
             </div>
             <button
               type="button"
               onClick={newChat}
-              className="flex items-center gap-2 mx-3 mt-3 rounded-xl bg-accent text-background font-semibold px-3 py-2 text-sm hover:bg-accent-deep transition-colors"
+              className="btn-secondary flex items-center justify-center gap-2 mx-3 mt-3 px-3 py-2.5 text-sm font-medium"
             >
-              <Plus size={16} aria-hidden /> New chat
+              <Plus size={16} strokeWidth={1.8} aria-hidden /> New chat
             </button>
             <ul className="flex-1 overflow-y-auto p-3 flex flex-col gap-1">
               {sessions.length === 0 && (
@@ -258,9 +273,9 @@ export function ChatClient({ aiConfigured }: { aiConfigured: boolean }) {
                   <button
                     type="button"
                     onClick={() => void openSession(s.id)}
-                    className={`w-full text-left rounded-lg px-3 py-2 text-sm truncate transition-colors ${
+                    className={`w-full text-left rounded-xl px-3 py-2.5 text-sm truncate transition-colors ${
                       s.id === sessionId
-                        ? "bg-surface-raised text-accent"
+                        ? "bg-accent/10 text-accent border border-accent/30"
                         : "hover:bg-surface-raised"
                     }`}
                   >
@@ -273,7 +288,7 @@ export function ChatClient({ aiConfigured }: { aiConfigured: boolean }) {
           <button
             type="button"
             aria-label="Close conversation list"
-            className="flex-1 bg-black/40"
+            className="flex-1 bg-black/50"
             onClick={() => setDrawerOpen(false)}
           />
         </div>
@@ -282,18 +297,26 @@ export function ChatClient({ aiConfigured }: { aiConfigured: boolean }) {
       {/* Thread */}
       <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-3">
         {messages.length === 0 && !pending && (
-          <div className="flex flex-col items-center justify-center flex-1 gap-4 text-center">
-            <div className="text-4xl">🥃</div>
-            <p className="text-muted text-sm max-w-xs">
-              Ask about your bar, your pours, or anything whiskey. Enjoy responsibly.
-            </p>
+          <div className="flex flex-col items-center justify-center flex-1 gap-5 text-center">
+            <MessageCircle
+              size={40}
+              strokeWidth={1.8}
+              className="text-accent drop-shadow-[0_0_18px_rgba(232,161,60,0.35)]"
+              aria-hidden
+            />
+            <div>
+              <p className="font-display text-xl font-semibold">Ask me anything whiskey.</p>
+              <p className="text-muted text-sm mt-2 max-w-xs leading-relaxed">
+                Your bar, your pours, the wide world of whisk(e)y. Enjoy responsibly.
+              </p>
+            </div>
             <div className="flex flex-wrap justify-center gap-2">
               {SUGGESTIONS.map((s) => (
                 <button
                   key={s}
                   type="button"
-                  onClick={() => void send(s)}
-                  className="rounded-full bg-surface border border-border-subtle px-4 py-2 text-sm hover:bg-surface-raised transition-colors"
+                  onClick={() => pickSuggestion(s)}
+                  className="chip px-4 py-2 text-sm hover:text-foreground"
                 >
                   {s}
                 </button>
@@ -305,13 +328,13 @@ export function ChatClient({ aiConfigured }: { aiConfigured: boolean }) {
         {messages.map((m) =>
           m.role === "user" ? (
             <div key={m.id} className="self-end max-w-[85%]">
-              <div className="rounded-2xl rounded-br-sm bg-accent text-background px-4 py-2.5 whitespace-pre-wrap">
+              <div className="rounded-2xl rounded-br-md bg-accent/12 border border-accent/30 px-4 py-2.5 text-[15px] leading-relaxed whitespace-pre-wrap">
                 {m.content}
               </div>
             </div>
           ) : (
             <div key={m.id} className="self-start max-w-[85%]">
-              <div className="rounded-2xl rounded-bl-sm bg-surface border border-border-subtle px-4 py-2.5 whitespace-pre-wrap">
+              <div className="card-flat rounded-2xl rounded-bl-md! px-4 py-2.5 text-[15px] leading-relaxed whitespace-pre-wrap">
                 {m.content}
               </div>
               {m.toolCalls && m.toolCalls.length > 0 && <ToolChips toolCalls={m.toolCalls} />}
@@ -326,7 +349,7 @@ export function ChatClient({ aiConfigured }: { aiConfigured: boolean }) {
         )}
 
         {error && (
-          <p role="alert" className="self-center text-sm text-red-400">
+          <p role="alert" className="self-center text-sm text-danger">
             {error}
           </p>
         )}
@@ -339,30 +362,33 @@ export function ChatClient({ aiConfigured }: { aiConfigured: boolean }) {
           e.preventDefault();
           void send(input);
         }}
-        className="flex items-end gap-2 border-t border-border-subtle px-4 py-3"
+        className="sticky bottom-0 px-4 py-3 border-t border-border-subtle bg-background/95 backdrop-blur"
       >
-        <textarea
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              void send(input);
-            }
-          }}
-          rows={1}
-          placeholder="Ask the concierge…"
-          aria-label="Message the concierge"
-          className="flex-1 resize-none rounded-xl bg-surface border border-border-subtle px-4 py-2.5 text-sm focus:outline-none focus:border-accent"
-        />
-        <button
-          type="submit"
-          disabled={pending || !input.trim()}
-          aria-label="Send message"
-          className="rounded-xl bg-accent text-background p-2.5 disabled:opacity-40 hover:bg-accent-deep transition-colors"
-        >
-          <Send size={18} aria-hidden />
-        </button>
+        <div className="card-flat flex items-end gap-2 p-1.5 focus-within:border-accent/50 transition-colors">
+          <textarea
+            ref={inputRef}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                void send(input);
+              }
+            }}
+            rows={1}
+            placeholder="Ask the concierge…"
+            aria-label="Message the concierge"
+            className="flex-1 resize-none rounded-xl bg-transparent px-3 py-2.5 text-[15px] placeholder:text-muted focus:outline-none"
+          />
+          <button
+            type="submit"
+            disabled={pending || !input.trim()}
+            aria-label="Send message"
+            className="btn-primary flex items-center justify-center h-11 w-11 shrink-0 disabled:opacity-40"
+          >
+            <Send size={18} strokeWidth={1.8} aria-hidden />
+          </button>
+        </div>
       </form>
     </div>
   );
