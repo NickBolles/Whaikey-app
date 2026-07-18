@@ -2,7 +2,7 @@
 
 An AI-native whiskey tracking app, inspired by wine apps like **Vivino** (social scanning + ratings) and **InVintory** (beautiful personal cellar management), but built for whiskey from day one with AI at the core — not bolted on.
 
-> Deep dives: [docs/FEATURES.md](./docs/FEATURES.md) (detailed feature map) · [docs/COMPETITORS.md](./docs/COMPETITORS.md) (competitor & market analysis)
+> Deep dives: [docs/FEATURES.md](./docs/FEATURES.md) (detailed feature map) · [docs/COMPETITORS.md](./docs/COMPETITORS.md) (competitor & market analysis) · [docs/DATA_SOURCES.md](./docs/DATA_SOURCES.md) (data sourcing strategy)
 
 ---
 
@@ -167,7 +167,7 @@ Key decisions:
 - **All AI calls server-side** (Edge Functions) — no API keys in the client, per-user rate limiting, response caching (pairings/recs for a bottle are cacheable).
 - **AI chat uses tool calling** against internal APIs: `search_bottles`, `get_my_bar`, `get_tasting_notes`, `add_to_wishlist`, `get_pairings`, `recommend_bottles`. Destructive/creative actions require in-chat confirmation.
 - **Offline-first pour logging**: queue writes locally, sync on reconnect (a bar basement has no signal).
-- **Bottle database**: seed from open datasets + AI-assisted enrichment (flavor profiles, descriptions), dedupe pipeline, user-submitted bottles go through a review queue.
+- **Bottle database**: seed from open datasets + AI-assisted enrichment (flavor profiles, descriptions), dedupe pipeline, user-submitted bottles go through a review queue. Sourcing detailed in §4.5.
 
 ### 4.3 Core data model (simplified)
 
@@ -208,7 +208,20 @@ price_history(bottle_id, date, price, source)   -- powers $ trends & "good price
 
 Row-level security throughout: users only see their own bars/notes; bottles/distilleries are public-read.
 
-### 4.4 The palate model (what makes it AI-native)
+### 4.5 Data sourcing (summary — full strategy in [docs/DATA_SOURCES.md](./docs/DATA_SOURCES.md))
+
+There is no single whiskey API; the catalog is assembled in layers, mostly free at launch:
+
+| Layer | Launch sources (free) | Paid upgrades (when funded) |
+|---|---|---|
+| **Bottle catalog** | TTB COLA registry (US label approvals + images; public record), Iowa Liquor Products dataset (clean SKU catalog), Wikidata distilleries (CC0), 86-distillery Scotch flavor dataset | COLA Cloud API (repackaged COLA + 575k extracted barcodes), Whiskybase *licensing conversation* (never scraping) |
+| **Barcodes** | Own DB first; UPCitemdb free tier; Open Food Facts fallback (ODbL — never merged into our DB) | UPCitemdb Dev $99/mo |
+| **Prices/valuation** | Iowa monthly price data, control-state price books (VA/NC/OH/PA), Whisky Hunter free auction-trend API, affiliate feeds (Whisky Exchange, Master of Malt, Total Wine — live prices + revenue) | Wine-Searcher API (covers spirits), Whiskystats auction data |
+| **Label scanning** | Barcode-first → OCR text match (labels are text-heavy) | TinEye WineEngine or Vuforia visual matching, seeded with COLA label images (Vivino's stack) |
+
+Principles: every third-party lookup converts into a first-party record (user confirmations, corrections, prices paid — the moat we control); every external feed has a degraded-but-working fallback (Systembolaget/LCBO both revoked open APIs); legal checklist (COLA image posture, ODbL isolation, feed ToS) clears before launch.
+
+### 4.6 The palate model (what makes it AI-native)
 
 1. Every tasting note (typed, tapped, or spoken) → Haiku extracts normalized flavor tags mapped to the wheel taxonomy.
 2. Ratings × flavor tags accumulate into `users.palate_profile` (weighted flavor-preference vector, updated incrementally).
@@ -221,7 +234,7 @@ Row-level security throughout: users only see their own bars/notes; bottles/dist
 
 ### Phase 0 — Foundation (week 1–2)
 - Expo app scaffold, Supabase project, auth (Apple/Google/email), CI.
-- Schema + RLS, bottle DB seeded with ~2–5k popular bottles.
+- Schema + RLS, bottle DB seeded with ~2–5k popular bottles (Iowa Products + TTB COLA + Wikidata pipeline, §4.5).
 - Design system: dark, warm, whiskey-toned; bottle card + detail components.
 
 ### Phase 1 — Core loop MVP (week 3–6)
@@ -305,7 +318,8 @@ Pricing logic: whiskey collectors routinely spend $50–100+ per bottle; $6/mo i
 
 | Risk | Mitigation |
 |---|---|
-| Bottle database quality/coverage | Seed popular bottles first; AI-assisted enrichment; user submissions with review queue; fuzzy matching so near-misses still resolve |
+| Bottle database quality/coverage | Layered sourcing per §4.5 (TTB COLA + Iowa + Wikidata seed); AI-assisted enrichment; user submissions with review queue; fuzzy matching so near-misses still resolve |
+| Data source revocation (Systembolaget/LCBO precedent) | Single-source risk rule: every feed has a fallback; convert lookups into first-party records (DATA_SOURCES.md §6) |
 | AI cost per user | Haiku for high-volume tasks, cache pairings/recs per bottle, rate-limit free tier, premium tier absorbs heavy chat users |
 | Label scan accuracy (bottle variants, private barrels) | Always confirm-or-correct UX; log corrections as training/eval data |
 | Market price data (no clean whiskey API) | Start with MSRP + user-entered prices; crowdsource street prices; treat "value" as estimate with ranges |
