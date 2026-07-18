@@ -16,14 +16,14 @@ test.describe("signed-out smoke", () => {
 
   test("search works without an account", async ({ page }) => {
     await page.goto("/search");
-    const input = page.getByRole("textbox");
+    const input = page.getByRole("searchbox");
     await input.first().fill("eagle rare");
     await expect(page.getByText(/Eagle Rare/i).first()).toBeVisible({ timeout: 10_000 });
   });
 
   test("bottle detail renders from a search result", async ({ page }) => {
     await page.goto("/search");
-    await page.getByRole("textbox").first().fill("lagavulin 16");
+    await page.getByRole("searchbox").first().fill("lagavulin 16");
     const result = page.getByText(/Lagavulin 16/i).first();
     await result.click();
     await expect(page).toHaveURL(/\/bottles\//);
