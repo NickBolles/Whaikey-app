@@ -30,6 +30,21 @@ export function isPostgresUrl(url: string): boolean {
 }
 
 function createLocalDb(url: string): DB {
+  // A local PGlite/file DB can never work on Vercel's read-only serverless
+  // filesystem. If we reach this branch at runtime there, DATABASE_URL is
+  // missing or isn't a `postgres://` URL — fail with a clear message instead of
+  // a cryptic `ENOENT: mkdir '/var/task/data'`. (Guarded off the build phase so
+  // `next build` — which may evaluate this without env vars — still succeeds.)
+  if (process.env.VERCEL && process.env.NEXT_PHASE !== "phase-production-build") {
+    throw new Error(
+      "No Postgres DATABASE_URL is configured, but the app is running on Vercel, " +
+        "where a local database cannot be used. Set DATABASE_URL to your Postgres " +
+        "connection string (e.g. the Supabase transaction-pooler URL, " +
+        "postgres://…pooler.supabase.com:6543/postgres) for the Production and " +
+        "Preview environments, then redeploy.",
+    );
+  }
+
   // Lazily pull in PGlite so its WASM bundle is never statically imported into
   // the Next.js serverless build (production never takes this branch).
   const { PGlite } = nodeRequire("@electric-sql/pglite") as typeof import("@electric-sql/pglite");
