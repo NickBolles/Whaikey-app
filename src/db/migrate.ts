@@ -1,16 +1,39 @@
-import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import { createRequire } from "node:module";
 import path from "node:path";
-import { createDb, type DB } from "./index";
+import { migrate as migratePostgres } from "drizzle-orm/postgres-js/migrator";
+import { createDb, isPostgresUrl, resolveDbUrl, type DB } from "./index";
 
 const MIGRATIONS_FOLDER = path.join(process.cwd(), "src", "db", "migrations");
+const nodeRequire = createRequire(import.meta.url);
 
-export function migrateDb(db: DB): void {
-  migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
+/**
+ * Apply migrations against whichever driver `db` is — postgres-js in
+ * production, PGlite locally / in tests. Both migrators are async.
+ */
+export async function migrateDb(db: DB, url: string): Promise<void> {
+  if (isPostgresUrl(url)) {
+    await migratePostgres(db as never, { migrationsFolder: MIGRATIONS_FOLDER });
+  } else {
+    // Lazy-require so PGlite's migrator never enters the serverless bundle.
+    const { migrate } = nodeRequire(
+      "drizzle-orm/pglite/migrator",
+    ) as typeof import("drizzle-orm/pglite/migrator");
+    await migrate(db as never, { migrationsFolder: MIGRATIONS_FOLDER });
+  }
 }
 
+// CLI entry: `pnpm db:push` (tsx src/db/migrate.ts). Runs against DATABASE_URL,
+// so it migrates the remote (Supabase) DB in prod or the local PGlite dir in dev.
 if (process.argv[1]?.endsWith("migrate.ts")) {
-  const dbPath = process.env.DATABASE_PATH ?? path.join(process.cwd(), "data", "whaikey.db");
-  const db = createDb(dbPath);
-  migrateDb(db);
-  console.log(`Migrated ${dbPath}`);
+  const url = resolveDbUrl();
+  const db = createDb(url);
+  migrateDb(db, url)
+    .then(() => {
+      console.log(`Migrated ${url}`);
+      process.exit(0);
+    })
+    .catch((err) => {
+      console.error(err);
+      process.exit(1);
+    });
 }

@@ -10,7 +10,7 @@ describe("seedDatabase", () => {
   let db: DB;
 
   beforeEach(async () => {
-    db = setupTestDb();
+    db = await setupTestDb();
     await seedDatabase(db);
   });
 

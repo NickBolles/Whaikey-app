@@ -21,7 +21,7 @@ let user: schema.User;
 const TINY_PNG = "iVBORw0KGgoAAAANSUhEUg=="; // tiny valid-looking base64 payload
 
 beforeEach(async () => {
-  db = setupTestDb();
+  db = await setupTestDb();
   user = await createTestUser(db);
   setSessionUser(null);
   setAnthropicForTests(null);

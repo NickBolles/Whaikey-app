@@ -4,6 +4,10 @@ import { requireUser, withErrorHandling } from "@/lib/session";
 import { isAiConfigured } from "@/lib/ai/client";
 import { extractTastingNote } from "@/lib/ai/extract";
 
+// Node runtime (not edge): uses the Anthropic SDK.
+export const runtime = "nodejs";
+export const maxDuration = 30;
+
 const bodySchema = z.object({
   text: z.string().min(1).max(8000),
 });

@@ -3,6 +3,10 @@ import { getDb } from "@/db";
 import { withErrorHandling } from "@/lib/session";
 import { getOrGeneratePairings } from "@/lib/ai/pairings";
 
+// Node runtime (not edge): uses the DB driver and (on cache miss) the Anthropic SDK.
+export const runtime = "nodejs";
+export const maxDuration = 30;
+
 /**
  * GET /api/bottles/[id]/pairings → {pairings}
  * Public read of the pairing cache; generates + caches via AI when the cache

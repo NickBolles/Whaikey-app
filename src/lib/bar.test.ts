@@ -18,8 +18,8 @@ async function seedUserBottle(
 
 describe("getBarStats", () => {
   let db: DB;
-  beforeEach(() => {
-    db = setupTestDb();
+  beforeEach(async () => {
+    db = await setupTestDb();
   });
 
   it("computes counts, spend, value, cost-per-pour and kill list", async () => {
@@ -143,8 +143,8 @@ describe("getBarStats", () => {
 
 describe("getSpendByMonth", () => {
   let db: DB;
-  beforeEach(() => {
-    db = setupTestDb();
+  beforeEach(async () => {
+    db = await setupTestDb();
   });
 
   it("buckets the last 12 months of own purchases, zero-filled", async () => {
@@ -207,7 +207,7 @@ describe("getSpendByMonth", () => {
 
 describe("listUserBottles", () => {
   it("joins bottle + distillery info and filters by relationship", async () => {
-    const db = setupTestDb();
+    const db = await setupTestDb();
     const user = await createTestUser(db);
     const [dist] = await db
       .insert(schema.distilleries)

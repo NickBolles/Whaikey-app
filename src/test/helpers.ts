@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { vi } from "vitest";
 import { createDb, setDb, type DB } from "@/db";
 import { migrateDb } from "@/db/migrate";
@@ -10,15 +11,32 @@ export function uid(prefix: string): string {
   return `${prefix}_${counter}_${Math.abs(counter * 2654435761 % 1e9).toString(36)}`;
 }
 
+// Booting PGlite (WASM Postgres) + migrating on every test would be slow, so we
+// stand up one in-memory instance per worker and truncate all app tables
+// between tests — same fresh-DB isolation, a fraction of the cost.
+let sharedDb: DB | undefined;
+
 /**
- * Create a fresh in-memory DB with the full schema and install it as the app
- * singleton so route handlers under test hit it. Call in beforeEach.
+ * Return a migrated, empty in-memory Postgres (PGlite) and install it as the
+ * app singleton so route handlers under test hit it. Call in beforeEach.
  */
-export function setupTestDb(): DB {
-  const db = createDb(":memory:");
-  migrateDb(db);
-  setDb(db);
-  return db;
+export async function setupTestDb(): Promise<DB> {
+  if (!sharedDb) {
+    sharedDb = createDb(":memory:");
+    await migrateDb(sharedDb, ":memory:");
+  } else {
+    await sharedDb.execute(sql`
+      DO $$
+      DECLARE r RECORD;
+      BEGIN
+        FOR r IN (SELECT tablename FROM pg_tables WHERE schemaname = 'public') LOOP
+          EXECUTE 'TRUNCATE TABLE ' || quote_ident(r.tablename) || ' RESTART IDENTITY CASCADE';
+        END LOOP;
+      END $$;
+    `);
+  }
+  setDb(sharedDb);
+  return sharedDb;
 }
 
 export async function createTestUser(db: DB, overrides: Partial<schema.User> = {}): Promise<schema.User> {

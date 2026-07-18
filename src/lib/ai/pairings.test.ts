@@ -9,8 +9,8 @@ import { makeFakeAnthropic, textResponse } from "./testing";
 
 let db: DB;
 
-beforeEach(() => {
-  db = setupTestDb();
+beforeEach(async () => {
+  db = await setupTestDb();
   setAnthropicForTests(null);
   delete process.env.ANTHROPIC_API_KEY;
 });

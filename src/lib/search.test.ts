@@ -60,8 +60,8 @@ async function seedCatalog() {
 }
 
 describe("searchBottles", () => {
-  beforeEach(() => {
-    db = setupTestDb();
+  beforeEach(async () => {
+    db = await setupTestDb();
   });
 
   it("matches every token across name/distillery ('eagle 10' finds Eagle Rare 10)", async () => {

@@ -1,12 +1,22 @@
-import { sqliteTable, text, integer, real, uniqueIndex, index } from "drizzle-orm/sqlite-core";
+import {
+  pgTable,
+  text,
+  integer,
+  doublePrecision,
+  boolean,
+  timestamp,
+  jsonb,
+  uniqueIndex,
+  index,
+} from "drizzle-orm/pg-core";
 
 const id = () => text("id").primaryKey();
 const createdAt = () =>
-  integer("created_at", { mode: "timestamp_ms" })
+  timestamp("created_at", { withTimezone: true, mode: "date" })
     .$defaultFn(() => new Date())
     .notNull();
 const updatedAt = () =>
-  integer("updated_at", { mode: "timestamp_ms" })
+  timestamp("updated_at", { withTimezone: true, mode: "date" })
     .$defaultFn(() => new Date())
     .notNull();
 
@@ -14,19 +24,19 @@ const updatedAt = () =>
 // Better Auth tables (standard shape expected by the drizzle adapter)
 // ---------------------------------------------------------------------------
 
-export const user = sqliteTable("user", {
+export const user = pgTable("user", {
   id: id(),
   name: text("name").notNull(),
   email: text("email").notNull().unique(),
-  emailVerified: integer("email_verified", { mode: "boolean" }).notNull().default(false),
+  emailVerified: boolean("email_verified").notNull().default(false),
   image: text("image"),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
 
-export const session = sqliteTable("session", {
+export const session = pgTable("session", {
   id: id(),
-  expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }).notNull(),
   token: text("token").notNull().unique(),
   ipAddress: text("ip_address"),
   userAgent: text("user_agent"),
@@ -37,7 +47,7 @@ export const session = sqliteTable("session", {
   updatedAt: updatedAt(),
 });
 
-export const account = sqliteTable("account", {
+export const account = pgTable("account", {
   id: id(),
   accountId: text("account_id").notNull(),
   providerId: text("provider_id").notNull(),
@@ -47,19 +57,19 @@ export const account = sqliteTable("account", {
   accessToken: text("access_token"),
   refreshToken: text("refresh_token"),
   idToken: text("id_token"),
-  accessTokenExpiresAt: integer("access_token_expires_at", { mode: "timestamp_ms" }),
-  refreshTokenExpiresAt: integer("refresh_token_expires_at", { mode: "timestamp_ms" }),
+  accessTokenExpiresAt: timestamp("access_token_expires_at", { withTimezone: true, mode: "date" }),
+  refreshTokenExpiresAt: timestamp("refresh_token_expires_at", { withTimezone: true, mode: "date" }),
   scope: text("scope"),
   password: text("password"),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
 
-export const verification = sqliteTable("verification", {
+export const verification = pgTable("verification", {
   id: id(),
   identifier: text("identifier").notNull(),
   value: text("value").notNull(),
-  expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }).notNull(),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
@@ -82,7 +92,7 @@ export const WHISKEY_CATEGORIES = [
 ] as const;
 export type WhiskeyCategory = (typeof WHISKEY_CATEGORIES)[number];
 
-export const distilleries = sqliteTable("distilleries", {
+export const distilleries = pgTable("distilleries", {
   id: id(),
   name: text("name").notNull(),
   country: text("country").notNull(),
@@ -97,7 +107,7 @@ export const distilleries = sqliteTable("distilleries", {
  * intensity, e.g. {"fruity":6,"floral":2,"grain":3,"sweet":8,"woody":7,
  * "spicy":5,"peaty":0,"feinty":1}. Keys defined in src/lib/flavor-wheel.ts.
  */
-export const bottles = sqliteTable(
+export const bottles = pgTable(
   "bottles",
   {
     id: id(),
@@ -106,13 +116,13 @@ export const bottles = sqliteTable(
     category: text("category").$type<WhiskeyCategory>().notNull(),
     region: text("region"),
     ageYears: integer("age_years"),
-    abv: real("abv"),
-    caskTypes: text("cask_types", { mode: "json" }).$type<string[]>(),
+    abv: doublePrecision("abv"),
+    caskTypes: jsonb("cask_types").$type<string[]>(),
     mashBill: text("mash_bill"),
-    msrp: real("msrp"),
-    avgPrice: real("avg_price"),
+    msrp: doublePrecision("msrp"),
+    avgPrice: doublePrecision("avg_price"),
     description: text("description"),
-    flavorProfile: text("flavor_profile", { mode: "json" }).$type<Record<string, number>>(),
+    flavorProfile: jsonb("flavor_profile").$type<Record<string, number>>(),
     imageUrl: text("image_url"),
     status: text("status").$type<"verified" | "user_submitted">().notNull().default("verified"),
     submittedBy: text("submitted_by").references(() => user.id),
@@ -121,7 +131,7 @@ export const bottles = sqliteTable(
   (t) => [index("bottles_category_idx").on(t.category), index("bottles_name_idx").on(t.name)],
 );
 
-export const bottleAliases = sqliteTable(
+export const bottleAliases = pgTable(
   "bottle_aliases",
   {
     id: id(),
@@ -138,7 +148,7 @@ export type Relationship = (typeof RELATIONSHIPS)[number];
 export const BOTTLE_STATUSES = ["sealed", "open", "finished", "sold", "traded", "gifted"] as const;
 export type BottleStatus = (typeof BOTTLE_STATUSES)[number];
 
-export const userBottles = sqliteTable(
+export const userBottles = pgTable(
   "user_bottles",
   {
     id: id(),
@@ -153,10 +163,10 @@ export const userBottles = sqliteTable(
     /** 0-100, only meaningful when status is "open" */
     fillLevel: integer("fill_level"),
     quantity: integer("quantity").notNull().default(1),
-    purchasePrice: real("purchase_price"),
-    purchaseDate: integer("purchase_date", { mode: "timestamp_ms" }),
+    purchasePrice: doublePrecision("purchase_price"),
+    purchaseDate: timestamp("purchase_date", { withTimezone: true, mode: "date" }),
     store: text("store"),
-    estValue: real("est_value"),
+    estValue: doublePrecision("est_value"),
     location: text("location"),
     notes: text("notes"),
     createdAt: createdAt(),
@@ -171,7 +181,7 @@ export const userBottles = sqliteTable(
 export const SERVING_STYLES = ["neat", "rocks", "splash", "cocktail", "highball"] as const;
 export type ServingStyle = (typeof SERVING_STYLES)[number];
 
-export const pours = sqliteTable(
+export const pours = pgTable(
   "pours",
   {
     id: id(),
@@ -183,10 +193,10 @@ export const pours = sqliteTable(
       .references(() => bottles.id, { onDelete: "cascade" }),
     userBottleId: text("user_bottle_id").references(() => userBottles.id, { onDelete: "set null" }),
     /** 0.5-5.0 in half-star steps */
-    rating: real("rating"),
+    rating: doublePrecision("rating"),
     servingStyle: text("serving_style").$type<ServingStyle>(),
     amountMl: integer("amount_ml"),
-    context: text("context", { mode: "json" }).$type<{ setting?: string; companions?: string; glassware?: string }>(),
+    context: jsonb("context").$type<{ setting?: string; companions?: string; glassware?: string }>(),
     createdAt: createdAt(),
   },
   (t) => [index("pours_user_idx").on(t.userId), index("pours_bottle_idx").on(t.bottleId)],
@@ -196,7 +206,7 @@ export const pours = sqliteTable(
  * flavorTags: JSON mapping leaf descriptor ids from the flavor wheel to
  * intensity 1-3, e.g. {"vanilla":3,"green-apple":1}.
  */
-export const tastingNotes = sqliteTable("tasting_notes", {
+export const tastingNotes = pgTable("tasting_notes", {
   id: id(),
   pourId: text("pour_id")
     .notNull()
@@ -206,12 +216,12 @@ export const tastingNotes = sqliteTable("tasting_notes", {
   palate: text("palate"),
   finish: text("finish"),
   freeform: text("freeform"),
-  flavorTags: text("flavor_tags", { mode: "json" }).$type<Record<string, number>>(),
+  flavorTags: jsonb("flavor_tags").$type<Record<string, number>>(),
   extractedBy: text("extracted_by").$type<"user" | "ai">().notNull().default("user"),
   createdAt: createdAt(),
 });
 
-export const pairings = sqliteTable(
+export const pairings = pgTable(
   "pairings",
   {
     id: id(),
@@ -227,7 +237,7 @@ export const pairings = sqliteTable(
   (t) => [index("pairings_bottle_idx").on(t.bottleId)],
 );
 
-export const chatSessions = sqliteTable(
+export const chatSessions = pgTable(
   "chat_sessions",
   {
     id: id(),
@@ -241,7 +251,7 @@ export const chatSessions = sqliteTable(
   (t) => [index("chat_sessions_user_idx").on(t.userId)],
 );
 
-export const chatMessages = sqliteTable(
+export const chatMessages = pgTable(
   "chat_messages",
   {
     id: id(),
@@ -250,21 +260,21 @@ export const chatMessages = sqliteTable(
       .references(() => chatSessions.id, { onDelete: "cascade" }),
     role: text("role").$type<"user" | "assistant">().notNull(),
     content: text("content").notNull(),
-    toolCalls: text("tool_calls", { mode: "json" }).$type<Array<{ name: string; input: unknown; result?: unknown }>>(),
+    toolCalls: jsonb("tool_calls").$type<Array<{ name: string; input: unknown; result?: unknown }>>(),
     createdAt: createdAt(),
   },
   (t) => [index("chat_messages_session_idx").on(t.sessionId)],
 );
 
-export const priceHistory = sqliteTable(
+export const priceHistory = pgTable(
   "price_history",
   {
     id: id(),
     bottleId: text("bottle_id")
       .notNull()
       .references(() => bottles.id, { onDelete: "cascade" }),
-    date: integer("date", { mode: "timestamp_ms" }).notNull(),
-    price: real("price").notNull(),
+    date: timestamp("date", { withTimezone: true, mode: "date" }).notNull(),
+    price: doublePrecision("price").notNull(),
     source: text("source").notNull(),
   },
   (t) => [index("price_history_bottle_idx").on(t.bottleId)],

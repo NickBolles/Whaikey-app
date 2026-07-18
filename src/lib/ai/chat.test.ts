@@ -10,7 +10,7 @@ let db: DB;
 let user: schema.User;
 
 beforeEach(async () => {
-  db = setupTestDb();
+  db = await setupTestDb();
   user = await createTestUser(db);
 });
 
