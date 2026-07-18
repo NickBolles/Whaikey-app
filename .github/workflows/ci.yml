@@ -5,8 +5,15 @@ on:
     branches: [main]
   pull_request:
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  test:
+  # Typecheck, lint, unit tests, and a production build. Runs on the plain
+  # runner (no browser needed) in parallel with the Playwright jobs below.
+  unit:
+    name: typecheck / lint / unit / build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,3 +31,68 @@ jobs:
       - run: pnpm build
         env:
           BETTER_AUTH_SECRET: ci-secret
+
+  # Functional end-to-end smoke suite (playwright project "functional").
+  # Runs inside the Playwright container so the browser + OS deps match the
+  # library version pinned in package.json.
+  e2e:
+    name: e2e (functional)
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.61.1-noble
+    env:
+      # The local dev container points Playwright at a preinstalled Chromium;
+      # in CI we use the browser bundled with the pinned Playwright version.
+      PLAYWRIGHT_CHROMIUM_PATH: ""
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report-e2e
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+
+  # Visual regression suite (projects "visual-mobile" + "visual-desktop").
+  # Baselines under e2e/__screenshots__/ are CI-canonical: they must be
+  # regenerated from this container (see README "Visual baselines"), never
+  # from a local render, because font rasterization differs by environment.
+  visual:
+    name: visual regression
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.61.1-noble
+    env:
+      PLAYWRIGHT_CHROMIUM_PATH: ""
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm e2e:visual
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report-visual
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
