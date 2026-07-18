@@ -13,7 +13,7 @@ Companion to [PLAN.md](../PLAN.md). This document specifies every feature area i
 | 1.1 | Auth: Apple / Google / email magic link | 🟢 | Apple sign-in required for iOS App Store anyway |
 | 1.2 | Taste onboarding quiz | 🟡 | 5–7 swipeable questions ("Peat: love it / hate it / what's peat?") seeds the palate profile before any pours are logged |
 | 1.3 | "Add your first 3 bottles" prompt | 🟢 | Empty-state flow that immediately demonstrates search + My Bar |
-| 1.4 | Import from spreadsheet/CSV | 🔵 | Collectors arrive with spreadsheets; AI-assisted column mapping ("this column looks like purchase price") |
+| 1.4 | Import from spreadsheet/CSV + competitor exports | 🔵 | Collectors arrive with spreadsheets; AI-assisted column mapping ("this column looks like purchase price"). Support Distiller/Whiskybase export formats — InVintory proved competitor import is a switching weapon (see COMPETITORS.md §7) |
 | 1.5 | Experience level selector | 🟡 | Beginner / enthusiast / collector — tunes copy depth, default rating scale, and AI chat tone |
 
 **UX flow (first run):** splash → auth → 3-question mini quiz (skippable) → "scan or search your first bottle" → land on My Bar with one bottle in it. Target: < 90 seconds to first bottle.
@@ -75,6 +75,11 @@ Sections, top to bottom:
 - Kill list: bottles < 20% full — "finish these."
 - Oxidation awareness: open + low fill + long time → "this one may be fading."
 - "You haven't poured X in 6 months — still love it?" (feeds recommendations too.)
+
+### 3.4 Collector depth (🔵/⚪, borrowed from competitor analysis)
+- 🔵 **Bottle lifecycle statuses** beyond finished: sold / traded / gifted / broken (OnlyDrams pattern) — keeps $ tracking honest.
+- 🔵 **Store pick / single-barrel metadata**: barrel number, pick store, batch/proof variants (BarrelBook pattern) — whiskey-specific data wine apps handle badly.
+- ⚪ **Infinity bottle** management: blend composition log, pour-in history, evolving profile (Whiskey Shelf pattern).
 
 ---
 
