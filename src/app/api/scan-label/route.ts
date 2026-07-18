@@ -6,6 +6,10 @@ import { fastModel, getAnthropic, isAiConfigured } from "@/lib/ai/client";
 import { parseModelJson, textFromContent } from "@/lib/ai/json";
 import { searchBottlesLike, type BottleSearchResult } from "@/lib/ai/tools";
 
+// Node runtime (not edge): uses the DB driver and the Anthropic SDK.
+export const runtime = "nodejs";
+export const maxDuration = 30;
+
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // ~5MB decoded
 
 const bodySchema = z.object({

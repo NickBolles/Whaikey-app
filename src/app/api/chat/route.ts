@@ -5,6 +5,11 @@ import { requireUser, withErrorHandling } from "@/lib/session";
 import { isAiConfigured } from "@/lib/ai/client";
 import { ChatSessionNotFoundError, getChatMessages, runChat } from "@/lib/ai/chat";
 
+// Node runtime (not edge): this route uses the DB driver and the Anthropic SDK.
+export const runtime = "nodejs";
+// Concierge chat runs multi-step tool calls against Claude — allow headroom.
+export const maxDuration = 60;
+
 const postSchema = z.object({
   sessionId: z.string().min(1).nullish(),
   message: z.string().min(1).max(4000),
