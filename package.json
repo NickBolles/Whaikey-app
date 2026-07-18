@@ -1,0 +1,54 @@
+{
+  "name": "whaikey",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "db:generate": "drizzle-kit generate",
+    "db:push": "tsx src/db/migrate.ts",
+    "db:seed": "tsx src/db/seed/run.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "e2e": "playwright test"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.112.3",
+    "better-auth": "^1.6.23",
+    "better-sqlite3": "^12.11.1",
+    "drizzle-orm": "^0.45.2",
+    "lucide-react": "^1.25.0",
+    "next": "16.2.10",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.1",
+    "@tailwindcss/postcss": "^4",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^6.0.3",
+    "drizzle-kit": "^0.31.10",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.10",
+    "jsdom": "^29.1.1",
+    "tailwindcss": "^4",
+    "tsx": "^4.23.1",
+    "typescript": "^5",
+    "vitest": "^4.1.10"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3"
+    ]
+  }
+}
