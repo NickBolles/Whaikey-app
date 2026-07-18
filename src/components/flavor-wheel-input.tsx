@@ -13,10 +13,22 @@ const SIZE = 340;
 const C = SIZE / 2;
 const R_WEDGE_IN = 66;
 const R_WEDGE_OUT = 106;
-const R_LEAF_IN = 112;
+const R_WEDGE_OUT_SELECTED = 111; // selected wedge grows subtly outward
+const R_LEAF_IN = 116;
 const R_LEAF_OUT = 144; // grows +4 per intensity step, max 156
 const WEDGE_LABEL_R = (R_WEDGE_IN + R_WEDGE_OUT) / 2;
 const LEAF_LABEL_R = (R_LEAF_IN + R_LEAF_OUT) / 2;
+
+const SERIF = "var(--font-fraunces), Georgia, serif";
+
+/** Nudge a wedge hue toward the warm brass palette so the wheel sits in the room. */
+function warmify(hex: string): string {
+  const warm = [185, 141, 79]; // brass midpoint (#b98d4f)
+  const n = parseInt(hex.slice(1), 16);
+  const rgb = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  const mixed = rgb.map((c, i) => Math.round(c * 0.78 + warm[i] * 0.22));
+  return `#${mixed.map((c) => c.toString(16).padStart(2, "0")).join("")}`;
+}
 
 function polar(r: number, deg: number): { x: number; y: number } {
   const a = (deg * Math.PI) / 180;
@@ -88,7 +100,8 @@ export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
     for (const wedge of FLAVOR_WHEEL) {
       for (const leaf of wedge.leaves) {
         const intensity = value[leaf.id] ?? 0;
-        if (intensity > 0) out.push({ leafId: leaf.id, label: leaf.label, intensity, color: wedge.color });
+        if (intensity > 0)
+          out.push({ leafId: leaf.id, label: leaf.label, intensity, color: warmify(wedge.color) });
       }
     }
     return out;
@@ -130,7 +143,9 @@ export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
           const isSelected = wedge.id === selectedWedgeId;
           const dimmed = selectedWedgeId !== null && !isSelected;
           const count = wedgeCounts.get(wedge.id) ?? 0;
-          const badge = polar(R_WEDGE_OUT - 7, mid);
+          const color = warmify(wedge.color);
+          const rOut = isSelected ? R_WEDGE_OUT_SELECTED : R_WEDGE_OUT;
+          const badge = polar(rOut - 7, mid);
           return (
             <g
               key={wedge.id}
@@ -143,20 +158,21 @@ export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
               className="cursor-pointer focus:outline-none"
             >
               <path
-                d={arcPath(R_WEDGE_IN, R_WEDGE_OUT, start, end)}
-                fill={wedge.color}
-                fillOpacity={isSelected ? 1 : dimmed ? 0.35 : 0.85}
-                stroke={isSelected ? "var(--foreground)" : "none"}
-                strokeWidth={isSelected ? 1.5 : 0}
+                d={arcPath(R_WEDGE_IN, rOut, start, end)}
+                fill={color}
+                fillOpacity={isSelected ? 1 : dimmed ? 0.28 : 0.78}
+                stroke={isSelected ? "var(--foreground)" : "var(--border)"}
+                strokeOpacity={isSelected ? 0.7 : 1}
+                strokeWidth={isSelected ? 1 : 0.75}
               />
               <text
                 transform={labelTransform(WEDGE_LABEL_R, mid)}
                 textAnchor="middle"
                 dominantBaseline="central"
                 fontSize={11}
-                fontWeight={700}
+                fontWeight={isSelected ? 700 : 600}
                 fill="#16110c"
-                opacity={dimmed ? 0.5 : 0.9}
+                opacity={dimmed ? 0.45 : 0.92}
                 pointerEvents="none"
               >
                 {shortLabel(wedge.label)}
@@ -171,7 +187,7 @@ export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
                     dominantBaseline="central"
                     fontSize={9}
                     fontWeight={700}
-                    fill={wedge.color}
+                    fill={color}
                   >
                     {count}
                   </text>
@@ -191,6 +207,7 @@ export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
             const intensity = value[leaf.id] ?? 0;
             const rOut = R_LEAF_OUT + intensity * 4;
             const badge = polar(rOut - 9, mid);
+            const color = warmify(selectedWedge.color);
             return (
               <g
                 key={leaf.id}
@@ -204,11 +221,11 @@ export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
               >
                 <path
                   d={arcPath(R_LEAF_IN, rOut, start, end, Math.min(1.2, span / 10))}
-                  fill={selectedWedge.color}
-                  fillOpacity={intensity === 0 ? 0.3 : 0.42 + 0.19 * intensity}
-                  stroke={intensity > 0 ? "var(--foreground)" : "none"}
-                  strokeWidth={intensity > 0 ? 1 : 0}
-                  strokeOpacity={0.6}
+                  fill={color}
+                  fillOpacity={intensity === 0 ? 0.26 : 0.42 + 0.19 * intensity}
+                  stroke={intensity > 0 ? "var(--foreground)" : "var(--border)"}
+                  strokeOpacity={intensity > 0 ? 0.55 : 1}
+                  strokeWidth={intensity > 0 ? 1 : 0.75}
                 />
                 <text
                   transform={labelTransform(LEAF_LABEL_R, mid)}
@@ -231,7 +248,7 @@ export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
                       dominantBaseline="central"
                       fontSize={9}
                       fontWeight={700}
-                      fill={selectedWedge.color}
+                      fill={color}
                     >
                       {intensity}
                     </text>
@@ -241,21 +258,22 @@ export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
             );
           })}
 
-        {/* Center label */}
+        {/* Center label — serif, like a label on aged glass */}
         <text
           x={C}
           y={C - 8}
           textAnchor="middle"
-          fontSize={14}
-          fontWeight={700}
+          fontSize={16}
+          fontWeight={600}
           fill="var(--foreground)"
+          style={{ fontFamily: SERIF }}
           pointerEvents="none"
         >
           {selectedWedge ? shortLabel(selectedWedge.label) : "Flavors"}
         </text>
         <text
           x={C}
-          y={C + 10}
+          y={C + 11}
           textAnchor="middle"
           fontSize={9}
           fill="var(--muted)"
@@ -266,7 +284,7 @@ export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
         {chips.length > 0 && (
           <text
             x={C}
-            y={C + 26}
+            y={C + 27}
             textAnchor="middle"
             fontSize={9}
             fontWeight={600}
@@ -286,14 +304,14 @@ export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
                 type="button"
                 onClick={() => removeLeaf(chip.leafId)}
                 aria-label={`Remove ${chip.label}`}
-                className="flex items-center gap-1.5 rounded-full bg-surface-raised border border-border-subtle px-3 py-1.5 text-xs hover:border-danger transition-colors"
+                className="chip flex items-center gap-1.5 px-3 py-1.5 text-xs hover:border-danger/60"
               >
                 <span
                   className="inline-block h-2 w-2 rounded-full"
                   style={{ backgroundColor: chip.color }}
                   aria-hidden
                 />
-                <span>
+                <span className="text-foreground/90">
                   {chip.label} <span className="text-accent">{"×".repeat(chip.intensity)}</span>
                 </span>
                 <span className="text-muted" aria-hidden>

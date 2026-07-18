@@ -10,15 +10,31 @@ export interface FlavorRadarProps {
 const MAX_SCORE = 10;
 
 /**
+ * Short display labels for the radar only — long wedge names would clip at
+ * the SVG edge on a 390px viewport. Taxonomy labels stay canonical in
+ * FLAVOR_WHEEL.
+ */
+export const RADAR_LABELS: Record<string, string> = {
+  peaty: "Peaty",
+};
+
+export function radarLabel(wedgeId: string, fallback: string): string {
+  return RADAR_LABELS[wedgeId] ?? fallback;
+}
+
+/**
  * Pure-SVG radar (octagon) of the 8 flavor-wheel wedge scores. No chart
  * library; safe to render from server components.
  */
-export function FlavorRadar({ profile, size = 280 }: FlavorRadarProps) {
+export function FlavorRadar({ profile, size = 300 }: FlavorRadarProps) {
   const wedges = FLAVOR_WHEEL;
   const n = wedges.length;
   const cx = size / 2;
   const cy = size / 2;
-  const radius = size / 2 - 46; // leave room for labels
+  // Generous margin so every label fits fully inside the viewBox (DESIGN.md
+  // rule 7: text never touches an edge — SVG labels included).
+  const radius = size / 2 - 52;
+  const labelRadius = radius + 24;
 
   const angleAt = (i: number) => (2 * Math.PI * i) / n - Math.PI / 2;
   const pointAt = (i: number, r: number): [number, number] => [
@@ -30,7 +46,7 @@ export function FlavorRadar({ profile, size = 280 }: FlavorRadarProps) {
 
   if (!profile || Object.keys(profile).length === 0) {
     return (
-      <div className="flex items-center justify-center rounded-xl border border-border-subtle bg-surface p-6 text-sm text-muted">
+      <div className="card-flat flex items-center justify-center p-6 text-sm text-muted">
         No flavor profile yet for this bottle.
       </div>
     );
@@ -54,15 +70,15 @@ export function FlavorRadar({ profile, size = 280 }: FlavorRadarProps) {
       aria-label="Flavor profile radar chart"
       data-testid="flavor-radar"
     >
-      {/* grid rings */}
-      {[0.25, 0.5, 0.75, 1].map((f) => (
+      {/* warm hairline grid rings */}
+      {[0.25, 0.5, 0.75, 1].map((f, idx) => (
         <polygon
           key={f}
           points={ringPoints(radius * f)}
           fill="none"
-          stroke="var(--border, #3a2f22)"
+          stroke="var(--border, #392e20)"
           strokeWidth={1}
-          opacity={0.7}
+          opacity={idx === 3 ? 0.9 : 0.45}
         />
       ))}
       {/* axes */}
@@ -75,9 +91,9 @@ export function FlavorRadar({ profile, size = 280 }: FlavorRadarProps) {
             y1={cy}
             x2={x}
             y2={y}
-            stroke="var(--border, #3a2f22)"
+            stroke="var(--border, #392e20)"
             strokeWidth={1}
-            opacity={0.5}
+            opacity={0.4}
           />
         );
       })}
@@ -86,32 +102,44 @@ export function FlavorRadar({ profile, size = 280 }: FlavorRadarProps) {
         data-testid="flavor-radar-polygon"
         points={dataPoints}
         fill="var(--accent, #e8a13c)"
-        fillOpacity={0.25}
+        fillOpacity={0.35}
         stroke="var(--accent, #e8a13c)"
         strokeWidth={2}
         strokeLinejoin="round"
       />
-      {/* vertex dots */}
+      {/* subtle vertex dots */}
       {dataPoints.split(" ").map((pt, i) => {
         const [x, y] = pt.split(",").map(Number);
-        return <circle key={wedges[i].id} cx={x} cy={y} r={3} fill={wedges[i].color} />;
+        return (
+          <circle
+            key={wedges[i].id}
+            cx={x}
+            cy={y}
+            r={2.5}
+            fill="var(--accent, #e8a13c)"
+            stroke="var(--background, #14100b)"
+            strokeWidth={1}
+          />
+        );
       })}
-      {/* labels */}
+      {/* small-caps labels, kept inside the viewBox */}
       {wedges.map((w, i) => {
-        const [x, y] = pointAt(i, radius + 22);
-        const cos = Math.cos(angleAt(i));
-        const anchor = Math.abs(cos) < 0.3 ? "middle" : cos > 0 ? "start" : "end";
+        const [x, y] = pointAt(i, labelRadius);
+        const sin = Math.sin(angleAt(i));
+        const baseline = sin < -0.3 ? "auto" : sin > 0.3 ? "hanging" : "middle";
         return (
           <text
             key={w.id}
             x={x.toFixed(1)}
             y={y.toFixed(1)}
-            textAnchor={anchor}
-            dominantBaseline="middle"
-            fontSize={11}
-            fill="var(--muted, #a89578)"
+            textAnchor="middle"
+            dominantBaseline={baseline}
+            fontSize={10.5}
+            letterSpacing="0.1em"
+            style={{ textTransform: "uppercase" }}
+            fill="var(--muted, #a3927a)"
           >
-            {w.label}
+            {radarLabel(w.id, w.label)}
           </text>
         );
       })}

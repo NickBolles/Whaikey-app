@@ -13,15 +13,35 @@ function Star({ size, fraction }: { size: number; fraction: number }) {
       width={size}
       height={size}
       aria-hidden="true"
-      className="pointer-events-none block"
+      className="pointer-events-none block overflow-visible"
     >
       <defs>
         <clipPath id={clipId}>
-          <rect x="0" y="0" width={24 * fraction} height="24" />
+          <rect x="-2" y="-2" width={2 + 24 * fraction} height="28" />
         </clipPath>
       </defs>
-      <path d={STAR_PATH} fill="var(--border)" />
-      {fraction > 0 && <path d={STAR_PATH} fill="var(--accent)" clipPath={`url(#${clipId})`} />}
+      {/* Empty state: an elegant outlined star — hairline stroke, no fill. */}
+      <path
+        d={STAR_PATH}
+        fill="none"
+        stroke="var(--muted)"
+        strokeOpacity={0.45}
+        strokeWidth={1.25}
+        strokeLinejoin="round"
+      />
+      {fraction > 0 && (
+        <g clipPath={`url(#${clipId})`}>
+          {/* Set state: amber fill with a soft glow. */}
+          <path
+            d={STAR_PATH}
+            fill="var(--accent)"
+            stroke="var(--accent)"
+            strokeWidth={1.25}
+            strokeLinejoin="round"
+            style={{ filter: "drop-shadow(0 0 5px rgba(232, 161, 60, 0.45))" }}
+          />
+        </g>
+      )}
     </svg>
   );
 }
@@ -65,7 +85,12 @@ export function StarRating({ value, onChange, size = 44 }: StarRatingProps) {
           </span>
         );
       })}
-      <span className="ml-2 min-w-8 text-lg font-semibold text-accent" aria-live="polite">
+      <span
+        aria-live="polite"
+        className={`stat-number ml-3 min-w-10 text-2xl leading-none ${
+          value != null ? "text-accent" : "text-muted/50"
+        }`}
+      >
         {value != null ? value.toFixed(1) : "—"}
       </span>
     </div>

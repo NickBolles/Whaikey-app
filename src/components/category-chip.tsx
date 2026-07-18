@@ -17,9 +17,18 @@ export function categoryLabel(category: string): string {
   return CATEGORY_LABELS[category as WhiskeyCategory] ?? category;
 }
 
-export function CategoryChip({ category }: { category: string }) {
+export function CategoryChip({
+  category,
+  active = false,
+}: {
+  category: string;
+  /** Amber-tinted variant for the one place a screen highlights its category. */
+  active?: boolean;
+}) {
   return (
-    <span className="inline-flex items-center rounded-full border border-border-subtle bg-surface-raised px-2 py-0.5 text-xs font-medium text-accent whitespace-nowrap">
+    <span
+      className={`${active ? "chip chip-active" : "chip"} inline-flex items-center px-2.5 py-0.5 text-[11px] font-medium whitespace-nowrap`}
+    >
       {categoryLabel(category)}
     </span>
   );

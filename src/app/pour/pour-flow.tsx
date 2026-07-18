@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ChevronDown, ChevronUp, GlassWater, Search } from "lucide-react";
+import { ChevronDown, ChevronUp, GlassWater, Search, Star } from "lucide-react";
 import { SERVING_STYLES, type ServingStyle } from "@/db/schema";
 import { StarRating } from "@/components/star-rating";
 import { FlavorWheelInput } from "@/components/flavor-wheel-input";
@@ -102,12 +102,13 @@ function BottlePicker({ onPick }: { onPick: (bottle: BottlePick) => void }) {
   };
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-5">
       <label className="relative block">
         <span className="sr-only">Search bottles</span>
         <Search
           size={18}
-          className="absolute left-3 top-1/2 -translate-y-1/2 text-muted"
+          strokeWidth={1.8}
+          className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted"
           aria-hidden
         />
         <input
@@ -116,12 +117,12 @@ function BottlePicker({ onPick }: { onPick: (bottle: BottlePick) => void }) {
           value={query}
           onChange={(e) => handleQueryChange(e.target.value)}
           placeholder="What are you pouring?"
-          className="w-full rounded-xl bg-surface border border-border-subtle pl-10 pr-4 py-3 placeholder:text-muted focus:outline-none focus:border-accent"
+          className="w-full rounded-xl bg-surface border border-border-subtle pl-11 pr-4 py-3 placeholder:text-muted focus:outline-none focus:border-accent"
         />
       </label>
 
       {searchError && (
-        <p className="text-sm text-muted rounded-xl bg-surface border border-border-subtle p-3">
+        <p className="card-flat text-sm text-muted p-4">
           Search is unavailable right now — try again in a moment, or pick from your recent
           bottles below.
         </p>
@@ -130,7 +131,7 @@ function BottlePicker({ onPick }: { onPick: (bottle: BottlePick) => void }) {
       {searching && <p className="text-sm text-muted px-1">Searching…</p>}
 
       {results.length > 0 && (
-        <ul className="flex flex-col gap-2" aria-label="Search results">
+        <ul className="flex flex-col gap-2.5" aria-label="Search results">
           {results.map((r) => (
             <li key={r.id}>
               <button
@@ -143,7 +144,7 @@ function BottlePicker({ onPick }: { onPick: (bottle: BottlePick) => void }) {
                     category: r.category,
                   })
                 }
-                className="w-full text-left rounded-xl bg-surface border border-border-subtle p-3 hover:bg-surface-raised transition-colors"
+                className="card-flat w-full text-left p-4 hover:bg-surface-raised transition-colors"
               >
                 <span className="font-medium block">{r.name}</span>
                 <span className="text-xs text-muted">
@@ -161,18 +162,16 @@ function BottlePicker({ onPick }: { onPick: (bottle: BottlePick) => void }) {
 
       {recent.length > 0 && (
         <section aria-label="Recent bottles">
-          <h2 className="text-xs font-semibold text-muted uppercase tracking-wide mb-2">
-            Recent bottles
-          </h2>
-          <ul className="flex flex-col gap-2">
+          <h2 className="section-label mb-3">Recent bottles</h2>
+          <ul className="flex flex-col gap-2.5">
             {recent.map((b) => (
               <li key={b.id}>
                 <button
                   type="button"
                   onClick={() => onPick(b)}
-                  className="w-full flex items-center gap-3 text-left rounded-xl bg-surface border border-border-subtle p-3 hover:bg-surface-raised transition-colors"
+                  className="card-flat w-full flex items-center gap-3 text-left p-4 hover:bg-surface-raised transition-colors"
                 >
-                  <GlassWater size={18} className="text-accent shrink-0" aria-hidden />
+                  <GlassWater size={18} strokeWidth={1.8} className="text-accent shrink-0" aria-hidden />
                   <span className="font-medium">{b.name}</span>
                 </button>
               </li>
@@ -259,29 +258,27 @@ export function PourFlow() {
 
   if (done) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[60dvh] px-6 text-center gap-5">
-        <div className="text-6xl" aria-hidden>
+      <div className="flex flex-col items-center justify-center min-h-[70dvh] px-6 text-center gap-7">
+        <div aria-hidden className="text-6xl drop-shadow-[0_0_24px_rgba(232,161,60,0.25)]">
           🥃
         </div>
         <div>
-          <h1 className="text-2xl font-bold">Pour logged</h1>
-          <p className="text-muted mt-1">
-            {done.bottleName}
-            {done.rating != null && <span className="text-accent"> · ★ {done.rating.toFixed(1)}</span>}
-          </p>
+          <h1 className="font-display text-5xl font-semibold tracking-tight text-gradient-amber">
+            Poured.
+          </h1>
+          <p className="text-muted mt-3">{done.bottleName}</p>
+          {done.rating != null && (
+            <p className="mt-2.5 flex items-center justify-center gap-1.5 text-accent">
+              <Star size={16} fill="currentColor" aria-hidden />
+              <span className="stat-number text-2xl leading-none">{done.rating.toFixed(1)}</span>
+            </p>
+          )}
         </div>
         <div className="flex gap-3">
-          <button
-            type="button"
-            onClick={reset}
-            className="rounded-xl bg-accent text-background font-semibold px-6 py-3 hover:bg-accent-deep transition-colors"
-          >
+          <button type="button" onClick={reset} className="btn-primary px-7 py-3">
             Log another
           </button>
-          <Link
-            href="/history"
-            className="rounded-xl bg-surface border border-border-subtle font-semibold px-6 py-3 hover:bg-surface-raised transition-colors"
-          >
+          <Link href="/history" className="btn-secondary px-7 py-3 font-medium">
             View journal
           </Link>
         </div>
@@ -292,7 +289,7 @@ export function PourFlow() {
   return (
     <div className="px-4 pt-8 pb-24 flex flex-col gap-6 max-w-lg mx-auto">
       <header>
-        <h1 className="text-2xl font-bold">Log a pour</h1>
+        <h1 className="font-display text-[2rem] leading-tight font-semibold">Log a pour</h1>
         <p className="text-muted text-sm mt-1">
           {bottle ? "How was it?" : "Pick a bottle to get started."}
         </p>
@@ -302,9 +299,9 @@ export function PourFlow() {
         <BottlePicker onPick={setBottle} />
       ) : (
         <div className="flex flex-col gap-6">
-          <div className="flex items-center justify-between rounded-xl bg-surface border border-border-subtle p-4">
+          <div className="card flex items-center justify-between p-4">
             <div>
-              <div className="font-semibold">{bottle.name}</div>
+              <div className="font-medium">{bottle.name}</div>
               {(bottle.distillery || bottle.category) && (
                 <div className="text-xs text-muted mt-0.5">
                   {[bottle.distillery, bottle.category].filter(Boolean).join(" · ")}
@@ -314,19 +311,19 @@ export function PourFlow() {
             <button
               type="button"
               onClick={() => setBottle(null)}
-              className="text-sm text-accent hover:underline shrink-0 ml-3"
+              className="text-sm text-accent shrink-0 ml-3 min-h-11 px-1 hover:brightness-110 transition-[filter]"
             >
               Change
             </button>
           </div>
 
-          <section aria-label="Rating" className="flex flex-col gap-2">
-            <h2 className="text-sm font-semibold text-muted uppercase tracking-wide">Rating</h2>
+          <section aria-label="Rating" className="flex flex-col gap-3">
+            <h2 className="section-label">Rating</h2>
             <StarRating value={rating} onChange={setRating} />
           </section>
 
-          <section aria-label="Serving style" className="flex flex-col gap-2">
-            <h2 className="text-sm font-semibold text-muted uppercase tracking-wide">Serving</h2>
+          <section aria-label="Serving style" className="flex flex-col gap-3">
+            <h2 className="section-label">Serving</h2>
             <div className="flex flex-wrap gap-2" role="group" aria-label="Serving style">
               {SERVING_STYLES.map((style) => (
                 <button
@@ -334,27 +331,23 @@ export function PourFlow() {
                   type="button"
                   aria-pressed={servingStyle === style}
                   onClick={() => setServingStyle((cur) => (cur === style ? null : style))}
-                  className={`rounded-full px-4 py-2 text-sm capitalize border transition-colors ${
-                    servingStyle === style
-                      ? "bg-accent text-background border-accent font-semibold"
-                      : "bg-surface border-border-subtle hover:bg-surface-raised"
+                  className={`chip min-h-11 px-4 text-sm capitalize ${
+                    servingStyle === style ? "chip-active font-medium" : "hover:bg-surface-raised"
                   }`}
                 >
                   {style}
                 </button>
               ))}
             </div>
-            <div className="flex gap-2 mt-1" role="group" aria-label="Pour size">
+            <div className="flex gap-2" role="group" aria-label="Pour size">
               {POUR_SIZES.map((ml) => (
                 <button
                   key={ml}
                   type="button"
                   aria-pressed={amountMl === ml}
                   onClick={() => setAmountMl(ml)}
-                  className={`rounded-full px-4 py-2 text-sm border transition-colors ${
-                    amountMl === ml
-                      ? "bg-accent text-background border-accent font-semibold"
-                      : "bg-surface border-border-subtle hover:bg-surface-raised"
+                  className={`chip min-h-11 px-4 text-sm ${
+                    amountMl === ml ? "chip-active font-medium" : "hover:bg-surface-raised"
                   }`}
                 >
                   {ml} ml
@@ -368,15 +361,15 @@ export function PourFlow() {
               type="button"
               onClick={() => setNotesOpen((o) => !o)}
               aria-expanded={notesOpen}
-              className="flex items-center justify-between rounded-xl bg-surface border border-border-subtle p-4 hover:bg-surface-raised transition-colors"
+              className="card flex items-center justify-between p-4 hover:brightness-110 transition-[filter]"
             >
-              <span className="font-semibold text-sm">
+              <span className="font-medium text-sm">
                 Tasting notes <span className="text-muted font-normal">(optional)</span>
               </span>
               {notesOpen ? (
-                <ChevronUp size={18} className="text-muted" aria-hidden />
+                <ChevronUp size={18} strokeWidth={1.8} className="text-muted" aria-hidden />
               ) : (
-                <ChevronDown size={18} className="text-muted" aria-hidden />
+                <ChevronDown size={18} strokeWidth={1.8} className="text-muted" aria-hidden />
               )}
             </button>
 
@@ -389,10 +382,8 @@ export function PourFlow() {
                     ["Finish", finish, setFinish],
                   ] as const
                 ).map(([label, val, set]) => (
-                  <label key={label} className="flex flex-col gap-1">
-                    <span className="text-xs font-semibold text-muted uppercase tracking-wide">
-                      {label}
-                    </span>
+                  <label key={label} className="flex flex-col gap-1.5">
+                    <span className="section-label">{label}</span>
                     <textarea
                       value={val}
                       onChange={(e) => set(e.target.value)}
@@ -409,17 +400,13 @@ export function PourFlow() {
                   </label>
                 ))}
 
-                <div className="flex flex-col gap-1">
-                  <span className="text-xs font-semibold text-muted uppercase tracking-wide">
-                    Flavor wheel
-                  </span>
+                <div className="flex flex-col gap-1.5">
+                  <span className="section-label">Flavor wheel</span>
                   <FlavorWheelInput value={flavorTags} onChange={setFlavorTags} />
                 </div>
 
-                <label className="flex flex-col gap-1">
-                  <span className="text-xs font-semibold text-muted uppercase tracking-wide">
-                    Anything else
-                  </span>
+                <label className="flex flex-col gap-1.5">
+                  <span className="section-label">Anything else</span>
                   <textarea
                     value={freeform}
                     onChange={(e) => setFreeform(e.target.value)}
@@ -442,7 +429,7 @@ export function PourFlow() {
             type="button"
             onClick={submit}
             disabled={submitting}
-            className="rounded-xl bg-accent text-background font-semibold py-3.5 text-lg hover:bg-accent-deep transition-colors disabled:opacity-60"
+            className="btn-primary w-full py-3.5 text-base disabled:opacity-60"
           >
             {submitting ? "Saving…" : "Save pour"}
           </button>

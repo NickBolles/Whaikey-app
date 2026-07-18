@@ -12,6 +12,11 @@ async function settle(page: Page) {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.waitForLoadState("networkidle");
   await page.evaluate(() => document.fonts.ready);
+  // Sticky bars get painted at scroll seams in fullPage captures — pin them
+  // into normal flow for screenshots so they appear once, at the page end.
+  await page.addStyleTag({
+    content: `nav[aria-label="Primary"], [data-sticky] { position: static !important; }`,
+  });
 }
 
 function shot(name: string) {

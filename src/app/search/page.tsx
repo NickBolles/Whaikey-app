@@ -48,15 +48,16 @@ export default function SearchPage() {
   const isBrowsing = query.trim().length === 0;
 
   return (
-    <div className="px-4 pt-6 flex flex-col gap-4">
+    <div className="px-4 pt-6 flex flex-col gap-5">
       <header>
-        <h1 className="text-2xl font-bold">Find a bottle</h1>
+        <h1 className="font-display text-[2rem] leading-tight font-semibold">Find a bottle</h1>
         <p className="text-muted text-sm mt-1">Search by bottle, distillery, or nickname.</p>
       </header>
 
       <div className="relative">
         <SearchIcon
           size={18}
+          strokeWidth={1.8}
           aria-hidden
           className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted"
         />
@@ -67,11 +68,15 @@ export default function SearchPage() {
           onChange={(e) => setQuery(e.target.value)}
           placeholder='Try "eagle 10" or "ECBP"'
           aria-label="Search bottles"
-          className="w-full rounded-xl border border-border-subtle bg-surface py-3 pl-10 pr-4 text-foreground placeholder:text-muted focus:outline-none focus:border-accent"
+          className="w-full rounded-xl border border-border-subtle bg-surface py-3 pl-10 pr-4 text-foreground placeholder:text-muted transition-colors focus:outline-none focus:border-accent/70"
         />
       </div>
 
-      <div className="-mx-4 px-4 flex gap-2 overflow-x-auto pb-1" role="tablist" aria-label="Filter by category">
+      <div
+        className="-mx-4 px-4 flex gap-2 overflow-x-auto pb-1"
+        role="tablist"
+        aria-label="Filter by category"
+      >
         <CategoryFilterChip
           label="All"
           active={category === null}
@@ -88,29 +93,38 @@ export default function SearchPage() {
       </div>
 
       {error && (
-        <p role="alert" className="rounded-xl border border-border-subtle bg-surface p-4 text-sm text-muted">
+        <p role="alert" className="card-flat p-4 text-sm text-muted">
           {error}
         </p>
       )}
 
       {!error && results !== null && results.length === 0 && !loading && (
-        <div className="rounded-xl border border-border-subtle bg-surface p-6 text-center">
-          <p className="font-medium">No bottles found</p>
-          <p className="text-sm text-muted mt-1">
+        <div className="card p-8 text-center flex flex-col items-center gap-2">
+          <div aria-hidden className="text-4xl mb-1">
+            🥃
+          </div>
+          <p className="font-display text-lg font-semibold">No bottles found</p>
+          <p className="text-sm text-muted leading-relaxed max-w-xs">
             Try fewer or shorter words — &quot;eagle&quot; instead of &quot;eagle rare bourbon&quot;
             {category ? ", or clear the category filter" : ""}.
           </p>
+          <button
+            type="button"
+            onClick={() => {
+              setQuery("");
+              setCategory(null);
+            }}
+            className="btn-secondary mt-3 px-5 py-2.5 text-sm font-medium"
+          >
+            Start over
+          </button>
         </div>
       )}
 
       {!error && results !== null && results.length > 0 && (
         <section aria-label="Search results">
-          {isBrowsing && (
-            <h2 className="text-sm font-semibold text-muted uppercase tracking-wide mb-2">
-              Popular bottles
-            </h2>
-          )}
-          <ul className={`flex flex-col gap-2 ${loading ? "opacity-60" : ""}`}>
+          {isBrowsing && <h2 className="section-label mb-3">Popular bottles</h2>}
+          <ul className={`flex flex-col gap-2.5 ${loading ? "opacity-60" : ""}`}>
             {results.map((b) => (
               <li key={b.id}>
                 <BottleCard bottle={b} />
@@ -141,10 +155,8 @@ function CategoryFilterChip({
       type="button"
       onClick={onClick}
       aria-pressed={active}
-      className={`shrink-0 rounded-full px-3.5 py-1.5 text-sm font-medium border transition-colors whitespace-nowrap ${
-        active
-          ? "bg-accent text-background border-accent"
-          : "bg-surface text-muted border-border-subtle hover:bg-surface-raised"
+      className={`chip shrink-0 min-h-11 px-4 text-sm font-medium whitespace-nowrap ${
+        active ? "chip-active" : "hover:text-foreground"
       }`}
     >
       {label}

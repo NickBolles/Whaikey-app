@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
-import { FlavorRadar } from "@/components/flavor-radar";
+import { FlavorRadar, radarLabel } from "@/components/flavor-radar";
 import { FLAVOR_WHEEL, WEDGE_IDS } from "@/lib/flavor-wheel";
 
 afterEach(cleanup);
@@ -20,11 +20,13 @@ describe("FlavorRadar", () => {
     }
   });
 
-  it("labels every wedge", () => {
+  it("labels every wedge (using shortened radar labels where defined)", () => {
     render(<FlavorRadar profile={fullProfile} />);
     for (const wedge of FLAVOR_WHEEL) {
-      expect(screen.getByText(wedge.label)).toBeInTheDocument();
+      expect(screen.getByText(radarLabel(wedge.id, wedge.label))).toBeInTheDocument();
     }
+    // Long taxonomy labels are shortened so they fit inside the SVG.
+    expect(radarLabel("peaty", "Peaty / Smoky")).toBe("Peaty");
   });
 
   it("treats missing wedges as zero (points collapse to center)", () => {

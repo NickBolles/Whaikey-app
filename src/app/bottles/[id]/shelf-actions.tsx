@@ -56,10 +56,8 @@ export function ShelfActions({
               disabled={pending !== null}
               onClick={() => setRelationship(r)}
               aria-pressed={active}
-              className={`flex-1 rounded-xl border px-3 py-2.5 text-sm font-medium transition-colors disabled:opacity-60 ${
-                active
-                  ? "bg-accent text-background border-accent"
-                  : "bg-surface-raised text-foreground border-border-subtle hover:border-accent"
+              className={`flex-1 px-3 py-3 text-sm font-medium disabled:opacity-60 ${
+                active ? "btn-primary" : "btn-secondary"
               }`}
             >
               {pending === r ? "Saving…" : RELATIONSHIP_LABELS[r]}
