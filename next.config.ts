@@ -3,11 +3,10 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   // Keep the dev-tools badge out of visual regression screenshots.
   devIndicators: false,
-  // Keep the SQLite drivers out of the server bundle and loaded via native
-  // require. better-sqlite3 (local dev / tests) must never be bundled; the
-  // libSQL client is server-only too. Both are on Next's auto-external list,
-  // but we pin them here so the intent is explicit and stable.
-  serverExternalPackages: ["better-sqlite3", "@libsql/client"],
+  // Keep the DB drivers external (loaded via native require, not bundled):
+  // postgres-js is server-only, and PGlite's WASM payload (local dev / tests)
+  // must never enter the serverless bundle.
+  serverExternalPackages: ["postgres", "@electric-sql/pglite"],
 };
 
 export default nextConfig;

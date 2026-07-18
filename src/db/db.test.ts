@@ -6,8 +6,8 @@ import { createTestBottle, createTestUser, setupTestDb } from "@/test/helpers";
 
 describe("database schema", () => {
   let db: DB;
-  beforeEach(() => {
-    db = setupTestDb();
+  beforeEach(async () => {
+    db = await setupTestDb();
   });
 
   it("migrates and supports the core domain flow", async () => {

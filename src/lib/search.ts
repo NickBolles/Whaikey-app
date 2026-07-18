@@ -56,18 +56,18 @@ const resultColumns = {
 
 /**
  * A token matches a bottle when it appears (case-insensitively) in the bottle
- * name, the distillery name, or any of the bottle's aliases. SQLite LIKE is
- * case-insensitive for ASCII, which covers our catalog.
+ * name, the distillery name, or any of the bottle's aliases. Postgres LIKE is
+ * case-sensitive, so we use ILIKE to keep the search case-insensitive.
  */
 function tokenCondition(token: string): SQL {
   const pattern = `%${escapeLike(token)}%`;
   return sql`(
-    ${bottles.name} LIKE ${pattern} ESCAPE '\\'
-    OR COALESCE(${distilleries.name}, '') LIKE ${pattern} ESCAPE '\\'
+    ${bottles.name} ILIKE ${pattern} ESCAPE '\\'
+    OR COALESCE(${distilleries.name}, '') ILIKE ${pattern} ESCAPE '\\'
     OR EXISTS (
       SELECT 1 FROM ${bottleAliases}
       WHERE ${bottleAliases.bottleId} = ${bottles.id}
-        AND ${bottleAliases.alias} LIKE ${pattern} ESCAPE '\\'
+        AND ${bottleAliases.alias} ILIKE ${pattern} ESCAPE '\\'
     )
   )`;
 }

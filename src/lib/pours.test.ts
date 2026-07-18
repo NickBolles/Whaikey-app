@@ -45,7 +45,7 @@ describe("logPour", () => {
   let bottleId: string;
 
   beforeEach(async () => {
-    db = setupTestDb();
+    db = await setupTestDb();
     userId = (await createTestUser(db)).id;
     bottleId = (await createTestBottle(db)).id;
   });
@@ -177,7 +177,7 @@ describe("listPours / getPour / deletePour", () => {
   let bottleId: string;
 
   beforeEach(async () => {
-    db = setupTestDb();
+    db = await setupTestDb();
     userId = (await createTestUser(db)).id;
     bottleId = (await createTestBottle(db, { name: "Journal Bourbon" })).id;
   });

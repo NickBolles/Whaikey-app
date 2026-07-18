@@ -27,8 +27,8 @@ function detailCtx(id: string) {
 }
 
 describe("GET /api/bottles/search", () => {
-  beforeEach(() => {
-    db = setupTestDb();
+  beforeEach(async () => {
+    db = await setupTestDb();
     setSessionUser(null);
   });
 
@@ -94,8 +94,8 @@ describe("GET /api/bottles/search", () => {
 });
 
 describe("GET /api/bottles/[id]", () => {
-  beforeEach(() => {
-    db = setupTestDb();
+  beforeEach(async () => {
+    db = await setupTestDb();
     setSessionUser(null);
   });
 

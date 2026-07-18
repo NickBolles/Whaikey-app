@@ -37,7 +37,7 @@ function baseURL(): string {
 }
 
 export const auth = betterAuth({
-  database: drizzleAdapter(getDb(), { provider: "sqlite", schema }),
+  database: drizzleAdapter(getDb(), { provider: "pg", schema }),
   secret: process.env.BETTER_AUTH_SECRET ?? "dev-only-secret-change-me",
   baseURL: baseURL(),
   socialProviders: socialProviders(),

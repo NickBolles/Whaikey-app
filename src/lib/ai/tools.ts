@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { and, avg, count, desc, eq, like, or } from "drizzle-orm";
+import { and, avg, count, desc, eq, ilike, or } from "drizzle-orm";
 import type Anthropic from "@anthropic-ai/sdk";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
@@ -148,8 +148,8 @@ export async function searchBottlesLike(
 ): Promise<BottleSearchResult[]> {
   const term = `%${query.trim()}%`;
   const matchClause = or(
-    like(schema.bottles.name, term),
-    like(schema.bottleAliases.alias, term),
+    ilike(schema.bottles.name, term),
+    ilike(schema.bottleAliases.alias, term),
   );
   return db
     .selectDistinct({

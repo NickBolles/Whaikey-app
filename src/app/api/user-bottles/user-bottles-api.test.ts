@@ -26,7 +26,7 @@ describe("/api/user-bottles", () => {
   let bottle: schema.Bottle;
 
   beforeEach(async () => {
-    db = setupTestDb();
+    db = await setupTestDb();
     user = await createTestUser(db);
     bottle = await createTestBottle(db);
     setSessionUser(user);
