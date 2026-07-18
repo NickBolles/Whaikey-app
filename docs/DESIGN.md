@@ -50,4 +50,11 @@ PLAYWRIGHT_CHROMIUM_PATH=/opt/pw-browsers/chromium-1194/chrome-linux/chrome \
   pnpm playwright test --project=visual-mobile -g "<test name>" --update-snapshots
 ```
 
-Then **open the PNG under `e2e/__screenshots__/visual-mobile/` and look at it.** Iterate until it matches this doc, then leave the updated baseline in place. CI fails on unreviewed drift; intentional changes ship new baselines in the same commit.
+Then **open the PNG under `e2e/__screenshots__/visual-mobile/` and look at it.** Iterate until it matches this doc. CI fails on unreviewed drift; intentional changes ship new baselines in the same commit.
+
+**Local renders are for review only — CI renders are the source of truth.** Font rasterization differs by environment, so a baseline rendered here (dev container / laptop) will not match a GitHub runner. The committed baselines are CI-canonical: they are generated inside the same `mcr.microsoft.com/playwright:<version>` container that CI uses. So the workflow is:
+
+1. `pnpm e2e:update` locally and eyeball the PNGs to confirm the design change looks right.
+2. `pnpm e2e:update:ci` (Docker required) to re-render those baselines in the CI container, then commit the result. Do **not** commit the raw local renders from step 1.
+
+The visual-regression job runs in that same container (`retries=1`, `maxDiffPixelRatio=0.02`), and on failure uploads `playwright-report/` + `test-results/` as artifacts so the diff PNGs are reviewable from the PR.
