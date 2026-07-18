@@ -34,6 +34,16 @@ describe("FillGauge", () => {
     expect(screen.getByRole("img", { name: "65% full" })).toBeInTheDocument();
   });
 
+  it("draws a meniscus line at the liquid surface only when there is liquid", () => {
+    render(<FillGauge level={60} />);
+    const fill = screen.getByTestId("fill-gauge-fill");
+    const meniscus = screen.getByTestId("fill-gauge-meniscus");
+    expect(meniscus.getAttribute("y")).toBe(fill.getAttribute("y"));
+    cleanup();
+    render(<FillGauge level={0} />);
+    expect(screen.queryByTestId("fill-gauge-meniscus")).not.toBeInTheDocument();
+  });
+
   it("treats a null level as empty", () => {
     render(<FillGauge level={null} />);
     const rect = screen.getByTestId("fill-gauge-fill");

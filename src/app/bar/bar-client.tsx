@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { Hourglass, Plus } from "lucide-react";
 import type { BarRow } from "@/lib/bar";
 import { FillGauge } from "@/components/fill-gauge";
 
@@ -29,13 +30,11 @@ function money(n: number): string {
 function statusChipClass(status: string | null): string {
   switch (status) {
     case "open":
-      return "bg-accent/15 text-accent";
-    case "sealed":
-      return "bg-surface-raised text-muted";
+      return "chip-active";
     case "finished":
-      return "bg-surface-raised text-muted line-through";
+      return "line-through opacity-70";
     default:
-      return "bg-surface-raised text-muted";
+      return "";
   }
 }
 
@@ -150,11 +149,14 @@ export function BarClient({ initialRows }: { initialRows: Row[] }) {
   const activeRows = tab === "bar" ? ownRows : tab === "wishlist" ? wishlistRows : triedRows;
 
   return (
-    <div className="px-4 pt-8 pb-24 flex flex-col gap-5">
+    <div className="px-4 pt-5 pb-10 flex flex-col gap-6">
       <header className="flex items-end justify-between">
-        <h1 className="text-2xl font-bold">My Bar</h1>
-        <Link href="/search" className="text-sm text-accent hover:underline">
-          + Add bottle
+        <h1 className="font-display text-[2rem] leading-tight font-semibold">My Bar</h1>
+        <Link
+          href="/search"
+          className="inline-flex items-center gap-1 min-h-11 px-1 text-sm font-medium text-accent hover:underline"
+        >
+          <Plus size={16} strokeWidth={1.8} aria-hidden /> Add bottle
         </Link>
       </header>
 
@@ -165,10 +167,8 @@ export function BarClient({ initialRows }: { initialRows: Row[] }) {
             role="tab"
             aria-selected={tab === t.key}
             onClick={() => setTab(t.key)}
-            className={`rounded-xl px-4 py-2 text-sm font-semibold transition-colors ${
-              tab === t.key
-                ? "bg-accent text-background"
-                : "bg-surface border border-border-subtle text-muted hover:bg-surface-raised"
+            className={`chip inline-flex items-center min-h-11 px-4 text-sm font-medium ${
+              tab === t.key ? "chip-active" : "hover:text-foreground"
             }`}
           >
             {t.label}
@@ -177,30 +177,36 @@ export function BarClient({ initialRows }: { initialRows: Row[] }) {
       </div>
 
       {error && (
-        <div className="rounded-xl border border-red-500/40 bg-red-500/10 text-red-400 text-sm p-3">
+        <div className="rounded-xl border border-danger/40 bg-danger/10 text-danger text-sm p-3">
           {error}
         </div>
       )}
 
       {tab === "bar" && (
         <>
-          <section aria-label="Bar stats" className="grid grid-cols-2 gap-3">
+          <section aria-label="Bar stats" className="grid grid-cols-4 gap-2">
             <StatCard value={String(stats.bottleCount)} label="bottles" />
             <StatCard value={String(stats.openCount)} label="open" />
-            <StatCard value={money(stats.totalSpent)} label="total spent" />
+            <StatCard value={money(stats.totalSpent)} label="spent" />
             <StatCard value={money(stats.estValue)} label="est. value" />
           </section>
 
           {killList.length > 0 && (
             <section
               aria-label="Kill list"
-              className="rounded-xl border border-accent/40 bg-accent/10 p-4"
+              className="rounded-2xl border border-accent/25 bg-accent/[0.07] p-4"
             >
-              <h2 className="text-sm font-semibold text-accent">Finish these first</h2>
-              <ul className="mt-1 text-sm text-muted">
+              <h2 className="flex items-center gap-2 text-sm font-semibold text-accent">
+                <Hourglass size={18} strokeWidth={1.8} aria-hidden />
+                Finish these first
+              </h2>
+              <ul className="mt-2.5 flex flex-col gap-1.5 text-sm">
                 {killList.map((r) => (
-                  <li key={r.id}>
-                    {r.bottle.name} — {r.fillLevel}% left
+                  <li key={r.id} className="flex items-baseline justify-between gap-3">
+                    <span className="truncate font-medium text-foreground/90">{r.bottle.name}</span>
+                    <span className="shrink-0 text-muted">
+                      <span className="stat-number text-accent">{r.fillLevel}%</span> left
+                    </span>
                   </li>
                 ))}
               </ul>
@@ -212,36 +218,41 @@ export function BarClient({ initialRows }: { initialRows: Row[] }) {
       {activeRows.length === 0 ? (
         <EmptyState tab={tab} />
       ) : (
-        <ul className="flex flex-col gap-2">
+        <ul className="flex flex-col gap-2.5">
           {activeRows.map((row) => (
-            <li
-              key={row.id}
-              className="rounded-xl bg-surface border border-border-subtle overflow-hidden"
-            >
+            <li key={row.id} className="card-flat overflow-hidden">
               {tab === "bar" ? (
                 <>
                   <button
-                    className="w-full flex items-center gap-3 p-3 text-left hover:bg-surface-raised transition-colors"
+                    className="w-full flex items-center gap-3.5 p-4 text-left hover:bg-surface-raised transition-colors"
                     onClick={() => setExpandedId(expandedId === row.id ? null : row.id)}
                     aria-expanded={expandedId === row.id}
                   >
-                    <FillGauge level={row.fillLevel} className="h-10 w-4 shrink-0" />
+                    <FillGauge level={row.fillLevel} className="h-12 w-5 shrink-0 text-muted" />
                     <span className="flex-1 min-w-0">
-                      <span className="block font-medium truncate">{row.bottle.name}</span>
-                      <span className="block text-xs text-muted truncate">
+                      <span className="block font-medium leading-snug line-clamp-2">
+                        {row.bottle.name}
+                      </span>
+                      <span className="block text-xs text-muted truncate mt-0.5">
                         {row.bottle.distilleryName ?? row.bottle.category}
                         {row.quantity > 1 ? ` · ×${row.quantity}` : ""}
                       </span>
                     </span>
-                    {row.status && (
+                    <span className="flex flex-col items-end gap-1.5 shrink-0">
                       <span
-                        className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusChipClass(row.status)}`}
+                        className={`stat-number text-lg leading-none ${
+                          row.purchasePrice != null ? "" : "text-muted"
+                        }`}
                       >
-                        {row.status}
+                        {row.purchasePrice != null ? `$${row.purchasePrice.toFixed(0)}` : "—"}
                       </span>
-                    )}
-                    <span className="text-sm text-muted w-16 text-right">
-                      {row.purchasePrice != null ? `$${row.purchasePrice.toFixed(0)}` : "—"}
+                      {row.status && (
+                        <span
+                          className={`chip px-2 py-0.5 text-[10px] font-medium ${statusChipClass(row.status)}`}
+                        >
+                          {row.status}
+                        </span>
+                      )}
                     </span>
                   </button>
                   {expandedId === row.id && (
@@ -254,27 +265,33 @@ export function BarClient({ initialRows }: { initialRows: Row[] }) {
                   )}
                 </>
               ) : (
-                <div className="flex items-center gap-3 p-3">
+                <div className="flex items-center gap-3.5 p-4">
                   <span className="flex-1 min-w-0">
-                    <span className="block font-medium truncate">{row.bottle.name}</span>
-                    <span className="block text-xs text-muted truncate">
+                    <span className="block font-medium leading-snug line-clamp-2">
+                      {row.bottle.name}
+                    </span>
+                    <span className="block text-xs text-muted truncate mt-0.5">
                       {row.bottle.distilleryName ?? row.bottle.category}
                     </span>
                   </span>
                   {tab === "wishlist" ? (
-                    <>
-                      <span className="text-sm text-muted">
-                        {row.bottle.avgPrice != null ? `~$${row.bottle.avgPrice.toFixed(0)}` : ""}
-                      </span>
+                    <span className="flex flex-col items-end gap-1.5 shrink-0">
+                      {row.bottle.avgPrice != null && (
+                        <span className="text-muted text-sm">
+                          ~<span className="stat-number">${row.bottle.avgPrice.toFixed(0)}</span>
+                        </span>
+                      )}
                       <button
                         onClick={() => moveToBar(row)}
-                        className="rounded-xl bg-accent text-background text-sm font-semibold px-3 py-1.5 hover:bg-accent-deep transition-colors"
+                        className="btn-primary text-[13px] px-3.5 py-2"
                       >
                         Move to bar
                       </button>
-                    </>
+                    </span>
                   ) : (
-                    <span className="text-xs text-muted capitalize">{row.bottle.category}</span>
+                    <span className="chip px-2.5 py-1 text-[11px] capitalize shrink-0">
+                      {row.bottle.category}
+                    </span>
                   )}
                 </div>
               )}
@@ -288,9 +305,9 @@ export function BarClient({ initialRows }: { initialRows: Row[] }) {
 
 function StatCard({ value, label }: { value: string; label: string }) {
   return (
-    <div className="rounded-xl bg-surface border border-border-subtle p-4">
-      <div className="text-2xl font-bold text-accent">{value}</div>
-      <div className="text-xs text-muted mt-1">{label}</div>
+    <div className="card p-3">
+      <div className="stat-number text-[1.35rem] leading-none text-accent">{value}</div>
+      <div className="text-[10px] text-muted mt-2">{label}</div>
     </div>
   );
 }
@@ -298,16 +315,31 @@ function StatCard({ value, label }: { value: string; label: string }) {
 function EmptyState({ tab }: { tab: Tab }) {
   const copy =
     tab === "bar"
-      ? "No bottles on your shelf yet."
+      ? {
+          title: "Your shelf is waiting",
+          line: "Find a bottle you love and add it to your bar.",
+          action: "Find a bottle",
+        }
       : tab === "wishlist"
-        ? "Nothing on your wishlist yet."
-        : "No tried bottles logged yet.";
+        ? {
+            title: "Nothing wished for yet",
+            line: "Save bottles you're hunting and track their going price.",
+            action: "Browse bottles",
+          }
+        : {
+            title: "No tastings logged",
+            line: "Bottles you've tried — at a bar, a friend's, a festival — live here.",
+            action: "Find a bottle",
+          };
   return (
-    <div className="rounded-xl bg-surface border border-border-subtle p-8 text-center flex flex-col items-center gap-3">
-      <div className="text-3xl">🥃</div>
-      <p className="text-muted text-sm">{copy}</p>
-      <Link href="/search" className="text-accent text-sm font-semibold hover:underline">
-        Find a bottle →
+    <div className="card p-8 text-center flex flex-col items-center gap-3">
+      <div aria-hidden className="text-4xl">
+        🥃
+      </div>
+      <p className="font-display text-lg font-semibold">{copy.title}</p>
+      <p className="text-sm text-muted max-w-[26ch] leading-relaxed">{copy.line}</p>
+      <Link href="/search" className="btn-secondary px-5 py-2.5 text-sm font-medium mt-1">
+        {copy.action}
       </Link>
     </div>
   );
@@ -336,15 +368,15 @@ function RowDetails({
   }
 
   const inputClass =
-    "rounded-lg bg-surface-raised border border-border-subtle px-2 py-1.5 text-sm w-full";
+    "rounded-xl bg-surface-raised/70 border border-border-subtle px-3 py-2.5 text-sm w-full";
 
   return (
-    <div className="border-t border-border-subtle p-3 flex flex-col gap-3 bg-surface-raised/40">
-      <div className="flex flex-wrap gap-2">
+    <div className="border-t border-border-subtle p-4 flex flex-col gap-4 bg-surface-raised/30">
+      <div className="flex flex-wrap items-center gap-2">
         {row.status !== "open" && row.status !== "finished" && (
           <button
             onClick={() => onPatch({ status: "open" })}
-            className="rounded-xl bg-accent text-background text-sm font-semibold px-3 py-1.5 hover:bg-accent-deep transition-colors"
+            className="btn-secondary min-h-11 px-4 text-sm font-medium"
           >
             Mark open
           </button>
@@ -352,14 +384,14 @@ function RowDetails({
         {row.status !== "finished" && (
           <button
             onClick={() => onPatch({ status: "finished" })}
-            className="rounded-xl bg-surface border border-border-subtle text-sm px-3 py-1.5 hover:bg-surface-raised transition-colors"
+            className="btn-secondary min-h-11 px-4 text-sm font-medium"
           >
             Mark finished
           </button>
         )}
         <button
           onClick={onRemove}
-          className="rounded-xl border border-red-500/40 text-red-400 text-sm px-3 py-1.5 hover:bg-red-500/10 transition-colors ml-auto"
+          className="ml-auto min-h-11 px-2 text-sm text-danger hover:underline"
         >
           Remove
         </button>
@@ -367,17 +399,17 @@ function RowDetails({
 
       {row.status === "open" && (
         <div>
-          <div className="text-xs text-muted mb-1">Fill level</div>
-          <div className="flex gap-2">
+          <div className="section-label mb-2">
+            Fill level{row.fillLevel != null ? ` · ${row.fillLevel}%` : ""}
+          </div>
+          <div className="flex flex-wrap gap-2">
             {FILL_STEPS.map((step) => (
               <button
                 key={step}
                 onClick={() => onPatch({ fillLevel: step })}
                 aria-pressed={row.fillLevel === step}
-                className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${
-                  row.fillLevel === step
-                    ? "bg-accent text-background"
-                    : "bg-surface border border-border-subtle text-muted hover:bg-surface-raised"
+                className={`chip inline-flex items-center min-h-11 px-3.5 text-[13px] font-medium ${
+                  row.fillLevel === step ? "chip-active" : "hover:text-foreground"
                 }`}
               >
                 {step}%
@@ -388,7 +420,7 @@ function RowDetails({
       )}
 
       <div className="grid grid-cols-3 gap-2 items-end">
-        <label className="text-xs text-muted flex flex-col gap-1">
+        <label className="text-xs text-muted flex flex-col gap-1.5">
           Paid ($)
           <input
             value={price}
@@ -398,7 +430,7 @@ function RowDetails({
             placeholder="59.99"
           />
         </label>
-        <label className="text-xs text-muted flex flex-col gap-1">
+        <label className="text-xs text-muted flex flex-col gap-1.5">
           Store
           <input
             value={store}
@@ -407,7 +439,7 @@ function RowDetails({
             placeholder="Store"
           />
         </label>
-        <label className="text-xs text-muted flex flex-col gap-1">
+        <label className="text-xs text-muted flex flex-col gap-1.5">
           Location
           <input
             value={location}
@@ -419,7 +451,7 @@ function RowDetails({
       </div>
       <button
         onClick={saveDetails}
-        className="self-start rounded-xl bg-surface border border-border-subtle text-sm font-semibold px-4 py-1.5 hover:bg-surface-raised transition-colors"
+        className="btn-secondary self-start min-h-11 px-4 text-sm font-medium"
       >
         Save details
       </button>
