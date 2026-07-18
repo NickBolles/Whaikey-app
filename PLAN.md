@@ -245,11 +245,61 @@ Row-level security throughout: users only see their own bars/notes; bottles/dist
 ### Phase 4 — Growth (post-launch)
 - Community ratings/notes aggregation, friends & sharing, Wrapped recap.
 - Price alerts on wishlist, blind tasting mode, widgets.
-- Monetization: free core + **premium** ($4–6/mo): unlimited AI chat, advanced analytics, collection value tracking, export, early features.
+- Launch premium tier (see §6 Monetization).
 
 ---
 
-## 6. Risks & open questions
+## 6. Monetization
+
+**Model: freemium subscription.** The free tier must be genuinely useful (that's the growth engine — Vivino proved free scanning drives adoption), while the AI concierge and collection analytics justify a paid tier because they have real per-use value *and* real per-use cost.
+
+### 6.1 Free tier — "the spreadsheet killer"
+
+Everything needed to replace notes apps and win the habit:
+
+- Unlimited bottles in My Bar, wishlist, and tried list.
+- Pour logging, ratings, structured notes, flavor wheel input.
+- Bottle search + detail pages, label scanning (fair-use cap, e.g. 20 scans/mo).
+- **Limited AI chat** — e.g. 10 messages/month, enough to feel the magic and hit the wall.
+- Basic spend total (sum of purchase prices).
+
+### 6.2 Premium — "Whaikey Pro" (~$5.99/mo or $49/yr; ~30% annual discount)
+
+Sell the *palate + portfolio* story — "know your taste, know your bar's worth":
+
+- **Unlimited AI concierge** chat + voice-note extraction.
+- **Palate wheel + explainable recommendations** ("because you loved X…").
+- **Collection value tracking** — market value estimates, value-over-time chart, cost-per-pour, spending analytics.
+- Unlimited label scans, price history on bottles, wishlist price alerts (when built).
+- Blind tasting mode, flight comparison, CSV/PDF export (insurance reports).
+- Yearly "Whiskey Wrapped" in full (free users get a teaser).
+
+Pricing logic: whiskey collectors routinely spend $50–100+ per bottle; $6/mo is < 2% of a single mid-shelf purchase. Anchor the annual plan as "less than one pour of Blanton's per month."
+
+### 6.3 Later revenue streams (post-traction, in order of attractiveness)
+
+1. **Affiliate/referral on recommendations** — "buy near you / online" links from bottle pages and rec cards (Vivino's core model). Strict rule: recommendations are *never* pay-to-rank; affiliate revenue is disclosed and downstream of an honest rec, or trust dies.
+2. **Retailer/brand analytics (B2B)** — aggregated, anonymized demand and flavor-trend data ("sherry-cask demand up 40% in Texas"). Privacy-first: opt-out, aggregate-only, no individual data sales.
+3. **Distillery partnerships** — sponsored (clearly labeled) tasting flights, early releases, virtual tastings inside clubs.
+4. **One-time IAPs** — lifetime unlock option (~$149) for subscription-averse collectors; gift subscriptions.
+
+**Explicitly not doing:** selling user data, ads in the tasting flow, pay-to-win community rankings, or paywalling data users entered themselves (your notes/inventory are always exportable — even on free).
+
+### 6.4 Unit economics sanity check
+
+- Main variable cost is AI inference. Mitigations already in §7 risks: Haiku for high-volume extraction, per-bottle caching of pairings/recs, rate limits on free tier.
+- Rough target: keep AI cost per premium user < $1/mo (achievable with caching + Haiku routing) → healthy margin at $5.99.
+- Conversion assumption to validate in beta: 3–5% free→paid (typical for prosumer hobby apps; collectors likely convert higher).
+
+### 6.5 Rollout
+
+- **Beta:** everything free, instrument usage to find the real willingness-to-pay lines.
+- **Launch:** grandfather beta users with 3 months of Pro; introduce paywall with the limits above.
+- Revisit free-tier AI message cap based on actual cost data — generosity is a growth lever, not a loss center, if caching works.
+
+---
+
+## 7. Risks & open questions
 
 | Risk | Mitigation |
 |---|---|
@@ -266,9 +316,9 @@ Row-level security throughout: users only see their own bars/notes; bottles/dist
 
 ---
 
-## 7. Immediate next steps
+## 8. Immediate next steps
 
-1. Approve/adjust this plan (especially §3 priorities and §6 open questions).
+1. Approve/adjust this plan (especially §3 priorities, §6 pricing, and §7 open questions).
 2. Scaffold Expo app + Supabase project (Phase 0).
 3. Design the 4 core screens: Search, Bottle Detail, My Bar, Pour Log.
 4. Build the bottle-DB seed pipeline.
