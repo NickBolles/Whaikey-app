@@ -2,7 +2,7 @@
 
 An AI-native whiskey tracking app, inspired by wine apps like **Vivino** (social scanning + ratings) and **InVintory** (beautiful personal cellar management), but built for whiskey from day one with AI at the core — not bolted on.
 
-> Deep dives: [docs/FEATURES.md](./docs/FEATURES.md) (detailed feature map) · [docs/COMPETITORS.md](./docs/COMPETITORS.md) (competitor & market analysis)
+> Deep dives: [docs/FEATURES.md](./docs/FEATURES.md) (detailed feature map) · [docs/COMPETITORS.md](./docs/COMPETITORS.md) (competitor & market analysis) · [docs/DATA_SOURCES.md](./docs/DATA_SOURCES.md) (data sourcing strategy)
 
 ---
 
