@@ -13,7 +13,7 @@ An AI-native whiskey tracking app — think Vivino/InVintory, but for whiskey, w
 
 ## Stack
 
-Next.js (App Router, TypeScript, Tailwind) · Drizzle ORM + SQLite (Postgres-swappable) · [Better Auth](https://better-auth.com) (social login only) · Anthropic Claude (server-side AI gateway) · Vitest + Playwright.
+Next.js (App Router, TypeScript, Tailwind) · Drizzle ORM + SQLite → libSQL/[Turso](https://turso.tech) in production (better-sqlite3 locally) · [Better Auth](https://better-auth.com) (social login only) · Anthropic Claude (server-side AI gateway) · Vitest + Playwright · deployed on Vercel.
 
 ## Development
 
@@ -26,6 +26,68 @@ pnpm test         # vitest suite
 ```
 
 Copy `.env.example` to `.env.local`. Auth is social-login-only: set `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` (and optionally Apple). AI features need `ANTHROPIC_API_KEY`.
+
+Local dev and the test suite run on `better-sqlite3` (a local file / in-memory DB) — no network or cloud account required. `DATABASE_URL` defaults to `file:./data/whaikey.db`.
+
+## Deployment (Vercel)
+
+The app runs on Vercel serverless. Because `better-sqlite3` needs a persistent local file (which serverless functions don't have), **production uses a hosted [libSQL](https://turso.tech) database** while local dev/tests keep using `better-sqlite3`. The driver is chosen at runtime from the connection string — see [`src/db/index.ts`](./src/db/index.ts) — so no app or schema code changes between environments.
+
+### 1. Provision the database (Turso / libSQL)
+
+```bash
+# https://docs.turso.tech/cli/installation
+turso auth login
+turso db create whaikey
+turso db show whaikey --url            # → DATABASE_URL  (libsql://…-<org>.turso.io)
+turso db tokens create whaikey         # → DATABASE_AUTH_TOKEN
+```
+
+Any hosted libSQL endpoint works; Turso is the managed option. (Migrations are plain SQLite and run unchanged against libSQL.)
+
+### 2. Create the Vercel project
+
+Import the GitHub repo at [vercel.com/new](https://vercel.com/new). Vercel auto-detects Next.js — no build config needed. GitHub Actions remains the test gate (`.github/workflows/ci.yml`); Vercel builds on every push and creates a preview deployment per branch/PR.
+
+### 3. Set environment variables (Vercel → Project → Settings → Environment Variables)
+
+| Variable | Value | Environments |
+| --- | --- | --- |
+| `DATABASE_URL` | `libsql://…turso.io` (from step 1) | Production, Preview |
+| `DATABASE_AUTH_TOKEN` | Turso token (from step 1) | Production, Preview |
+| `BETTER_AUTH_SECRET` | `openssl rand -base64 32` | Production, Preview |
+| `BETTER_AUTH_URL` | your production URL, e.g. `https://whaikey.vercel.app` | Production |
+| `GOOGLE_CLIENT_ID` | Google OAuth client ID (step 5) | Production |
+| `GOOGLE_CLIENT_SECRET` | Google OAuth client secret (step 5) | Production |
+| `ANTHROPIC_API_KEY` | Anthropic API key ([console](https://console.anthropic.com/)) | Production, Preview |
+
+Notes:
+- On **preview** deploys `BETTER_AUTH_URL` is unset and the server falls back to the per-deploy `VERCEL_URL`, so the app boots. Google sign-in itself only works on production (its redirect URI is fixed), so exercise previews **signed-out** (search → bottle detail work without auth).
+- The API routes that touch the DB or Anthropic pin `runtime = "nodejs"` (never edge); `/api/chat` sets `maxDuration = 60`.
+
+### 4. Migrate & seed the production database
+
+Point the migrate/seed scripts at the remote DB (they read `DATABASE_URL` / `DATABASE_AUTH_TOKEN`):
+
+```bash
+DATABASE_URL="libsql://…turso.io" DATABASE_AUTH_TOKEN="…" pnpm db:push   # apply migrations
+DATABASE_URL="libsql://…turso.io" DATABASE_AUTH_TOKEN="…" pnpm db:seed   # load the bottle catalog
+```
+
+### 5. Google OAuth
+
+1. [Google Cloud Console](https://console.cloud.google.com/) → create/select a project.
+2. **APIs & Services → OAuth consent screen** → External → add app name, support email, and your email as a test user.
+3. **APIs & Services → Credentials → Create credentials → OAuth client ID → Web application**.
+4. **Authorized JavaScript origins:** `https://<your-domain>` (e.g. `https://whaikey.vercel.app`).
+5. **Authorized redirect URI:** `https://<your-domain>/api/auth/callback/google`.
+6. Copy the client ID/secret into the Vercel env vars above.
+
+Apple sign-in can be added later the same way (`APPLE_CLIENT_ID` / `APPLE_CLIENT_SECRET`); it activates automatically when those vars are present.
+
+### 6. Deploy
+
+Push to a branch for a **preview** deploy; verify signed-out search → bottle detail. Then **promote to production** (Vercel dashboard → Deployments → Promote, or merge to `main`). After promotion, confirm Google sign-in and the AI chat concierge.
 
 ## Status
 
