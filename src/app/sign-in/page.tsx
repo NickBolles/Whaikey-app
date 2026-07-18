@@ -27,34 +27,39 @@ function AppleIcon() {
 export default function SignInPage() {
   const oauthConfigured = process.env.NEXT_PUBLIC_OAUTH_CONFIGURED !== "false";
   return (
-    <div className="flex flex-col items-center justify-center min-h-[80dvh] px-6 gap-8">
+    <div className="flex flex-col items-center justify-center min-h-[85dvh] px-6 gap-9">
       <div className="text-center">
-        <div className="text-5xl mb-3">🥃</div>
-        <h1 className="text-3xl font-bold tracking-tight">Whaikey</h1>
-        <p className="text-muted mt-2 max-w-xs">
+        <div aria-hidden className="text-5xl mb-4 drop-shadow-[0_0_24px_rgba(232,161,60,0.25)]">
+          🥃
+        </div>
+        <h1 className="font-display text-4xl font-semibold tracking-tight text-gradient-amber">
+          Whaikey
+        </h1>
+        <p className="text-muted mt-3 max-w-xs leading-relaxed">
           Your bar, your palate, your pours — with an AI concierge who knows them all.
         </p>
       </div>
       <div className="w-full max-w-xs flex flex-col gap-3">
         <button
           onClick={() => signIn.social({ provider: "google", callbackURL: "/" })}
-          className="flex items-center justify-center gap-3 rounded-xl bg-foreground text-background font-medium py-3 hover:opacity-90 transition-opacity"
+          className="btn-primary flex items-center justify-center gap-3 py-3.5"
         >
           <GoogleIcon /> Continue with Google
         </button>
         <button
           onClick={() => signIn.social({ provider: "apple", callbackURL: "/" })}
-          className="flex items-center justify-center gap-3 rounded-xl border border-border-subtle bg-surface font-medium py-3 hover:bg-surface-raised transition-colors"
+          className="btn-secondary flex items-center justify-center gap-3 py-3.5 font-medium"
         >
           <AppleIcon /> Continue with Apple
         </button>
         {!oauthConfigured && (
-          <p className="text-xs text-muted text-center mt-2">
-            OAuth isn&apos;t configured yet — set GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET in .env.local.
+          <p className="text-xs text-muted text-center mt-2 leading-relaxed">
+            OAuth isn&apos;t configured yet — set GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET in
+            .env.local.
           </p>
         )}
       </div>
-      <p className="text-xs text-muted text-center max-w-xs">
+      <p className="text-xs text-muted/70 text-center max-w-xs">
         Sip responsibly. Whaikey never rewards drinking frequency — only curiosity.
       </p>
     </div>

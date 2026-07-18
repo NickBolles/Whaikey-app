@@ -17,9 +17,9 @@ export function AppNav() {
   return (
     <nav
       aria-label="Primary"
-      className="fixed bottom-0 inset-x-0 z-40 border-t border-border-subtle bg-surface/95 backdrop-blur"
+      className="sticky bottom-0 z-40 mt-10 border-t border-border-subtle bg-surface/95 backdrop-blur supports-[backdrop-filter]:bg-surface/80"
     >
-      <div className="mx-auto max-w-2xl grid grid-cols-5">
+      <div className="grid grid-cols-5 pb-[env(safe-area-inset-bottom)]">
         {TABS.map(({ href, label, icon: Icon }) => {
           const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
           return (
@@ -27,11 +27,17 @@ export function AppNav() {
               key={href}
               href={href}
               aria-current={active ? "page" : undefined}
-              className={`flex flex-col items-center gap-1 py-2.5 text-[11px] transition-colors ${
+              className={`relative flex flex-col items-center gap-1 pt-3 pb-2.5 text-[11px] transition-colors ${
                 active ? "text-accent" : "text-muted hover:text-foreground"
               }`}
             >
-              <Icon size={20} strokeWidth={active ? 2.4 : 1.8} aria-hidden />
+              {active && (
+                <span
+                  aria-hidden
+                  className="absolute top-0 h-0.5 w-8 rounded-full bg-accent shadow-[0_0_8px_rgba(232,161,60,0.6)]"
+                />
+              )}
+              <Icon size={20} strokeWidth={active ? 2.2 : 1.8} aria-hidden />
               {label}
             </Link>
           );
