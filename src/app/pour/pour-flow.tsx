@@ -6,6 +6,7 @@ import { ChevronDown, ChevronUp, GlassWater, Search, Star } from "lucide-react";
 import { SERVING_STYLES, type ServingStyle } from "@/db/schema";
 import { StarRating } from "@/components/star-rating";
 import { FlavorWheelInput } from "@/components/flavor-wheel-input";
+import { NoteCapture, type ExtractedTastingNote } from "@/components/note-capture";
 
 interface BottlePick {
   id: string;
@@ -218,6 +219,25 @@ export function PourFlow() {
     setDone(null);
   };
 
+  // Merge an AI extraction into the user's in-progress note WITHOUT clobbering
+  // anything they've already entered. Extraction assists; the user stays author.
+  const applyExtraction = (r: ExtractedTastingNote) => {
+    if (r.nose && !nose.trim()) setNose(r.nose);
+    if (r.palate && !palate.trim()) setPalate(r.palate);
+    if (r.finish && !finish.trim()) setFinish(r.finish);
+    if (Object.keys(r.flavorTags).length > 0) {
+      setFlavorTags((cur) => ({ ...r.flavorTags, ...cur }));
+    }
+    if (r.suggestedRating != null && rating == null) setRating(r.suggestedRating);
+    if (
+      r.servingStyle &&
+      servingStyle == null &&
+      (SERVING_STYLES as readonly string[]).includes(r.servingStyle)
+    ) {
+      setServingStyle(r.servingStyle as ServingStyle);
+    }
+  };
+
   const submit = async () => {
     if (!bottle || submitting) return;
     setSubmitting(true);
@@ -405,16 +425,11 @@ export function PourFlow() {
                   <FlavorWheelInput value={flavorTags} onChange={setFlavorTags} />
                 </div>
 
-                <label className="flex flex-col gap-1.5">
-                  <span className="section-label">Anything else</span>
-                  <textarea
-                    value={freeform}
-                    onChange={(e) => setFreeform(e.target.value)}
-                    rows={3}
-                    placeholder="Free-form thoughts…"
-                    className="rounded-xl bg-surface border border-border-subtle p-3 text-sm placeholder:text-muted focus:outline-none focus:border-accent resize-y"
-                  />
-                </label>
+                <NoteCapture
+                  freeform={freeform}
+                  onFreeformChange={setFreeform}
+                  onApplyExtraction={applyExtraction}
+                />
               </div>
             )}
           </section>
