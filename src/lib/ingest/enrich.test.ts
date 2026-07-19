@@ -1,10 +1,16 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { eq, isNull } from "drizzle-orm";
 import type { DB } from "@/db";
-import { bottles } from "@/db/schema";
+import { bottles, pours, tastingNotes } from "@/db/schema";
 import { makeFakeAnthropic } from "@/lib/ai/testing";
-import { createTestBottle, setupTestDb } from "@/test/helpers";
-import { buildEnrichPrompt, cleanProfile, enrichBottleProfiles } from "./enrich";
+import { createTestBottle, createTestUser, setupTestDb, uid } from "@/test/helpers";
+import {
+  buildEnrichPrompt,
+  cleanProfile,
+  enrichBottleProfiles,
+  enrichModel,
+  profileFromNotes,
+} from "./enrich";
 
 const fullProfile = (over: Record<string, number> = {}) => ({
   fruity: 3,
@@ -18,11 +24,30 @@ const fullProfile = (over: Record<string, number> = {}) => ({
   ...over,
 });
 
-const textResponse = (payload: unknown) => ({
+const textResponse = (payload: unknown, stopReason = "end_turn") => ({
   id: "msg_test",
-  content: [{ type: "text", text: JSON.stringify(payload) }],
-  stop_reason: "end_turn",
+  content: [{ type: "text", text: typeof payload === "string" ? payload : JSON.stringify(payload) }],
+  stop_reason: stopReason,
 });
+
+async function addNote(
+  db: DB,
+  userId: string,
+  bottleId: string,
+  flavorTags: Record<string, number> | null,
+  text: Partial<{ nose: string; palate: string; finish: string }> = {},
+): Promise<void> {
+  const pourId = uid("pour");
+  await db.insert(pours).values({ id: pourId, userId, bottleId, rating: 4 });
+  await db.insert(tastingNotes).values({
+    id: uid("note"),
+    pourId,
+    flavorTags,
+    nose: text.nose ?? null,
+    palate: text.palate ?? null,
+    finish: text.finish ?? null,
+  });
+}
 
 describe("cleanProfile", () => {
   it("accepts full profiles and clamps out-of-range scores", () => {
@@ -42,22 +67,72 @@ describe("cleanProfile", () => {
   });
 });
 
-describe("buildEnrichPrompt", () => {
-  it("includes every bottle and the wedge taxonomy", () => {
-    const prompt = buildEnrichPrompt([
-      {
-        id: "test-bourbon",
-        name: "Test Bourbon",
-        category: "bourbon",
-        distillery: "Test Distillery",
-        region: "Kentucky",
-        abv: 45,
-        ageYears: 8,
-      },
+describe("profileFromNotes", () => {
+  it("rolls tagged notes up to a full 8-wedge profile", () => {
+    const profile = profileFromNotes([
+      { flavorTags: { vanilla: 3, "green-apple": 1 }, nose: null, palate: null, finish: null },
+      { flavorTags: { vanilla: 2 }, nose: null, palate: null, finish: null },
     ]);
+    expect(profile).not.toBeNull();
+    expect(Object.keys(profile!).sort()).toEqual(
+      ["feinty", "floral", "fruity", "grain", "peaty", "spicy", "sweet", "woody"].sort(),
+    );
+    expect(profile!.sweet).toBeGreaterThan(0); // vanilla rolls into sweet
+    expect(profile!.peaty).toBe(0);
+  });
+
+  it("requires the community threshold of tagged notes", () => {
+    expect(
+      profileFromNotes([{ flavorTags: { vanilla: 3 }, nose: null, palate: null, finish: null }]),
+    ).toBeNull();
+    expect(
+      profileFromNotes([
+        { flavorTags: null, nose: "oak", palate: null, finish: null },
+        { flavorTags: {}, nose: null, palate: null, finish: null },
+      ]),
+    ).toBeNull();
+  });
+});
+
+describe("enrichModel", () => {
+  it("defaults cheap, upgrades for web search, and honors the env override", () => {
+    expect(enrichModel(false)).toBe("claude-haiku-4-5-20251001");
+    expect(enrichModel(true)).toBe("claude-sonnet-5");
+    process.env.WHAIKEY_ENRICH_MODEL = "claude-opus-4-8";
+    try {
+      expect(enrichModel(false)).toBe("claude-opus-4-8");
+      expect(enrichModel(true)).toBe("claude-opus-4-8");
+    } finally {
+      delete process.env.WHAIKEY_ENRICH_MODEL;
+    }
+  });
+});
+
+describe("buildEnrichPrompt", () => {
+  const bottle = {
+    id: "test-bourbon",
+    name: "Test Bourbon",
+    category: "bourbon",
+    distillery: "Test Distillery",
+    region: "Kentucky",
+    abv: 45,
+    ageYears: 8,
+    description: "A test bottling.",
+    userNotes: ["nose: caramel; palate: oak"],
+  };
+
+  it("includes bottle context, notes, and the wedge taxonomy", () => {
+    const prompt = buildEnrichPrompt([bottle], false);
     expect(prompt).toContain('"id":"test-bourbon"');
+    expect(prompt).toContain("caramel");
+    expect(prompt).toContain("A test bottling.");
     expect(prompt).toContain("peaty");
     expect(prompt).toContain("STRICT JSON");
+    expect(prompt).not.toContain("web search");
+  });
+
+  it("adds web-search guidance only when enabled", () => {
+    expect(buildEnrichPrompt([bottle], true)).toContain("web search");
   });
 });
 
@@ -68,23 +143,62 @@ describe("enrichBottleProfiles", () => {
     db = await setupTestDb();
   });
 
-  it("fills profiles for bottles lacking one and leaves others alone", async () => {
-    const bare = await createTestBottle(db, { id: "bare-bottle", flavorProfile: null });
-    const curated = await createTestBottle(db, {
-      id: "curated-bottle",
-      flavorProfile: { sweet: 9, woody: 1, fruity: 0, floral: 0, grain: 0, spicy: 0, peaty: 0, feinty: 0 },
-    });
+  it("derives profiles from user notes without calling the model", async () => {
+    const noted = await createTestBottle(db, { id: "noted-bottle", flavorProfile: null });
+    const user = await createTestUser(db);
+    await addNote(db, user.id, noted.id, { vanilla: 3, oak: 2 });
+    await addNote(db, user.id, noted.id, { vanilla: 2, "black-pepper": 1 });
 
-    const fake = makeFakeAnthropic([
-      textResponse([{ id: bare.id, profile: fullProfile() }]),
-    ]);
+    const fake = makeFakeAnthropic([]); // any model call would throw
     const report = await enrichBottleProfiles(db, { client: fake.client });
-    expect(report).toMatchObject({ candidates: 1, batches: 1, enriched: 1, rejected: 0 });
+    expect(report).toMatchObject({ candidates: 1, fromNotes: 1, fromAi: 0, batches: 0 });
+    expect(fake.create).not.toHaveBeenCalled();
+
+    const [updated] = await db.select().from(bottles).where(eq(bottles.id, noted.id));
+    expect(updated.flavorProfile).not.toBeNull();
+    expect(updated.flavorProfile!.sweet).toBeGreaterThan(0);
+  });
+
+  it("sends remaining bottles to the model with note snippets as context", async () => {
+    const bare = await createTestBottle(db, { id: "bare-bottle", flavorProfile: null });
+    const user = await createTestUser(db);
+    // One note only — below the community threshold, but usable as context.
+    await addNote(db, user.id, bare.id, { vanilla: 2 }, { nose: "campfire smoke", palate: "honey" });
+
+    const fake = makeFakeAnthropic([textResponse([{ id: bare.id, profile: fullProfile() }])]);
+    const report = await enrichBottleProfiles(db, { client: fake.client });
+    expect(report).toMatchObject({ candidates: 1, fromNotes: 0, fromAi: 1, batches: 1 });
+
+    const params = fake.create.mock.calls[0][0] as { model: string; messages: Array<{ content: string }> };
+    expect(params.model).toBe("claude-haiku-4-5-20251001");
+    expect(params.messages[0].content).toContain("campfire smoke");
 
     const [updated] = await db.select().from(bottles).where(eq(bottles.id, bare.id));
     expect(updated.flavorProfile).toEqual(fullProfile());
-    const [untouched] = await db.select().from(bottles).where(eq(bottles.id, curated.id));
-    expect(untouched.flavorProfile!.sweet).toBe(9);
+  });
+
+  it("passes the web search tool and model when web is enabled", async () => {
+    const bare = await createTestBottle(db, { id: "web-bottle", flavorProfile: null });
+    const fake = makeFakeAnthropic([textResponse([{ id: bare.id, profile: fullProfile() }])]);
+    await enrichBottleProfiles(db, { client: fake.client, web: true });
+
+    const params = fake.create.mock.calls[0][0] as {
+      model: string;
+      tools?: Array<{ type: string }>;
+    };
+    expect(params.model).toBe("claude-sonnet-5");
+    expect(params.tools?.[0].type).toBe("web_search_20260209");
+  });
+
+  it("resumes pause_turn continuations and parses the joined output", async () => {
+    const bare = await createTestBottle(db, { id: "paused-bottle", flavorProfile: null });
+    const fake = makeFakeAnthropic([
+      textResponse("Searching for tasting notes…", "pause_turn"),
+      textResponse([{ id: bare.id, profile: fullProfile() }]),
+    ]);
+    const report = await enrichBottleProfiles(db, { client: fake.client, web: true });
+    expect(report).toMatchObject({ fromAi: 1 });
+    expect(fake.create).toHaveBeenCalledTimes(2);
   });
 
   it("batches by batchSize and reports per-bottle rejections", async () => {
@@ -102,7 +216,7 @@ describe("enrichBottleProfiles", () => {
       textResponse([{ id: c.id, profile: { sweet: 5 } }]),
     ]);
     const report = await enrichBottleProfiles(db, { client: fake.client, batchSize: 2 });
-    expect(report).toMatchObject({ candidates: 3, batches: 2, enriched: 1, rejected: 2 });
+    expect(report).toMatchObject({ candidates: 3, batches: 2, fromAi: 1, rejected: 2 });
     expect(fake.create).toHaveBeenCalledTimes(2);
 
     const remaining = await db.select({ id: bottles.id }).from(bottles).where(isNull(bottles.flavorProfile));
@@ -115,7 +229,7 @@ describe("enrichBottleProfiles", () => {
 
     const fake = makeFakeAnthropic([textResponse([{ id: "aa-limit", profile: fullProfile() }])]);
     const report = await enrichBottleProfiles(db, { client: fake.client, limit: 1, dryRun: true });
-    expect(report).toMatchObject({ candidates: 1, enriched: 1, dryRun: true });
+    expect(report).toMatchObject({ candidates: 1, fromAi: 1, dryRun: true });
 
     const remaining = await db.select({ id: bottles.id }).from(bottles).where(isNull(bottles.flavorProfile));
     expect(remaining).toHaveLength(2);
@@ -123,10 +237,8 @@ describe("enrichBottleProfiles", () => {
 
   it("survives non-JSON model output, counting the batch as rejected", async () => {
     await createTestBottle(db, { id: "aa-garbage", flavorProfile: null });
-    const fake = makeFakeAnthropic([
-      { id: "msg", content: [{ type: "text", text: "I cannot help with that." }], stop_reason: "end_turn" },
-    ]);
+    const fake = makeFakeAnthropic([textResponse("I cannot help with that.")]);
     const report = await enrichBottleProfiles(db, { client: fake.client });
-    expect(report).toMatchObject({ enriched: 0, rejected: 1 });
+    expect(report).toMatchObject({ fromAi: 0, rejected: 1 });
   });
 });

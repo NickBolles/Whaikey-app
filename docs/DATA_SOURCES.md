@@ -40,8 +40,8 @@ Every US Certificate of Label Approval since 1999: brand name, fanciful name, cl
 ### 2.3 Wikidata / DBpedia — distillery reference layer
 Distilleries with country, region, owner, founding date, coordinates, photos. **CC0 (no attribution needed)** via SPARQL. Good for notable distilleries worldwide; weak on craft/new ones and bottle-level data. Use for distillery pages (map, history), not the catalog.
 
-### 2.4 Flavor profiles for the bulk catalog — AI enrichment
-Bulk-ingested bottles (Iowa/COLA) arrive without flavor profiles, so recommendations skip them. **Implemented:** `pnpm ingest enrich` (src/lib/ingest/enrich.ts) batch-fills 8-wedge profiles via the standard Anthropic seam — typical-for-style estimates when the model doesn't know the exact bottle, which is the same estimate quality the curated seed carries. Requires `ANTHROPIC_API_KEY`; user tasting notes remain the long-term source of truth. Profiles only — no AI-generated descriptions or facts (product guardrails).
+### 2.4 Flavor profiles for the bulk catalog — tiered enrichment
+Bulk-ingested bottles (Iowa/COLA) arrive without flavor profiles, so recommendations skip them. **Implemented:** `pnpm ingest enrich` (src/lib/ingest/enrich.ts) fills 8-wedge profiles in tiers: (1) bottles with ≥2 tagged user tasting notes roll up directly from the notes — free, and community truth always wins; (2) the rest go to a cheap model in batches with catalog description + user-note snippets as context (default Haiku, `WHAIKEY_ENRICH_MODEL` to override); (3) `--web` adds the server-side web search tool (default Sonnet) so the model can look up published tasting notes for bottles it doesn't recognize. Requires `ANTHROPIC_API_KEY`. Profiles only — no AI-generated descriptions or facts (product guardrails). The `catalog sync` GitHub workflow (.github/workflows/catalog-sync.yml) runs iowa → cola → enrich against the production DB weekly and on demand.
 
 ### 2.5 Open flavor datasets — recommendation bootstrapping
 - **Classic 86-distillery Scotch dataset**: 86 single malts scored 0–4 on 12 flavor dimensions — small but perfect for bootstrapping flavor-similarity before we have user data.

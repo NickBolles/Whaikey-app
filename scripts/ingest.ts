@@ -4,7 +4,7 @@
  *
  *   pnpm ingest iowa [--dry-run]
  *   pnpm ingest cola --since 2026-01-01 [--until 2026-07-01] [--dry-run]
- *   pnpm ingest enrich [--limit N] [--batch-size N] [--dry-run]
+ *   pnpm ingest enrich [--limit N] [--batch-size N] [--web] [--dry-run]
  *   pnpm ingest prune            # delete imported bottles untouched by users
  *
  * Sources:
@@ -13,9 +13,12 @@
  *            whiskey SKUs; safe to re-run monthly (the feed updates monthly).
  *   cola   — TTB public COLA registry: newly label-approved whiskies (name +
  *            category only). Date-ranged; run e.g. weekly with a short window.
- *   enrich — AI pass filling flavor-wheel profiles for bottles without one
- *            (imported/user-submitted), making them recommendable. Requires
- *            ANTHROPIC_API_KEY; batches ~25 bottles per request.
+ *   enrich — fills flavor-wheel profiles for bottles without one
+ *            (imported/user-submitted), making them recommendable. Bottles
+ *            with enough user tasting notes are rolled up directly (no AI);
+ *            the rest go to a cheap model with description + user-note
+ *            context (requires ANTHROPIC_API_KEY). --web lets the model
+ *            search the web for bottles it doesn't recognize.
  */
 import { createDb, resolveDbUrl } from "../src/db";
 import { migrateDb } from "../src/db/migrate";
@@ -47,17 +50,20 @@ async function main(): Promise<void> {
   if (source === "enrich") {
     const limit = arg("limit") ? Number(arg("limit")) : undefined;
     const batchSize = arg("batch-size") ? Number(arg("batch-size")) : undefined;
+    const web = hasFlag("web");
     try {
-      console.log(`Enriching flavor profiles with ${enrichModel()}…`);
+      console.log(`Enriching flavor profiles with ${enrichModel(web)}${web ? " + web search" : ""}…`);
       const report = await enrichBottleProfiles(db, {
         limit,
         batchSize,
+        web,
         dryRun,
         onBatch: (batch, enriched) => console.log(`  batch ${batch}: ${enriched} enriched so far`),
       });
       console.log(
         `[enrich]${report.dryRun ? " (dry run)" : ""} ${report.candidates} bottles without profiles → ` +
-          `${report.enriched} enriched, ${report.rejected} rejected across ${report.batches} batches.`,
+          `${report.fromNotes} from user notes, ${report.fromAi} from the model, ` +
+          `${report.rejected} rejected across ${report.batches} batches.`,
       );
     } catch (err) {
       if (err instanceof AiNotConfiguredError) {
