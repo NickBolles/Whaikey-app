@@ -100,6 +100,7 @@ Implementation: LLM with **tool calling** into the app's own APIs (query invento
 - Community ratings & note aggregation per bottle (the Vivino moat).
 - Clubs/groups for whiskey societies; shared virtual flights.
 - Local availability & price reports crowdsourced from users.
+- **Blind taste test / flight setup** — host picks bottles from their bar (or a shared pool) and creates a "flight" for an in-person tasting; app assigns each bottle a blind letter/number so labels are hidden from participants. Each guest logs ratings + flavor-wheel notes per blind slot from their own phone; host (or a scheduled reveal trigger) unmasks the bottle identities at the end so the group can compare notes, see who guessed closest, and see aggregate scores per bottle. Useful for tasting clubs, gifting reveals, and "guess the mystery pour" nights. Depends on the existing pour-logging + flavor-wheel + multi-user session primitives; no new pricing/valuation claims involved (ratings only, not $ estimates) so it stays within the responsible-drinking and no-false-precision guardrails.
 
 ### 2.9 Extras / Delighters (backlog)
 
