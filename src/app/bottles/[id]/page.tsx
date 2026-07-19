@@ -5,6 +5,8 @@ import { getDb } from "@/db";
 import type { Pairing } from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
 import { getBottleDetail } from "@/lib/search";
+import { getUserPalate } from "@/lib/palate-store";
+import { tasteMatchPercent } from "@/lib/palate";
 import { CategoryChip } from "@/components/category-chip";
 import { FlavorRadar } from "@/components/flavor-radar";
 import { ShelfActions } from "./shelf-actions";
@@ -66,6 +68,15 @@ export default async function BottleDetailPage({
 
   const { bottle, distillery, communityStats, userBottle, pairings } = detail;
 
+  // Personal taste-match: cosine similarity of the signed palate vs this
+  // bottle's flavor profile. Null (hidden) for signed-out users, users with no
+  // palate signal yet, or bottles without a flavor profile.
+  let match: number | null = null;
+  if (user) {
+    const palate = await getUserPalate(getDb(), user.id);
+    match = tasteMatchPercent(palate.vector, bottle.flavorProfile, palate.sampleSize);
+  }
+
   const metaParts = [
     bottle.region ?? distillery?.region ?? null,
     bottle.ageYears != null ? `${bottle.ageYears} years` : null,
@@ -126,7 +137,14 @@ export default async function BottleDetailPage({
 
       {/* Flavor profile */}
       <section aria-label="Flavor profile">
-        <h2 className="section-label mb-3">Flavor profile</h2>
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <h2 className="section-label">Flavor profile</h2>
+          {match != null && (
+            <span className="chip chip-active px-3 py-1 text-xs font-medium">
+              {match}% match for you
+            </span>
+          )}
+        </div>
         <div className="card flex justify-center p-4">
           <FlavorRadar profile={bottle.flavorProfile} />
         </div>
