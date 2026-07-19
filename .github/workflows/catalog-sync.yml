@@ -5,7 +5,7 @@
 #   - cola:   TTB label approvals for the last 8 days (registry 503s during
 #             its maintenance windows, so failures here don't fail the run)
 #   - enrich: fill flavor profiles for new bottles (community notes first,
-#             then the model; needs ANTHROPIC_API_KEY)
+#             then Sonnet 5 with web search grounding; needs ANTHROPIC_API_KEY)
 #
 # Requires repo secrets: DATABASE_URL (Postgres/Supabase pooler URL) and, for
 # the enrich step, ANTHROPIC_API_KEY. Without DATABASE_URL the run stops early

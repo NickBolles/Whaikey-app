@@ -14,11 +14,12 @@ import { FLAVOR_WHEEL, WEDGE_IDS, rollUpToWedges } from "@/lib/flavor-wheel";
  *     notes get their profile rolled up directly from the notes' leaf tags —
  *     no model call at all. User palates are the ground truth this app is
  *     built on, so they always win.
- *  2. AI estimate (cheap model): remaining bottles go to the model in
- *     batches, with whatever context we hold — catalog description and user
- *     note snippets — included per bottle.
- *  3. Optional web assist (--web): adds the server-side web search tool so
- *     the model can look up bottles it doesn't recognize before estimating.
+ *  2. Web-grounded AI estimate (default): remaining bottles go to the model
+ *     in batches with whatever context we hold — catalog description and
+ *     user note snippets — and the server-side web search tool, which the
+ *     model is instructed to use to discover published tasting notes for
+ *     bottles it doesn't already know. --no-web disables the search tool for
+ *     a cheaper, offline-knowledge run.
  *
  * All model traffic goes through the standard Anthropic seam
  * (src/lib/ai/client.ts): no key ⇒ AiNotConfiguredError with a clear CLI
@@ -28,12 +29,12 @@ import { FLAVOR_WHEEL, WEDGE_IDS, rollUpToWedges } from "@/lib/flavor-wheel";
  */
 
 /**
- * Model for batch enrichment; override with WHAIKEY_ENRICH_MODEL. Defaults
- * cheap: profile estimation is a bulk classification-style task. Web-assisted
- * runs need a web_search_20260209-capable model, so --web defaults to Sonnet.
+ * Model for batch enrichment; override with WHAIKEY_ENRICH_MODEL. Sonnet 5:
+ * strong at synthesizing published tasting notes into wedge scores, supports
+ * the current web search tool, and stays far cheaper than Opus.
  */
-export function enrichModel(web = false): string {
-  return process.env.WHAIKEY_ENRICH_MODEL ?? (web ? "claude-sonnet-5" : "claude-haiku-4-5-20251001");
+export function enrichModel(): string {
+  return process.env.WHAIKEY_ENRICH_MODEL ?? "claude-sonnet-5";
 }
 
 /** User notes needed before we trust the community roll-up over the model. */
@@ -76,12 +77,12 @@ export function buildEnrichPrompt(batch: EnrichableBottle[], web: boolean): stri
     "",
     "Ground each profile in the strongest evidence available, in this order:",
     "1. The bottle's userNotes (real tasting notes from this app's users — weigh these heavily).",
-    "2. The bottle's description and what you know about the specific bottling.",
     ...(web
       ? [
-          "3. For bottles you don't recognize, use web search to find published tasting notes (search at most once per unknown bottle; skip searching for bottles you already know).",
+          '2. Web search: for each bottle without userNotes that you don\'t already know confidently, search the web to discover published tasting notes (e.g. "<bottle name> tasting notes review") and synthesize the flavors reviewers actually report. At most one search per bottle.',
         ]
       : []),
+    `${web ? "3" : "2"}. The bottle's description and what you know about the specific bottling.`,
     `${web ? "4" : "3"}. Otherwise estimate from category, distillery house style, region, age, proof, and name cues (e.g. 'Port Cask', 'Peated', 'Bottled-in-Bond') — a typical-for-style estimate is expected and useful.`,
     "",
     "Return STRICT JSON only — no prose, no markdown fences — an array with one entry per input bottle:",
@@ -166,9 +167,9 @@ export interface EnrichReport {
 export interface EnrichOptions {
   /** Max bottles to enrich this run (default: all without a profile). */
   limit?: number;
-  /** Bottles per model request (default 25; 10 when web search is enabled). */
+  /** Bottles per model request (default 10 with web search, 25 without). */
   batchSize?: number;
-  /** Let the model web-search bottles it doesn't recognize (needs a capable model). */
+  /** Web-search grounding (default ON; pass false for a cheaper, offline-knowledge run). */
   web?: boolean;
   dryRun?: boolean;
   /** Test seam; defaults to the shared getAnthropic() singleton. */
@@ -179,7 +180,7 @@ export interface EnrichOptions {
 
 /** Fill flavorProfile for bottles that lack one: notes first, then the model. */
 export async function enrichBottleProfiles(db: DB, opts: EnrichOptions = {}): Promise<EnrichReport> {
-  const web = opts.web ?? false;
+  const web = opts.web ?? true;
   const batchSize = Math.max(1, opts.batchSize ?? (web ? 10 : 25));
 
   let targets = await db
@@ -259,7 +260,7 @@ export async function enrichBottleProfiles(db: DB, opts: EnrichOptions = {}): Pr
 
   if (aiTargets.length === 0) return report;
   const anthropic = opts.client ?? getAnthropic();
-  const model = enrichModel(web);
+  const model = enrichModel();
 
   for (let i = 0; i < aiTargets.length; i += batchSize) {
     const batch = aiTargets.slice(i, i + batchSize);

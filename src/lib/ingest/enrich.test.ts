@@ -95,13 +95,11 @@ describe("profileFromNotes", () => {
 });
 
 describe("enrichModel", () => {
-  it("defaults cheap, upgrades for web search, and honors the env override", () => {
-    expect(enrichModel(false)).toBe("claude-haiku-4-5-20251001");
-    expect(enrichModel(true)).toBe("claude-sonnet-5");
+  it("defaults to Sonnet and honors the env override", () => {
+    expect(enrichModel()).toBe("claude-sonnet-5");
     process.env.WHAIKEY_ENRICH_MODEL = "claude-opus-4-8";
     try {
-      expect(enrichModel(false)).toBe("claude-opus-4-8");
-      expect(enrichModel(true)).toBe("claude-opus-4-8");
+      expect(enrichModel()).toBe("claude-opus-4-8");
     } finally {
       delete process.env.WHAIKEY_ENRICH_MODEL;
     }
@@ -128,11 +126,13 @@ describe("buildEnrichPrompt", () => {
     expect(prompt).toContain("A test bottling.");
     expect(prompt).toContain("peaty");
     expect(prompt).toContain("STRICT JSON");
-    expect(prompt).not.toContain("web search");
+    expect(prompt).not.toContain("search the web");
   });
 
-  it("adds web-search guidance only when enabled", () => {
-    expect(buildEnrichPrompt([bottle], true)).toContain("web search");
+  it("explicitly instructs discovering tasting notes via web search when enabled", () => {
+    const prompt = buildEnrichPrompt([bottle], true);
+    expect(prompt).toContain("search the web to discover published tasting notes");
+    expect(prompt).toContain("tasting notes review");
   });
 });
 
@@ -170,24 +170,28 @@ describe("enrichBottleProfiles", () => {
     expect(report).toMatchObject({ candidates: 1, fromNotes: 0, fromAi: 1, batches: 1 });
 
     const params = fake.create.mock.calls[0][0] as { model: string; messages: Array<{ content: string }> };
-    expect(params.model).toBe("claude-haiku-4-5-20251001");
+    expect(params.model).toBe("claude-sonnet-5");
     expect(params.messages[0].content).toContain("campfire smoke");
 
     const [updated] = await db.select().from(bottles).where(eq(bottles.id, bare.id));
     expect(updated.flavorProfile).toEqual(fullProfile());
   });
 
-  it("passes the web search tool and model when web is enabled", async () => {
+  it("passes the web search tool by default and omits it with web: false", async () => {
     const bare = await createTestBottle(db, { id: "web-bottle", flavorProfile: null });
-    const fake = makeFakeAnthropic([textResponse([{ id: bare.id, profile: fullProfile() }])]);
-    await enrichBottleProfiles(db, { client: fake.client, web: true });
+    const fake = makeFakeAnthropic([
+      textResponse([{ id: bare.id, profile: fullProfile() }]),
+      textResponse([{ id: bare.id, profile: fullProfile() }]),
+    ]);
+    await enrichBottleProfiles(db, { client: fake.client });
+    const withWeb = fake.create.mock.calls[0][0] as { tools?: Array<{ type: string }> };
+    expect(withWeb.tools?.[0].type).toBe("web_search_20260209");
 
-    const params = fake.create.mock.calls[0][0] as {
-      model: string;
-      tools?: Array<{ type: string }>;
-    };
-    expect(params.model).toBe("claude-sonnet-5");
-    expect(params.tools?.[0].type).toBe("web_search_20260209");
+    // Re-null the profile and run again without web.
+    await db.update(bottles).set({ flavorProfile: null }).where(eq(bottles.id, bare.id));
+    await enrichBottleProfiles(db, { client: fake.client, web: false });
+    const withoutWeb = fake.create.mock.calls[1][0] as { tools?: Array<{ type: string }> };
+    expect(withoutWeb.tools).toBeUndefined();
   });
 
   it("resumes pause_turn continuations and parses the joined output", async () => {

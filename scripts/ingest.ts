@@ -4,7 +4,7 @@
  *
  *   pnpm ingest iowa [--dry-run]
  *   pnpm ingest cola --since 2026-01-01 [--until 2026-07-01] [--dry-run]
- *   pnpm ingest enrich [--limit N] [--batch-size N] [--web] [--dry-run]
+ *   pnpm ingest enrich [--limit N] [--batch-size N] [--no-web] [--dry-run]
  *   pnpm ingest prune            # delete imported bottles untouched by users
  *
  * Sources:
@@ -16,9 +16,9 @@
  *   enrich — fills flavor-wheel profiles for bottles without one
  *            (imported/user-submitted), making them recommendable. Bottles
  *            with enough user tasting notes are rolled up directly (no AI);
- *            the rest go to a cheap model with description + user-note
- *            context (requires ANTHROPIC_API_KEY). --web lets the model
- *            search the web for bottles it doesn't recognize.
+ *            the rest go to the model with description + user-note context
+ *            and web search to discover published tasting notes (requires
+ *            ANTHROPIC_API_KEY). --no-web disables search for a cheaper run.
  */
 import { createDb, resolveDbUrl } from "../src/db";
 import { migrateDb } from "../src/db/migrate";
@@ -50,9 +50,9 @@ async function main(): Promise<void> {
   if (source === "enrich") {
     const limit = arg("limit") ? Number(arg("limit")) : undefined;
     const batchSize = arg("batch-size") ? Number(arg("batch-size")) : undefined;
-    const web = hasFlag("web");
+    const web = !hasFlag("no-web");
     try {
-      console.log(`Enriching flavor profiles with ${enrichModel(web)}${web ? " + web search" : ""}…`);
+      console.log(`Enriching flavor profiles with ${enrichModel()}${web ? " + web search" : ""}…`);
       const report = await enrichBottleProfiles(db, {
         limit,
         batchSize,
@@ -109,7 +109,7 @@ async function main(): Promise<void> {
   }
 
   console.error(
-    "Usage: pnpm ingest <iowa|cola|enrich|prune> [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--limit N] [--batch-size N] [--dry-run]",
+    "Usage: pnpm ingest <iowa|cola|enrich|prune> [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--limit N] [--batch-size N] [--no-web] [--dry-run]",
   );
   process.exit(1);
 }
