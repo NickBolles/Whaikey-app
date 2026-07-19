@@ -4,25 +4,32 @@
  *
  *   pnpm ingest iowa [--dry-run]
  *   pnpm ingest cola --since 2026-01-01 [--until 2026-07-01] [--dry-run]
+ *   pnpm ingest enrich [--limit N] [--batch-size N] [--dry-run]
  *   pnpm ingest prune            # delete imported bottles untouched by users
  *
  * Sources:
- *   iowa  — Iowa Liquor Products open dataset (CC-BY 4.0): names, categories,
- *           ABV, 750ml state retail price, UPCs. Full-catalog sync, ~4k
- *           whiskey SKUs; safe to re-run monthly (the feed updates monthly).
- *   cola  — TTB public COLA registry: newly label-approved whiskies (name +
- *           category only). Date-ranged; run e.g. weekly with a short window.
+ *   iowa   — Iowa Liquor Products open dataset (CC-BY 4.0): names, categories,
+ *            ABV, 750ml state retail price, UPCs. Full-catalog sync, ~4k
+ *            whiskey SKUs; safe to re-run monthly (the feed updates monthly).
+ *   cola   — TTB public COLA registry: newly label-approved whiskies (name +
+ *            category only). Date-ranged; run e.g. weekly with a short window.
+ *   enrich — AI pass filling flavor-wheel profiles for bottles without one
+ *            (imported/user-submitted), making them recommendable. Requires
+ *            ANTHROPIC_API_KEY; batches ~25 bottles per request.
  */
 import { createDb, resolveDbUrl } from "../src/db";
 import { migrateDb } from "../src/db/migrate";
 import {
   countBottles,
+  enrichBottleProfiles,
+  enrichModel,
   fetchColaRecords,
   colaRecordsToCandidates,
   fetchIowaCandidates,
   ingestCandidates,
   pruneImportedBottles,
 } from "../src/lib/ingest";
+import { AiNotConfiguredError } from "../src/lib/ai/client";
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
@@ -36,6 +43,33 @@ async function main(): Promise<void> {
   const url = resolveDbUrl();
   const db = createDb(url);
   await migrateDb(db, url);
+
+  if (source === "enrich") {
+    const limit = arg("limit") ? Number(arg("limit")) : undefined;
+    const batchSize = arg("batch-size") ? Number(arg("batch-size")) : undefined;
+    try {
+      console.log(`Enriching flavor profiles with ${enrichModel()}…`);
+      const report = await enrichBottleProfiles(db, {
+        limit,
+        batchSize,
+        dryRun,
+        onBatch: (batch, enriched) => console.log(`  batch ${batch}: ${enriched} enriched so far`),
+      });
+      console.log(
+        `[enrich]${report.dryRun ? " (dry run)" : ""} ${report.candidates} bottles without profiles → ` +
+          `${report.enriched} enriched, ${report.rejected} rejected across ${report.batches} batches.`,
+      );
+    } catch (err) {
+      if (err instanceof AiNotConfiguredError) {
+        console.error(
+          "ANTHROPIC_API_KEY is not set. Set it (see .env.example) and re-run: pnpm ingest enrich",
+        );
+        process.exit(1);
+      }
+      throw err;
+    }
+    return;
+  }
 
   if (source === "prune") {
     const removed = await pruneImportedBottles(db);
@@ -68,7 +102,9 @@ async function main(): Promise<void> {
     return;
   }
 
-  console.error("Usage: pnpm ingest <iowa|cola|prune> [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--dry-run]");
+  console.error(
+    "Usage: pnpm ingest <iowa|cola|enrich|prune> [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--limit N] [--batch-size N] [--dry-run]",
+  );
   process.exit(1);
 }
 

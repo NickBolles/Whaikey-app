@@ -7,6 +7,7 @@ import type { CatalogCandidate, IngestReport } from "./types";
 export type { CatalogCandidate, IngestReport } from "./types";
 export { fetchIowaCandidates } from "./iowa";
 export { colaRecordsToCandidates, fetchColaRecords } from "./cola";
+export { enrichBottleProfiles, enrichModel, type EnrichReport } from "./enrich";
 
 /**
  * Merge source candidates into the catalog (docs/DATA_SOURCES.md §2, §6).

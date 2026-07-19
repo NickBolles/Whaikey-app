@@ -40,11 +40,14 @@ Every US Certificate of Label Approval since 1999: brand name, fanciful name, cl
 ### 2.3 Wikidata / DBpedia — distillery reference layer
 Distilleries with country, region, owner, founding date, coordinates, photos. **CC0 (no attribution needed)** via SPARQL. Good for notable distilleries worldwide; weak on craft/new ones and bottle-level data. Use for distillery pages (map, history), not the catalog.
 
-### 2.4 Open flavor datasets — recommendation bootstrapping
+### 2.4 Flavor profiles for the bulk catalog — AI enrichment
+Bulk-ingested bottles (Iowa/COLA) arrive without flavor profiles, so recommendations skip them. **Implemented:** `pnpm ingest enrich` (src/lib/ingest/enrich.ts) batch-fills 8-wedge profiles via the standard Anthropic seam — typical-for-style estimates when the model doesn't know the exact bottle, which is the same estimate quality the curated seed carries. Requires `ANTHROPIC_API_KEY`; user tasting notes remain the long-term source of truth. Profiles only — no AI-generated descriptions or facts (product guardrails).
+
+### 2.5 Open flavor datasets — recommendation bootstrapping
 - **Classic 86-distillery Scotch dataset**: 86 single malts scored 0–4 on 12 flavor dimensions — small but perfect for bootstrapping flavor-similarity before we have user data.
 - WhiskeyProject/whiskey-api (~370 whiskeys, ~70 flavor tags), 2.2k scraped Whisky Advocate reviews (⚠️ copyright risk if surfaced verbatim — use for internal priors only, if at all).
 
-### 2.5 What we can NOT build on
+### 2.6 What we can NOT build on
 - **Whiskybase** — no official API; undocumented private API serves their own app; scraping is legally risky and would poison the well for a future partnership. The right move long-term is a **licensing conversation**, not a scraper.
 - **Vivino/Distiller data** — closed.
 - **Systembolaget & LCBO** — cautionary tales: both retailers *revoked* previously open product APIs (Systembolaget explicitly to prevent commercial alcohol promotion). Never build a core feature on a single third-party feed.
