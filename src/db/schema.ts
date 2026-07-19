@@ -24,12 +24,25 @@ const updatedAt = () =>
 // Better Auth tables (standard shape expected by the drizzle adapter)
 // ---------------------------------------------------------------------------
 
+/**
+ * palateProfile: incrementally-accumulated flavor-preference snapshot
+ * (src/lib/palate.ts). `vector` maps the 8 flavor-wheel wedge ids to a signed
+ * preference weight; `sampleSize` is the number of rated pours folded in. Read
+ * paths recompute from pours for freshness — this column is the running cache.
+ */
+export interface PalateProfile {
+  vector: Record<string, number>;
+  sampleSize: number;
+  updatedAt: string;
+}
+
 export const user = pgTable("user", {
   id: id(),
   name: text("name").notNull(),
   email: text("email").notNull().unique(),
   emailVerified: boolean("email_verified").notNull().default(false),
   image: text("image"),
+  palateProfile: jsonb("palate_profile").$type<PalateProfile>(),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
@@ -266,6 +279,35 @@ export const chatMessages = pgTable(
   (t) => [index("chat_messages_session_idx").on(t.sessionId)],
 );
 
+export const REC_MODES = ["discovery", "tonight"] as const;
+export type RecMode = (typeof REC_MODES)[number];
+
+/**
+ * Cached one-line recommendation explanations, keyed by (user, bottle, mode).
+ * Populated by the AI gateway when a key is configured; recommendations fall
+ * back to a deterministic reason when the cache is empty, so the rail always
+ * renders. Grounded in the user's own pours at generation time.
+ */
+export const recExplanations = pgTable(
+  "rec_explanations",
+  {
+    id: id(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    bottleId: text("bottle_id")
+      .notNull()
+      .references(() => bottles.id, { onDelete: "cascade" }),
+    mode: text("mode").$type<RecMode>().notNull(),
+    reason: text("reason").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("rec_explanations_user_bottle_mode_uq").on(t.userId, t.bottleId, t.mode),
+    index("rec_explanations_user_idx").on(t.userId),
+  ],
+);
+
 export const priceHistory = pgTable(
   "price_history",
   {
@@ -290,3 +332,4 @@ export type TastingNote = typeof tastingNotes.$inferSelect;
 export type Pairing = typeof pairings.$inferSelect;
 export type ChatSession = typeof chatSessions.$inferSelect;
 export type ChatMessage = typeof chatMessages.$inferSelect;
+export type RecExplanation = typeof recExplanations.$inferSelect;

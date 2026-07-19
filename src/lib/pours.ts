@@ -4,6 +4,7 @@ import type { DB } from "@/db";
 import * as schema from "@/db/schema";
 import { SERVING_STYLES, type Pour, type TastingNote } from "@/db/schema";
 import { isValidLeaf } from "@/lib/flavor-wheel";
+import { refreshUserPalate } from "@/lib/palate-store";
 
 /** Standard pour when the user doesn't specify an amount. */
 export const DEFAULT_POUR_ML = 45;
@@ -150,6 +151,9 @@ export async function logPour(db: DB, userId: string, input: PourInput): Promise
     note = inserted;
   }
 
+  // Fold this pour into the user's accumulated palate snapshot.
+  await refreshUserPalate(db, userId);
+
   return { pour, note };
 }
 
@@ -214,5 +218,9 @@ export async function deletePour(db: DB, userId: string, pourId: string): Promis
     .delete(schema.pours)
     .where(and(eq(schema.pours.id, pourId), eq(schema.pours.userId, userId)))
     .returning({ id: schema.pours.id });
+  if (deleted.length > 0) {
+    // Removing a pour changes the palate; keep the snapshot in sync.
+    await refreshUserPalate(db, userId);
+  }
   return deleted.length > 0;
 }
