@@ -2,6 +2,7 @@ import { and, desc, eq, gte, isNotNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
+import { WEDGE_IDS, wedgeForLeaf } from "@/lib/flavor-wheel";
 import {
   BOTTLE_STATUSES,
   RELATIONSHIPS,
@@ -252,6 +253,81 @@ export async function getBarStats(db: DB, userId: string): Promise<BarStats> {
     costPerPour,
     killList,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Bar flavor heat (the "bar palate" heat map)
+// ---------------------------------------------------------------------------
+
+export interface BarFlavorHeat {
+  /** Wedge id -> 0-1, relative to the hottest wedge. */
+  wedges: Record<string, number>;
+  /** Leaf id -> 0-1, relative to the hottest leaf. */
+  leaves: Record<string, number>;
+  /** Wedge ids with heat > 0, hottest first. */
+  topWedgeIds: string[];
+  hasHeat: boolean;
+}
+
+/**
+ * Aggregate where a user's bar leans on the flavor wheel. Wedge heat sums the
+ * flavor profiles (0-10 per wedge) of owned bottles; the user's tasting-note
+ * flavor tags (1-3 per leaf) add leaf heat and warm their parent wedge, so
+ * pours on tried bottles count too. Both maps are normalized to their own
+ * max — heat is relative ("where does MY bar lean"), never an absolute score.
+ */
+export async function getBarFlavorHeat(db: DB, userId: string): Promise<BarFlavorHeat> {
+  const validWedges = new Set<string>(WEDGE_IDS);
+  const wedgeTotals: Record<string, number> = {};
+  const leafTotals: Record<string, number> = {};
+
+  const owned = await db
+    .select({ flavorProfile: schema.bottles.flavorProfile })
+    .from(schema.userBottles)
+    .innerJoin(schema.bottles, eq(schema.userBottles.bottleId, schema.bottles.id))
+    .where(and(eq(schema.userBottles.userId, userId), eq(schema.userBottles.relationship, "own")));
+
+  for (const row of owned) {
+    if (!row.flavorProfile) continue;
+    for (const [wedgeId, score] of Object.entries(row.flavorProfile)) {
+      if (!validWedges.has(wedgeId) || typeof score !== "number") continue;
+      wedgeTotals[wedgeId] = (wedgeTotals[wedgeId] ?? 0) + Math.max(0, score);
+    }
+  }
+
+  const notes = await db
+    .select({ flavorTags: schema.tastingNotes.flavorTags })
+    .from(schema.tastingNotes)
+    .innerJoin(schema.pours, eq(schema.tastingNotes.pourId, schema.pours.id))
+    .where(eq(schema.pours.userId, userId));
+
+  for (const note of notes) {
+    if (!note.flavorTags) continue;
+    for (const [leafId, intensity] of Object.entries(note.flavorTags)) {
+      const wedgeId = wedgeForLeaf(leafId);
+      if (!wedgeId || typeof intensity !== "number") continue;
+      leafTotals[leafId] = (leafTotals[leafId] ?? 0) + intensity;
+      wedgeTotals[wedgeId] = (wedgeTotals[wedgeId] ?? 0) + intensity;
+    }
+  }
+
+  const normalize = (totals: Record<string, number>): Record<string, number> => {
+    const max = Math.max(0, ...Object.values(totals));
+    if (max === 0) return {};
+    const out: Record<string, number> = {};
+    for (const [id, total] of Object.entries(totals)) {
+      if (total > 0) out[id] = Math.round((total / max) * 100) / 100;
+    }
+    return out;
+  };
+
+  const wedges = normalize(wedgeTotals);
+  const leaves = normalize(leafTotals);
+  const topWedgeIds = Object.entries(wedges)
+    .sort((a, b) => b[1] - a[1])
+    .map(([id]) => id);
+
+  return { wedges, leaves, topWedgeIds, hasHeat: topWedgeIds.length > 0 };
 }
 
 // ---------------------------------------------------------------------------

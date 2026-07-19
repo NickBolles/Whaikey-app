@@ -6,6 +6,7 @@ import {
   SERIF,
   arcPath,
   labelTransform,
+  leafShade,
   polar,
   pressableKeys,
   shortLabel,
@@ -51,11 +52,17 @@ export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
   const chips = useMemo(() => {
     const out: Array<{ leafId: string; label: string; intensity: number; color: string }> = [];
     for (const wedge of FLAVOR_WHEEL) {
-      for (const leaf of wedge.leaves) {
+      const family = warmify(wedge.color);
+      wedge.leaves.forEach((leaf, i) => {
         const intensity = value[leaf.id] ?? 0;
         if (intensity > 0)
-          out.push({ leafId: leaf.id, label: leaf.label, intensity, color: warmify(wedge.color) });
-      }
+          out.push({
+            leafId: leaf.id,
+            label: leaf.label,
+            intensity,
+            color: leafShade(family, i, wedge.leaves.length),
+          });
+      });
     }
     return out;
   }, [value]);
@@ -160,7 +167,8 @@ export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
             const intensity = value[leaf.id] ?? 0;
             const rOut = R_LEAF_OUT + intensity * 4;
             const badge = polar(C, rOut - 9, mid);
-            const color = warmify(selectedWedge.color);
+            // Graded family shade so each subsection is its own color band.
+            const color = leafShade(warmify(selectedWedge.color), i, selectedWedge.leaves.length);
             return (
               <g
                 key={leaf.id}

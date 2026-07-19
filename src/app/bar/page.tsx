@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { getDb } from "@/db";
 import { getSessionUser } from "@/lib/session";
-import { listUserBottles } from "@/lib/bar";
+import { getBarFlavorHeat, listUserBottles } from "@/lib/bar";
 import { BarClient } from "./bar-client";
 
 export const dynamic = "force-dynamic";
@@ -25,6 +25,10 @@ export default async function BarPage() {
     );
   }
 
-  const rows = await listUserBottles(getDb(), user.id);
-  return <BarClient initialRows={rows} />;
+  const db = getDb();
+  const [rows, flavorHeat] = await Promise.all([
+    listUserBottles(db, user.id),
+    getBarFlavorHeat(db, user.id),
+  ]);
+  return <BarClient initialRows={rows} flavorHeat={flavorHeat} />;
 }

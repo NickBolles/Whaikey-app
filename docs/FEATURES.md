@@ -27,6 +27,7 @@ Companion to [PLAN.md](../PLAN.md). This document specifies every feature area i
 - Understands abbreviations and enthusiast slang: "weller sr" → W.L. Weller Special Reserve; "ECBP" → Elijah Craig Barrel Proof (alias table on bottles).
 - Filters: category (bourbon/scotch/rye/irish/japanese/world), region, age, ABV, price band, cask type.
 - **Semantic search (🟡):** "smoky but sweet under $70" → embedding search over flavor profiles.
+- **One search, many doors.** Search is a single feature — one engine, one UI component — reached from several places (Search tab, My Bar "Add bottle", pour-flow bottle picker, chat). The entry point only changes **what happens when you pick a result** (view detail / add to bar / log a pour), stated in the header so it never feels like three different search screens. Never fork the search UX per surface.
 
 ### 2.2 Label scan (🟡 Phase 2) — *shipped: API + scan-page fallback*
 - Camera → vision model → top-3 candidate matches with confidence → confirm-or-correct.
@@ -61,6 +62,14 @@ Sections, top to bottom:
 
 ## 3. My Bar (Inventory)
 
+> **User story:** *"When I open My Bar I'm standing in front of my shelf. I can see at a glance what I own, what each bottle tastes like, and what I thought of it the last time I poured it — without tapping through to anything. Scanning a bottle in and looking at my bar are the two things I do most."*
+
+My Bar is a **top-2 surface** (with scan/search-to-add) — not a list of rows with prices. Flavor and memory are first-class here:
+
+- **Every bottle shows its flavor identity in place** — expand a row and its flavor radar is right there, next to fill level and price.
+- **Your notes live on the shelf** — the last thing you wrote about a bottle is visible on its row; quick notes are editable inline, full tasting notes one tap away.
+- **The bar itself has a palate** — an aggregate flavor-wheel heat map of the whole library (see 3.5).
+
 ### 3.1 Core inventory (🟢 Phase 1)
 - Relationship types: **Own** (in My Bar), **Tried** (history), **Wishlist**, and implicit "viewed."
 - Per owned bottle: sealed/open/finished, fill level (5-step visual bottle gauge, tap to update), purchase price + date + store, location label (shelf/cabinet/office), backup count.
@@ -84,6 +93,12 @@ Sections, top to bottom:
 - 🔵 **Bottle lifecycle statuses** beyond finished: sold / traded / gifted / broken (OnlyDrams pattern) — keeps $ tracking honest.
 - 🔵 **Store pick / single-barrel metadata**: barrel number, pick store, batch/proof variants (BarrelBook pattern) — whiskey-specific data wine apps handle badly.
 - ⚪ **Infinity bottle** management: blend composition log, pour-in history, evolving profile (Whiskey Shelf pattern).
+
+### 3.5 Bar flavor heat map (🟢 Phase 1)
+- The full two-tier flavor wheel (8 color-coded families + all leaf subsections, see §5.1) rendered as a **heat map of the library**: the more your bar leans into a flavor, the hotter that wedge/leaf glows — a peat-heavy shelf lights up Peaty/Smoky.
+- Heat sources: owned bottles' flavor profiles warm the family wedges; your own tasting-note flavor tags warm the leaf subsections (so pours on tried bottles count too).
+- Heat is **relative to your own bar** ("where do I lean"), never an absolute score; hottest leaves are labeled on the wheel and listed as a chip legend.
+- Uses: see your collection's personality at a glance, spot gaps ("nothing floral at all"), seed "what's my bar missing?" chat prompts and recommendations (§7).
 
 ---
 
@@ -125,7 +140,8 @@ Sections, top to bottom:
 
 ### 5.1 The wheel (🟢 Phase 1)
 - Two-tier whiskey taxonomy: 8 cores (Fruity, Floral, Grain, Sweet, Woody, Spicy, Peaty/Smoky, Feinty/Sulfury) → ~60 leaf descriptors.
-- Roles: **input device** (tap wedges during note-taking), **bottle visualization** (aggregate profile), **comparison overlay** (bottle vs. bottle, you vs. community).
+- **Subsections are always color-coded by family** (classic printed-wheel look): each core wedge owns a hue, and its leaves render as graded shades of that hue — a flavor's color is the same everywhere it appears (wheel rings, note chips, legends).
+- Roles: **input device** (tap wedges during note-taking), **bottle visualization** (aggregate profile), **library heat map** (My Bar's aggregate palate, §3.5), **comparison overlay** (bottle vs. bottle, you vs. community).
 - Custom SVG/Skia component; must feel tactile (haptics on wedge selection).
 
 ### 5.2 Palate profile (🟡 Phase 3)
