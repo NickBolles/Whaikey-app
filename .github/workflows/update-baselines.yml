@@ -9,12 +9,17 @@
 # check on the regenerated baselines.
 name: Update visual baselines
 
+# Trigger it from the Actions tab, or by pushing a commit whose message
+# contains "[update-baselines]" (for tooling that can't dispatch workflows).
 on:
   workflow_dispatch:
+  push:
+    branches-ignore: [main]
 
 jobs:
   update:
     name: regenerate baselines
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[update-baselines]')
     runs-on: ubuntu-latest
     permissions:
       contents: write
