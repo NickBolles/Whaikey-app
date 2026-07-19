@@ -24,7 +24,7 @@ An AI-native whiskey tracking app, inspired by wine apps like **Vivino** (social
 ### 2.1 Bottle Identification & Library
 
 - **Label scan (camera)** — Vivino-style: photograph a label, vision model identifies distillery, expression, age statement, proof. Confirm-or-correct flow.
-- **Barcode scan** as a fallback for retail bottles.
+- **Barcode/UPC scan** — rapid batch mode: scan bottle after bottle and shelve a whole collection in minutes; own-DB-first resolution with crowdsourced UPC→bottle confirmations (FEATURES.md §2.3, DATA_SOURCES.md §3).
 - **Text/voice search** with fuzzy matching ("that 12yr Redbreast", "lagavulin 16").
 - **"Add to library or not" decision point** — after identifying a bottle, choose:
   - **Own it** → goes into *My Bar* (with purchase price, date, store, open/sealed status, fill level).
@@ -117,11 +117,12 @@ Implementation: LLM with **tool calling** into the app's own APIs (query invento
 | Must have | Should have | Could have | Won't have (v1) |
 |---|---|---|---|
 | Bottle search + detail pages | Label photo scan | Blind tasting mode | Social graph/feed |
-| My Bar with $ tracking | Voice note → structured note | Cigar pairing | Marketplace/price alerts |
-| Quick pour log + ratings | Palate wheel visualization | Gift mode | Distillery passport |
-| Structured notes + flavor chips | Reverse pairing from my bar | Widgets | Community price reports |
-| Interactive flavor wheel | Collection value estimates | Wrapped recap | |
-| AI chat with tool calling | Explainable recommendations | | |
+| Barcode/UPC scan (rapid collection import) | Voice note → structured note | Cigar pairing | Marketplace/price alerts |
+| My Bar with $ tracking | Palate wheel visualization | Gift mode | Distillery passport |
+| Quick pour log + ratings | Reverse pairing from my bar | Widgets | Community price reports |
+| Structured notes + flavor chips | Collection value estimates | Wrapped recap | |
+| Interactive flavor wheel | Explainable recommendations | | |
+| AI chat with tool calling | | | |
 | Wishlist / tried / own flows | | | |
 
 ---
@@ -239,6 +240,7 @@ Principles: every third-party lookup converts into a first-party record (user co
 
 ### Phase 1 — Core loop MVP (week 3–6)
 - Bottle search (instant FTS) + detail page.
+- Barcode/UPC scan with rapid batch mode (collection import in minutes).
 - Own / tried / wishlist flows; My Bar with purchase price + totals.
 - Quick pour log with 3-depth notes; flavor-chip input; ratings.
 - Interactive flavor wheel (input + per-bottle visualization).

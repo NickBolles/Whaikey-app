@@ -28,14 +28,18 @@ Companion to [PLAN.md](../PLAN.md). This document specifies every feature area i
 - Filters: category (bourbon/scotch/rye/irish/japanese/world), region, age, ABV, price band, cask type.
 - **Semantic search (🟡):** "smoky but sweet under $70" → embedding search over flavor profiles.
 
-### 2.2 Label scan (🟡 Phase 2)
+### 2.2 Label scan (🟡 Phase 2) — *shipped: API + scan-page fallback*
 - Camera → vision model → top-3 candidate matches with confidence → confirm-or-correct.
 - Handles: batch/vintage variants (flag ambiguity, ask), private single-barrel picks (match parent expression, note the pick), damaged/partial labels (fall back to search pre-filled with what was read).
 - Every correction is stored as eval data to improve matching.
 - Offline: photo queues and resolves when back online.
 
-### 2.3 Barcode scan (🔵)
-- Fallback for retail bottles; UPC → bottle mapping crowdsourced (first scanner confirms match, later scanners benefit).
+### 2.3 Barcode/UPC scan (🟢 Phase 1) — *shipped*
+The fastest path from a shelf of bottles to a tracked collection — a new user should shelve 50 bottles in a few minutes ("beep… beep… beep"), so this is core onboarding, not a fallback.
+- **Rapid batch mode** (`/scan`): camera barcode loop (BarcodeDetector where supported) with manual code entry (hardware wedge scanners work) and label-photo fallback; each confirmed scan lands on the shelf in one round trip — no forms between scans; session tray with undo.
+- **Resolution chain** (DATA_SOURCES.md §3): own DB (seeded + crowdsourced mappings) → transient external lookup (UPCitemdb → Open Food Facts; results matched against our catalog, never stored) → label photo / inline search.
+- **Crowdsourced UPC → bottle mapping**: the first scanner confirms the match, later scanners resolve instantly; confirmations are counted, so shared barcodes (reused across proofs/batches) rank by community consensus. Every scan converts a third-party lookup into first-party data.
+- Ambiguity is always confirm-or-correct; a miss teaches the catalog via search or label photo.
 
 ### 2.4 Bottle detail page (🟢 Phase 1)
 Sections, top to bottom:
