@@ -87,6 +87,6 @@ test.describe("signed-in scan flow", () => {
     await page.goto("/scan");
     await page.getByLabel(/barcode number/i).fill("1234");
     await page.getByRole("button", { name: "Scan" }).click();
-    await expect(page.getByRole("alert")).toContainText(/doesn't look like/i);
+    await expect(page.getByText(/doesn't look like a UPC/i)).toBeVisible();
   });
 });
