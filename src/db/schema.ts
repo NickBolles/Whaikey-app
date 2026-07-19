@@ -137,7 +137,10 @@ export const bottles = pgTable(
     description: text("description"),
     flavorProfile: jsonb("flavor_profile").$type<Record<string, number>>(),
     imageUrl: text("image_url"),
-    status: text("status").$type<"verified" | "user_submitted">().notNull().default("verified"),
+    status: text("status")
+      .$type<"verified" | "user_submitted" | "imported">()
+      .notNull()
+      .default("verified"),
     submittedBy: text("submitted_by").references(() => user.id),
     createdAt: createdAt(),
   },
@@ -156,7 +159,7 @@ export const bottleAliases = pgTable(
   (t) => [index("bottle_aliases_bottle_idx").on(t.bottleId), index("bottle_aliases_alias_idx").on(t.alias)],
 );
 
-export const UPC_SOURCES = ["seed", "user"] as const;
+export const UPC_SOURCES = ["seed", "user", "iowa"] as const;
 export type UpcSource = (typeof UPC_SOURCES)[number];
 
 /**

@@ -1,0 +1,76 @@
+# Catalog population against the production database (docs/DATA_SOURCES.md §6).
+#
+# Runs `pnpm ingest` against the DATABASE_URL secret:
+#   - iowa:   full Iowa Liquor Products sync (feed updates monthly; idempotent)
+#   - cola:   TTB label approvals for the last 8 days (registry 503s during
+#             its maintenance windows, so failures here don't fail the run)
+#   - enrich: fill flavor profiles for new bottles (community notes first,
+#             then Sonnet 5 with web search grounding; needs ANTHROPIC_API_KEY)
+#
+# Requires repo secrets: DATABASE_URL (Postgres/Supabase pooler URL) and, for
+# the enrich step, ANTHROPIC_API_KEY. Without DATABASE_URL the run stops early
+# with a clear message instead of failing cryptically.
+name: catalog sync
+
+on:
+  workflow_dispatch:
+    inputs:
+      skip_enrich:
+        description: "Skip the AI enrichment step"
+        type: boolean
+        default: false
+  schedule:
+    # Mondays 09:00 UTC — after Iowa's monthly refresh lands and clear of
+    # TTB's Sunday maintenance window.
+    - cron: "0 9 * * 1"
+
+concurrency:
+  group: catalog-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check configuration
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::DATABASE_URL secret is not set — add the production Postgres URL to repo secrets to enable catalog sync."
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Sync Iowa Liquor Products
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: pnpm ingest iowa
+
+      - name: Sync TTB COLA approvals (last 8 days)
+        # The registry has scheduled maintenance windows; don't fail the run.
+        continue-on-error: true
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: pnpm ingest cola --since "$(date -u -d '8 days ago' +%F)"
+
+      - name: Enrich flavor profiles
+        if: ${{ inputs.skip_enrich != true }}
+        continue-on-error: true
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "ANTHROPIC_API_KEY secret is not set — skipping enrichment."
+            exit 0
+          fi
+          pnpm ingest enrich

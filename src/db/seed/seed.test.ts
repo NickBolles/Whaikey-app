@@ -20,9 +20,9 @@ describe("seedDatabase", () => {
     const allBottles = await db.select().from(bottles);
     const allAliases = await db.select().from(bottleAliases);
 
-    expect(allDistilleries.length).toBeGreaterThanOrEqual(35);
-    expect(allBottles.length).toBeGreaterThanOrEqual(170);
-    expect(allAliases.length).toBeGreaterThanOrEqual(40);
+    expect(allDistilleries.length).toBeGreaterThanOrEqual(95);
+    expect(allBottles.length).toBeGreaterThanOrEqual(250);
+    expect(allAliases.length).toBeGreaterThanOrEqual(60);
   });
 
   it("gives every bottle a valid category", async () => {
@@ -38,13 +38,13 @@ describe("seedDatabase", () => {
     for (const bottle of allBottles) {
       byCategory.set(bottle.category, (byCategory.get(bottle.category) ?? 0) + 1);
     }
-    expect(byCategory.get("bourbon") ?? 0).toBeGreaterThanOrEqual(40);
-    expect(byCategory.get("rye") ?? 0).toBeGreaterThanOrEqual(15);
-    expect(byCategory.get("scotch-single-malt") ?? 0).toBeGreaterThanOrEqual(40);
-    expect(byCategory.get("scotch-blended") ?? 0).toBeGreaterThanOrEqual(8);
-    expect(byCategory.get("irish") ?? 0).toBeGreaterThanOrEqual(15);
-    expect(byCategory.get("japanese") ?? 0).toBeGreaterThanOrEqual(10);
-    expect(byCategory.get("canadian") ?? 0).toBeGreaterThanOrEqual(6);
+    expect(byCategory.get("bourbon") ?? 0).toBeGreaterThanOrEqual(55);
+    expect(byCategory.get("rye") ?? 0).toBeGreaterThanOrEqual(20);
+    expect(byCategory.get("scotch-single-malt") ?? 0).toBeGreaterThanOrEqual(55);
+    expect(byCategory.get("scotch-blended") ?? 0).toBeGreaterThanOrEqual(15);
+    expect(byCategory.get("irish") ?? 0).toBeGreaterThanOrEqual(20);
+    expect(byCategory.get("japanese") ?? 0).toBeGreaterThanOrEqual(15);
+    expect(byCategory.get("canadian") ?? 0).toBeGreaterThanOrEqual(20);
   });
 
   it("gives every bottle a flavor profile over valid wedges with 0-10 scores", async () => {
@@ -168,6 +168,14 @@ describe("seedDatabase", () => {
     const [bottle] = await db.select().from(bottles).where(eq(bottles.id, row.bottleId));
     expect(bottle.name).toBe("W.L. Weller Special Reserve");
     expect(bottle.mashBill).toMatch(/wheat/i);
+  });
+
+  it("spot-checks: Wayne Gretzky Canadian resolves by alias 'WG Canadian'", async () => {
+    const [row] = await db.select().from(bottleAliases).where(eq(bottleAliases.alias, "WG Canadian"));
+    expect(row).toBeTruthy();
+    const [bottle] = await db.select().from(bottles).where(eq(bottles.id, row.bottleId));
+    expect(bottle.name).toBe("Wayne Gretzky No. 99 Red Cask");
+    expect(bottle.category).toBe("canadian");
   });
 
   it("spot-checks: well-known bottles are present with sane data", async () => {
