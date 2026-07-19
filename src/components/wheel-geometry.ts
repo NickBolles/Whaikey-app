@@ -2,9 +2,9 @@ import type { KeyboardEvent } from "react";
 
 /**
  * Shared SVG geometry + palette helpers for the flavor wheel surfaces
- * (FlavorWheelInput for note capture, FlavorWheelExplorer in Whiskey School).
- * All angle args are degrees clockwise from 12 o'clock; `c` is the square
- * viewBox's center coordinate.
+ * (FlavorWheelInput for note capture, FlavorWheelExplorer in Whiskey School,
+ * FlavorWheel heat map in My Bar). All angle args are degrees clockwise from
+ * 12 o'clock; `c` is the square viewBox's center coordinate.
  */
 
 export const SERIF = "var(--font-fraunces), Georgia, serif";
@@ -16,6 +16,25 @@ export function warmify(hex: string): string {
   const rgb = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
   const mixed = rgb.map((ch, i) => Math.round(ch * 0.78 + warm[i] * 0.22));
   return `#${mixed.map((ch) => ch.toString(16).padStart(2, "0")).join("")}`;
+}
+
+/**
+ * Grade a wedge color across its leaves so subsections read as distinct
+ * bands of the same family (classic printed-wheel look): first leaf lightest,
+ * last leaf deepest.
+ */
+export function leafShade(hex: string, index: number, count: number): string {
+  const n = parseInt(hex.slice(1), 16);
+  const rgb = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  const t = count <= 1 ? 0.5 : index / (count - 1);
+  // Mix toward cream at t=0 and toward near-black at t=1, gently.
+  const lighten = 0.28 * (1 - t);
+  const darken = 0.22 * t;
+  const mixed = rgb.map((ch) => {
+    const up = ch + (244 - ch) * lighten;
+    return Math.round(up * (1 - darken));
+  });
+  return `#${mixed.map((ch) => Math.max(0, Math.min(255, ch)).toString(16).padStart(2, "0")).join("")}`;
 }
 
 export function polar(c: number, r: number, deg: number): { x: number; y: number } {
@@ -55,6 +74,25 @@ export function labelTransform(c: number, r: number, deg: number): string {
   const norm = ((deg % 360) + 360) % 360;
   const rot = norm > 90 && norm < 270 ? deg + 180 : deg;
   return `translate(${x.toFixed(2)} ${y.toFixed(2)}) rotate(${rot.toFixed(2)})`;
+}
+
+/**
+ * Radial (spoke) label transform for dense outer rings: text runs along the
+ * radius, flipped on the left half so it always reads outward.
+ */
+export function radialLabelTransform(
+  c: number,
+  r: number,
+  deg: number,
+): { transform: string; anchor: "start" | "end" } {
+  const { x, y } = polar(c, r, deg);
+  const norm = ((deg % 360) + 360) % 360;
+  const flip = norm > 180;
+  const rot = flip ? deg + 90 : deg - 90;
+  return {
+    transform: `translate(${x.toFixed(2)} ${y.toFixed(2)}) rotate(${rot.toFixed(2)})`,
+    anchor: flip ? "end" : "start",
+  };
 }
 
 export function shortLabel(label: string): string {

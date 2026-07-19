@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
 import { createTestBottle, createTestUser, setupTestDb, uid } from "@/test/helpers";
-import { getBarStats, getSpendByMonth, listUserBottles, monthKey } from "./bar";
+import { getBarFlavorHeat, getBarStats, getSpendByMonth, listUserBottles, monthKey } from "./bar";
 
 async function seedUserBottle(
   db: DB,
@@ -239,5 +239,110 @@ describe("listUserBottles", () => {
 
     const all = await listUserBottles(db, user.id);
     expect(all).toHaveLength(2);
+  });
+});
+
+describe("getBarFlavorHeat", () => {
+  let db: DB;
+  beforeEach(async () => {
+    db = await setupTestDb();
+  });
+
+  it("returns empty heat for a user with no bottles or notes", async () => {
+    const user = await createTestUser(db);
+    const heat = await getBarFlavorHeat(db, user.id);
+    expect(heat.hasHeat).toBe(false);
+    expect(heat.wedges).toEqual({});
+    expect(heat.leaves).toEqual({});
+    expect(heat.topWedgeIds).toEqual([]);
+  });
+
+  it("sums owned bottles' wedge profiles, normalized to the hottest wedge", async () => {
+    const user = await createTestUser(db);
+    const peaty = await createTestBottle(db, { flavorProfile: { peaty: 10, fruity: 2 } });
+    const peaty2 = await createTestBottle(db, { flavorProfile: { peaty: 6, sweet: 4 } });
+    await seedUserBottle(db, { userId: user.id, bottleId: peaty.id, relationship: "own" });
+    await seedUserBottle(db, { userId: user.id, bottleId: peaty2.id, relationship: "own" });
+
+    const heat = await getBarFlavorHeat(db, user.id);
+    // peaty total 16 is the max -> 1; fruity 2/16, sweet 4/16.
+    expect(heat.wedges.peaty).toBe(1);
+    expect(heat.wedges.fruity).toBeCloseTo(0.13, 2);
+    expect(heat.wedges.sweet).toBeCloseTo(0.25, 2);
+    expect(heat.topWedgeIds[0]).toBe("peaty");
+    expect(heat.hasHeat).toBe(true);
+    // No notes -> no leaf heat.
+    expect(heat.leaves).toEqual({});
+  });
+
+  it("wishlist/tried bottles and other users' bars contribute no wedge heat", async () => {
+    const user = await createTestUser(db);
+    const other = await createTestUser(db);
+    const bottle = await createTestBottle(db, { flavorProfile: { woody: 8 } });
+    await seedUserBottle(db, { userId: user.id, bottleId: bottle.id, relationship: "wishlist" });
+    await seedUserBottle(db, { userId: other.id, bottleId: bottle.id, relationship: "own" });
+
+    const heat = await getBarFlavorHeat(db, user.id);
+    expect(heat.hasHeat).toBe(false);
+  });
+
+  it("tasting-note flavor tags add leaf heat and warm the parent wedge", async () => {
+    const user = await createTestUser(db);
+    // A tried bottle with no profile: all heat must come from notes.
+    const bottle = await createTestBottle(db, { flavorProfile: null });
+    await seedUserBottle(db, { userId: user.id, bottleId: bottle.id, relationship: "tried" });
+
+    const [pour] = await db
+      .insert(schema.pours)
+      .values({ id: uid("pour"), userId: user.id, bottleId: bottle.id, rating: 4 })
+      .returning();
+    await db.insert(schema.tastingNotes).values({
+      id: uid("note"),
+      pourId: pour.id,
+      flavorTags: { campfire: 3, brine: 1, vanilla: 2 },
+      extractedBy: "user",
+    });
+
+    const heat = await getBarFlavorHeat(db, user.id);
+    // Leaves normalize to campfire (3): brine 1/3, vanilla 2/3.
+    expect(heat.leaves.campfire).toBe(1);
+    expect(heat.leaves.brine).toBeCloseTo(0.33, 2);
+    expect(heat.leaves.vanilla).toBeCloseTo(0.67, 2);
+    // Wedges: peaty = 3+1 = 4 (max), sweet = 2.
+    expect(heat.wedges.peaty).toBe(1);
+    expect(heat.wedges.sweet).toBe(0.5);
+    expect(heat.topWedgeIds[0]).toBe("peaty");
+  });
+
+  it("ignores another user's notes and unknown leaf ids", async () => {
+    const user = await createTestUser(db);
+    const other = await createTestUser(db);
+    const bottle = await createTestBottle(db, { flavorProfile: null });
+
+    const [mine] = await db
+      .insert(schema.pours)
+      .values({ id: uid("pour"), userId: user.id, bottleId: bottle.id })
+      .returning();
+    await db.insert(schema.tastingNotes).values({
+      id: uid("note"),
+      pourId: mine.id,
+      flavorTags: { oak: 2, "not-a-real-leaf": 9 },
+      extractedBy: "user",
+    });
+
+    const [theirs] = await db
+      .insert(schema.pours)
+      .values({ id: uid("pour"), userId: other.id, bottleId: bottle.id })
+      .returning();
+    await db.insert(schema.tastingNotes).values({
+      id: uid("note"),
+      pourId: theirs.id,
+      flavorTags: { campfire: 3 },
+      extractedBy: "user",
+    });
+
+    const heat = await getBarFlavorHeat(db, user.id);
+    expect(heat.leaves).toEqual({ oak: 1 });
+    expect(heat.wedges).toEqual({ woody: 1 });
   });
 });
