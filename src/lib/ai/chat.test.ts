@@ -3,8 +3,21 @@ import { eq, asc } from "drizzle-orm";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
 import { createTestBottle, createTestUser, setupTestDb, uid } from "@/test/helpers";
-import { runChat, getChatSessions, getChatMessages, ChatSessionNotFoundError } from "./chat";
+import {
+  runChat,
+  runChatStream,
+  getChatSessions,
+  getChatMessages,
+  ChatSessionNotFoundError,
+  type ChatStreamEvent,
+} from "./chat";
 import { makeFakeAnthropic, textResponse, toolUseResponse } from "./testing";
+
+async function drain(gen: AsyncGenerator<ChatStreamEvent>): Promise<ChatStreamEvent[]> {
+  const events: ChatStreamEvent[] = [];
+  for await (const event of gen) events.push(event);
+  return events;
+}
 
 let db: DB;
 let user: schema.User;
@@ -131,6 +144,117 @@ describe("runChat", () => {
     const messages = await getChatMessages(db, user.id, result.sessionId);
     expect(messages?.at(-1)?.role).toBe("assistant");
     expect(messages?.at(-1)?.content).toBeTruthy();
+  });
+});
+
+describe("runChatStream", () => {
+  it("streams text, dispatches tools, and persists like runChat", async () => {
+    const bottle = await createTestBottle(db, { name: "Test Bourbon 10" });
+    await db.insert(schema.userBottles).values({
+      id: uid("ub"),
+      userId: user.id,
+      bottleId: bottle.id,
+      relationship: "own",
+    });
+
+    const fake = makeFakeAnthropic([
+      toolUseResponse("get_my_bar", {}, { id: "toolu_1", leadText: "Let me check your bar." }),
+      textResponse("Based on your bar, pour the Test Bourbon 10 tonight."),
+    ]);
+
+    const events = await drain(
+      runChatStream(db, user.id, null, "What should I pour tonight?", { client: fake.client }),
+    );
+
+    // Two streamed model calls (tool round + final answer).
+    expect(fake.create).toHaveBeenCalledTimes(2);
+    // Both were streaming calls.
+    expect((fake.create.mock.calls[0][0] as { stream?: boolean }).stream).toBe(true);
+
+    // The second call fed the tool_result (with real DB data) back.
+    const secondCall = fake.create.mock.calls[1][0] as {
+      messages: Array<{ role: string; content: unknown }>;
+    };
+    const toolResultMsg = secondCall.messages.at(-1) as {
+      role: string;
+      content: Array<{ type: string; tool_use_id: string; content: string }>;
+    };
+    expect(toolResultMsg.role).toBe("user");
+    expect(toolResultMsg.content[0].type).toBe("tool_result");
+    expect(toolResultMsg.content[0].tool_use_id).toBe("toolu_1");
+    expect(toolResultMsg.content[0].content).toContain("Test Bourbon 10");
+
+    // session event emitted first.
+    expect(events[0]).toMatchObject({ type: "session" });
+    const sessionId = (events[0] as { sessionId: string }).sessionId;
+
+    // A tool event announced the dispatch.
+    const toolEvent = events.find((e) => e.type === "tool");
+    expect(toolEvent).toMatchObject({ type: "tool", name: "get_my_bar" });
+
+    // done event carries the final message + tool trace.
+    const done = events.find((e) => e.type === "done") as Extract<
+      ChatStreamEvent,
+      { type: "done" }
+    >;
+    expect(done.sessionId).toBe(sessionId);
+    expect(done.message).toContain("Test Bourbon 10");
+    expect(done.toolCalls).toHaveLength(1);
+    expect(done.toolCalls[0].name).toBe("get_my_bar");
+
+    // Streamed text deltas assemble to include the final answer.
+    const streamed = events
+      .filter((e): e is Extract<ChatStreamEvent, { type: "text" }> => e.type === "text")
+      .map((e) => e.text)
+      .join("");
+    expect(streamed).toContain("Test Bourbon 10 tonight.");
+
+    // Persistence matches runChat: user + assistant(with toolCalls).
+    const messages = await getChatMessages(db, user.id, sessionId);
+    expect(messages).toHaveLength(2);
+    expect(messages?.[0].role).toBe("user");
+    expect(messages?.[0].content).toBe("What should I pour tonight?");
+    expect(messages?.[1].role).toBe("assistant");
+    expect(messages?.[1].content).toBe(done.message);
+    expect(messages?.[1].toolCalls).toHaveLength(1);
+    expect(messages?.[1].toolCalls?.[0].name).toBe("get_my_bar");
+
+    // Session titled from the first message.
+    const sessions = await getChatSessions(db, user.id);
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0].id).toBe(sessionId);
+    expect(sessions[0].title).toBe("What should I pour tonight?");
+  });
+
+  it("throws ChatSessionNotFoundError before yielding for another user's session", async () => {
+    const other = await createTestUser(db);
+    const theirs = await runChat(db, other.id, null, "their chat", {
+      client: makeFakeAnthropic([textResponse("hi")]).client,
+    });
+
+    const gen = runChatStream(db, user.id, theirs.sessionId, "sneaky", {
+      client: makeFakeAnthropic([textResponse("hi")]).client,
+    });
+    // Error surfaces on the first advance, before any event is yielded.
+    await expect(gen.next()).rejects.toThrow(ChatSessionNotFoundError);
+  });
+
+  it("persists fallback text when the model never produces a final answer", async () => {
+    const responses = Array.from({ length: 10 }, () => toolUseResponse("get_my_bar", {}));
+    const fake = makeFakeAnthropic(responses);
+    const events = await drain(
+      runChatStream(db, user.id, null, "loop forever", { client: fake.client, maxIterations: 2 }),
+    );
+    const done = events.find((e) => e.type === "done") as Extract<
+      ChatStreamEvent,
+      { type: "done" }
+    >;
+    expect(done.toolCalls).toHaveLength(2);
+    expect(fake.create).toHaveBeenCalledTimes(3);
+    expect(done.message).toBeTruthy();
+    const messages = await getChatMessages(db, user.id, done.sessionId);
+    expect(messages?.at(-1)?.role).toBe("assistant");
+    expect(messages?.at(-1)?.content).toBe(done.message);
   });
 });
 

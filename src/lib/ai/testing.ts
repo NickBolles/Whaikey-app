@@ -14,13 +14,72 @@ export interface FakeAnthropic {
 
 export function makeFakeAnthropic(responses: Array<Record<string, unknown>>): FakeAnthropic {
   const queue = [...responses];
-  const create = vi.fn(async () => {
+  const create = vi.fn(async (params?: Record<string, unknown>) => {
     const next = queue.shift();
     if (!next) throw new Error("FakeAnthropic: no more scripted responses");
+    // When the caller opts into streaming, reconstruct an Anthropic-style
+    // event stream from the next scripted message; otherwise return it as-is.
+    if (params?.stream) return toEventStream(next);
     return next;
   });
   const client = { messages: { create } } as unknown as Anthropic;
   return { client, create };
+}
+
+/**
+ * Reconstruct an Anthropic streaming event sequence from a scripted message
+ * object (the same shape textResponse/toolUseResponse produce). The returned
+ * value is a reusable async-iterable: each `for await` gets a fresh iterator.
+ */
+export function toEventStream(message: Record<string, unknown>): AsyncIterable<Record<string, unknown>> {
+  const content = (message.content as Array<Record<string, unknown>>) ?? [];
+  const stopReason = (message.stop_reason as string) ?? "end_turn";
+
+  async function* gen(): AsyncGenerator<Record<string, unknown>> {
+    yield {
+      type: "message_start",
+      message: {
+        id: message.id,
+        type: "message",
+        role: "assistant",
+        model: message.model,
+        content: [],
+        stop_reason: null,
+        stop_sequence: null,
+        usage: message.usage ?? { input_tokens: 1, output_tokens: 0 },
+      },
+    };
+
+    for (let index = 0; index < content.length; index++) {
+      const block = content[index];
+      if (block.type === "text") {
+        yield { type: "content_block_start", index, content_block: { type: "text", text: "" } };
+        yield {
+          type: "content_block_delta",
+          index,
+          delta: { type: "text_delta", text: block.text },
+        };
+        yield { type: "content_block_stop", index };
+      } else if (block.type === "tool_use") {
+        yield {
+          type: "content_block_start",
+          index,
+          content_block: { type: "tool_use", id: block.id, name: block.name, input: {} },
+        };
+        yield {
+          type: "content_block_delta",
+          index,
+          delta: { type: "input_json_delta", partial_json: JSON.stringify(block.input ?? {}) },
+        };
+        yield { type: "content_block_stop", index };
+      }
+    }
+
+    yield { type: "message_delta", delta: { stop_reason: stopReason }, usage: { output_tokens: 1 } };
+    yield { type: "message_stop" };
+  }
+
+  return { [Symbol.asyncIterator]: gen };
 }
 
 let counter = 0;

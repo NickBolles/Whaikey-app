@@ -97,6 +97,7 @@ export function ChatClient({ aiConfigured }: { aiConfigured: boolean }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [pending, setPending] = useState(false);
+  const [streamingId, setStreamingId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -177,6 +178,26 @@ export function ChatClient({ aiConfigured }: { aiConfigured: boolean }) {
         { id: `local-${Date.now()}`, role: "user", content: message },
       ]);
       setPending(true);
+      const assistantId = `assistant-${Date.now()}`;
+      let started = false;
+      let acc = "";
+      // Reveal (or update) the in-progress assistant bubble as tokens arrive.
+      const renderText = (chunk: string) => {
+        acc += chunk;
+        if (!started) {
+          started = true;
+          setStreamingId(assistantId);
+          setMessages((prev) => [
+            ...prev,
+            { id: assistantId, role: "assistant" as const, content: acc },
+          ]);
+        } else {
+          setMessages((prev) =>
+            prev.map((m) => (m.id === assistantId ? { ...m, content: acc } : m)),
+          );
+        }
+      };
+
       try {
         const res = await fetch("/api/chat", {
           method: "POST",
@@ -187,26 +208,63 @@ export function ChatClient({ aiConfigured }: { aiConfigured: boolean }) {
           setError("AI features are not configured on this server.");
           return;
         }
-        if (!res.ok) {
+        if (!res.ok || !res.body) {
           setError("Something went wrong — please try again.");
           return;
         }
-        const data = await res.json();
-        setSessionId(data.sessionId);
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `assistant-${Date.now()}`,
-            role: "assistant",
-            content: data.message,
-            toolCalls: data.toolCalls,
-          },
-        ]);
-        void refreshSessions();
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const parts = buffer.split("\n\n");
+          buffer = parts.pop() ?? "";
+          for (const part of parts) {
+            const line = part.trim();
+            if (!line.startsWith("data:")) continue;
+            const payload = line.slice(5).trim();
+            if (!payload) continue;
+            let event: {
+              type: string;
+              sessionId?: string;
+              text?: string;
+              message?: string;
+              toolCalls?: ToolCall[] | null;
+            };
+            try {
+              event = JSON.parse(payload);
+            } catch {
+              continue;
+            }
+            if (event.type === "session") {
+              if (event.sessionId) setSessionId(event.sessionId);
+            } else if (event.type === "text") {
+              renderText(event.text ?? "");
+            } else if (event.type === "done") {
+              if (event.sessionId) setSessionId(event.sessionId);
+              const finalMsg: ChatMessage = {
+                id: assistantId,
+                role: "assistant",
+                content: event.message ?? acc,
+                toolCalls: event.toolCalls ?? null,
+              };
+              setMessages((prev) =>
+                prev.some((m) => m.id === assistantId)
+                  ? prev.map((m) => (m.id === assistantId ? finalMsg : m))
+                  : [...prev, finalMsg],
+              );
+              void refreshSessions();
+            }
+          }
+        }
       } catch {
         setError("Network error — please try again.");
       } finally {
         setPending(false);
+        setStreamingId(null);
       }
     },
     [pending, sessionId, refreshSessions],
@@ -342,7 +400,7 @@ export function ChatClient({ aiConfigured }: { aiConfigured: boolean }) {
           ),
         )}
 
-        {pending && (
+        {pending && !streamingId && (
           <div className="self-start max-w-[85%]">
             <TypingIndicator />
           </div>

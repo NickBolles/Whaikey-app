@@ -15,6 +15,24 @@ import { GET as getSessions } from "./sessions/route";
 
 vi.mock("@/lib/session", async () => mockSessionModule());
 
+interface StreamEvent {
+  type: string;
+  sessionId?: string;
+  text?: string;
+  message?: string;
+  toolCalls?: Array<{ name: string }>;
+}
+
+/** Read an SSE Response body and parse its `data:` JSON events. */
+async function readStreamEvents(res: Response): Promise<StreamEvent[]> {
+  const body = await res.text();
+  return body
+    .split("\n\n")
+    .map((chunk) => chunk.trim())
+    .filter((chunk) => chunk.startsWith("data:"))
+    .map((chunk) => JSON.parse(chunk.slice(5).trim()) as StreamEvent);
+}
+
 let db: DB;
 let user: schema.User;
 
@@ -54,9 +72,13 @@ describe("POST /api/chat", () => {
       jsonRequest("/api/chat", "POST", { sessionId: "nope", message: "hello" }),
     );
     expect(res.status).toBe(404);
+    // Must be a real JSON error, not a 200 event-stream.
+    expect(res.headers.get("content-type")).toContain("application/json");
+    const body = await res.json();
+    expect(body.error).toBe("Chat session not found");
   });
 
-  it("runs the chat loop on the happy path and persists the session", async () => {
+  it("streams the chat loop on the happy path and persists the session", async () => {
     setSessionUser(user);
     const fake = makeFakeAnthropic([
       toolUseResponse("get_my_bar", {}),
@@ -68,11 +90,26 @@ describe("POST /api/chat", () => {
       jsonRequest("/api/chat", "POST", { message: "What should I pour tonight?" }),
     );
     expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.sessionId).toBeTruthy();
-    expect(body.message).toContain("shopping");
-    expect(body.toolCalls).toHaveLength(1);
-    expect(body.toolCalls[0].name).toBe("get_my_bar");
+    expect(res.headers.get("content-type")).toBe("text/event-stream");
+
+    const events = await readStreamEvents(res);
+    const session = events.find((e) => e.type === "session");
+    const done = events.find((e) => e.type === "done");
+    expect(session?.sessionId).toBeTruthy();
+    expect(done?.sessionId).toBe(session?.sessionId);
+    expect(done?.message).toContain("shopping");
+    expect(done?.toolCalls).toHaveLength(1);
+    expect(done?.toolCalls?.[0].name).toBe("get_my_bar");
+
+    // Streamed text deltas reassemble into the final message.
+    const streamedText = events
+      .filter((e) => e.type === "text")
+      .map((e) => e.text)
+      .join("");
+    expect(streamedText).toContain("shopping");
+
+    // A `tool` event announced the dispatched tool live.
+    expect(events.some((e) => e.type === "tool")).toBe(true);
 
     // Session list reflects the new chat.
     const sessionsRes = await getSessions();
@@ -83,11 +120,12 @@ describe("POST /api/chat", () => {
 
     // GET /api/chat?sessionId returns the thread.
     const messagesRes = await GET(
-      jsonRequest(`/api/chat?sessionId=${body.sessionId}`, "GET"),
+      jsonRequest(`/api/chat?sessionId=${session?.sessionId}`, "GET"),
     );
     expect(messagesRes.status).toBe(200);
     const messagesBody = await messagesRes.json();
     expect(messagesBody.messages).toHaveLength(2);
+    expect(messagesBody.messages[1].content).toBe(done?.message);
     expect(messagesBody.messages[1].toolCalls).toHaveLength(1);
   });
 });
@@ -106,7 +144,8 @@ describe("GET /api/chat", () => {
     setSessionUser(user);
     setAnthropicForTests(makeFakeAnthropic([textResponse("hi")]).client);
     const created = await POST(jsonRequest("/api/chat", "POST", { message: "mine" }));
-    const { sessionId } = await created.json();
+    const createdEvents = await readStreamEvents(created);
+    const sessionId = createdEvents.find((e) => e.type === "session")?.sessionId;
 
     const other = await createTestUser(db);
     setSessionUser(other);

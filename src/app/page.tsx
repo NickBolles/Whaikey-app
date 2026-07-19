@@ -2,6 +2,9 @@ import Link from "next/link";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { getSessionUser } from "@/lib/session";
+import { getUserPalate } from "@/lib/palate-store";
+import { PalateWheel } from "@/components/palate-wheel";
+import { RecommendationRail } from "@/components/recommendation-rail";
 import { Search, Wine, GlassWater, MessageCircle, Star } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -68,6 +71,8 @@ export default async function HomePage() {
     .orderBy(desc(schema.pours.createdAt))
     .limit(5);
 
+  const palate = await getUserPalate(db, user.id);
+
   const firstName = user.name?.split(" ")[0] ?? "there";
   const stats = [
     { value: String(owned?.count ?? 0), label: "bottles owned" },
@@ -116,6 +121,12 @@ export default async function HomePage() {
           ))}
         </div>
       </section>
+
+      <RecommendationRail mode="tonight" title="What to pour tonight" />
+
+      <RecommendationRail mode="discovery" title="For your palate" />
+
+      <PalateWheel vector={palate.vector} sampleSize={palate.sampleSize} />
 
       {recentPours.length > 0 && (
         <section aria-label="Recent pours">
