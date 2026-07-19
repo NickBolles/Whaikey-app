@@ -61,6 +61,35 @@ test.describe("signed out", () => {
     await settle(page);
     await expect(page).toHaveScreenshot(shot("bottle-detail-eagle-rare"), { fullPage: true });
   });
+
+  test("learn hub", async ({ page }) => {
+    await page.goto("/learn");
+    await expect(page.getByRole("heading", { name: /Learn whiskey/i })).toBeVisible();
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("learn-hub"), { fullPage: true });
+  });
+
+  test("learn lesson (cask science)", async ({ page }) => {
+    await page.goto("/learn/barrel-science");
+    await expect(page.getByRole("heading", { name: /Cask science/i })).toBeVisible();
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("learn-lesson"), { fullPage: true });
+  });
+
+  test("flavor explorer (idle)", async ({ page }) => {
+    await page.goto("/learn/flavors");
+    await expect(page.getByRole("heading", { name: "The flavor wheel" })).toBeVisible();
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("learn-flavors"), { fullPage: true });
+  });
+
+  test("flavor explorer (family selected)", async ({ page }) => {
+    await page.goto("/learn/flavors");
+    await page.getByRole("button", { name: "Peaty / Smoky" }).click();
+    await expect(page.getByText(/Where it comes from/i)).toBeVisible();
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("learn-flavors-selected"), { fullPage: true });
+  });
 });
 
 test.describe("signed in (demo collector)", () => {

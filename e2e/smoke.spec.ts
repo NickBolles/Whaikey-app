@@ -38,3 +38,48 @@ test.describe("signed-out smoke", () => {
     }
   });
 });
+
+test.describe("whiskey school", () => {
+  test("hub lists both tracks and their lessons", async ({ page }) => {
+    await page.goto("/learn");
+    await expect(page.getByRole("heading", { name: /Learn whiskey/i })).toBeVisible();
+    await expect(page.getByText("Whiskey 101").first()).toBeVisible();
+    await expect(page.getByText("Going deeper").first()).toBeVisible();
+    await expect(page.getByRole("link", { name: /What is whiskey, anyway/i })).toBeVisible();
+  });
+
+  test("lesson page renders content and the quiz gives feedback", async ({ page }) => {
+    await page.goto("/learn/what-is-whiskey");
+    await expect(page.getByRole("heading", { name: /What is whiskey, anyway/i })).toBeVisible();
+    await expect(page.getByText(/Key terms/i)).toBeVisible();
+
+    await page.getByRole("button", { name: "Cereal grain" }).click();
+    await expect(page.getByText(/Correct\. Grain is the defining ingredient/i)).toBeVisible();
+  });
+
+  test("finishing a quiz marks the lesson done on the hub", async ({ page }) => {
+    await page.goto("/learn/what-is-whiskey");
+    await page.getByRole("button", { name: "Cereal grain" }).click();
+    await page.getByRole("button", { name: "The oak cask" }).click();
+    await page.getByRole("button", { name: "Spirit straight off the still, before aging" }).click();
+    await expect(page.getByText("3/3", { exact: true })).toBeVisible();
+
+    await page.goto("/learn");
+    const lessonLink = page.getByRole("link", { name: /What is whiskey, anyway/i });
+    await expect(lessonLink.getByText("Done")).toBeVisible();
+  });
+
+  test("unknown lesson slugs 404", async ({ page }) => {
+    const response = await page.goto("/learn/not-a-lesson");
+    expect(response?.status()).toBe(404);
+  });
+
+  test("flavor explorer shows a family's education card on tap", async ({ page }) => {
+    await page.goto("/learn/flavors");
+    await expect(page.getByRole("heading", { name: "The flavor wheel" })).toBeVisible();
+
+    await page.getByRole("button", { name: "Sweet" }).click();
+    await expect(page.getByText(/Where it comes from/i)).toBeVisible();
+    await expect(page.getByText("Butterscotch")).toBeVisible();
+  });
+});
