@@ -1,0 +1,62 @@
+# Regenerate the CI-canonical visual baselines (e2e/__screenshots__/) inside
+# the same Playwright container CI uses, and commit the result back to the
+# branch the workflow was dispatched on. This is the hosted equivalent of
+# `pnpm e2e:update:ci` for environments without Docker (see README "Visual
+# baselines").
+#
+# Note: the push uses GITHUB_TOKEN, which does not retrigger CI on the new
+# commit — push any follow-up commit (or re-run CI manually) to get a green
+# check on the regenerated baselines.
+name: Update visual baselines
+
+# Trigger it from the Actions tab, or by pushing a commit whose message
+# contains "[update-baselines]" (for tooling that can't dispatch workflows).
+on:
+  workflow_dispatch:
+  push:
+    branches-ignore: [main]
+
+jobs:
+  update:
+    name: regenerate baselines
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[update-baselines]')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    container:
+      # Keep in sync with @playwright/test in package.json and ci.yml.
+      image: mcr.microsoft.com/playwright:v1.61.1-noble
+    env:
+      PLAYWRIGHT_CHROMIUM_PATH: ""
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm e2e:update
+      - name: Commit regenerated baselines
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add e2e/__screenshots__
+          if git diff --cached --quiet; then
+            echo "Baselines already up to date."
+          else
+            git commit -m "chore: regenerate CI-canonical visual baselines"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report-update-baselines
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7

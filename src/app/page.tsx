@@ -5,7 +5,16 @@ import { getSessionUser } from "@/lib/session";
 import { getUserPalate } from "@/lib/palate-store";
 import { PalateWheel } from "@/components/palate-wheel";
 import { RecommendationRail } from "@/components/recommendation-rail";
-import { Search, ScanLine, Wine, GlassWater, MessageCircle, Star } from "lucide-react";
+import {
+  Search,
+  ScanLine,
+  Wine,
+  GlassWater,
+  GraduationCap,
+  MessageCircle,
+  ChevronRight,
+  Star,
+} from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -128,6 +137,23 @@ export default async function HomePage() {
       <RecommendationRail mode="discovery" title="For your palate" />
 
       <PalateWheel vector={palate.vector} sampleSize={palate.sampleSize} />
+
+      <section aria-label="Whiskey School">
+        <h2 className="section-label mb-3">Whiskey School</h2>
+        <Link
+          href="/learn"
+          className="card flex items-center gap-4 p-5 hover:brightness-110 transition-[filter]"
+        >
+          <GraduationCap size={22} strokeWidth={1.8} className="text-accent shrink-0" aria-hidden />
+          <span className="flex-1 min-w-0">
+            <span className="font-display text-lg font-semibold block">Learn as you sip</span>
+            <span className="text-sm text-muted block mt-0.5">
+              Short lessons on styles, casks, and the flavor wheel.
+            </span>
+          </span>
+          <ChevronRight size={18} strokeWidth={1.8} className="text-muted shrink-0" aria-hidden />
+        </Link>
+      </section>
 
       {recentPours.length > 0 && (
         <section aria-label="Recent pours">
