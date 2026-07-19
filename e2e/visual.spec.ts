@@ -139,4 +139,12 @@ test.describe("signed in (demo collector)", () => {
     await settle(page);
     await expect(page).toHaveScreenshot(shot("chat-empty"), { fullPage: true });
   });
+
+  test("scan (manual fallback, empty session)", async ({ page }) => {
+    await page.goto("/scan");
+    // Headless has no camera: wait for the deterministic manual-entry state.
+    await expect(page.getByLabel(/barcode number/i)).toBeVisible();
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("scan"), { fullPage: true });
+  });
 });

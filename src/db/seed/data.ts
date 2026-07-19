@@ -899,3 +899,51 @@ export const SEED_BOTTLES: SeedBottle[] = [
     description: "Melbourne malt matured fully in shiraz barrels; red berries, banana, and soft tannin.",
     flavorProfile: fp({ fruity: 7, sweet: 5, grain: 3, woody: 3, spicy: 3 }), aliases: ["Nova"] },
 ];
+
+/**
+ * Best-effort UPC/EAN barcodes for the most-scanned bottles, keyed by bottle
+ * id. Like msrp/avgPrice these are approximate seed data: codes are the
+ * standard 750ml retail GTINs where known and may drift across bottlings —
+ * user scan confirmations (bottle_upcs.confirmedCount) are the source of
+ * truth and outrank seeds at resolve time. All codes carry valid GTIN check
+ * digits (validated in seed.test.ts).
+ */
+export const SEED_BOTTLE_UPCS: Record<string, string[]> = {
+  "buffalo-trace": ["080244009960"],
+  "eagle-rare-10": ["080244002145"],
+  "blantons-original": ["080244003302"],
+  "weller-special-reserve": ["080244016012"],
+  "sazerac-rye": ["080244005023"],
+  "elijah-craig-small-batch": ["096749001613"],
+  "evan-williams-black": ["096749000029"],
+  "rittenhouse-bib": ["096749001101"],
+  "makers-mark": ["085246000014"],
+  "jim-beam-white": ["080686001003"],
+  "knob-creek-9": ["080686003380"],
+  "wild-turkey-101": ["721059001014"],
+  "four-roses-small-batch": ["083664004607"],
+  "woodford-reserve": ["082184001431"],
+  "old-forester-86": ["082184000861"],
+  "jack-daniels-old-no-7": ["082184000106"],
+  "bulleit-bourbon": ["082000740001"],
+  "michters-us1-bourbon": ["039383003018"],
+  jameson: ["080432000052"],
+  "redbreast-12": ["080432004401"],
+  "crown-royal": ["082000009702"],
+  "suntory-toki": ["088004029074"],
+  "yamazaki-12": ["088004029081"],
+  "glenfiddich-12": ["5010327000176"],
+  "balvenie-12-doublewood": ["5010327021126"],
+  "monkey-shoulder": ["5010327012032"],
+  "glenlivet-12": ["5080009100128"],
+  "macallan-12-sherry": ["5010317101142"],
+  "highland-park-12": ["5010316101211"],
+  "lagavulin-16": ["5000267107011"],
+  "talisker-10": ["5000267101026"],
+  "johnnie-walker-black": ["5000267021072"],
+  "laphroaig-10": ["5010019101013"],
+  "ardbeg-10": ["5010494101010"],
+  "glenmorangie-10": ["5010494001013"],
+  "nikka-from-the-barrel": ["4904230031307"],
+  "kavalan-classic": ["4710001001017"],
+};

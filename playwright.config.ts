@@ -50,6 +50,8 @@ export default defineConfig({
       DATABASE_PATH: DB_PATH,
       BETTER_AUTH_SECRET: "e2e-secret",
       NEXT_PUBLIC_OAUTH_CONFIGURED: "false",
+      // Keep scan-miss behavior deterministic: never call external UPC APIs.
+      WHAIKEY_UPC_LOOKUP: "off",
     },
     timeout: 120_000,
   },

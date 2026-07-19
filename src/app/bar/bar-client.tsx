@@ -338,9 +338,20 @@ function EmptyState({ tab }: { tab: Tab }) {
       </div>
       <p className="font-display text-lg font-semibold">{copy.title}</p>
       <p className="text-sm text-muted max-w-[26ch] leading-relaxed">{copy.line}</p>
-      <Link href="/search" className="btn-secondary px-5 py-2.5 text-sm font-medium mt-1">
-        {copy.action}
-      </Link>
+      {tab === "bar" ? (
+        <>
+          <Link href="/scan" className="btn-primary px-5 py-2.5 text-sm font-medium mt-1">
+            Scan your bottles
+          </Link>
+          <Link href="/search" className="btn-secondary px-5 py-2.5 text-sm font-medium">
+            {copy.action}
+          </Link>
+        </>
+      ) : (
+        <Link href="/search" className="btn-secondary px-5 py-2.5 text-sm font-medium mt-1">
+          {copy.action}
+        </Link>
+      )}
     </div>
   );
 }

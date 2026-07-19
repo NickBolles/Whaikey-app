@@ -2,8 +2,9 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { setupTestDb } from "@/test/helpers";
 import type { DB } from "@/db";
-import { WHISKEY_CATEGORIES, bottleAliases, bottles, distilleries } from "@/db/schema";
+import { WHISKEY_CATEGORIES, bottleAliases, bottles, bottleUpcs, distilleries } from "@/db/schema";
 import { WEDGE_IDS } from "@/lib/flavor-wheel";
+import { isValidUpc, resolveUpc } from "@/lib/scan";
 import { seedDatabase } from "./index";
 
 describe("seedDatabase", () => {
@@ -93,14 +94,48 @@ describe("seedDatabase", () => {
       distilleries: (await db.select().from(distilleries)).length,
       bottles: (await db.select().from(bottles)).length,
       aliases: (await db.select().from(bottleAliases)).length,
+      upcs: (await db.select().from(bottleUpcs)).length,
     };
     await seedDatabase(db);
     const after = {
       distilleries: (await db.select().from(distilleries)).length,
       bottles: (await db.select().from(bottles)).length,
       aliases: (await db.select().from(bottleAliases)).length,
+      upcs: (await db.select().from(bottleUpcs)).length,
     };
     expect(after).toEqual(before);
+  });
+
+  it("seeds UPC mappings with valid check digits onto existing bottles", async () => {
+    const bottleIds = new Set((await db.select().from(bottles)).map((b) => b.id));
+    const upcRows = await db.select().from(bottleUpcs);
+    expect(upcRows.length).toBeGreaterThanOrEqual(30);
+    for (const row of upcRows) {
+      expect(isValidUpc(row.upc), `check digit of ${row.upc} (${row.bottleId})`).toBe(true);
+      expect(bottleIds.has(row.bottleId), `bottle of ${row.upc}`).toBe(true);
+      expect(row.source).toBe("seed");
+      expect(row.confirmedCount).toBe(0);
+    }
+    // No barcode maps to two bottles in the seed set.
+    const codes = upcRows.map((r) => r.upc);
+    expect(new Set(codes).size).toBe(codes.length);
+  });
+
+  it("spot-checks: scanning the Eagle Rare barcode resolves the bottle", async () => {
+    const matches = await resolveUpc(db, "080244002145");
+    expect(matches.map((m) => m.id)).toEqual(["eagle-rare-10"]);
+  });
+
+  it("re-seeding never clobbers a user-confirmed mapping", async () => {
+    // A user has confirmed the seeded Eagle Rare code 3 times.
+    await db
+      .update(bottleUpcs)
+      .set({ source: "user", confirmedCount: 3 })
+      .where(eq(bottleUpcs.upc, "080244002145"));
+    await seedDatabase(db);
+    const [row] = await db.select().from(bottleUpcs).where(eq(bottleUpcs.upc, "080244002145"));
+    expect(row.confirmedCount).toBe(3);
+    expect(row.source).toBe("user");
   });
 
   it("spot-checks: Ardbeg 10 is heavily peaty", async () => {

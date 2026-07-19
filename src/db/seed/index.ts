@@ -1,12 +1,13 @@
 import { sql } from "drizzle-orm";
 import type { DB } from "../index";
-import { bottleAliases, bottles, distilleries } from "../schema";
-import { SEED_BOTTLES, SEED_DISTILLERIES } from "./data";
+import { bottleAliases, bottles, bottleUpcs, distilleries } from "../schema";
+import { SEED_BOTTLES, SEED_BOTTLE_UPCS, SEED_DISTILLERIES } from "./data";
 
 export interface SeedResult {
   distilleries: number;
   bottles: number;
   aliases: number;
+  upcs: number;
 }
 
 const CHUNK_SIZE = 50;
@@ -117,9 +118,26 @@ export async function seedDatabase(db: DB): Promise<SeedResult> {
       });
   }
 
+  // Seed rows never overwrite user confirmations: on any conflict (same id
+  // from a re-seed, or a user-confirmed row already holding this upc+bottle)
+  // the existing row — and its confirmedCount — wins.
+  const upcRows = Object.entries(SEED_BOTTLE_UPCS).flatMap(([bottleId, codes]) =>
+    codes.map((upc) => ({
+      id: `${bottleId}--upc-${upc}`,
+      bottleId,
+      upc,
+      source: "seed" as const,
+      confirmedCount: 0,
+    })),
+  );
+  for (const batch of chunk(upcRows, CHUNK_SIZE)) {
+    await db.insert(bottleUpcs).values(batch).onConflictDoNothing();
+  }
+
   return {
     distilleries: SEED_DISTILLERIES.length,
     bottles: SEED_BOTTLES.length,
     aliases: aliasRows.length,
+    upcs: upcRows.length,
   };
 }

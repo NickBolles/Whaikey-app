@@ -5,7 +5,7 @@ import { getSessionUser } from "@/lib/session";
 import { getUserPalate } from "@/lib/palate-store";
 import { PalateWheel } from "@/components/palate-wheel";
 import { RecommendationRail } from "@/components/recommendation-rail";
-import { Search, Wine, GlassWater, MessageCircle, Star } from "lucide-react";
+import { Search, ScanLine, Wine, GlassWater, MessageCircle, Star } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -104,9 +104,10 @@ export default async function HomePage() {
         <Link href="/pour" className="btn-primary flex items-center justify-center gap-3 p-4 text-base">
           <GlassWater size={20} aria-hidden /> Log a pour
         </Link>
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 gap-3">
           {[
             { href: "/search", label: "Find a bottle", icon: Search },
+            { href: "/scan", label: "Scan bottles", icon: ScanLine },
             { href: "/bar", label: "My Bar", icon: Wine },
             { href: "/chat", label: "Concierge", icon: MessageCircle },
           ].map(({ href, label, icon: Icon }) => (

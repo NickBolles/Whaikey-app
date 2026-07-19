@@ -4,6 +4,12 @@ import type { BrowserContext } from "@playwright/test";
 export const E2E_SECRET = "e2e-secret";
 export const DEMO_USER_ID = "demo-user";
 export const DEMO_SESSION_TOKEN = "e2e-demo-session-token";
+/**
+ * Separate user for tests that MUTATE shelf data (e.g. the scan flow), so the
+ * demo collector's bar stays exactly as seeded for the visual baselines.
+ */
+export const SCAN_USER_ID = "scan-user";
+export const SCAN_SESSION_TOKEN = "e2e-scan-session-token";
 const SESSION_COOKIE = "better-auth.session_token";
 
 /**
@@ -27,8 +33,12 @@ export async function mintSessionCookieValue(
   return encodeURIComponent(`${token}.${b64}`);
 }
 
-export async function signIn(context: BrowserContext, baseURL: string): Promise<void> {
-  const value = await mintSessionCookieValue();
+export async function signIn(
+  context: BrowserContext,
+  baseURL: string,
+  token: string = DEMO_SESSION_TOKEN,
+): Promise<void> {
+  const value = await mintSessionCookieValue(token);
   const url = new URL(baseURL);
   await context.addCookies([
     {

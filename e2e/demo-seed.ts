@@ -1,6 +1,6 @@
 import type { DB } from "../src/db/index";
 import * as schema from "../src/db/schema";
-import { DEMO_SESSION_TOKEN, DEMO_USER_ID } from "./fixtures";
+import { DEMO_SESSION_TOKEN, DEMO_USER_ID, SCAN_SESSION_TOKEN, SCAN_USER_ID } from "./fixtures";
 
 const D = (iso: string) => new Date(iso);
 
@@ -23,6 +23,24 @@ export async function seedDemoUser(db: DB): Promise<void> {
     id: "demo-session",
     token: DEMO_SESSION_TOKEN,
     userId: DEMO_USER_ID,
+    expiresAt: D("2030-01-01T00:00:00Z"),
+    createdAt: D("2026-07-01T12:00:00Z"),
+    updatedAt: D("2026-07-01T12:00:00Z"),
+  });
+
+  // Empty-shelf user for mutating flows (scan e2e) — keeps Jordan's bar stable.
+  await db.insert(schema.user).values({
+    id: SCAN_USER_ID,
+    name: "Sam Scanner",
+    email: "scan@whaikey.app",
+    emailVerified: true,
+    createdAt: D("2026-01-15T12:00:00Z"),
+    updatedAt: D("2026-01-15T12:00:00Z"),
+  });
+  await db.insert(schema.session).values({
+    id: "scan-session",
+    token: SCAN_SESSION_TOKEN,
+    userId: SCAN_USER_ID,
     expiresAt: D("2030-01-01T00:00:00Z"),
     createdAt: D("2026-07-01T12:00:00Z"),
     updatedAt: D("2026-07-01T12:00:00Z"),
