@@ -100,6 +100,10 @@ test.describe("signed in (demo collector)", () => {
   test("home dashboard", async ({ page }) => {
     await page.goto("/");
     await expect(page.getByText(/Welcome back/i)).toBeVisible();
+    // Wait for the recommendation rails to resolve (match chips render on
+    // loaded cards) so the palate-driven content is captured, not a skeleton.
+    await expect(page.getByRole("heading", { name: "What to pour tonight" })).toBeVisible();
+    await expect(page.getByText(/% match/i).first()).toBeVisible();
     await settle(page);
     await expect(page).toHaveScreenshot(shot("home-dashboard"), { fullPage: true });
   });
@@ -138,6 +142,18 @@ test.describe("signed in (demo collector)", () => {
     await page.getByText(/Eagle Rare 10/i).first().click();
     await settle(page);
     await expect(page).toHaveScreenshot(shot("pour-step-rate"), { fullPage: true });
+  });
+
+  test("pour flow: freeform + voice note capture", async ({ page }) => {
+    await page.goto("/pour");
+    await settle(page);
+    await page.getByText(/Eagle Rare 10/i).first().click();
+    // Expand the optional tasting-notes section to reveal freeform + voice
+    // capture (the AI-assisted note-capture surface).
+    await page.getByRole("button", { name: /Tasting notes/i }).click();
+    await expect(page.getByRole("button", { name: /Auto-fill|Extract/i })).toBeVisible();
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("pour-note-capture"), { fullPage: true });
   });
 
   test("history journal", async ({ page }) => {

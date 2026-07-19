@@ -1,6 +1,5 @@
 import { createRequire } from "node:module";
 import fs from "node:fs";
-import process from "node:process";
 import path from "node:path";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import { drizzle as drizzlePostgres } from "drizzle-orm/postgres-js";
@@ -23,11 +22,7 @@ import * as schema from "./schema";
  */
 export type DB = PgDatabase<PgQueryResultHKT, typeof schema>;
 
-// Anchored to the working directory, not import.meta.url: Playwright's e2e
-// global-setup imports this file through a CJS transpile, where `import.meta`
-// is a syntax error. Resolution only needs to find the project's node_modules,
-// which the cwd anchor does in every environment that reaches the PGlite branch.
-const nodeRequire = createRequire(path.join(process.cwd(), "package.json"));
+const nodeRequire = createRequire(import.meta.url);
 
 /** A hosted Postgres connection string vs. a local PGlite file / in-memory DB. */
 export function isPostgresUrl(url: string): boolean {

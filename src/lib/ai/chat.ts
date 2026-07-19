@@ -51,6 +51,36 @@ interface RunChatOpts {
   maxIterations?: number;
 }
 
+/** Streamed events emitted by runChatStream, consumed by the route/client. */
+export type ChatStreamEvent =
+  | { type: "session"; sessionId: string }
+  | { type: "text"; text: string }
+  | { type: "tool"; name: string }
+  | { type: "done"; sessionId: string; message: string; toolCalls: ChatToolCall[] };
+
+/** Resolve an existing (owned) session or create a titled new one. */
+async function resolveOrCreateSession(
+  db: DB,
+  userId: string,
+  sessionId: string | null,
+  trimmed: string,
+): Promise<schema.ChatSession> {
+  if (sessionId) {
+    const [existing] = await db
+      .select()
+      .from(schema.chatSessions)
+      .where(and(eq(schema.chatSessions.id, sessionId), eq(schema.chatSessions.userId, userId)))
+      .limit(1);
+    if (!existing) throw new ChatSessionNotFoundError();
+    return existing;
+  }
+  const [created] = await db
+    .insert(schema.chatSessions)
+    .values({ id: randomUUID(), userId, title: trimmed.slice(0, 60) })
+    .returning();
+  return created;
+}
+
 /**
  * Run one user turn of the concierge chat: create the session if needed,
  * persist the user message, run the agentic tool loop, persist the assistant
@@ -67,23 +97,7 @@ export async function runChat(
   const maxIterations = opts?.maxIterations ?? MAX_TOOL_ITERATIONS;
   const trimmed = userMessage.trim();
 
-  // Resolve or create the session.
-  let session: schema.ChatSession;
-  if (sessionId) {
-    const [existing] = await db
-      .select()
-      .from(schema.chatSessions)
-      .where(and(eq(schema.chatSessions.id, sessionId), eq(schema.chatSessions.userId, userId)))
-      .limit(1);
-    if (!existing) throw new ChatSessionNotFoundError();
-    session = existing;
-  } else {
-    const [created] = await db
-      .insert(schema.chatSessions)
-      .values({ id: randomUUID(), userId, title: trimmed.slice(0, 60) })
-      .returning();
-    session = created;
-  }
+  const session = await resolveOrCreateSession(db, userId, sessionId, trimmed);
 
   // Prior history for model context (text only; tool traces are display-only).
   const history = await db
@@ -162,6 +176,190 @@ export async function runChat(
     .where(eq(schema.chatSessions.id, session.id));
 
   return { sessionId: session.id, message: finalText, toolCalls };
+}
+
+// ---------------------------------------------------------------------------
+// Streaming turn
+// ---------------------------------------------------------------------------
+
+/** Minimal structural view of the Anthropic raw streaming events we consume. */
+type RawStreamEvent =
+  | { type: "message_start"; message?: unknown }
+  | {
+      type: "content_block_start";
+      index: number;
+      content_block: { type: string; id?: string; name?: string };
+    }
+  | {
+      type: "content_block_delta";
+      index: number;
+      delta: { type: string; text?: string; partial_json?: string };
+    }
+  | { type: "content_block_stop"; index: number }
+  | { type: "message_delta"; delta: { stop_reason?: string | null }; usage?: unknown }
+  | { type: "message_stop" };
+
+type AssembledBlock =
+  | { type: "text"; text: string }
+  | { type: "tool_use"; id: string; name: string; partialJson: string };
+
+/**
+ * Streaming variant of runChat: identical session/persistence/tool-loop
+ * semantics, but each model turn is consumed as a token stream so callers can
+ * render incrementally. Emits `session` once the id is known, `text` per token
+ * delta, `tool` when a tool is dispatched, and `done` at the end.
+ */
+export async function* runChatStream(
+  db: DB,
+  userId: string,
+  sessionId: string | null,
+  userMessage: string,
+  opts?: RunChatOpts,
+): AsyncGenerator<ChatStreamEvent> {
+  const anthropic = opts?.client ?? getAnthropic();
+  const maxIterations = opts?.maxIterations ?? MAX_TOOL_ITERATIONS;
+  const trimmed = userMessage.trim();
+
+  // Resolve/create the session BEFORE the first yield so a bad sessionId
+  // surfaces as a thrown ChatSessionNotFoundError (the route turns it into 404).
+  const session = await resolveOrCreateSession(db, userId, sessionId, trimmed);
+  yield { type: "session", sessionId: session.id };
+
+  // Prior history for model context (text only; tool traces are display-only).
+  const history = await db
+    .select()
+    .from(schema.chatMessages)
+    .where(eq(schema.chatMessages.sessionId, session.id))
+    .orderBy(asc(schema.chatMessages.createdAt));
+
+  // Persist the user message.
+  await db.insert(schema.chatMessages).values({
+    id: randomUUID(),
+    sessionId: session.id,
+    role: "user",
+    content: trimmed,
+  });
+
+  const messages: Anthropic.Messages.MessageParam[] = [
+    ...history.map((m) => ({ role: m.role, content: m.content })),
+    { role: "user" as const, content: trimmed },
+  ];
+
+  const toolCalls: ChatToolCall[] = [];
+  let finalText = "";
+
+  for (let iteration = 0; ; iteration++) {
+    const stream = (await anthropic.messages.create({
+      model: chatModel(),
+      max_tokens: 8192,
+      system: SYSTEM_PROMPT,
+      tools: TOOL_DEFINITIONS,
+      messages,
+      stream: true,
+    })) as unknown as AsyncIterable<RawStreamEvent>;
+
+    const blocks: AssembledBlock[] = [];
+    let stopReason: string | null = null;
+
+    for await (const event of stream) {
+      switch (event.type) {
+        case "content_block_start": {
+          const cb = event.content_block;
+          if (cb.type === "text") {
+            blocks[event.index] = { type: "text", text: "" };
+          } else if (cb.type === "tool_use") {
+            blocks[event.index] = {
+              type: "tool_use",
+              id: cb.id ?? "",
+              name: cb.name ?? "",
+              partialJson: "",
+            };
+          }
+          break;
+        }
+        case "content_block_delta": {
+          const block = blocks[event.index];
+          if (event.delta.type === "text_delta" && block?.type === "text") {
+            const text = event.delta.text ?? "";
+            block.text += text;
+            if (text) yield { type: "text", text };
+          } else if (event.delta.type === "input_json_delta" && block?.type === "tool_use") {
+            block.partialJson += event.delta.partial_json ?? "";
+          }
+          break;
+        }
+        case "message_delta": {
+          stopReason = event.delta?.stop_reason ?? stopReason;
+          break;
+        }
+        default:
+          break;
+      }
+    }
+
+    const assembled = blocks.filter(Boolean);
+    const texts = assembled.filter((b): b is Extract<AssembledBlock, { type: "text" }> => b.type === "text");
+    if (texts.length > 0) finalText = texts.map((b) => b.text).join("\n");
+
+    const toolUses = assembled.filter(
+      (b): b is Extract<AssembledBlock, { type: "tool_use" }> => b.type === "tool_use",
+    );
+
+    if (stopReason !== "tool_use" || toolUses.length === 0 || iteration >= maxIterations) {
+      break;
+    }
+
+    // Rebuild the assistant turn's content blocks to feed the next request.
+    const assistantContent: Anthropic.Messages.ContentBlockParam[] = assembled.map((b) => {
+      if (b.type === "text") return { type: "text", text: b.text };
+      let input: unknown = {};
+      try {
+        input = b.partialJson ? JSON.parse(b.partialJson) : {};
+      } catch {
+        input = {};
+      }
+      return { type: "tool_use", id: b.id, name: b.name, input };
+    });
+    messages.push({ role: "assistant", content: assistantContent });
+
+    const results: Anthropic.Messages.ToolResultBlockParam[] = [];
+    for (const toolUse of toolUses) {
+      let input: unknown = {};
+      try {
+        input = toolUse.partialJson ? JSON.parse(toolUse.partialJson) : {};
+      } catch {
+        input = {};
+      }
+      yield { type: "tool", name: toolUse.name };
+      const result = await executeTool(db, userId, toolUse.name, input);
+      toolCalls.push({ name: toolUse.name, input, result });
+      results.push({
+        type: "tool_result",
+        tool_use_id: toolUse.id,
+        content: JSON.stringify(result),
+      });
+    }
+    messages.push({ role: "user", content: results });
+  }
+
+  if (!finalText) {
+    finalText = "Sorry — I couldn't finish that request. Could you rephrase it?";
+  }
+
+  await db.insert(schema.chatMessages).values({
+    id: randomUUID(),
+    sessionId: session.id,
+    role: "assistant",
+    content: finalText,
+    toolCalls: toolCalls.length > 0 ? toolCalls : null,
+  });
+
+  await db
+    .update(schema.chatSessions)
+    .set({ updatedAt: new Date() })
+    .where(eq(schema.chatSessions.id, session.id));
+
+  yield { type: "done", sessionId: session.id, message: finalText, toolCalls };
 }
 
 /** List the user's chat sessions, most recently active first. */

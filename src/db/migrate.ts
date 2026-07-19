@@ -4,9 +4,7 @@ import { migrate as migratePostgres } from "drizzle-orm/postgres-js/migrator";
 import { createDb, isPostgresUrl, resolveDbUrl, type DB } from "./index";
 
 const MIGRATIONS_FOLDER = path.join(process.cwd(), "src", "db", "migrations");
-// cwd-anchored (not import.meta.url) so Playwright's CJS transpile of the e2e
-// global-setup can load this file — see the matching note in ./index.ts.
-const nodeRequire = createRequire(path.join(process.cwd(), "package.json"));
+const nodeRequire = createRequire(import.meta.url);
 
 /**
  * Apply migrations against whichever driver `db` is — postgres-js in
