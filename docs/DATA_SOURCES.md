@@ -27,14 +27,15 @@ User submissions             Open Food Facts (fallback)   Wine-Searcher/Whiskyst
 ### 2.1 TTB COLA Public Registry ⭐ — the free US backbone
 Every US Certificate of Label Approval since 1999: brand name, fanciful name, class/type ("straight bourbon whisky"), origin, applicant, approval date, status, **and the label images themselves**. New approvals appear ~48h after issuance.
 
-- **Access:** free public search UI + CSV-style extract downloads (no full official bulk dump/API). Commercial repackager **COLA Cloud** offers 2.9M+ records, **5M+ label images, 575k+ extracted UPC/EAN barcodes**, AI-extracted ABV/volume, via REST/bulk (~2,500 new approvals/week); pricing by contact *(unverified)*.
+- **Access:** free public search UI + CSV-style extract downloads (no full official bulk dump/API). Commercial repackager **COLA Cloud** offers 2.9M+ records, **5M+ label images, 575k+ extracted UPC/EAN barcodes**, AI-extracted ABV/volume, via REST/bulk (~2,500 new approvals/week); pricing by contact *(unverified)*. **Implemented:** `pnpm ingest cola --since <date>` (src/lib/ingest/cola.ts) pulls whisky-class approvals via the documented public-search → Save-Search-Results CSV flow, month-chunked around the 500-row cap. Names + categories only (no ABV/price/UPC on COLAs). The registry has scheduled maintenance windows (Sundays) during which it returns 503.
 - **Licensing:** US government public record — free, no copyright on the records. Label *artwork* copyright stays with brands; identification use is standard industry practice but **get counsel review** before bulk redistribution.
 - **Gotchas:** COLAs are label approvals, not products — one bottle can have many COLAs and some approved labels never ship (needs a dedupe/clustering pipeline). US-only. No prices.
 
 ### 2.2 Iowa Liquor open data ⭐ — clean US SKU catalog + price baseline
 - **Iowa Liquor Products** dataset: a clean product catalog — item number, description, category, vendor, proof, identifiers, list prices. Ideal seed for mainstream US brands.
-- **Iowa Liquor Sales** dataset: ~30M+ wholesale purchase rows since 2012 with **state bottle cost and state bottle retail**, store geography, volumes. Monthly updates. Free via Socrata SODA API, CSV, and BigQuery public datasets.
-- **Gotchas:** Iowa assortment only (mainstream; few imports/allocated bottles); ALL-CAPS abbreviated names need normalization; wholesale-oriented pricing.
+- **Iowa Liquor Sales** dataset: ~30M+ wholesale purchase rows since 2012 with **state bottle cost and state bottle retail**, store geography, volumes. Monthly updates.
+- **⚠️ Platform migration (July 2026):** data.iowa.gov moved off Socrata to the new **Iowa Data Hub**; the old `/resource/<id>.json` SODA endpoints are dead. Products now downloads from `https://idh-be.iowa.gov/api/v1/datasets/1029/rows.json` (a ZIP containing NDJSON; CC-BY 4.0). **Implemented:** `pnpm ingest iowa` (src/lib/ingest/iowa.ts) syncs the whiskey categories into the catalog — names, ABV, 750ml state retail price, and UPCs — deduped against the curated seed.
+- **Gotchas:** Iowa assortment only (mainstream; few imports/allocated bottles); names carry program noise (barrel-pick/allocation prefixes, "Mini"/"PET"/"DISCO" suffixes — handled in src/lib/ingest/normalize.ts); category buckets are shelving, not taxonomy (Japanese malts under "Scotch Whiskies"); wholesale-oriented pricing.
 
 ### 2.3 Wikidata / DBpedia — distillery reference layer
 Distilleries with country, region, owner, founding date, coordinates, photos. **CC0 (no attribution needed)** via SPARQL. Good for notable distilleries worldwide; weak on craft/new ones and bottle-level data. Use for distillery pages (map, history), not the catalog.
