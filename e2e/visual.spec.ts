@@ -61,6 +61,32 @@ test.describe("signed out", () => {
     await settle(page);
     await expect(page).toHaveScreenshot(shot("bottle-detail-eagle-rare"), { fullPage: true });
   });
+
+  test("learn hub", async ({ page }) => {
+    await page.goto("/learn");
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("learn-hub"), { fullPage: true });
+  });
+
+  test("learn lesson (cask science)", async ({ page }) => {
+    await page.goto("/learn/barrel-science");
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("learn-lesson"), { fullPage: true });
+  });
+
+  test("flavor explorer (idle)", async ({ page }) => {
+    await page.goto("/learn/flavors");
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("learn-flavors"), { fullPage: true });
+  });
+
+  test("flavor explorer (family selected)", async ({ page }) => {
+    await page.goto("/learn/flavors");
+    await page.getByRole("button", { name: "Peaty / Smoky" }).click();
+    await expect(page.getByText(/Where it comes from/i)).toBeVisible();
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("learn-flavors-selected"), { fullPage: true });
+  });
 });
 
 test.describe("signed in (demo collector)", () => {

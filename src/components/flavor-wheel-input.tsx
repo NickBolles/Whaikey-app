@@ -1,7 +1,16 @@
 "use client";
 
-import { useMemo, useState, type KeyboardEvent } from "react";
+import { useMemo, useState } from "react";
 import { FLAVOR_WHEEL } from "@/lib/flavor-wheel";
+import {
+  SERIF,
+  arcPath,
+  labelTransform,
+  polar,
+  pressableKeys,
+  shortLabel,
+  warmify,
+} from "@/components/wheel-geometry";
 
 export interface FlavorWheelInputProps {
   /** {leafId: intensity 1-3} */
@@ -18,62 +27,6 @@ const R_LEAF_IN = 116;
 const R_LEAF_OUT = 144; // grows +4 per intensity step, max 156
 const WEDGE_LABEL_R = (R_WEDGE_IN + R_WEDGE_OUT) / 2;
 const LEAF_LABEL_R = (R_LEAF_IN + R_LEAF_OUT) / 2;
-
-const SERIF = "var(--font-fraunces), Georgia, serif";
-
-/** Nudge a wedge hue toward the warm brass palette so the wheel sits in the room. */
-function warmify(hex: string): string {
-  const warm = [185, 141, 79]; // brass midpoint (#b98d4f)
-  const n = parseInt(hex.slice(1), 16);
-  const rgb = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-  const mixed = rgb.map((c, i) => Math.round(c * 0.78 + warm[i] * 0.22));
-  return `#${mixed.map((c) => c.toString(16).padStart(2, "0")).join("")}`;
-}
-
-function polar(r: number, deg: number): { x: number; y: number } {
-  const a = (deg * Math.PI) / 180;
-  return { x: C + r * Math.sin(a), y: C - r * Math.cos(a) };
-}
-
-/** Donut-segment path between two radii, angles in degrees clockwise from 12 o'clock. */
-function arcPath(rIn: number, rOut: number, startDeg: number, endDeg: number, padDeg = 1.2): string {
-  const a0 = startDeg + padDeg;
-  const a1 = endDeg - padDeg;
-  const p1 = polar(rOut, a0);
-  const p2 = polar(rOut, a1);
-  const p3 = polar(rIn, a1);
-  const p4 = polar(rIn, a0);
-  const large = a1 - a0 > 180 ? 1 : 0;
-  const f = (n: number) => n.toFixed(2);
-  return [
-    `M ${f(p1.x)} ${f(p1.y)}`,
-    `A ${rOut} ${rOut} 0 ${large} 1 ${f(p2.x)} ${f(p2.y)}`,
-    `L ${f(p3.x)} ${f(p3.y)}`,
-    `A ${rIn} ${rIn} 0 ${large} 0 ${f(p4.x)} ${f(p4.y)}`,
-    "Z",
-  ].join(" ");
-}
-
-/** Tangential label transform, flipped on the bottom half so text stays upright. */
-function labelTransform(r: number, deg: number): string {
-  const { x, y } = polar(r, deg);
-  const norm = ((deg % 360) + 360) % 360;
-  const rot = norm > 90 && norm < 270 ? deg + 180 : deg;
-  return `translate(${x.toFixed(2)} ${y.toFixed(2)}) rotate(${rot.toFixed(2)})`;
-}
-
-function shortLabel(label: string): string {
-  return label.split(" / ")[0];
-}
-
-function pressableKeys(handler: () => void) {
-  return (e: KeyboardEvent<SVGGElement>) => {
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      handler();
-    }
-  };
-}
 
 /**
  * The Whaikey flavor wheel. Inner ring: the 8 core wedges. Tap a wedge and
@@ -145,7 +98,7 @@ export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
           const count = wedgeCounts.get(wedge.id) ?? 0;
           const color = warmify(wedge.color);
           const rOut = isSelected ? R_WEDGE_OUT_SELECTED : R_WEDGE_OUT;
-          const badge = polar(rOut - 7, mid);
+          const badge = polar(C, rOut - 7, mid);
           return (
             <g
               key={wedge.id}
@@ -158,7 +111,7 @@ export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
               className="cursor-pointer focus:outline-none"
             >
               <path
-                d={arcPath(R_WEDGE_IN, rOut, start, end)}
+                d={arcPath(C, R_WEDGE_IN, rOut, start, end)}
                 fill={color}
                 fillOpacity={isSelected ? 1 : dimmed ? 0.28 : 0.78}
                 stroke={isSelected ? "var(--foreground)" : "var(--border)"}
@@ -166,7 +119,7 @@ export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
                 strokeWidth={isSelected ? 1 : 0.75}
               />
               <text
-                transform={labelTransform(WEDGE_LABEL_R, mid)}
+                transform={labelTransform(C, WEDGE_LABEL_R, mid)}
                 textAnchor="middle"
                 dominantBaseline="central"
                 fontSize={11}
@@ -206,7 +159,7 @@ export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
             const mid = start + span / 2;
             const intensity = value[leaf.id] ?? 0;
             const rOut = R_LEAF_OUT + intensity * 4;
-            const badge = polar(rOut - 9, mid);
+            const badge = polar(C, rOut - 9, mid);
             const color = warmify(selectedWedge.color);
             return (
               <g
@@ -220,7 +173,7 @@ export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
                 className="cursor-pointer focus:outline-none"
               >
                 <path
-                  d={arcPath(R_LEAF_IN, rOut, start, end, Math.min(1.2, span / 10))}
+                  d={arcPath(C, R_LEAF_IN, rOut, start, end, Math.min(1.2, span / 10))}
                   fill={color}
                   fillOpacity={intensity === 0 ? 0.26 : 0.42 + 0.19 * intensity}
                   stroke={intensity > 0 ? "var(--foreground)" : "var(--border)"}
@@ -228,7 +181,7 @@ export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
                   strokeWidth={intensity > 0 ? 1 : 0.75}
                 />
                 <text
-                  transform={labelTransform(LEAF_LABEL_R, mid)}
+                  transform={labelTransform(C, LEAF_LABEL_R, mid)}
                   textAnchor="middle"
                   dominantBaseline="central"
                   fontSize={9}
