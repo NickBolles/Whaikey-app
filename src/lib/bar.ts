@@ -67,6 +67,54 @@ export function toUserBottleValues(
 }
 
 // ---------------------------------------------------------------------------
+// Add / update a shelf row (shared by /api/user-bottles and the scan flow)
+// ---------------------------------------------------------------------------
+
+/**
+ * Upsert by (userId, bottleId): inserts with own-defaults (sealed, full, one
+ * bottle), or updates the existing row's relationship + provided fields.
+ */
+export async function upsertUserBottle(
+  db: DB,
+  userId: string,
+  input: UserBottleCreateInput,
+): Promise<{ row: schema.UserBottle; created: boolean }> {
+  const values = toUserBottleValues(input);
+  const existing = await db.query.userBottles.findFirst({
+    where: and(
+      eq(schema.userBottles.userId, userId),
+      eq(schema.userBottles.bottleId, input.bottleId),
+    ),
+  });
+
+  if (existing) {
+    const [row] = await db
+      .update(schema.userBottles)
+      .set({ relationship: input.relationship, ...values, updatedAt: new Date() })
+      .where(eq(schema.userBottles.id, existing.id))
+      .returning();
+    return { row, created: false };
+  }
+
+  const ownDefaults =
+    input.relationship === "own"
+      ? { status: "sealed" as BottleStatus, fillLevel: 100, quantity: 1 }
+      : {};
+  const [row] = await db
+    .insert(schema.userBottles)
+    .values({
+      id: crypto.randomUUID(),
+      userId,
+      bottleId: input.bottleId,
+      relationship: input.relationship,
+      ...ownDefaults,
+      ...values,
+    })
+    .returning();
+  return { row, created: true };
+}
+
+// ---------------------------------------------------------------------------
 // Inventory queries
 // ---------------------------------------------------------------------------
 

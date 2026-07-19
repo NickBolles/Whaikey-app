@@ -156,6 +156,37 @@ export const bottleAliases = pgTable(
   (t) => [index("bottle_aliases_bottle_idx").on(t.bottleId), index("bottle_aliases_alias_idx").on(t.alias)],
 );
 
+export const UPC_SOURCES = ["seed", "user"] as const;
+export type UpcSource = (typeof UPC_SOURCES)[number];
+
+/**
+ * UPC/EAN barcode → bottle mappings, resolved own-DB-first at scan time
+ * (docs/DATA_SOURCES.md §3). The same barcode can legitimately map to more
+ * than one bottle (producers reuse UPCs across proofs/batches/years), so
+ * (upc, bottleId) is the unique key and resolution ranks by confirmedCount.
+ * Every user confirmation increments the count — scans convert third-party
+ * lookups into first-party data we keep.
+ */
+export const bottleUpcs = pgTable(
+  "bottle_upcs",
+  {
+    id: id(),
+    /** Normalized GTIN digits (see normalizeUpc in src/lib/scan.ts). */
+    upc: text("upc").notNull(),
+    bottleId: text("bottle_id")
+      .notNull()
+      .references(() => bottles.id, { onDelete: "cascade" }),
+    source: text("source").$type<UpcSource>().notNull().default("user"),
+    confirmedCount: integer("confirmed_count").notNull().default(1),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("bottle_upcs_upc_bottle_uq").on(t.upc, t.bottleId),
+    index("bottle_upcs_upc_idx").on(t.upc),
+  ],
+);
+
 export const RELATIONSHIPS = ["own", "tried", "wishlist"] as const;
 export type Relationship = (typeof RELATIONSHIPS)[number];
 export const BOTTLE_STATUSES = ["sealed", "open", "finished", "sold", "traded", "gifted"] as const;
@@ -323,6 +354,7 @@ export const priceHistory = pgTable(
 );
 
 export type User = typeof user.$inferSelect;
+export type BottleUpc = typeof bottleUpcs.$inferSelect;
 export type Distillery = typeof distilleries.$inferSelect;
 export type Bottle = typeof bottles.$inferSelect;
 export type NewBottle = typeof bottles.$inferInsert;

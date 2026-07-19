@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import {
   BOTTLE_STATUSES,
@@ -8,7 +8,7 @@ import {
   type Relationship,
 } from "@/db/schema";
 import { requireUser, withErrorHandling } from "@/lib/session";
-import { listUserBottles, toUserBottleValues, userBottleCreateSchema } from "@/lib/bar";
+import { listUserBottles, upsertUserBottle, userBottleCreateSchema } from "@/lib/bar";
 
 export const dynamic = "force-dynamic";
 
@@ -64,38 +64,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Bottle not found" }, { status: 404 });
     }
 
-    const values = toUserBottleValues(input);
-    const existing = await db.query.userBottles.findFirst({
-      where: and(
-        eq(schema.userBottles.userId, user.id),
-        eq(schema.userBottles.bottleId, input.bottleId),
-      ),
-    });
-
-    if (existing) {
-      const [row] = await db
-        .update(schema.userBottles)
-        .set({ relationship: input.relationship, ...values, updatedAt: new Date() })
-        .where(eq(schema.userBottles.id, existing.id))
-        .returning();
-      return NextResponse.json(row, { status: 200 });
-    }
-
-    const ownDefaults =
-      input.relationship === "own"
-        ? { status: "sealed" as BottleStatus, fillLevel: 100, quantity: 1 }
-        : {};
-    const [row] = await db
-      .insert(schema.userBottles)
-      .values({
-        id: crypto.randomUUID(),
-        userId: user.id,
-        bottleId: input.bottleId,
-        relationship: input.relationship,
-        ...ownDefaults,
-        ...values,
-      })
-      .returning();
-    return NextResponse.json(row, { status: 201 });
+    const { row, created } = await upsertUserBottle(db, user.id, input);
+    return NextResponse.json(row, { status: created ? 201 : 200 });
   });
 }
