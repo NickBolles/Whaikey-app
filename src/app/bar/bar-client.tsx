@@ -3,8 +3,11 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { Hourglass, Plus } from "lucide-react";
-import type { BarRow } from "@/lib/bar";
+import type { BarFlavorHeat, BarRow } from "@/lib/bar";
+import { FLAVOR_WHEEL } from "@/lib/flavor-wheel";
 import { FillGauge } from "@/components/fill-gauge";
+import { FlavorHeatLegend, FlavorWheel } from "@/components/flavor-wheel";
+import { FlavorRadar } from "@/components/flavor-radar";
 
 /** BarRow with dates possibly serialized to strings (API JSON responses). */
 export type Row = Omit<BarRow, "createdAt" | "updatedAt" | "purchaseDate"> & {
@@ -38,7 +41,18 @@ function statusChipClass(status: string | null): string {
   }
 }
 
-export function BarClient({ initialRows }: { initialRows: Row[] }) {
+function wedgeLabel(wedgeId: string): string {
+  const wedge = FLAVOR_WHEEL.find((w) => w.id === wedgeId);
+  return wedge ? wedge.label.split(" / ")[0] : wedgeId;
+}
+
+export function BarClient({
+  initialRows,
+  flavorHeat,
+}: {
+  initialRows: Row[];
+  flavorHeat: BarFlavorHeat;
+}) {
   const [rows, setRows] = useState<Row[]>(initialRows);
   const [tab, setTab] = useState<Tab>("bar");
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -191,6 +205,36 @@ export function BarClient({ initialRows }: { initialRows: Row[] }) {
             <StatCard value={money(stats.estValue)} label="est. value" />
           </section>
 
+          <section aria-label="Bar flavor map">
+            <h2 className="section-label mb-3">Bar flavor map</h2>
+            {flavorHeat.hasHeat ? (
+              <div className="card p-4 flex flex-col items-center gap-3">
+                <FlavorWheel
+                  wedgeHeat={flavorHeat.wedges}
+                  leafHeat={flavorHeat.leaves}
+                  caption="Your bar"
+                  subCaption={
+                    flavorHeat.topWedgeIds.length > 0
+                      ? `leans ${flavorHeat.topWedgeIds.slice(0, 2).map(wedgeLabel).join(" & ").toLowerCase()}`
+                      : undefined
+                  }
+                />
+                <FlavorHeatLegend leafHeat={flavorHeat.leaves} />
+              </div>
+            ) : (
+              <div className="card p-6 text-center flex flex-col items-center gap-2">
+                <div aria-hidden className="text-3xl">
+                  🎯
+                </div>
+                <p className="font-display text-base font-semibold">No flavor map yet</p>
+                <p className="text-sm text-muted max-w-[30ch] leading-relaxed">
+                  Add bottles and tag flavors on your pours — the wheel heats up where your bar
+                  leans.
+                </p>
+              </div>
+            )}
+          </section>
+
           {killList.length > 0 && (
             <section
               aria-label="Kill list"
@@ -237,6 +281,11 @@ export function BarClient({ initialRows }: { initialRows: Row[] }) {
                         {row.bottle.distilleryName ?? row.bottle.category}
                         {row.quantity > 1 ? ` · ×${row.quantity}` : ""}
                       </span>
+                      {row.notes && (
+                        <span className="block text-xs text-foreground/60 font-display italic truncate mt-1">
+                          “{row.notes}”
+                        </span>
+                      )}
                     </span>
                     <span className="flex flex-col items-end gap-1.5 shrink-0">
                       <span
@@ -357,6 +406,7 @@ function RowDetails({
   const [price, setPrice] = useState(row.purchasePrice?.toString() ?? "");
   const [store, setStore] = useState(row.store ?? "");
   const [location, setLocation] = useState(row.location ?? "");
+  const [notes, setNotes] = useState(row.notes ?? "");
 
   function saveDetails() {
     const parsed = price.trim() === "" ? null : Number.parseFloat(price);
@@ -364,8 +414,12 @@ function RowDetails({
       purchasePrice: parsed != null && Number.isFinite(parsed) && parsed >= 0 ? parsed : null,
       store: store.trim() === "" ? null : store.trim(),
       location: location.trim() === "" ? null : location.trim(),
+      notes: notes.trim() === "" ? null : notes.trim(),
     });
   }
+
+  const hasProfile =
+    row.bottle.flavorProfile != null && Object.keys(row.bottle.flavorProfile).length > 0;
 
   const inputClass =
     "rounded-xl bg-surface-raised/70 border border-border-subtle px-3 py-2.5 text-sm w-full";
@@ -396,6 +450,15 @@ function RowDetails({
           Remove
         </button>
       </div>
+
+      {hasProfile && (
+        <div>
+          <div className="section-label mb-2">Flavor profile</div>
+          <div className="flex justify-center">
+            <FlavorRadar profile={row.bottle.flavorProfile} size={230} />
+          </div>
+        </div>
+      )}
 
       {row.status === "open" && (
         <div>
@@ -449,12 +512,32 @@ function RowDetails({
           />
         </label>
       </div>
-      <button
-        onClick={saveDetails}
-        className="btn-secondary self-start min-h-11 px-4 text-sm font-medium"
-      >
-        Save details
-      </button>
+
+      <label className="text-xs text-muted flex flex-col gap-1.5">
+        Your notes
+        <textarea
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          rows={2}
+          className={`${inputClass} resize-y min-h-[44px]`}
+          placeholder="Great with a drop of water…"
+        />
+      </label>
+
+      <div className="flex items-center justify-between gap-3">
+        <button
+          onClick={saveDetails}
+          className="btn-secondary min-h-11 px-4 text-sm font-medium"
+        >
+          Save details
+        </button>
+        <Link
+          href={`/bottles/${row.bottleId}`}
+          className="min-h-11 inline-flex items-center text-sm font-medium text-accent hover:underline"
+        >
+          Bottle &amp; tasting notes →
+        </Link>
+      </div>
     </div>
   );
 }
