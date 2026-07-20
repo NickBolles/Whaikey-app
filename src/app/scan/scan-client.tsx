@@ -18,6 +18,15 @@ import { RELATIONSHIPS, type Relationship } from "@/db/schema";
 import { isValidUpc, normalizeUpc } from "@/lib/upc";
 import type { BottleSearchResult } from "@/lib/ai/tools";
 import { CategoryChip } from "@/components/category-chip";
+import {
+  captureWarning,
+  frameStats,
+  guidanceFor,
+  scaleBoxToCover,
+  type Box,
+  type FrameStats,
+  type Guidance,
+} from "./guidance";
 
 /**
  * Rapid-fire scanning built around an async capture queue: every barcode hit,
@@ -70,6 +79,8 @@ interface Capture {
   mediaType: string;
   /** When set, the confirmed photo resolves THIS item instead of enqueueing a new one. */
   forItemId: string | null;
+  /** On-device quality verdict shown in the confirm sheet (null = looks fine). */
+  warning: string | null;
 }
 
 const RELATIONSHIP_LABELS: Record<Relationship, string> = {
@@ -81,6 +92,7 @@ const RELATIONSHIP_LABELS: Record<Relationship, string> = {
 // Minimal typings for the (Chromium-only, for now) shape-detection API.
 interface DetectedBarcode {
   rawValue: string;
+  boundingBox?: Box;
 }
 interface BarcodeDetectorLike {
   detect(source: CanvasImageSource): Promise<DetectedBarcode[]>;
@@ -114,12 +126,19 @@ export function ScanClient() {
   const [manualOpen, setManualOpen] = useState(false);
   const [manualCode, setManualCode] = useState("");
   const [manualError, setManualError] = useState<string | null>(null);
+  /** Live on-device viewfinder guidance (frame analysis, no network). */
+  const [guidance, setGuidance] = useState<Guidance | null>(null);
+  /** Highlight box over the detected barcode, in element coordinates. */
+  const [lockBox, setLockBox] = useState<Box | null>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const fileForItemRef = useRef<string | null>(null);
   const lastCodeRef = useRef<{ code: string; at: number } | null>(null);
+  const lastDetectionAtRef = useRef<number | null>(null);
+  const lockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sampleCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Mirrors for the detector loop, which runs outside React's render cycle.
   const pausedRef = useRef(false);
@@ -327,10 +346,39 @@ export function ScanClient() {
     [patchItem, processLabelItem],
   );
 
-  // Camera + barcode detection loop.
+  /** Sample a tiny downscaled frame for on-device brightness/sharpness stats. */
+  const sampleFrameStats = useCallback((video: HTMLVideoElement): FrameStats | null => {
+    try {
+      if (!sampleCanvasRef.current) {
+        sampleCanvasRef.current = document.createElement("canvas");
+        sampleCanvasRef.current.width = 64;
+        sampleCanvasRef.current.height = 48;
+      }
+      const canvas = sampleCanvasRef.current;
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
+      if (!ctx) return null;
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      return frameStats(img.data, canvas.width, canvas.height);
+    } catch {
+      return null;
+    }
+  }, []);
+
+  /** Flash the detected barcode's outline over the viewfinder for a beat. */
+  const flashLockBox = useCallback((raw: Box, video: HTMLVideoElement) => {
+    setLockBox(
+      scaleBoxToCover(raw, video.videoWidth, video.videoHeight, video.clientWidth, video.clientHeight),
+    );
+    if (lockTimerRef.current) clearTimeout(lockTimerRef.current);
+    lockTimerRef.current = setTimeout(() => setLockBox(null), 900);
+  }, []);
+
+  // Camera + barcode detection loop with live on-device guidance.
   useEffect(() => {
     let cancelled = false;
     let interval: ReturnType<typeof setInterval> | null = null;
+    let tick = 0;
 
     (async () => {
       const Detector = barcodeDetectorCtor();
@@ -353,20 +401,47 @@ export function ScanClient() {
         video.srcObject = stream;
         await video.play();
         setCameraState("on");
+        lastDetectionAtRef.current = Date.now(); // don't nag "move closer" instantly
 
         if (!Detector) return; // camera preview + shutter still work; no barcode loop
         const detector = new Detector({ formats: BARCODE_FORMATS });
         interval = setInterval(async () => {
           if (pausedRef.current || !videoRef.current || videoRef.current.readyState < 2) return;
+          const v = videoRef.current;
+          tick++;
           try {
-            const codes = await detector.detect(videoRef.current);
-            const value = codes[0]?.rawValue;
-            if (!value) return;
-            const now = Date.now();
-            const last = lastCodeRef.current;
-            if (last && last.code === value && now - last.at < REPEAT_MS) return;
-            lastCodeRef.current = { code: value, at: now };
-            enqueueCode(value);
+            const codes = await detector.detect(v);
+            const hit = codes[0];
+            if (hit?.rawValue) {
+              lastDetectionAtRef.current = Date.now();
+              if (hit.boundingBox) flashLockBox(hit.boundingBox, v);
+
+              const code = normalizeUpc(hit.rawValue);
+              if (!code || !isValidUpc(code)) {
+                setGuidance({
+                  kind: "warn",
+                  message: "Found a barcode but couldn't read it — hold steady",
+                });
+                return;
+              }
+              const now = Date.now();
+              const last = lastCodeRef.current;
+              if (last && last.code === code && now - last.at < REPEAT_MS) return;
+              lastCodeRef.current = { code, at: now };
+              setGuidance({ kind: "ok", message: `Got it · ${code}` });
+              enqueueCode(code);
+              return;
+            }
+            // No barcode this frame: every other tick, analyze the frame
+            // locally and coach the user (light → steadiness → distance).
+            if (tick % 2 === 0) {
+              const stats = sampleFrameStats(v);
+              const since =
+                lastDetectionAtRef.current === null
+                  ? Infinity
+                  : Date.now() - lastDetectionAtRef.current;
+              setGuidance(guidanceFor(stats, since));
+            }
           } catch {
             // Detection hiccups (tab hidden, etc.) — just try the next frame.
           }
@@ -379,26 +454,32 @@ export function ScanClient() {
     return () => {
       cancelled = true;
       if (interval) clearInterval(interval);
+      if (lockTimerRef.current) clearTimeout(lockTimerRef.current);
       streamRef.current?.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     };
-  }, [enqueueCode]);
+  }, [enqueueCode, flashLockBox, sampleFrameStats]);
 
   /** Shutter: grab the current frame for on-device framing confirmation. */
-  const captureFrame = useCallback((forItemId: string | null) => {
-    const video = videoRef.current;
-    if (!video || video.readyState < 2) return;
-    const scale = Math.min(1, CAPTURE_MAX_PX / Math.max(video.videoWidth, video.videoHeight));
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.round(video.videoWidth * scale);
-    canvas.height = Math.round(video.videoHeight * scale);
-    canvas.getContext("2d")?.drawImage(video, 0, 0, canvas.width, canvas.height);
-    setCapture({
-      dataUrl: canvas.toDataURL("image/jpeg", 0.85),
-      mediaType: "image/jpeg",
-      forItemId,
-    });
-  }, []);
+  const captureFrame = useCallback(
+    (forItemId: string | null) => {
+      const video = videoRef.current;
+      if (!video || video.readyState < 2) return;
+      const scale = Math.min(1, CAPTURE_MAX_PX / Math.max(video.videoWidth, video.videoHeight));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(video.videoWidth * scale);
+      canvas.height = Math.round(video.videoHeight * scale);
+      canvas.getContext("2d")?.drawImage(video, 0, 0, canvas.width, canvas.height);
+      setCapture({
+        dataUrl: canvas.toDataURL("image/jpeg", 0.85),
+        mediaType: "image/jpeg",
+        forItemId,
+        // Same on-device analysis as the live guidance, applied to the shot.
+        warning: captureWarning(sampleFrameStats(video)),
+      });
+    },
+    [sampleFrameStats],
+  );
 
   const onManualSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -419,7 +500,7 @@ export function ScanClient() {
     }
     const mediaType = /data:([^;]+)/.exec(dataUrl)?.[1] ?? "image/jpeg";
     // Same on-device confirmation step as a shutter capture.
-    setCapture({ dataUrl, mediaType, forItemId: fileForItemRef.current });
+    setCapture({ dataUrl, mediaType, forItemId: fileForItemRef.current, warning: null });
     fileForItemRef.current = null;
   };
 
@@ -483,11 +564,40 @@ export function ScanClient() {
           <div aria-hidden className="absolute inset-0 pointer-events-none flex items-center justify-center">
             <div className="w-3/4 h-1/3 rounded-2xl border-2 border-accent/70 shadow-[0_0_24px_rgba(232,161,60,0.25)]" />
           </div>
+          {/* Live lock: outlines the barcode the detector just saw, in place. */}
+          {lockBox && (
+            <div
+              aria-hidden
+              className="absolute rounded-lg border-2 border-success shadow-[0_0_16px_rgba(94,178,122,0.5)] pointer-events-none transition-all duration-150"
+              style={{
+                left: `${lockBox.x}px`,
+                top: `${lockBox.y}px`,
+                width: `${lockBox.width}px`,
+                height: `${lockBox.height}px`,
+              }}
+            />
+          )}
           <div className="absolute bottom-0 inset-x-0 p-3 flex items-center justify-between gap-2 bg-gradient-to-t from-black/70 to-transparent">
-            <span className="text-sm text-foreground/90 flex items-center gap-2 min-w-0">
-              <ScanLine size={18} strokeWidth={1.8} aria-hidden className="text-accent shrink-0" />
+            <span
+              role="status"
+              aria-live="polite"
+              className={`text-sm flex items-center gap-2 min-w-0 ${
+                guidance?.kind === "ok"
+                  ? "text-success"
+                  : guidance?.kind === "warn"
+                    ? "text-accent"
+                    : "text-foreground/90"
+              }`}
+            >
+              {guidance?.kind === "ok" ? (
+                <Check size={18} strokeWidth={2} aria-hidden className="shrink-0" />
+              ) : (
+                <ScanLine size={18} strokeWidth={1.8} aria-hidden className="text-accent shrink-0" />
+              )}
               <span className="truncate">
-                {cameraState === "on" ? "Barcode, or shutter for the label" : "Starting camera…"}
+                {cameraState !== "on"
+                  ? "Starting camera…"
+                  : (guidance?.message ?? "Center the barcode, or shutter for the label")}
               </span>
             </span>
             <div className="flex items-center gap-2 shrink-0">
@@ -719,6 +829,9 @@ export function ScanClient() {
               <p className="text-sm text-muted mt-1">
                 Make sure the label fills the frame and the name is readable.
               </p>
+              {capture.warning && (
+                <p className="text-sm text-accent mt-2 font-medium">{capture.warning}</p>
+              )}
             </div>
             {/* eslint-disable-next-line @next/next/no-img-element -- local data URL preview */}
             <img

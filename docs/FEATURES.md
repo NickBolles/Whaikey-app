@@ -31,6 +31,7 @@ Companion to [PLAN.md](../PLAN.md). This document specifies every feature area i
 
 ### 2.2 Label scan (🟡 Phase 2) — *shipped: dual-mode camera + queue*
 - **Dual-mode viewfinder** *(shipped)*: the barcode loop runs continuously while a shutter button captures the label; the frame is confirmed **on-device** (framing check, retake) before anything is uploaded to the vision model.
+- **Live on-device guidance** *(shipped)*: the viewfinder coaches in real time from local frame analysis — brightness/sharpness sampling drives "too dark / hold steady / move closer" hints, a green outline flashes over the barcode the detector locked onto, and captures that look dark or blurry get a retake nudge in the confirm sheet. All of it runs on-device; nothing leaves the phone until the user confirms.
 - Camera → vision model → top-3 candidate matches with confidence → confirm-or-correct *(shipped)*.
 - **Async capture queue** *(shipped)*: every capture resolves in the background — keep shooting bottle after bottle; ambiguous captures pile up as "needs you" items to settle once the shelf is done.
 - Handles: batch/vintage variants (flag ambiguity, ask), private single-barrel picks (match parent expression, note the pick), damaged/partial labels (fall back to search pre-filled with what was read).
