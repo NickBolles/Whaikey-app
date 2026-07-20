@@ -36,10 +36,28 @@ function baseURL(): string {
   return "http://localhost:3000";
 }
 
+/**
+ * Origins Better Auth accepts requests from (in addition to baseURL). On Vercel
+ * the app is reachable at several of its own hostnames — the per-deploy URL, the
+ * branch alias, and the stable production URL — so trust each that's present.
+ * These are the project's own deployment URLs (not a broad `*.vercel.app`), so
+ * a deploy or preview link stops throwing "Invalid origin" at sign-in.
+ */
+function trustedOrigins(): string[] {
+  return [
+    process.env.VERCEL_URL,
+    process.env.VERCEL_BRANCH_URL,
+    process.env.VERCEL_PROJECT_PRODUCTION_URL,
+  ]
+    .filter((host): host is string => Boolean(host))
+    .map((host) => `https://${host}`);
+}
+
 export const auth = betterAuth({
   database: drizzleAdapter(getDb(), { provider: "pg", schema }),
   secret: process.env.BETTER_AUTH_SECRET ?? "dev-only-secret-change-me",
   baseURL: baseURL(),
+  trustedOrigins: trustedOrigins(),
   socialProviders: socialProviders(),
   emailAndPassword: { enabled: false },
 });
