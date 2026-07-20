@@ -13,7 +13,7 @@ Companion to [PLAN.md](../PLAN.md). This document specifies every feature area i
 | 1.1 | Auth: Apple / Google / email magic link | 🟢 | Apple sign-in required for iOS App Store anyway |
 | 1.2 | Taste onboarding quiz | 🟡 | 5–7 swipeable questions ("Peat: love it / hate it / what's peat?") seeds the palate profile before any pours are logged |
 | 1.3 | "Add your first 3 bottles" prompt | 🟢 | Empty-state flow that immediately demonstrates search + My Bar |
-| 1.4 | Import from spreadsheet/CSV + competitor exports | 🔵 | Collectors arrive with spreadsheets; AI-assisted column mapping ("this column looks like purchase price"). Support Distiller/Whiskybase export formats — InVintory proved competitor import is a switching weapon (see COMPETITORS.md §7) |
+| 1.4 | Import from spreadsheet/CSV + competitor exports | 🟢 | *Shipped (v1)* at `/import`: paste or upload CSV/TSV → AI-assisted column mapping (heuristic fallback when no key — "this column looks like purchase price") → rows matched by UPC then fuzzy name → user confirms every match before commit. Purchase price/date/store/notes come along; rows with barcodes teach the UPC map. Arbitrary headers means competitor exports (Distiller/Whiskybase-style) work too — InVintory proved competitor import is a switching weapon (see COMPETITORS.md §7). v2: format-specific presets, unmatched rows → user-submitted bottles |
 | 1.5 | Experience level selector | 🟡 | Beginner / enthusiast / collector — tunes copy depth, default rating scale, and AI chat tone |
 
 **UX flow (first run):** splash → auth → 3-question mini quiz (skippable) → "scan or search your first bottle" → land on My Bar with one bottle in it. Target: < 90 seconds to first bottle.
@@ -29,15 +29,17 @@ Companion to [PLAN.md](../PLAN.md). This document specifies every feature area i
 - **Semantic search (🟡):** "smoky but sweet under $70" → embedding search over flavor profiles.
 - **One search, many doors.** Search is a single feature — one engine, one UI component — reached from several places (Search tab, My Bar "Add bottle", pour-flow bottle picker, chat). The entry point only changes **what happens when you pick a result** (view detail / add to bar / log a pour), stated in the header so it never feels like three different search screens. Never fork the search UX per surface.
 
-### 2.2 Label scan (🟡 Phase 2) — *shipped: API + scan-page fallback*
-- Camera → vision model → top-3 candidate matches with confidence → confirm-or-correct.
+### 2.2 Label scan (🟡 Phase 2) — *shipped: dual-mode camera + queue*
+- **Dual-mode viewfinder** *(shipped)*: the barcode loop runs continuously while a shutter button captures the label; the frame is confirmed **on-device** (framing check, retake) before anything is uploaded to the vision model.
+- **Live on-device guidance** *(shipped)*: the viewfinder coaches in real time from local frame analysis — brightness/sharpness sampling drives "too dark / hold steady / move closer" hints, a green outline flashes over the barcode the detector locked onto, and captures that look dark or blurry get a retake nudge in the confirm sheet. All of it runs on-device; nothing leaves the phone until the user confirms.
+- Camera → vision model → top-3 candidate matches with confidence → confirm-or-correct *(shipped)*.
+- **Async capture queue** *(shipped)*: every capture resolves in the background — keep shooting bottle after bottle; ambiguous captures pile up as "needs you" items to settle once the shelf is done.
 - Handles: batch/vintage variants (flag ambiguity, ask), private single-barrel picks (match parent expression, note the pick), damaged/partial labels (fall back to search pre-filled with what was read).
-- Every correction is stored as eval data to improve matching.
-- Offline: photo queues and resolves when back online.
+- Still open: every correction stored as eval data to improve matching; offline photo queueing that resolves when back online.
 
 ### 2.3 Barcode/UPC scan (🟢 Phase 1) — *shipped*
 The fastest path from a shelf of bottles to a tracked collection — a new user should shelve 50 bottles in a few minutes ("beep… beep… beep"), so this is core onboarding, not a fallback.
-- **Rapid batch mode** (`/scan`): camera barcode loop (BarcodeDetector where supported) with manual code entry (hardware wedge scanners work) and label-photo fallback; each confirmed scan lands on the shelf in one round trip — no forms between scans; session tray with undo.
+- **Rapid batch mode** (`/scan`): camera barcode loop (BarcodeDetector where supported) with manual code entry (hardware wedge scanners work) and label-photo fallback; each confirmed scan lands on the shelf in one round trip — no forms between scans; session tray with undo. Identification runs in an **async queue**, so the next scan never waits for the previous one's network round trip.
 - **Resolution chain** (DATA_SOURCES.md §3): own DB (seeded + crowdsourced mappings) → transient external lookup (UPCitemdb → Open Food Facts; results matched against our catalog, never stored) → label photo / inline search.
 - **Crowdsourced UPC → bottle mapping**: the first scanner confirms the match, later scanners resolve instantly; confirmations are counted, so shared barcodes (reused across proofs/batches) rank by community consensus. Every scan converts a third-party lookup into first-party data.
 - Ambiguity is always confirm-or-correct; a miss teaches the catalog via search or label photo.
