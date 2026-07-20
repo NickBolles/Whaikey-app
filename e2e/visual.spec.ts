@@ -176,4 +176,11 @@ test.describe("signed in (demo collector)", () => {
     await settle(page);
     await expect(page).toHaveScreenshot(shot("scan"), { fullPage: true });
   });
+
+  test("import (paste step)", async ({ page }) => {
+    await page.goto("/import");
+    await expect(page.getByLabel(/paste csv/i)).toBeVisible();
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("import"), { fullPage: true });
+  });
 });
