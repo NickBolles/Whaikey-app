@@ -2,18 +2,31 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Camera, Check, ImageUp, Keyboard, ScanLine, Undo2, X } from "lucide-react";
+import {
+  Aperture,
+  Camera,
+  Check,
+  ImageUp,
+  Keyboard,
+  Loader2,
+  RefreshCw,
+  ScanLine,
+  Undo2,
+  X,
+} from "lucide-react";
 import { RELATIONSHIPS, type Relationship } from "@/db/schema";
 import { isValidUpc, normalizeUpc } from "@/lib/upc";
 import type { BottleSearchResult } from "@/lib/ai/tools";
 import { CategoryChip } from "@/components/category-chip";
 
 /**
- * Rapid-fire scanning: camera barcode loop (BarcodeDetector where available),
- * manual code entry (works with hardware wedge scanners), and label-photo
- * fallback. Confirmed scans add to the shelf in one round trip and feed the
- * crowdsourced UPC map, so the flow is "beep… beep… beep" — a 50-bottle
- * collection should take minutes, not an evening.
+ * Rapid-fire scanning built around an async capture queue: every barcode hit,
+ * typed code, or label photo becomes a queue item that resolves in the
+ * background while you keep scanning. Unique matches shelve themselves;
+ * ambiguous ones pile up as "needs you" items you can settle after the last
+ * bottle is back on the shelf. Dual-mode camera: the barcode loop runs
+ * continuously and a shutter button captures a framed label photo (confirmed
+ * on-device before anything is uploaded) for AI identification.
  */
 
 interface UpcMatch extends BottleSearchResult {
@@ -27,21 +40,36 @@ interface ScanResponse {
   externalName: string | null;
 }
 
-interface AddedEntry {
+type ItemStatus = "resolving" | "added" | "review" | "failed";
+
+interface AddedInfo {
   userBottleId: string | null;
   bottleId: string;
   name: string;
-  upc: string | null;
   relationship: Relationship;
   updated: boolean;
 }
 
-/** Decision sheet shown when a scan needs the user to pick / search. */
-interface PendingDecision {
+interface QueueItem {
+  id: string;
+  kind: "upc" | "label";
+  /** Normalized GTIN for barcode items; carried into label confirms so a rescue teaches the mapping. */
   upc: string | null;
+  /** Tiny preview for label items. */
+  thumb: string | null;
+  status: ItemStatus;
+  /** Review-sheet payload when status is "review". */
   title: string;
   subtitle: string | null;
   options: BottleSearchResult[];
+  added: AddedInfo | null;
+}
+
+interface Capture {
+  dataUrl: string;
+  mediaType: string;
+  /** When set, the confirmed photo resolves THIS item instead of enqueueing a new one. */
+  forItemId: string | null;
 }
 
 const RELATIONSHIP_LABELS: Record<Relationship, string> = {
@@ -63,6 +91,8 @@ const BARCODE_FORMATS = ["upc_a", "upc_e", "ean_13", "ean_8"];
 /** Ignore re-detections of the same code within this window (ms). */
 const REPEAT_MS = 4000;
 const DETECT_INTERVAL_MS = 300;
+/** Longest edge for uploaded label captures. */
+const CAPTURE_MAX_PX = 1280;
 
 function barcodeDetectorCtor(): BarcodeDetectorCtor | null {
   if (typeof window === "undefined") return null;
@@ -70,12 +100,16 @@ function barcodeDetectorCtor(): BarcodeDetectorCtor | null {
   return ctor ?? null;
 }
 
+function newId(): string {
+  return `q-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 export function ScanClient() {
   const [cameraState, setCameraState] = useState<"starting" | "on" | "unavailable">("starting");
   const [relationship, setRelationship] = useState<Relationship>("own");
-  const [added, setAdded] = useState<AddedEntry[]>([]);
-  const [pending, setPending] = useState<PendingDecision | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [items, setItems] = useState<QueueItem[]>([]);
+  const [reviewId, setReviewId] = useState<string | null>(null);
+  const [capture, setCapture] = useState<Capture | null>(null);
   const [toast, setToast] = useState<{ text: string; kind: "ok" | "warn" } | null>(null);
   const [manualOpen, setManualOpen] = useState(false);
   const [manualCode, setManualCode] = useState("");
@@ -84,17 +118,20 @@ export function ScanClient() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
+  const fileForItemRef = useRef<string | null>(null);
   const lastCodeRef = useRef<{ code: string; at: number } | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Mirrors for the detector loop, which runs outside React's render cycle.
   const pausedRef = useRef(false);
   const relationshipRef = useRef(relationship);
-  const addedRef = useRef(added);
+  const itemsRef = useRef(items);
   useEffect(() => {
-    pausedRef.current = pending !== null || busy;
+    // Pause detection only while a modal owns the screen — background
+    // resolution never blocks the next scan.
+    pausedRef.current = capture !== null || reviewId !== null;
     relationshipRef.current = relationship;
-    addedRef.current = added;
-  }, [pending, busy, relationship, added]);
+    itemsRef.current = items;
+  }, [capture, reviewId, relationship, items]);
 
   const showToast = useCallback((text: string, kind: "ok" | "warn" = "ok") => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -102,10 +139,14 @@ export function ScanClient() {
     toastTimer.current = setTimeout(() => setToast(null), 2600);
   }, []);
 
+  const patchItem = useCallback((id: string, patch: Partial<QueueItem>) => {
+    setItems((prev) => prev.map((it) => (it.id === id ? { ...it, ...patch } : it)));
+  }, []);
+
   /** Record the confirmation (crowdsourcing the mapping) and shelve the bottle. */
   const confirmAdd = useCallback(
-    async (upc: string | null, bottle: BottleSearchResult) => {
-      setBusy(true);
+    async (itemId: string, upc: string | null, bottle: BottleSearchResult) => {
+      patchItem(itemId, { status: "resolving" });
       try {
         const res = await fetch("/api/scan/confirm", {
           method: "POST",
@@ -117,49 +158,32 @@ export function ScanClient() {
           }),
         });
         if (!res.ok) throw new Error(`confirm failed (${res.status})`);
-        const data = (await res.json()) as {
-          userBottle: { id: string } | null;
-        };
+        const data = (await res.json()) as { userBottle: { id: string } | null };
         const updated = res.status !== 201;
-        setPending(null);
-        setAdded((prev) => [
-          {
+        patchItem(itemId, {
+          status: "added",
+          added: {
             userBottleId: data.userBottle?.id ?? null,
             bottleId: bottle.id,
             name: bottle.name,
-            upc,
             relationship: relationshipRef.current,
             updated,
           },
-          ...prev,
-        ]);
+        });
+        setReviewId((cur) => (cur === itemId ? null : cur));
         navigator.vibrate?.(60);
         showToast(updated ? `${bottle.name} — shelf updated` : `Added ${bottle.name}`);
       } catch {
-        showToast("Couldn't save that one — try again", "warn");
-      } finally {
-        setBusy(false);
+        patchItem(itemId, { status: "failed", subtitle: "Couldn't save — tap to retry." });
+        showToast("Couldn't save that one", "warn");
       }
     },
-    [showToast],
+    [patchItem, showToast],
   );
 
-  /** Resolve a scanned/typed code and decide: auto-add, pick, or fall back. */
-  const submitCode = useCallback(
-    async (raw: string): Promise<boolean> => {
-      const code = normalizeUpc(raw);
-      if (!code || !isValidUpc(code)) {
-        setManualError("That doesn't look like a UPC/EAN barcode.");
-        return false;
-      }
-      setManualError(null);
-
-      if (addedRef.current.some((a) => a.upc === code)) {
-        showToast("Already scanned this session", "warn");
-        return true;
-      }
-
-      setBusy(true);
+  /** Background resolution for a barcode item. */
+  const processUpcItem = useCallback(
+    async (itemId: string, code: string) => {
       try {
         const res = await fetch("/api/scan/upc", {
           method: "POST",
@@ -170,54 +194,147 @@ export function ScanClient() {
         const data = (await res.json()) as ScanResponse;
 
         if (data.matches.length === 1) {
-          setBusy(false);
-          await confirmAdd(data.upc, data.matches[0]);
-          return true;
+          await confirmAdd(itemId, data.upc, data.matches[0]);
+          return;
         }
         if (data.matches.length > 1) {
-          setPending({
-            upc: data.upc,
+          patchItem(itemId, {
+            status: "review",
             title: "Which bottle is this?",
             subtitle: "This barcode is shared across bottlings — pick yours.",
             options: data.matches,
           });
-          return true;
+          return;
         }
         if (data.candidates.length > 0) {
-          setPending({
-            upc: data.upc,
+          patchItem(itemId, {
+            status: "review",
             title: "Is it one of these?",
             subtitle: data.externalName ? `Barcode lookup says “${data.externalName}”.` : null,
             options: data.candidates,
           });
-          return true;
+          return;
         }
-        setPending({
-          upc: data.upc,
+        patchItem(itemId, {
+          status: "review",
           title: "New one on us 🥃",
           subtitle:
-            "We don't know this barcode yet. Find the bottle below or snap the label — your confirmation teaches Whaikey for everyone.",
+            "We don't know this barcode yet. Find the bottle or snap the label — your confirmation teaches Whaikey for everyone.",
           options: [],
         });
-        return true;
       } catch {
-        showToast("Scan failed — check your connection and retry", "warn");
-        return false;
-      } finally {
-        setBusy(false);
+        patchItem(itemId, { status: "failed", subtitle: "Network hiccup — tap to retry." });
       }
     },
-    [confirmAdd, showToast],
+    [confirmAdd, patchItem],
   );
 
-  // Camera + detection loop.
+  /** Background resolution for a label-photo item. */
+  const processLabelItem = useCallback(
+    async (itemId: string, dataUrl: string, mediaType: string) => {
+      try {
+        const base64 = dataUrl.split(",", 2)[1] ?? "";
+        const res = await fetch("/api/scan-label", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ imageBase64: base64, mediaType }),
+        });
+        if (res.status === 503) {
+          patchItem(itemId, {
+            status: "review",
+            title: "Find your bottle",
+            subtitle: "AI label reading isn't configured — search the catalog instead.",
+            options: [],
+          });
+          return;
+        }
+        if (!res.ok) throw new Error(`label scan failed (${res.status})`);
+        const data = (await res.json()) as {
+          extracted: { brandGuess: string | null; expressionGuess: string | null };
+          candidates: BottleSearchResult[];
+        };
+        const guess = [data.extracted.brandGuess, data.extracted.expressionGuess]
+          .filter(Boolean)
+          .join(" ");
+        patchItem(itemId, {
+          status: "review",
+          title: data.candidates.length > 0 ? "Is it one of these?" : "New one on us 🥃",
+          subtitle: guess ? `The label reads “${guess}”.` : "Couldn't read much off that label.",
+          options: data.candidates,
+        });
+      } catch {
+        patchItem(itemId, { status: "failed", subtitle: "Couldn't read that photo — tap to retry." });
+      }
+    },
+    [patchItem],
+  );
+
+  /** Enqueue a scanned/typed barcode. Returns false when the code is invalid. */
+  const enqueueCode = useCallback(
+    (raw: string): boolean => {
+      const code = normalizeUpc(raw);
+      if (!code || !isValidUpc(code)) {
+        setManualError("That doesn't look like a UPC/EAN barcode.");
+        return false;
+      }
+      setManualError(null);
+      if (itemsRef.current.some((it) => it.upc === code && it.status !== "failed")) {
+        showToast("Already scanned this session", "warn");
+        return true;
+      }
+      const item: QueueItem = {
+        id: newId(),
+        kind: "upc",
+        upc: code,
+        thumb: null,
+        status: "resolving",
+        title: "",
+        subtitle: null,
+        options: [],
+        added: null,
+      };
+      setItems((prev) => [item, ...prev]);
+      navigator.vibrate?.(30);
+      void processUpcItem(item.id, code);
+      return true;
+    },
+    [processUpcItem, showToast],
+  );
+
+  /** Enqueue a confirmed label capture (or re-resolve an existing item with it). */
+  const enqueueLabel = useCallback(
+    (dataUrl: string, mediaType: string, forItemId: string | null) => {
+      if (forItemId) {
+        patchItem(forItemId, { kind: "label", thumb: dataUrl, status: "resolving" });
+        setReviewId((cur) => (cur === forItemId ? null : cur));
+        void processLabelItem(forItemId, dataUrl, mediaType);
+        return;
+      }
+      const item: QueueItem = {
+        id: newId(),
+        kind: "label",
+        upc: null,
+        thumb: dataUrl,
+        status: "resolving",
+        title: "",
+        subtitle: null,
+        options: [],
+        added: null,
+      };
+      setItems((prev) => [item, ...prev]);
+      void processLabelItem(item.id, dataUrl, mediaType);
+    },
+    [patchItem, processLabelItem],
+  );
+
+  // Camera + barcode detection loop.
   useEffect(() => {
     let cancelled = false;
     let interval: ReturnType<typeof setInterval> | null = null;
 
     (async () => {
       const Detector = barcodeDetectorCtor();
-      if (!navigator.mediaDevices?.getUserMedia || !Detector) {
+      if (!navigator.mediaDevices?.getUserMedia) {
         setCameraState("unavailable");
         return;
       }
@@ -237,6 +354,7 @@ export function ScanClient() {
         await video.play();
         setCameraState("on");
 
+        if (!Detector) return; // camera preview + shutter still work; no barcode loop
         const detector = new Detector({ formats: BARCODE_FORMATS });
         interval = setInterval(async () => {
           if (pausedRef.current || !videoRef.current || videoRef.current.readyState < 2) return;
@@ -248,7 +366,7 @@ export function ScanClient() {
             const last = lastCodeRef.current;
             if (last && last.code === value && now - last.at < REPEAT_MS) return;
             lastCodeRef.current = { code: value, at: now };
-            void submitCode(value);
+            enqueueCode(value);
           } catch {
             // Detection hiccups (tab hidden, etc.) — just try the next frame.
           }
@@ -264,68 +382,72 @@ export function ScanClient() {
       streamRef.current?.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     };
-  }, [submitCode]);
+  }, [enqueueCode]);
 
-  const onManualSubmit = async (e: React.FormEvent) => {
+  /** Shutter: grab the current frame for on-device framing confirmation. */
+  const captureFrame = useCallback((forItemId: string | null) => {
+    const video = videoRef.current;
+    if (!video || video.readyState < 2) return;
+    const scale = Math.min(1, CAPTURE_MAX_PX / Math.max(video.videoWidth, video.videoHeight));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(video.videoWidth * scale);
+    canvas.height = Math.round(video.videoHeight * scale);
+    canvas.getContext("2d")?.drawImage(video, 0, 0, canvas.width, canvas.height);
+    setCapture({
+      dataUrl: canvas.toDataURL("image/jpeg", 0.85),
+      mediaType: "image/jpeg",
+      forItemId,
+    });
+  }, []);
+
+  const onManualSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!manualCode.trim() || busy) return;
-    const ok = await submitCode(manualCode);
-    // Keep the code visible when it was rejected so the user can fix a typo.
-    if (ok) setManualCode("");
+    if (!manualCode.trim()) return;
+    if (enqueueCode(manualCode)) setManualCode("");
   };
 
   const onLabelFile = async (file: File) => {
-    setBusy(true);
-    try {
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result));
-        reader.onerror = () => reject(reader.error);
-        reader.readAsDataURL(file);
-      });
-      const [head, base64] = dataUrl.split(",", 2);
-      const mediaType = /data:([^;]+)/.exec(head)?.[1] ?? "image/jpeg";
-      const res = await fetch("/api/scan-label", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ imageBase64: base64, mediaType }),
-      });
-      if (res.status === 503) {
-        showToast("Label scan needs the AI key — use search below", "warn");
-        setPending((p) => p ?? { upc: null, title: "Find your bottle", subtitle: null, options: [] });
-        return;
-      }
-      if (!res.ok) throw new Error(`label scan failed (${res.status})`);
-      const data = (await res.json()) as {
-        extracted: { brandGuess: string | null; expressionGuess: string | null };
-        candidates: BottleSearchResult[];
-      };
-      const guess = [data.extracted.brandGuess, data.extracted.expressionGuess]
-        .filter(Boolean)
-        .join(" ");
-      setPending((p) => ({
-        upc: p?.upc ?? null,
-        title: data.candidates.length > 0 ? "Is it one of these?" : "New one on us 🥃",
-        subtitle: guess ? `The label reads “${guess}”.` : "Couldn't read much off that label.",
-        options: data.candidates,
-      }));
-    } catch {
-      showToast("Couldn't read that photo — try again", "warn");
-    } finally {
-      setBusy(false);
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    }).catch(() => null);
+    if (!dataUrl) {
+      showToast("Couldn't read that photo", "warn");
+      return;
+    }
+    const mediaType = /data:([^;]+)/.exec(dataUrl)?.[1] ?? "image/jpeg";
+    // Same on-device confirmation step as a shutter capture.
+    setCapture({ dataUrl, mediaType, forItemId: fileForItemRef.current });
+    fileForItemRef.current = null;
+  };
+
+  const undo = async (item: QueueItem) => {
+    const added = item.added;
+    setItems((prev) => prev.filter((it) => it.id !== item.id));
+    if (added?.userBottleId && !added.updated) {
+      await fetch(`/api/user-bottles/${added.userBottleId}`, { method: "DELETE" }).catch(() => {});
+      showToast(`Removed ${added.name}`);
+    } else if (added) {
+      showToast(`${added.name} kept its earlier shelf entry`, "warn");
     }
   };
 
-  const undo = async (entry: AddedEntry) => {
-    setAdded((prev) => prev.filter((a) => a !== entry));
-    if (entry.userBottleId && !entry.updated) {
-      await fetch(`/api/user-bottles/${entry.userBottleId}`, { method: "DELETE" }).catch(() => {});
-      showToast(`Removed ${entry.name}`);
-    } else {
-      showToast(`${entry.name} kept its earlier shelf entry`, "warn");
+  const retry = (item: QueueItem) => {
+    if (item.kind === "upc" && item.upc) {
+      patchItem(item.id, { status: "resolving" });
+      void processUpcItem(item.id, item.upc);
+    } else if (item.kind === "label" && item.thumb) {
+      patchItem(item.id, { status: "resolving" });
+      void processLabelItem(item.id, item.thumb, "image/jpeg");
     }
   };
 
+  const addedCount = items.filter((it) => it.status === "added").length;
+  const reviewCount = items.filter((it) => it.status === "review").length;
+  const resolvingCount = items.filter((it) => it.status === "resolving").length;
+  const reviewItem = reviewId ? (items.find((it) => it.id === reviewId) ?? null) : null;
   const manualVisible = cameraState !== "on" || manualOpen;
 
   return (
@@ -333,7 +455,7 @@ export function ScanClient() {
       <header>
         <h1 className="font-display text-[2rem] leading-tight font-semibold">Scan your shelf</h1>
         <p className="text-muted text-sm mt-1">
-          Barcode after barcode — each confirmed scan lands straight in your bar.
+          Keep scanning — bottles identify themselves in the background.
         </p>
       </header>
 
@@ -361,18 +483,31 @@ export function ScanClient() {
           <div aria-hidden className="absolute inset-0 pointer-events-none flex items-center justify-center">
             <div className="w-3/4 h-1/3 rounded-2xl border-2 border-accent/70 shadow-[0_0_24px_rgba(232,161,60,0.25)]" />
           </div>
-          <div className="absolute bottom-0 inset-x-0 p-3 flex items-center justify-between bg-gradient-to-t from-black/70 to-transparent">
-            <span className="text-sm text-foreground/90 flex items-center gap-2">
-              <ScanLine size={18} strokeWidth={1.8} aria-hidden className="text-accent" />
-              {cameraState === "on" ? "Point at a barcode" : "Starting camera…"}
+          <div className="absolute bottom-0 inset-x-0 p-3 flex items-center justify-between gap-2 bg-gradient-to-t from-black/70 to-transparent">
+            <span className="text-sm text-foreground/90 flex items-center gap-2 min-w-0">
+              <ScanLine size={18} strokeWidth={1.8} aria-hidden className="text-accent shrink-0" />
+              <span className="truncate">
+                {cameraState === "on" ? "Barcode, or shutter for the label" : "Starting camera…"}
+              </span>
             </span>
-            <button
-              type="button"
-              onClick={() => setManualOpen((v) => !v)}
-              className="btn-secondary px-3 py-2 text-xs font-medium flex items-center gap-1.5"
-            >
-              <Keyboard size={16} strokeWidth={1.8} aria-hidden /> Type it
-            </button>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => setManualOpen((v) => !v)}
+                className="btn-secondary px-3 py-2 text-xs font-medium flex items-center gap-1.5"
+              >
+                <Keyboard size={16} strokeWidth={1.8} aria-hidden /> Type it
+              </button>
+              <button
+                type="button"
+                onClick={() => captureFrame(null)}
+                disabled={cameraState !== "on"}
+                aria-label="Capture the label"
+                className="btn-primary p-2.5 rounded-full disabled:opacity-50"
+              >
+                <Aperture size={20} strokeWidth={1.8} aria-hidden />
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -412,10 +547,10 @@ export function ScanClient() {
             />
             <button
               type="submit"
-              disabled={busy || manualCode.trim().length === 0}
+              disabled={manualCode.trim().length === 0}
               className="btn-primary px-5 py-3 text-sm font-medium disabled:opacity-50"
             >
-              {busy ? "…" : "Scan"}
+              Scan
             </button>
           </div>
           {manualError && (
@@ -425,27 +560,31 @@ export function ScanClient() {
           )}
           <button
             type="button"
-            onClick={() => fileRef.current?.click()}
+            onClick={() => {
+              fileForItemRef.current = null;
+              fileRef.current?.click();
+            }}
             className="btn-secondary mt-1 px-4 py-3 text-sm font-medium flex items-center justify-center gap-2"
           >
             <ImageUp size={18} strokeWidth={1.8} aria-hidden />
             Snap the label instead
           </button>
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="hidden"
-            aria-label="Photograph a bottle label"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              e.target.value = "";
-              if (file) void onLabelFile(file);
-            }}
-          />
         </form>
       )}
+
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        aria-label="Photograph a bottle label"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          if (file) void onLabelFile(file);
+        }}
+      />
 
       {toast && (
         <p
@@ -459,61 +598,186 @@ export function ScanClient() {
         </p>
       )}
 
-      {/* Session tray */}
+      {/* Session queue */}
       <section aria-label="Scanned this session">
-        <div className="flex items-baseline justify-between mb-3">
-          <h2 className="section-label">Scanned this session ({added.length})</h2>
-          {added.length > 0 && (
-            <Link href="/bar" className="text-sm text-accent font-medium">
+        <div className="flex items-baseline justify-between mb-3 gap-3">
+          <h2 className="section-label">
+            Scanned this session ({addedCount}
+            {resolvingCount > 0 ? ` · ${resolvingCount} identifying` : ""}
+            {reviewCount > 0 ? ` · ${reviewCount} need you` : ""})
+          </h2>
+          {addedCount > 0 && reviewCount === 0 && resolvingCount === 0 && (
+            <Link href="/bar" className="text-sm text-accent font-medium shrink-0">
               Done → My Bar
             </Link>
           )}
         </div>
-        {added.length === 0 ? (
+        {items.length === 0 ? (
           <div className="card p-8 text-center flex flex-col items-center gap-2">
             <div aria-hidden className="text-4xl mb-1">🥃</div>
             <p className="font-display text-lg font-semibold">Line up the bottles</p>
             <p className="text-sm text-muted leading-relaxed max-w-xs">
-              Scan one after another — no forms between scans. Undo anything from this list.
+              Scan one after another — no waiting between bottles. Anything ambiguous queues up
+              for you to settle at the end.
             </p>
           </div>
         ) : (
           <ul className="flex flex-col gap-2">
-            {added.map((entry, i) => (
-              <li
-                key={`${entry.bottleId}-${i}`}
-                className="card-flat flex items-center justify-between gap-3 p-3.5"
-              >
+            {items.map((item) => (
+              <li key={item.id} className="card-flat flex items-center justify-between gap-3 p-3.5">
                 <div className="min-w-0 flex items-center gap-2.5">
-                  <Check size={18} strokeWidth={2} aria-hidden className="text-success shrink-0" />
+                  {item.thumb ? (
+                    // eslint-disable-next-line @next/next/no-img-element -- local data URL preview
+                    <img
+                      src={item.thumb}
+                      alt=""
+                      className="w-9 h-9 rounded-lg object-cover shrink-0 border border-border-subtle"
+                    />
+                  ) : item.status === "added" ? (
+                    <Check size={18} strokeWidth={2} aria-hidden className="text-success shrink-0" />
+                  ) : (
+                    <ScanLine size={18} strokeWidth={1.8} aria-hidden className="text-muted shrink-0" />
+                  )}
                   <div className="min-w-0">
-                    <div className="font-medium truncate">{entry.name}</div>
-                    <div className="text-xs text-muted mt-0.5">
-                      {entry.updated ? "shelf updated" : RELATIONSHIP_LABELS[entry.relationship]}
-                      {entry.upc ? ` · ${entry.upc}` : ""}
+                    <div className="font-medium truncate">
+                      {item.added?.name ??
+                        (item.kind === "label" ? "Label photo" : (item.upc ?? "Barcode"))}
+                    </div>
+                    <div className="text-xs text-muted mt-0.5 truncate">
+                      {item.status === "resolving" && "Identifying…"}
+                      {item.status === "added" &&
+                        `${item.added?.updated ? "shelf updated" : RELATIONSHIP_LABELS[item.added!.relationship]}${
+                          item.upc ? ` · ${item.upc}` : ""
+                        }`}
+                      {item.status === "review" && (item.subtitle ?? item.title)}
+                      {item.status === "failed" && (item.subtitle ?? "Failed")}
                     </div>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => void undo(entry)}
-                  className="btn-secondary shrink-0 px-3 py-2 text-xs font-medium flex items-center gap-1.5"
-                >
-                  <Undo2 size={14} strokeWidth={1.8} aria-hidden /> Undo
-                </button>
+                <div className="shrink-0">
+                  {item.status === "resolving" && (
+                    <Loader2 size={18} strokeWidth={1.8} aria-hidden className="animate-spin text-muted" />
+                  )}
+                  {item.status === "added" && (
+                    <button
+                      type="button"
+                      onClick={() => void undo(item)}
+                      className="btn-secondary px-3 py-2 text-xs font-medium flex items-center gap-1.5"
+                    >
+                      <Undo2 size={14} strokeWidth={1.8} aria-hidden /> Undo
+                    </button>
+                  )}
+                  {item.status === "review" && (
+                    <button
+                      type="button"
+                      onClick={() => setReviewId(item.id)}
+                      className="btn-primary px-3.5 py-2 text-xs font-medium"
+                    >
+                      Needs you
+                    </button>
+                  )}
+                  {item.status === "failed" && (
+                    <button
+                      type="button"
+                      onClick={() => retry(item)}
+                      className="btn-secondary px-3 py-2 text-xs font-medium flex items-center gap-1.5"
+                    >
+                      <RefreshCw size={14} strokeWidth={1.8} aria-hidden /> Retry
+                    </button>
+                  )}
+                </div>
               </li>
             ))}
           </ul>
         )}
       </section>
 
-      {pending && (
+      <p className="text-center text-sm text-muted">
+        Have a spreadsheet or an export from another app?{" "}
+        <Link href="/import" className="text-accent font-medium">
+          Import it
+        </Link>
+      </p>
+
+      {/* On-device framing confirmation before anything is uploaded */}
+      {capture && (
+        <div
+          className="fixed inset-0 z-50 flex flex-col justify-end"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Confirm label photo"
+        >
+          <button
+            type="button"
+            aria-label="Dismiss"
+            onClick={() => setCapture(null)}
+            className="absolute inset-0 bg-black/60"
+          />
+          <div className="relative card rounded-b-none p-5 flex flex-col gap-4">
+            <div>
+              <h2 className="font-display text-xl font-semibold">Use this photo?</h2>
+              <p className="text-sm text-muted mt-1">
+                Make sure the label fills the frame and the name is readable.
+              </p>
+            </div>
+            {/* eslint-disable-next-line @next/next/no-img-element -- local data URL preview */}
+            <img
+              src={capture.dataUrl}
+              alt="Captured label preview"
+              className="w-full max-h-[40dvh] object-contain rounded-xl border border-border-subtle bg-black/40"
+            />
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  const c = capture;
+                  setCapture(null);
+                  enqueueLabel(c.dataUrl, c.mediaType, c.forItemId);
+                }}
+                className="btn-primary flex-1 px-4 py-3 text-sm font-medium"
+              >
+                Use photo
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const forItemId = capture.forItemId;
+                  setCapture(null);
+                  if (cameraState === "on") {
+                    // brief pause so the user can re-frame, then they hit the shutter again
+                  } else {
+                    fileForItemRef.current = forItemId;
+                    fileRef.current?.click();
+                  }
+                }}
+                className="btn-secondary flex-1 px-4 py-3 text-sm font-medium"
+              >
+                Retake
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {reviewItem && (
         <DecisionSheet
-          pending={pending}
-          busy={busy}
-          onPick={(bottle) => void confirmAdd(pending.upc, bottle)}
-          onLabelPhoto={() => fileRef.current?.click()}
-          onClose={() => setPending(null)}
+          item={reviewItem}
+          onPick={(bottle) => void confirmAdd(reviewItem.id, reviewItem.upc, bottle)}
+          onLabelPhoto={() => {
+            if (cameraState === "on") {
+              setReviewId(null);
+              captureFrame(reviewItem.id);
+            } else {
+              fileForItemRef.current = reviewItem.id;
+              setReviewId(null);
+              fileRef.current?.click();
+            }
+          }}
+          onRemove={() => {
+            setItems((prev) => prev.filter((it) => it.id !== reviewItem.id));
+            setReviewId(null);
+          }}
+          onClose={() => setReviewId(null)}
         />
       )}
     </div>
@@ -526,16 +790,16 @@ export function ScanClient() {
  * teach Whaikey the right answer without leaving the flow).
  */
 function DecisionSheet({
-  pending,
-  busy,
+  item,
   onPick,
   onLabelPhoto,
+  onRemove,
   onClose,
 }: {
-  pending: PendingDecision;
-  busy: boolean;
+  item: QueueItem;
   onPick: (bottle: BottleSearchResult) => void;
   onLabelPhoto: () => void;
+  onRemove: () => void;
   onClose: () => void;
 }) {
   const [query, setQuery] = useState("");
@@ -565,10 +829,15 @@ function DecisionSheet({
     };
   }, [query]);
 
-  const options = query.trim() ? results : pending.options;
+  const options = query.trim() ? results : item.options;
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col justify-end" role="dialog" aria-modal="true" aria-label={pending.title}>
+    <div
+      className="fixed inset-0 z-50 flex flex-col justify-end"
+      role="dialog"
+      aria-modal="true"
+      aria-label={item.title}
+    >
       <button
         type="button"
         aria-label="Dismiss"
@@ -578,9 +847,9 @@ function DecisionSheet({
       <div className="relative card rounded-b-none p-5 max-h-[80dvh] overflow-y-auto flex flex-col gap-4">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h2 className="font-display text-xl font-semibold">{pending.title}</h2>
-            {pending.subtitle && (
-              <p className="text-sm text-muted mt-1 leading-relaxed">{pending.subtitle}</p>
+            <h2 className="font-display text-xl font-semibold">{item.title}</h2>
+            {item.subtitle && (
+              <p className="text-sm text-muted mt-1 leading-relaxed">{item.subtitle}</p>
             )}
           </div>
           <button
@@ -608,9 +877,8 @@ function DecisionSheet({
                 </div>
                 <button
                   type="button"
-                  disabled={busy}
                   onClick={() => onPick(b)}
-                  className="btn-primary shrink-0 px-4 py-2.5 text-sm font-medium disabled:opacity-50"
+                  className="btn-primary shrink-0 px-4 py-2.5 text-sm font-medium"
                 >
                   This one
                 </button>
@@ -621,7 +889,7 @@ function DecisionSheet({
 
         <div className="flex flex-col gap-2">
           <label htmlFor="scan-sheet-search" className="section-label">
-            {pending.options.length > 0 ? "None of these? Search" : "Search the catalog"}
+            {item.options.length > 0 ? "None of these? Search" : "Search the catalog"}
           </label>
           <input
             id="scan-sheet-search"
@@ -638,6 +906,13 @@ function DecisionSheet({
           >
             <ImageUp size={18} strokeWidth={1.8} aria-hidden />
             Snap the label instead
+          </button>
+          <button
+            type="button"
+            onClick={onRemove}
+            className="px-4 py-2 text-sm text-muted hover:text-foreground transition-colors"
+          >
+            Skip this one
           </button>
         </div>
       </div>

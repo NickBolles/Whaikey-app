@@ -71,10 +71,12 @@ test.describe("signed-in scan flow", () => {
     await input.fill("012345678905"); // valid check digit, not in the catalog
     await page.getByRole("button", { name: "Scan" }).click();
 
+    // The miss queues up as a needs-you item instead of blocking the flow.
+    await page.getByRole("button", { name: /needs you/i }).click();
     const sheet = page.getByRole("dialog");
     await expect(sheet).toContainText(/new one on us/i);
     await sheet.getByRole("searchbox").fill("glenfarclas 105");
-    await sheet.getByRole("button", { name: /this one/i }).first().click();
+    await sheet.getByRole("button", { name: /^this one$/i }).first().click();
     await expect(page.getByText(/Scanned this session \(1\)/i)).toBeVisible();
 
     // The confirmation crowdsourced the mapping: scanning again resolves instantly.
@@ -88,6 +90,30 @@ test.describe("signed-in scan flow", () => {
     await page.getByLabel(/barcode number/i).fill("1234");
     await page.getByRole("button", { name: "Scan" }).click();
     await expect(page.getByText(/doesn't look like a UPC/i)).toBeVisible();
+  });
+
+  test("spreadsheet import: paste → map → match → commit lands in the bar", async ({ page }) => {
+    await page.goto("/import");
+    await page
+      .getByLabel(/paste csv/i)
+      .fill(
+        "Bottle,UPC,Price Paid\nRittenhouse Bottled in Bond,096749001101,27.99\nLarceny Small Batch,,19.99",
+      );
+    await page.getByRole("button", { name: /continue/i }).click();
+
+    // Column mapping proposed (heuristics — no AI key in e2e) and confirmed as-is.
+    await expect(page.getByText(/column mapping/i)).toBeVisible();
+    await page.getByRole("button", { name: /match 2 rows/i }).click();
+
+    // Row 1 resolves via the seeded UPC, row 2 via fuzzy name.
+    await expect(page.getByText(/confirm matches \(2\/2\)/i)).toBeVisible();
+    await expect(page.getByText(/via upc/i)).toBeVisible();
+    await page.getByRole("button", { name: /import 2 bottles/i }).click();
+    await expect(page.getByText(/collection imported/i)).toBeVisible();
+
+    await page.goto("/bar");
+    await expect(page.getByText(/Rittenhouse/i).first()).toBeVisible();
+    await expect(page.getByText(/Larceny Small Batch/i).first()).toBeVisible();
   });
 });
 
