@@ -395,6 +395,9 @@ function EmptyState({ tab }: { tab: Tab }) {
           <Link href="/search" className="btn-secondary px-5 py-2.5 text-sm font-medium">
             {copy.action}
           </Link>
+          <Link href="/import" className="text-sm text-muted hover:text-foreground transition-colors">
+            or import a spreadsheet / app export
+          </Link>
         </>
       ) : (
         <Link href="/search" className="btn-secondary px-5 py-2.5 text-sm font-medium mt-1">
