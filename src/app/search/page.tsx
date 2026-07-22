@@ -135,7 +135,7 @@ export default function SearchPage() {
       )}
 
       {results === null && loading && !error && (
-        <p className="text-sm text-muted text-center py-8">Loading the shelf…</p>
+        <p role="status" className="text-sm text-muted text-center py-8">Loading the shelf…</p>
       )}
     </div>
   );

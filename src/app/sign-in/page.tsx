@@ -1,6 +1,9 @@
 "use client";
 
+import { useState } from "react";
 import { signIn } from "@/lib/auth-client";
+
+type Provider = "google" | "apple";
 
 function GoogleIcon() {
   return (
@@ -26,6 +29,28 @@ function AppleIcon() {
 
 export default function SignInPage() {
   const oauthConfigured = process.env.NEXT_PUBLIC_OAUTH_CONFIGURED !== "false";
+  const [pending, setPending] = useState<Provider | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSignIn(provider: Provider) {
+    if (pending) return;
+    setPending(provider);
+    setError(null);
+    try {
+      // On success better-auth redirects to `callbackURL`, so we intentionally
+      // leave `pending` set — the page is on its way out. Only an error path
+      // (blocked popup, network failure, misconfig) resolves/throws here.
+      const res = await signIn.social({ provider, callbackURL: "/" });
+      if (res && "error" in res && res.error) {
+        setError(res.error.message ?? "Sign-in failed. Please try again.");
+        setPending(null);
+      }
+    } catch {
+      setError("Couldn't reach the sign-in service. Check your connection and try again.");
+      setPending(null);
+    }
+  }
+
   return (
     <div className="flex flex-col items-center justify-center min-h-[85dvh] px-6 gap-9">
       <div className="text-center">
@@ -41,17 +66,26 @@ export default function SignInPage() {
       </div>
       <div className="w-full max-w-xs flex flex-col gap-3">
         <button
-          onClick={() => signIn.social({ provider: "google", callbackURL: "/" })}
-          className="btn-primary flex items-center justify-center gap-3 py-3.5"
+          onClick={() => handleSignIn("google")}
+          disabled={pending !== null}
+          aria-busy={pending === "google"}
+          className="btn-primary flex items-center justify-center gap-3 py-3.5 disabled:opacity-60 disabled:cursor-not-allowed"
         >
-          <GoogleIcon /> Continue with Google
+          <GoogleIcon /> {pending === "google" ? "Connecting…" : "Continue with Google"}
         </button>
         <button
-          onClick={() => signIn.social({ provider: "apple", callbackURL: "/" })}
-          className="btn-secondary flex items-center justify-center gap-3 py-3.5 font-medium"
+          onClick={() => handleSignIn("apple")}
+          disabled={pending !== null}
+          aria-busy={pending === "apple"}
+          className="btn-secondary flex items-center justify-center gap-3 py-3.5 font-medium disabled:opacity-60 disabled:cursor-not-allowed"
         >
-          <AppleIcon /> Continue with Apple
+          <AppleIcon /> {pending === "apple" ? "Connecting…" : "Continue with Apple"}
         </button>
+        {error && (
+          <p role="alert" className="text-sm text-danger text-center mt-1 leading-relaxed">
+            {error}
+          </p>
+        )}
         {!oauthConfigured && (
           <p className="text-xs text-muted text-center mt-2 leading-relaxed">
             OAuth isn&apos;t configured yet — set GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET in

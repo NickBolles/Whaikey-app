@@ -520,8 +520,11 @@ export function ScanClient() {
       patchItem(item.id, { status: "resolving" });
       void processUpcItem(item.id, item.upc);
     } else if (item.kind === "label" && item.thumb) {
+      // `thumb` is the original data URL, so recover its true media type
+      // instead of assuming JPEG — a PNG mislabeled as JPEG is rejected upstream.
+      const mediaType = /data:([^;]+)/.exec(item.thumb)?.[1] ?? "image/jpeg";
       patchItem(item.id, { status: "resolving" });
-      void processLabelItem(item.id, item.thumb, "image/jpeg");
+      void processLabelItem(item.id, item.thumb, mediaType);
     }
   };
 

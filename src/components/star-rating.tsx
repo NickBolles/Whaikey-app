@@ -49,7 +49,8 @@ function Star({ size, fraction }: { size: number; fraction: number }) {
 export interface StarRatingProps {
   /** 0.5-5 in half-star steps, or null for unrated. */
   value: number | null;
-  onChange: (value: number) => void;
+  /** Receives the new value, or null when the current rating is tapped to clear it. */
+  onChange: (value: number | null) => void;
   /** Pixel size of each star (default 44 — thumb-sized). */
   size?: number;
 }
@@ -57,10 +58,12 @@ export interface StarRatingProps {
 /**
  * Five-star rating with half-star steps: tapping the left half of a star
  * sets n-0.5, the right half sets n. Each half is a real button for
- * keyboard and screen reader access.
+ * keyboard and screen reader access. Rating is optional, so tapping the
+ * currently-selected value clears it back to unrated (undoes a mis-tap).
  */
 export function StarRating({ value, onChange, size = 44 }: StarRatingProps) {
   const current = value ?? 0;
+  const set = (v: number) => onChange(value === v ? null : v);
   return (
     <div role="group" aria-label="Rating" className="flex items-center gap-1">
       {[1, 2, 3, 4, 5].map((n) => {
@@ -70,16 +73,16 @@ export function StarRating({ value, onChange, size = 44 }: StarRatingProps) {
             <Star size={size} fraction={fraction} />
             <button
               type="button"
-              aria-label={`Rate ${n - 0.5} stars`}
+              aria-label={value === n - 0.5 ? `Clear rating` : `Rate ${n - 0.5} stars`}
               aria-pressed={current === n - 0.5}
-              onClick={() => onChange(n - 0.5)}
+              onClick={() => set(n - 0.5)}
               className="absolute inset-y-0 left-0 w-1/2 cursor-pointer rounded-l-md focus-visible:outline-2 focus-visible:outline-accent"
             />
             <button
               type="button"
-              aria-label={`Rate ${n} stars`}
+              aria-label={value === n ? `Clear rating` : `Rate ${n} stars`}
               aria-pressed={current === n}
-              onClick={() => onChange(n)}
+              onClick={() => set(n)}
               className="absolute inset-y-0 right-0 w-1/2 cursor-pointer rounded-r-md focus-visible:outline-2 focus-visible:outline-accent"
             />
           </span>

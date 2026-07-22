@@ -129,7 +129,7 @@ function BottlePicker({ onPick }: { onPick: (bottle: BottlePick) => void }) {
         </p>
       )}
 
-      {searching && <p className="text-sm text-muted px-1">Searching…</p>}
+      {searching && <p role="status" className="text-sm text-muted px-1">Searching…</p>}
 
       {results.length > 0 && (
         <ul className="flex flex-col gap-2.5" aria-label="Search results">
