@@ -25,7 +25,8 @@ describe("StarRating", () => {
     render(<StarRating value={2.5} onChange={() => {}} />);
     const buttons = screen.getAllByRole("button");
     expect(buttons).toHaveLength(10);
-    expect(screen.getByRole("button", { name: "Rate 2.5 stars" })).toHaveAttribute(
+    // The selected target relabels to "Clear rating" but stays aria-pressed.
+    expect(screen.getByRole("button", { name: "Clear rating" })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
@@ -38,5 +39,20 @@ describe("StarRating", () => {
   it("shows the numeric value", () => {
     render(<StarRating value={4.5} onChange={() => {}} />);
     expect(screen.getByText("4.5")).toBeInTheDocument();
+  });
+
+  it("tapping the current value clears the rating back to unrated", async () => {
+    const onChange = vi.fn();
+    render(<StarRating value={4} onChange={onChange} />);
+    // The selected target relabels to "Clear rating".
+    await userEvent.click(screen.getByRole("button", { name: "Clear rating" }));
+    expect(onChange).toHaveBeenCalledWith(null);
+  });
+
+  it("tapping a different value replaces rather than clears", async () => {
+    const onChange = vi.fn();
+    render(<StarRating value={4} onChange={onChange} />);
+    await userEvent.click(screen.getByRole("button", { name: "Rate 2 stars" }));
+    expect(onChange).toHaveBeenCalledWith(2);
   });
 });

@@ -16,24 +16,42 @@ export function uid(prefix: string): string {
 // between tests — same fresh-DB isolation, a fraction of the cost.
 let sharedDb: DB | undefined;
 
+/** True once the app schema (a representative core table) exists. */
+async function schemaReady(db: DB): Promise<boolean> {
+  const rows = await db.execute(sql`SELECT to_regclass('public.bottles') AS t`);
+  const list = (rows as unknown as { rows?: Array<{ t: string | null }> }).rows ?? (rows as unknown as Array<{ t: string | null }>);
+  return Boolean(list[0]?.t);
+}
+
+async function truncateAll(db: DB): Promise<void> {
+  await db.execute(sql`
+    DO $$
+    DECLARE r RECORD;
+    BEGIN
+      FOR r IN (SELECT tablename FROM pg_tables WHERE schemaname = 'public') LOOP
+        EXECUTE 'TRUNCATE TABLE ' || quote_ident(r.tablename) || ' RESTART IDENTITY CASCADE';
+      END LOOP;
+    END $$;
+  `);
+}
+
 /**
  * Return a migrated, empty in-memory Postgres (PGlite) and install it as the
  * app singleton so route handlers under test hit it. Call in beforeEach.
+ *
+ * The singleton is only cached *after* migrations succeed, and the cached
+ * handle is re-verified each call. Under heavy parallel load a migration can be
+ * slow or interrupted; without these guards a half-initialized handle would be
+ * reused and every later test in the worker would fail with
+ * `relation "…" does not exist`. Here a bad handle is rebuilt instead.
  */
 export async function setupTestDb(): Promise<DB> {
-  if (!sharedDb) {
-    sharedDb = createDb(":memory:");
-    await migrateDb(sharedDb, ":memory:");
+  if (sharedDb && (await schemaReady(sharedDb))) {
+    await truncateAll(sharedDb);
   } else {
-    await sharedDb.execute(sql`
-      DO $$
-      DECLARE r RECORD;
-      BEGIN
-        FOR r IN (SELECT tablename FROM pg_tables WHERE schemaname = 'public') LOOP
-          EXECUTE 'TRUNCATE TABLE ' || quote_ident(r.tablename) || ' RESTART IDENTITY CASCADE';
-        END LOOP;
-      END $$;
-    `);
+    const db = createDb(":memory:");
+    await migrateDb(db, ":memory:");
+    sharedDb = db;
   }
   setDb(sharedDb);
   return sharedDb;

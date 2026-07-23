@@ -131,7 +131,10 @@ export function ChatClient({ aiConfigured }: { aiConfigured: boolean }) {
   }, [aiConfigured]);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    const reduceMotion =
+      typeof window !== "undefined" &&
+      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    bottomRef.current?.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth" });
   }, [messages, pending]);
 
   const openSession = useCallback(async (id: string) => {

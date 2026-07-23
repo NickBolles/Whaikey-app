@@ -66,7 +66,7 @@ export function RecommendationRail({ mode, title }: RecommendationRailProps) {
       )}
 
       {!error && recs === null && (
-        <p className="text-sm text-muted py-2">Finding bottles…</p>
+        <p role="status" className="text-sm text-muted py-2">Finding bottles…</p>
       )}
 
       {!error && recs !== null && recs.length === 0 && <EmptyState mode={mode} />}
