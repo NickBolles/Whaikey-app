@@ -26,9 +26,16 @@ export default async function BarPage() {
   }
 
   const db = getDb();
-  const [rows, flavorHeat] = await Promise.all([
+  const [rows, personalFlavorHeat, producerFlavorHeat] = await Promise.all([
     listUserBottles(db, user.id),
-    getBarFlavorHeat(db, user.id),
+    getBarFlavorHeat(db, user.id, "personal"),
+    getBarFlavorHeat(db, user.id, "producer"),
   ]);
-  return <BarClient initialRows={rows} flavorHeat={flavorHeat} />;
+  return (
+    <BarClient
+      initialRows={rows}
+      personalFlavorHeat={personalFlavorHeat}
+      producerFlavorHeat={producerFlavorHeat}
+    />
+  );
 }

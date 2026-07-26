@@ -65,6 +65,7 @@ describe("cleanProfile", () => {
     expect(cleanProfile(Object.fromEntries(Object.keys(fullProfile()).map((k) => [k, 0])))).toBeNull();
     expect(cleanProfile(null)).toBeNull();
   });
+
 });
 
 describe("profileFromNotes", () => {

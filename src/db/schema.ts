@@ -136,6 +136,12 @@ export const bottles = pgTable(
     avgPrice: doublePrecision("avg_price"),
     description: text("description"),
     flavorProfile: jsonb("flavor_profile").$type<Record<string, number>>(),
+    /** Published/producer tasting descriptors, keyed by canonical leaf id (1-3). */
+    producerFlavorTags: jsonb("producer_flavor_tags").$type<Record<string, number>>(),
+    /** Attribution required before a producer descriptor can be shown as published. */
+    producerFlavorSourceUrl: text("producer_flavor_source_url"),
+    producerFlavorSourceLabel: text("producer_flavor_source_label"),
+    producerFlavorRetrievedAt: timestamp("producer_flavor_retrieved_at", { withTimezone: true, mode: "date" }),
     imageUrl: text("image_url"),
     status: text("status")
       .$type<"verified" | "user_submitted" | "imported">()

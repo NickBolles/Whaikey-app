@@ -133,9 +133,10 @@ export function FlavorWheelExplorer() {
           </div>
         </div>
       ) : (
-        <p className="text-center text-sm text-muted">
-          Tap a family on the wheel to see where its flavors come from and how to spot them.
-        </p>
+        <div className="text-center text-sm text-muted flex flex-col gap-1">
+          <p>Tap a family on the wheel to see where its flavors come from and how to spot them.</p>
+          <p>Producer notes are a starting point — your own tasting notes are personal observations.</p>
+        </div>
       )}
     </div>
   );

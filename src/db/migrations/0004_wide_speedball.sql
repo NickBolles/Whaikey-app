@@ -1,0 +1,1 @@
+ALTER TABLE "bottles" ADD COLUMN "producer_flavor_tags" jsonb;
