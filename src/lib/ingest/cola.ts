@@ -49,11 +49,24 @@ export interface ColaRecord {
  * eating leading zeros.
  */
 export function parseColaCsv(csv: string): ColaRecord[] {
+  return parseColaCsvResult(csv).records;
+}
+
+interface ColaCsvResult {
+  records: ColaRecord[];
+  dataRows: number;
+}
+
+/** Parse a COLA export and retain its raw row count for cap safety checks. */
+function parseColaCsvResult(csv: string): ColaCsvResult {
   const lines = csv.split(/\r?\n/).filter((l) => l.trim().length > 0);
-  if (lines.length === 0) return [];
+  if (lines.length === 0) return { records: [], dataRows: 0 };
   const records: ColaRecord[] = [];
+  let dataRows = 0;
   for (const line of lines) {
     const cells = splitCsvLine(line);
+    if (cells[0]?.trim() === "TTB ID") continue;
+    dataRows += 1;
     if (cells.length < 8) continue;
     const ttbId = cells[0].replace(/^'+|'+$/g, "").trim();
     if (!/^\d{6,}$/.test(ttbId)) continue; // header or malformed row
@@ -68,7 +81,7 @@ export function parseColaCsv(csv: string): ColaRecord[] {
       classType: cells[7].trim(),
     });
   }
-  return records;
+  return { records, dataRows };
 }
 
 /** Minimal RFC-4180 line splitter (quoted cells, doubled quotes). */
@@ -260,9 +273,15 @@ interface CompleteRangeOptions extends ChunkOptions {
 }
 
 async function fetchCompleteColaRange(o: CompleteRangeOptions): Promise<ColaRecord[]> {
-  const records = await fetchColaChunk(o);
+  const { records, dataRows } = await fetchColaChunk(o);
   await o.sleep(REQUEST_DELAY_MS);
-  if (records.length < COLA_RESULT_LIMIT) return records;
+  if (dataRows !== records.length) {
+    throw new Error(
+      `TTB COLA export for ${o.from}..${o.to} contained ${dataRows} rows but only ` +
+        `${records.length} could be parsed; refusing an incomplete import.`,
+    );
+  }
+  if (dataRows < COLA_RESULT_LIMIT) return records;
 
   const dateRanges = splitDateRange(o.from, o.to);
   if (dateRanges) {
@@ -318,7 +337,7 @@ function splitClassRange(from: string, to: string): [[string, string], [string, 
   ];
 }
 
-async function fetchColaChunk(o: ChunkOptions): Promise<ColaRecord[]> {
+async function fetchColaChunk(o: ChunkOptions): Promise<ColaCsvResult> {
   // 1. Establish a session (the JSP app tracks searches server-side).
   const landing = await o.fetchImpl(COLA_SEARCH_PAGE_URL, { redirect: "follow" });
   if (!landing.ok) {
@@ -360,7 +379,7 @@ async function fetchColaChunk(o: ChunkOptions): Promise<ColaRecord[]> {
         "fields may have changed; see src/lib/ingest/cola.ts.",
     );
   }
-  return parseColaCsv(body);
+  return parseColaCsvResult(body);
 }
 
 function extractCookies(headers: Headers): string {

@@ -243,4 +243,32 @@ describe("fetchColaRecords", () => {
 
     expect(records).toHaveLength(2);
   });
+
+  it("fails instead of treating malformed rows in a capped export as complete", async () => {
+    let searched = false;
+    const fetchImpl = (async (url: RequestInfo | URL) => {
+      const u = String(url);
+      if (u.includes("publicSearchColasBasic.do")) {
+        return new Response("<html>form</html>", {
+          status: 200,
+          headers: { "set-cookie": "JSESSIONID=x" },
+        });
+      }
+      if (u.includes("publicSearchColasBasicProcess.do")) {
+        searched = true;
+        return new Response("<html>results</html>", { status: 200 });
+      }
+      expect(searched).toBe(true);
+      return new Response(`${colaCsv(499, "26001")}\r\nmalformed`, { status: 200 });
+    }) as typeof fetch;
+
+    await expect(
+      fetchColaRecords({
+        since: "2026-01-01",
+        until: "2026-01-01",
+        fetchImpl,
+        sleep: async () => {},
+      }),
+    ).rejects.toThrow(/500 rows but only 499 could be parsed/);
+  });
 });
