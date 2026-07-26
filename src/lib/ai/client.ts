@@ -9,7 +9,7 @@ import Anthropic from "@anthropic-ai/sdk";
  * setAnthropicForTests().
  */
 
-const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
+const OPENROUTER_BASE_URL = "https://openrouter.ai/api";
 
 type AiProvider = "openrouter" | "anthropic";
 
@@ -35,9 +35,19 @@ export function aiSupportsServerWebSearch(): boolean {
   return activeAiProvider() !== "openrouter";
 }
 
+/** Client configuration for the active provider, or null when no key is set. */
+export function aiClientOptions(): { apiKey: string; baseURL?: string } | null {
+  if (activeAiProvider() === "openrouter") {
+    // The SDK appends /v1/messages, so use /api rather than /api/v1 here.
+    return { apiKey: process.env.OPENROUTER_API_KEY!, baseURL: OPENROUTER_BASE_URL };
+  }
+  if (activeAiProvider() === "anthropic") return { apiKey: process.env.ANTHROPIC_API_KEY! };
+  return null;
+}
+
 /** True when either a test client is injected or an API key is present. */
 export function isAiConfigured(): boolean {
-  return testClient !== null || activeAiProvider() !== null;
+  return testClient !== null || aiClientOptions() !== null;
 }
 
 /**
@@ -46,15 +56,9 @@ export function isAiConfigured(): boolean {
  */
 export function getAnthropic(): Anthropic {
   if (testClient) return testClient;
-  const provider = activeAiProvider();
-  if (!provider) throw new AiNotConfiguredError();
-  if (!singleton) {
-    singleton = new Anthropic(
-      provider === "openrouter"
-        ? { apiKey: process.env.OPENROUTER_API_KEY!, baseURL: OPENROUTER_BASE_URL }
-        : { apiKey: process.env.ANTHROPIC_API_KEY! },
-    );
-  }
+  const options = aiClientOptions();
+  if (!options) throw new AiNotConfiguredError();
+  if (!singleton) singleton = new Anthropic(options);
   return singleton;
 }
 
