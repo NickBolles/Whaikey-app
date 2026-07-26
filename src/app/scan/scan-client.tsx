@@ -21,6 +21,7 @@ import { isValidUpc, normalizeUpc } from "@/lib/upc";
 import type { BottleSearchResult } from "@/lib/ai/tools";
 import { CategoryChip } from "@/components/category-chip";
 import {
+  BRIGHTNESS_MIN,
   captureWarning,
   frameStats,
   guidanceFor,
@@ -149,6 +150,9 @@ export function ScanClient() {
   const lastDetectionAtRef = useRef<number | null>(null);
   const lockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const torchChangingRef = useRef(false);
+  const torchSupportedRef = useRef(false);
+  const torchOnRef = useRef(false);
+  const autoTorchAttemptedRef = useRef(false);
   const sampleCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Mirrors for the detector loop, which runs outside React's render cycle.
@@ -381,21 +385,24 @@ export function ScanClient() {
     if (torchChangingRef.current) return;
     const track = streamRef.current?.getVideoTracks()[0] as TorchTrack | undefined;
     if (!track?.applyConstraints) return;
-    const next = !torchOn;
+    const next = !torchOnRef.current;
     torchChangingRef.current = true;
     setTorchChanging(true);
     try {
       await track.applyConstraints({ advanced: [{ torch: next } as MediaTrackConstraintSet] });
+      torchOnRef.current = next;
       setTorchOn(next);
     } catch {
       // Torch support can be withdrawn by the device; keep scanning uninterrupted.
+      torchSupportedRef.current = false;
+      torchOnRef.current = false;
       setTorchSupported(false);
       setTorchOn(false);
     } finally {
       torchChangingRef.current = false;
       setTorchChanging(false);
     }
-  }, [torchOn]);
+  }, []);
 
   /** Flash the detected barcode's outline over the viewfinder for a beat. */
   const flashLockBox = useCallback((raw: Box, video: HTMLVideoElement) => {
@@ -430,8 +437,11 @@ export function ScanClient() {
         streamRef.current = stream;
         const track = stream.getVideoTracks()[0] as TorchTrack | undefined;
         try {
-          setTorchSupported(track?.getCapabilities?.().torch === true);
+          const supported = track?.getCapabilities?.().torch === true;
+          torchSupportedRef.current = supported;
+          setTorchSupported(supported);
         } catch {
+          torchSupportedRef.current = false;
           setTorchSupported(false);
         }
         const video = videoRef.current;
@@ -478,6 +488,18 @@ export function ScanClient() {
                 lastDetectionAtRef.current === null
                   ? Infinity
                   : Date.now() - lastDetectionAtRef.current;
+              if (stats && stats.brightness < BRIGHTNESS_MIN) {
+                if (
+                  torchSupportedRef.current &&
+                  !torchOnRef.current &&
+                  !autoTorchAttemptedRef.current
+                ) {
+                  autoTorchAttemptedRef.current = true;
+                  void toggleTorch();
+                }
+              } else {
+                autoTorchAttemptedRef.current = false;
+              }
               setGuidance(guidanceFor(stats, since));
             }
           } catch {
@@ -495,9 +517,12 @@ export function ScanClient() {
       if (lockTimerRef.current) clearTimeout(lockTimerRef.current);
       streamRef.current?.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
+      torchChangingRef.current = false;
+      torchSupportedRef.current = false;
+      torchOnRef.current = false;
+      autoTorchAttemptedRef.current = false;
       setTorchSupported(false);
       setTorchOn(false);
-      torchChangingRef.current = false;
       setTorchChanging(false);
     };
   }, [enqueueCode, flashLockBox, sampleFrameStats]);
@@ -657,23 +682,33 @@ export function ScanClient() {
               >
                 <Keyboard size={16} strokeWidth={1.8} aria-hidden /> Type it
               </button>
-              {torchSupported && (
-                <button
-                  type="button"
-                  onClick={() => void toggleTorch()}
-                  aria-label={torchOn ? "Turn flashlight off" : "Turn flashlight on"}
-                  aria-pressed={torchOn}
-                  title={torchOn ? "Turn flashlight off" : "Turn flashlight on"}
-                  disabled={torchChanging}
-                  className={`btn-secondary p-2.5 rounded-full disabled:opacity-50 ${torchOn ? "text-accent" : ""}`}
-                >
-                  {torchOn ? (
-                    <FlashlightOff size={18} strokeWidth={1.8} aria-hidden />
-                  ) : (
-                    <Flashlight size={18} strokeWidth={1.8} aria-hidden />
-                  )}
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={() => void toggleTorch()}
+                aria-label={
+                  torchSupported
+                    ? torchOn
+                      ? "Turn flashlight off"
+                      : "Turn flashlight on"
+                    : "Flashlight unavailable"
+                }
+                aria-pressed={torchOn}
+                title={
+                  torchSupported
+                    ? torchOn
+                      ? "Turn flashlight off"
+                      : "Turn flashlight on"
+                    : "Flashlight unavailable on this camera"
+                }
+                disabled={!torchSupported || torchChanging}
+                className={`btn-secondary p-2.5 rounded-full disabled:opacity-50 ${torchOn ? "text-accent" : ""}`}
+              >
+                {torchOn ? (
+                  <FlashlightOff size={18} strokeWidth={1.8} aria-hidden />
+                ) : (
+                  <Flashlight size={18} strokeWidth={1.8} aria-hidden />
+                )}
+              </button>
               <button
                 type="button"
                 onClick={() => captureFrame(null)}

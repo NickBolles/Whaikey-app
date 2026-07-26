@@ -104,6 +104,34 @@ describe("ScanClient (manual fallback mode)", () => {
     expect(enabledFlashlight).not.toBeDisabled();
   });
 
+  it("keeps an unavailable flashlight control visible after the camera starts", async () => {
+    const track = {
+      getCapabilities: () => ({ torch: false }),
+      applyConstraints: vi.fn(),
+      stop: vi.fn(),
+    };
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: {
+        getUserMedia: vi.fn().mockResolvedValue({
+          getTracks: () => [track],
+          getVideoTracks: () => [track],
+        }),
+      },
+    });
+    Object.defineProperty(HTMLMediaElement.prototype, "srcObject", {
+      configurable: true,
+      set: () => undefined,
+    });
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    mockFetch(() => scanMiss());
+    render(<ScanClient />);
+
+    const flashlight = await screen.findByRole("button", { name: /flashlight unavailable/i });
+    expect(flashlight).toBeDisabled();
+    expect(flashlight).toHaveAttribute("title", "Flashlight unavailable on this camera");
+  });
+
   it("rejects an invalid code inline without calling the API", async () => {
     const fetchMock = mockFetch(() => scanMiss());
     const user = userEvent.setup();
