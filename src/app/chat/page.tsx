@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 export const metadata = { title: "Concierge — Whaikey" };
 
-export default async function ChatPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
+export default async function ChatPage({ searchParams }: { searchParams: Promise<{ q?: string | string[] }> }) {
   const [user, query] = await Promise.all([getSessionUser(), searchParams]);
 
   if (!user) {
@@ -31,5 +31,6 @@ export default async function ChatPage({ searchParams }: { searchParams: Promise
     );
   }
 
-  return <ChatClient aiConfigured={isAiConfigured()} initialMessage={query.q?.slice(0, 1000) ?? null} />;
+  const initialMessage = (Array.isArray(query.q) ? query.q[0] : query.q)?.slice(0, 1000) ?? null;
+  return <ChatClient aiConfigured={isAiConfigured()} initialMessage={initialMessage} />;
 }
