@@ -41,6 +41,7 @@ function scanMiss() {
 
 afterEach(() => {
   cleanup();
+  Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: undefined });
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -52,6 +53,40 @@ describe("ScanClient (manual fallback mode)", () => {
     expect(screen.getByText(/camera scanning isn't available/i)).toBeTruthy();
     expect(screen.getByLabelText(/barcode number/i)).toBeTruthy();
     expect(screen.getByText(/scanned this session \(0\)/i)).toBeTruthy();
+  });
+
+  it("toggles the camera flashlight when the rear-camera track supports it", async () => {
+    const applyConstraints = vi.fn().mockResolvedValue(undefined);
+    const track = {
+      getCapabilities: () => ({ torch: true }),
+      applyConstraints,
+      stop: vi.fn(),
+    };
+    const getUserMedia = vi.fn().mockResolvedValue({
+      getTracks: () => [track],
+      getVideoTracks: () => [track],
+    });
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: { getUserMedia },
+    });
+    Object.defineProperty(HTMLMediaElement.prototype, "srcObject", {
+      configurable: true,
+      set: () => undefined,
+    });
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    mockFetch(() => scanMiss());
+    const user = userEvent.setup();
+    render(<ScanClient />);
+
+    const flashlight = await screen.findByRole("button", { name: /turn flashlight on/i });
+    expect(flashlight).toHaveAttribute("title", "Turn flashlight on");
+
+    await user.click(flashlight);
+    await waitFor(() =>
+      expect(applyConstraints).toHaveBeenCalledWith({ advanced: [{ torch: true }] }),
+    );
+    expect(screen.getByRole("button", { name: /turn flashlight off/i })).toBeTruthy();
   });
 
   it("rejects an invalid code inline without calling the API", async () => {

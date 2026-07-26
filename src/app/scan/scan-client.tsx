@@ -6,6 +6,8 @@ import {
   Aperture,
   Camera,
   Check,
+  Flashlight,
+  FlashlightOff,
   ImageUp,
   Keyboard,
   Loader2,
@@ -99,6 +101,10 @@ interface BarcodeDetectorLike {
 }
 type BarcodeDetectorCtor = new (opts: { formats: string[] }) => BarcodeDetectorLike;
 
+type TorchTrack = Pick<MediaStreamTrack, "applyConstraints"> & {
+  getCapabilities?: () => { torch?: boolean };
+};
+
 const BARCODE_FORMATS = ["upc_a", "upc_e", "ean_13", "ean_8"];
 /** Ignore re-detections of the same code within this window (ms). */
 const REPEAT_MS = 4000;
@@ -131,6 +137,8 @@ export function ScanClient() {
   const [guidance, setGuidance] = useState<Guidance | null>(null);
   /** Highlight box over the detected barcode, in element coordinates. */
   const [lockBox, setLockBox] = useState<Box | null>(null);
+  const [torchSupported, setTorchSupported] = useState(false);
+  const [torchOn, setTorchOn] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -366,6 +374,21 @@ export function ScanClient() {
     }
   }, []);
 
+  /** Toggle the rear camera's hardware torch when the browser exposes it. */
+  const toggleTorch = useCallback(async () => {
+    const track = streamRef.current?.getVideoTracks()[0] as TorchTrack | undefined;
+    if (!track?.applyConstraints) return;
+    const next = !torchOn;
+    try {
+      await track.applyConstraints({ advanced: [{ torch: next } as MediaTrackConstraintSet] });
+      setTorchOn(next);
+    } catch {
+      // Torch support can be withdrawn by the device; keep scanning uninterrupted.
+      setTorchSupported(false);
+      setTorchOn(false);
+    }
+  }, [torchOn]);
+
   /** Flash the detected barcode's outline over the viewfinder for a beat. */
   const flashLockBox = useCallback((raw: Box, video: HTMLVideoElement) => {
     setLockBox(
@@ -397,6 +420,12 @@ export function ScanClient() {
           return;
         }
         streamRef.current = stream;
+        const track = stream.getVideoTracks()[0] as TorchTrack | undefined;
+        try {
+          setTorchSupported(track?.getCapabilities?.().torch === true);
+        } catch {
+          setTorchSupported(false);
+        }
         const video = videoRef.current;
         if (!video) return;
         video.srcObject = stream;
@@ -458,6 +487,8 @@ export function ScanClient() {
       if (lockTimerRef.current) clearTimeout(lockTimerRef.current);
       streamRef.current?.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
+      setTorchSupported(false);
+      setTorchOn(false);
     };
   }, [enqueueCode, flashLockBox, sampleFrameStats]);
 
@@ -616,6 +647,21 @@ export function ScanClient() {
               >
                 <Keyboard size={16} strokeWidth={1.8} aria-hidden /> Type it
               </button>
+              {torchSupported && (
+                <button
+                  type="button"
+                  onClick={() => void toggleTorch()}
+                  aria-label={torchOn ? "Turn flashlight off" : "Turn flashlight on"}
+                  title={torchOn ? "Turn flashlight off" : "Turn flashlight on"}
+                  className={`btn-secondary p-2.5 rounded-full ${torchOn ? "text-accent" : ""}`}
+                >
+                  {torchOn ? (
+                    <FlashlightOff size={18} strokeWidth={1.8} aria-hidden />
+                  ) : (
+                    <Flashlight size={18} strokeWidth={1.8} aria-hidden />
+                  )}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => captureFrame(null)}
