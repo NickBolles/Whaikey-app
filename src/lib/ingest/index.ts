@@ -6,7 +6,7 @@ import type { CatalogCandidate, IngestReport } from "./types";
 
 export type { CatalogCandidate, IngestReport } from "./types";
 export { fetchIowaCandidates } from "./iowa";
-export { colaRecordsToCandidates, fetchColaRecords } from "./cola";
+export { COLA_FULL_HISTORY_START, colaRecordsToCandidates, fetchColaRecords } from "./cola";
 export { enrichBottleProfiles, enrichModel, type EnrichReport } from "./enrich";
 
 /**

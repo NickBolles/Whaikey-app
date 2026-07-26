@@ -18,6 +18,15 @@ const SAMPLE_CSV = [
   "'26001001000005',DSP-TX-77,26D01,1/9/2026,TEXAS SINGLE MALT WHISKY,LONE OAK,45,199",
 ].join("\r\n");
 
+const colaCsv = (count: number, prefix: string): string =>
+  [
+    "TTB ID,Permit No.,Serial Number,Completed Date,Fanciful Name,Brand Name,Origin,Class/Type",
+    ...Array.from(
+      { length: count },
+      (_, index) => `'${prefix}${String(index).padStart(5, "0")}',DSP-KY-10,26A01,1/5/2026,,EXAMPLE,50,101`,
+    ),
+  ].join("\r\n");
+
 describe("parseColaCsv", () => {
   it("parses rows, strips TTB ID quotes, skips the header", () => {
     const records = parseColaCsv(SAMPLE_CSV);
@@ -168,5 +177,98 @@ describe("fetchColaRecords", () => {
     await expect(
       fetchColaRecords({ since: "2026-01-01", until: "2026-01-05", fetchImpl, sleep: async () => {} }),
     ).rejects.toThrow(/form (fields )?may have changed|instead of the results CSV/);
+  });
+
+  it("splits capped month downloads by date so the export is complete", async () => {
+    let lastSearch = new URL("https://example.test");
+    const fetchImpl = (async (url: RequestInfo | URL) => {
+      const u = String(url);
+      if (u.includes("publicSearchColasBasic.do")) {
+        return new Response("<html>form</html>", {
+          status: 200,
+          headers: { "set-cookie": "JSESSIONID=x" },
+        });
+      }
+      if (u.includes("publicSearchColasBasicProcess.do")) {
+        lastSearch = new URL(u);
+        return new Response("<html>results</html>", { status: 200 });
+      }
+      const from = lastSearch.searchParams.get("searchCriteria.dateCompletedFrom")!;
+      const to = lastSearch.searchParams.get("searchCriteria.dateCompletedTo")!;
+      const rangeDays =
+        (Date.parse(`${to.slice(6)}-${to.slice(0, 2)}-${to.slice(3, 5)}T00:00:00Z`) -
+          Date.parse(`${from.slice(6)}-${from.slice(0, 2)}-${from.slice(3, 5)}T00:00:00Z`)) /
+        86_400_000;
+      return new Response(colaCsv(rangeDays > 0 ? 500 : 1, from.replaceAll("/", "")), { status: 200 });
+    }) as typeof fetch;
+
+    const records = await fetchColaRecords({
+      since: "2026-01-01",
+      until: "2026-01-04",
+      fetchImpl,
+      sleep: async () => {},
+    });
+
+    expect(records).toHaveLength(4);
+  });
+
+  it("splits a capped single-day download by class/type", async () => {
+    let lastSearch = new URL("https://example.test");
+    const fetchImpl = (async (url: RequestInfo | URL) => {
+      const u = String(url);
+      if (u.includes("publicSearchColasBasic.do")) {
+        return new Response("<html>form</html>", {
+          status: 200,
+          headers: { "set-cookie": "JSESSIONID=x" },
+        });
+      }
+      if (u.includes("publicSearchColasBasicProcess.do")) {
+        lastSearch = new URL(u);
+        return new Response("<html>results</html>", { status: 200 });
+      }
+      const classFrom = lastSearch.searchParams.get("searchCriteria.classTypeFrom");
+      const classTo = lastSearch.searchParams.get("searchCriteria.classTypeTo");
+      const isBroadWhiskeyRange = classFrom === "100" && classTo === "199";
+      return new Response(colaCsv(isBroadWhiskeyRange ? 500 : 1, `${classFrom}${classTo}`), {
+        status: 200,
+      });
+    }) as typeof fetch;
+
+    const records = await fetchColaRecords({
+      since: "2026-01-01",
+      until: "2026-01-01",
+      fetchImpl,
+      sleep: async () => {},
+    });
+
+    expect(records).toHaveLength(2);
+  });
+
+  it("fails instead of treating malformed rows in a capped export as complete", async () => {
+    let searched = false;
+    const fetchImpl = (async (url: RequestInfo | URL) => {
+      const u = String(url);
+      if (u.includes("publicSearchColasBasic.do")) {
+        return new Response("<html>form</html>", {
+          status: 200,
+          headers: { "set-cookie": "JSESSIONID=x" },
+        });
+      }
+      if (u.includes("publicSearchColasBasicProcess.do")) {
+        searched = true;
+        return new Response("<html>results</html>", { status: 200 });
+      }
+      expect(searched).toBe(true);
+      return new Response(`${colaCsv(499, "26001")}\r\nmalformed`, { status: 200 });
+    }) as typeof fetch;
+
+    await expect(
+      fetchColaRecords({
+        since: "2026-01-01",
+        until: "2026-01-01",
+        fetchImpl,
+        sleep: async () => {},
+      }),
+    ).rejects.toThrow(/500 rows but only 499 could be parsed/);
   });
 });

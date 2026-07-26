@@ -28,6 +28,8 @@ export const COLA_SAVE_RESULTS_URL = `${COLA_BASE}/publicSaveSearchResultsToFile
  * Flavored "whisky specialties" (600s) are intentionally out of range.
  */
 export const WHISKY_CLASS_RANGE = { from: "100", to: "199" } as const;
+export const COLA_FULL_HISTORY_START = "1999-01-01";
+const COLA_RESULT_LIMIT = 500;
 
 export interface ColaRecord {
   ttbId: string;
@@ -47,11 +49,24 @@ export interface ColaRecord {
  * eating leading zeros.
  */
 export function parseColaCsv(csv: string): ColaRecord[] {
+  return parseColaCsvResult(csv).records;
+}
+
+interface ColaCsvResult {
+  records: ColaRecord[];
+  dataRows: number;
+}
+
+/** Parse a COLA export and retain its raw row count for cap safety checks. */
+function parseColaCsvResult(csv: string): ColaCsvResult {
   const lines = csv.split(/\r?\n/).filter((l) => l.trim().length > 0);
-  if (lines.length === 0) return [];
+  if (lines.length === 0) return { records: [], dataRows: 0 };
   const records: ColaRecord[] = [];
+  let dataRows = 0;
   for (const line of lines) {
     const cells = splitCsvLine(line);
+    if (cells[0]?.trim() === "TTB ID") continue;
+    dataRows += 1;
     if (cells.length < 8) continue;
     const ttbId = cells[0].replace(/^'+|'+$/g, "").trim();
     if (!/^\d{6,}$/.test(ttbId)) continue; // header or malformed row
@@ -66,7 +81,7 @@ export function parseColaCsv(csv: string): ColaRecord[] {
       classType: cells[7].trim(),
     });
   }
-  return records;
+  return { records, dataRows };
 }
 
 /** Minimal RFC-4180 line splitter (quoted cells, doubled quotes). */
@@ -194,9 +209,10 @@ const REQUEST_DELAY_MS = 1500;
 
 /**
  * Fetch whisky label approvals for a date range from the public registry.
- * Works a month at a time (each saved search caps at 500 rows). The registry
- * is a session-based JSP app: each chunk establishes a session, runs the
- * search, then downloads that session's results file.
+ * The registry caps each download at 500 rows, so broad month searches are
+ * split recursively by date (then by class range for an unusually busy day)
+ * until every downloaded result set is below that cap. This makes historical
+ * backfills complete rather than silently accepting a truncated export.
  */
 export async function fetchColaRecords(opts: ColaFetchOptions): Promise<ColaRecord[]> {
   const fetchImpl = opts.fetchImpl ?? fetch;
@@ -206,15 +222,15 @@ export async function fetchColaRecords(opts: ColaFetchOptions): Promise<ColaReco
 
   const all: ColaRecord[] = [];
   for (const [from, to] of monthChunks(opts.since, opts.until)) {
-    const records = await fetchColaChunk({ from, to, classFrom, classTo, fetchImpl });
-    if (records.length >= 500) {
-      console.warn(
-        `COLA: ${from}..${to} hit the 500-row search cap; results are truncated. ` +
-          `Narrow the class/type range or ingest more often.`,
-      );
-    }
+    const records = await fetchCompleteColaRange({
+      from,
+      to,
+      classFrom,
+      classTo,
+      fetchImpl,
+      sleep,
+    });
     all.push(...records);
-    await sleep(REQUEST_DELAY_MS);
   }
   return all;
 }
@@ -252,7 +268,76 @@ interface ChunkOptions {
   fetchImpl: typeof fetch;
 }
 
-async function fetchColaChunk(o: ChunkOptions): Promise<ColaRecord[]> {
+interface CompleteRangeOptions extends ChunkOptions {
+  sleep: (ms: number) => Promise<void>;
+}
+
+async function fetchCompleteColaRange(o: CompleteRangeOptions): Promise<ColaRecord[]> {
+  const { records, dataRows } = await fetchColaChunk(o);
+  await o.sleep(REQUEST_DELAY_MS);
+  if (dataRows !== records.length) {
+    throw new Error(
+      `TTB COLA export for ${o.from}..${o.to} contained ${dataRows} rows but only ` +
+        `${records.length} could be parsed; refusing an incomplete import.`,
+    );
+  }
+  if (dataRows < COLA_RESULT_LIMIT) return records;
+
+  const dateRanges = splitDateRange(o.from, o.to);
+  if (dateRanges) {
+    console.warn(`COLA: splitting capped ${o.from}..${o.to} search by approval date.`);
+    const nested: ColaRecord[] = [];
+    for (const [from, to] of dateRanges) {
+      nested.push(...(await fetchCompleteColaRange({ ...o, from, to })));
+    }
+    return nested;
+  }
+
+  const classRanges = splitClassRange(o.classFrom, o.classTo);
+  if (classRanges) {
+    console.warn(
+      `COLA: splitting capped ${o.from} ${o.classFrom}..${o.classTo} search by class/type.`,
+    );
+    const nested: ColaRecord[] = [];
+    for (const [classFrom, classTo] of classRanges) {
+      nested.push(...(await fetchCompleteColaRange({ ...o, classFrom, classTo })));
+    }
+    return nested;
+  }
+
+  throw new Error(
+    `TTB COLA returned its ${COLA_RESULT_LIMIT}-row cap for ${o.from} class/type ${o.classFrom}; ` +
+      "cannot safely produce a complete download.",
+  );
+}
+
+/** Divide an inclusive date range in two, or return null for a single day. */
+function splitDateRange(from: string, to: string): [[string, string], [string, string]] | null {
+  const start = new Date(`${from}T00:00:00Z`);
+  const end = new Date(`${to}T00:00:00Z`);
+  const days = Math.round((end.getTime() - start.getTime()) / 86_400_000);
+  if (days < 1) return null;
+  const midpoint = new Date(start.getTime() + Math.floor(days / 2) * 86_400_000);
+  const next = new Date(midpoint.getTime() + 86_400_000);
+  return [
+    [toIso(start), toIso(midpoint)],
+    [toIso(next), toIso(end)],
+  ];
+}
+
+/** Divide an inclusive numeric class/type range in two, or return null for one code. */
+function splitClassRange(from: string, to: string): [[string, string], [string, string]] | null {
+  const start = Number(from);
+  const end = Number(to);
+  if (!Number.isInteger(start) || !Number.isInteger(end) || start >= end) return null;
+  const midpoint = Math.floor((start + end) / 2);
+  return [
+    [String(start), String(midpoint)],
+    [String(midpoint + 1), String(end)],
+  ];
+}
+
+async function fetchColaChunk(o: ChunkOptions): Promise<ColaCsvResult> {
   // 1. Establish a session (the JSP app tracks searches server-side).
   const landing = await o.fetchImpl(COLA_SEARCH_PAGE_URL, { redirect: "follow" });
   if (!landing.ok) {
@@ -294,7 +379,7 @@ async function fetchColaChunk(o: ChunkOptions): Promise<ColaRecord[]> {
         "fields may have changed; see src/lib/ingest/cola.ts.",
     );
   }
-  return parseColaCsv(body);
+  return parseColaCsvResult(body);
 }
 
 function extractCookies(headers: Headers): string {
