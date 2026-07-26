@@ -258,11 +258,25 @@ describe("getBarFlavorHeat", () => {
     expect(heat.topWedgeIds).toEqual([]);
   });
 
+  it("fills the personal bar wheel from owned bottle profiles before notes exist", async () => {
+    const user = await createTestUser(db);
+    const bottle = await createTestBottle(db, { flavorProfile: { sweet: 8, woody: 4 } });
+    await seedUserBottle(db, { userId: user.id, bottleId: bottle.id, relationship: "own" });
+
+    const heat = await getBarFlavorHeat(db, user.id, "personal");
+
+    expect(heat.hasHeat).toBe(true);
+    expect(heat.wedges).toEqual({ sweet: 1, woody: 0.5 });
+    expect(heat.leaves).toEqual({});
+  });
+
   it("keeps the bar's personal notes and published bottle notes as separate sources", async () => {
     const user = await createTestUser(db);
     const bottle = await createTestBottle(db, {
       flavorProfile: { sweet: 8, woody: 5 },
       producerFlavorTags: { vanilla: 3, oak: 2 },
+      producerFlavorSourceUrl: "https://example.com/tasting-notes",
+      producerFlavorSourceLabel: "Producer tasting notes",
     });
     await seedUserBottle(db, { userId: user.id, bottleId: bottle.id, relationship: "own" });
     const [pour] = await db
@@ -280,10 +294,23 @@ describe("getBarFlavorHeat", () => {
     const published = await getBarFlavorHeat(db, user.id, "producer");
 
     expect(personal.leaves).toEqual({ campfire: 1 });
-    expect(personal.wedges).toEqual({ peaty: 1 });
+    expect(personal.wedges.peaty).toBe(1);
+    expect(personal.wedges.sweet).toBe(1);
     expect(published.leaves).toEqual({ vanilla: 1, oak: expect.any(Number) });
     expect(published.leaves.campfire).toBeUndefined();
     expect(published.wedges.sweet).toBe(1);
+  });
+
+  it("does not present unattributed catalog descriptors as producer notes", async () => {
+    const user = await createTestUser(db);
+    const bottle = await createTestBottle(db, { producerFlavorTags: { vanilla: 3 } });
+    await seedUserBottle(db, { userId: user.id, bottleId: bottle.id, relationship: "own" });
+
+    expect(await getBarFlavorHeat(db, user.id, "producer")).toMatchObject({
+      hasHeat: false,
+      wedges: {},
+      leaves: {},
+    });
   });
 
   it("sums owned bottles' wedge profiles, normalized to the hottest wedge", async () => {
@@ -333,6 +360,7 @@ describe("getBarFlavorHeat", () => {
     });
 
     const heat = await getBarFlavorHeat(db, user.id);
+    const personalHeat = await getBarFlavorHeat(db, user.id, "personal");
     // Leaves normalize to campfire (3): brine 1/3, vanilla 2/3.
     expect(heat.leaves.campfire).toBe(1);
     expect(heat.leaves.brine).toBeCloseTo(0.33, 2);
@@ -343,6 +371,9 @@ describe("getBarFlavorHeat", () => {
     // Sweet is floored at vanilla's own heat rather than its lower rolled-up
     // share, so the wheel never paints a hot leaf inside a colder family.
     expect(heat.wedges.sweet).toBe(heat.leaves.vanilla);
+    // The personal My Bar view filters and displays the same owned-bottle
+    // universe as the inventory list, so tried-only notes stay out of it.
+    expect(personalHeat).toMatchObject({ hasHeat: false, wedges: {}, leaves: {} });
   });
 
   it("never renders a wedge colder than its own hottest leaf", async () => {
