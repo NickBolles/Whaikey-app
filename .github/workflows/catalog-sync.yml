@@ -86,6 +86,8 @@ jobs:
         name: Enrich flavor profiles
         # A full backfill can add a large number of bottles. Seed first, then
         # explicitly dispatch a separate enrichment run when desired.
+        # Keep bulk enrichment offline by default: direct Anthropic web search
+        # can add one paid search per bottle at this catalog scale.
         if: ${{ inputs.skip_enrich != true && inputs.cola_scope != 'full-history' }}
         continue-on-error: true
         env:
@@ -97,7 +99,7 @@ jobs:
             echo "OPENROUTER_API_KEY and ANTHROPIC_API_KEY secrets are not set — skipping enrichment."
             exit 0
           fi
-          pnpm ingest enrich
+          pnpm ingest enrich --no-web
 
       - name: Report incomplete catalog sync
         if: ${{ always() && (steps.cola.outcome == 'failure' || steps.cola-full-history.outcome == 'failure' || steps.enrich.outcome == 'failure') }}
