@@ -23,5 +23,10 @@ describe("AppNav", () => {
     expect(screen.getByRole("link", { name: /Log a pour/i })).toHaveAttribute("href", "/pour");
     expect(screen.getByRole("link", { name: /Scan a bottle/i })).toHaveAttribute("href", "/scan");
     expect(screen.getByRole("link", { name: /Find a bottle/i })).toHaveAttribute("href", "/search");
+    expect(screen.getByRole("link", { name: /Log a pour/i })).toHaveFocus();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Quick actions" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open quick actions" })).toHaveFocus();
   });
 });

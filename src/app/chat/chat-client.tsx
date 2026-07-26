@@ -92,11 +92,10 @@ function TypingIndicator() {
 }
 
 export function ChatClient({ aiConfigured, initialMessage = null }: { aiConfigured: boolean; initialMessage?: string | null }) {
-  const initialMessageSent = useRef(false);
   const [sessions, setSessions] = useState<ChatSessionSummary[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [input, setInput] = useState("");
+  const [input, setInput] = useState(initialMessage ?? "");
   const [pending, setPending] = useState(false);
   const [streamingId, setStreamingId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -275,13 +274,6 @@ export function ChatClient({ aiConfigured, initialMessage = null }: { aiConfigur
     },
     [pending, sessionId, refreshSessions],
   );
-
-  useEffect(() => {
-    if (!aiConfigured || !initialMessage || initialMessageSent.current) return;
-    initialMessageSent.current = true;
-    window.history.replaceState(window.history.state, "", "/chat");
-    void send(initialMessage);
-  }, [aiConfigured, initialMessage, send]);
 
   if (!aiConfigured) return <SetupCard />;
 
