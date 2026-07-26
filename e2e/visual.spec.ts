@@ -121,7 +121,7 @@ test.describe("signed in (demo collector)", () => {
   test("my bar: flavor map", async ({ page }) => {
     await page.goto("/bar");
     const map = page.getByRole("region", { name: /bar flavor map/i });
-    await expect(page.getByTestId("flavor-wheel")).toBeVisible();
+    await expect(page.getByTestId("bar-flavor-wheel")).toBeVisible();
     await settle(page);
     await expect(map).toHaveScreenshot(shot("bar-flavor-map"));
   });
