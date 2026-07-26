@@ -125,9 +125,14 @@ export interface BarRowBottle {
   distilleryName: string | null;
   avgPrice: number | null;
   flavorProfile: Record<string, number> | null;
+  producerFlavorTags: Record<string, number> | null;
 }
 
-export type BarRow = schema.UserBottle & { bottle: BarRowBottle };
+/** Personal note tags rolled up per bottle for client-side wheel filtering. */
+export type BarRow = schema.UserBottle & {
+  bottle: BarRowBottle;
+  personalFlavorTags: Record<string, number>;
+};
 
 export async function listUserBottles(
   db: DB,
@@ -147,6 +152,7 @@ export async function listUserBottles(
       distilleryName: schema.distilleries.name,
       avgPrice: schema.bottles.avgPrice,
       flavorProfile: schema.bottles.flavorProfile,
+      producerFlavorTags: schema.bottles.producerFlavorTags,
     })
     .from(schema.userBottles)
     .innerJoin(schema.bottles, eq(schema.userBottles.bottleId, schema.bottles.id))
@@ -154,8 +160,26 @@ export async function listUserBottles(
     .where(and(...conds))
     .orderBy(desc(schema.userBottles.updatedAt), desc(schema.userBottles.createdAt));
 
+  const personalTags = await db
+    .select({ bottleId: schema.pours.bottleId, flavorTags: schema.tastingNotes.flavorTags })
+    .from(schema.tastingNotes)
+    .innerJoin(schema.pours, eq(schema.tastingNotes.pourId, schema.pours.id))
+    .where(eq(schema.pours.userId, userId));
+  const personalTagsByBottle = new Map<string, Record<string, number>>();
+  for (const row of personalTags) {
+    if (!row.flavorTags) continue;
+    const tags = personalTagsByBottle.get(row.bottleId) ?? {};
+    for (const [leafId, intensity] of Object.entries(row.flavorTags)) {
+      if (wedgeForLeaf(leafId) && typeof intensity === "number") {
+        tags[leafId] = (tags[leafId] ?? 0) + intensity;
+      }
+    }
+    personalTagsByBottle.set(row.bottleId, tags);
+  }
+
   return rows.map((r) => ({
     ...r.ub,
+    personalFlavorTags: personalTagsByBottle.get(r.bottleId) ?? {},
     bottle: {
       id: r.bottleId,
       name: r.bottleName,
@@ -163,6 +187,7 @@ export async function listUserBottles(
       distilleryName: r.distilleryName,
       avgPrice: r.avgPrice,
       flavorProfile: r.flavorProfile,
+      producerFlavorTags: r.producerFlavorTags,
     },
   }));
 }
@@ -259,6 +284,8 @@ export async function getBarStats(db: DB, userId: string): Promise<BarStats> {
 // Bar flavor heat (the "bar palate" heat map)
 // ---------------------------------------------------------------------------
 
+export type FlavorHeatSource = "combined" | "personal" | "producer";
+
 export interface BarFlavorHeat {
   /** Wedge id -> 0-1, relative to the hottest wedge. */
   wedges: Record<string, number>;
@@ -282,44 +309,58 @@ export interface BarFlavorHeat {
  * of a bottle and never register), and a wedge is floored at its own hottest
  * leaf so the wheel can never paint a blazing leaf inside a cold family.
  */
-export async function getBarFlavorHeat(db: DB, userId: string): Promise<BarFlavorHeat> {
+export async function getBarFlavorHeat(
+  db: DB,
+  userId: string,
+  source: FlavorHeatSource = "combined",
+): Promise<BarFlavorHeat> {
   const validWedges = new Set<string>(WEDGE_IDS);
   const wedgeTotals: Record<string, number> = {};
   const leafTotals: Record<string, number> = {};
 
-  const owned = await db
-    .select({ flavorProfile: schema.bottles.flavorProfile })
-    .from(schema.userBottles)
-    .innerJoin(schema.bottles, eq(schema.userBottles.bottleId, schema.bottles.id))
-    .where(and(eq(schema.userBottles.userId, userId), eq(schema.userBottles.relationship, "own")));
-
-  for (const row of owned) {
-    if (!row.flavorProfile) continue;
-    for (const [wedgeId, score] of Object.entries(row.flavorProfile)) {
-      if (!validWedges.has(wedgeId) || typeof score !== "number") continue;
-      wedgeTotals[wedgeId] = (wedgeTotals[wedgeId] ?? 0) + Math.max(0, score);
-    }
-  }
-
-  const notes = await db
-    .select({ flavorTags: schema.tastingNotes.flavorTags })
-    .from(schema.tastingNotes)
-    .innerJoin(schema.pours, eq(schema.tastingNotes.pourId, schema.pours.id))
-    .where(eq(schema.pours.userId, userId));
-
-  for (const note of notes) {
-    if (!note.flavorTags) continue;
+  const addTags = (flavorTags: Record<string, number> | null) => {
+    if (!flavorTags) return;
     const tags: Record<string, number> = {};
-    for (const [leafId, intensity] of Object.entries(note.flavorTags)) {
+    for (const [leafId, intensity] of Object.entries(flavorTags)) {
       if (!wedgeForLeaf(leafId) || typeof intensity !== "number") continue;
       leafTotals[leafId] = (leafTotals[leafId] ?? 0) + intensity;
       tags[leafId] = intensity;
     }
-    // Onto the same 0-10 scale bottle profiles use, via the taxonomy's own
-    // leaf -> wedge contract rather than a second, incompatible rollup.
     for (const [wedgeId, score] of Object.entries(rollUpToWedges(tags))) {
       wedgeTotals[wedgeId] = (wedgeTotals[wedgeId] ?? 0) + score;
     }
+  };
+
+  if (source === "combined" || source === "producer") {
+    const owned = await db
+      .select({
+        flavorProfile: schema.bottles.flavorProfile,
+        producerFlavorTags: schema.bottles.producerFlavorTags,
+      })
+      .from(schema.userBottles)
+      .innerJoin(schema.bottles, eq(schema.userBottles.bottleId, schema.bottles.id))
+      .where(and(eq(schema.userBottles.userId, userId), eq(schema.userBottles.relationship, "own")));
+
+    for (const row of owned) {
+      // The legacy profile can include AI/community estimates; never present it
+      // as a producer claim. Only the combined legacy map may consume it.
+      if (source === "combined" && row.flavorProfile) {
+        for (const [wedgeId, score] of Object.entries(row.flavorProfile)) {
+          if (!validWedges.has(wedgeId) || typeof score !== "number") continue;
+          wedgeTotals[wedgeId] = (wedgeTotals[wedgeId] ?? 0) + Math.max(0, score);
+        }
+      }
+      if (source === "producer") addTags(row.producerFlavorTags);
+    }
+  }
+
+  if (source === "combined" || source === "personal") {
+    const notes = await db
+      .select({ flavorTags: schema.tastingNotes.flavorTags })
+      .from(schema.tastingNotes)
+      .innerJoin(schema.pours, eq(schema.tastingNotes.pourId, schema.pours.id))
+      .where(eq(schema.pours.userId, userId));
+    for (const note of notes) addTags(note.flavorTags);
   }
 
   const normalize = (totals: Record<string, number>): Record<string, number> => {

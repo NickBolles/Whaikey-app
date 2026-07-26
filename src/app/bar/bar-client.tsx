@@ -2,11 +2,12 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Hourglass, Plus } from "lucide-react";
+import { BookOpen, Hourglass, Plus, UserRound } from "lucide-react";
 import type { BarFlavorHeat, BarRow } from "@/lib/bar";
-import { FLAVOR_WHEEL } from "@/lib/flavor-wheel";
+import { leafLabel } from "@/lib/flavor-wheel";
+import { BarFlavorWheel, type FlavorSelection } from "@/components/bar-flavor-wheel";
 import { FillGauge } from "@/components/fill-gauge";
-import { FlavorHeatLegend, FlavorWheel } from "@/components/flavor-wheel";
+import { FlavorHeatLegend } from "@/components/flavor-wheel";
 import { FlavorRadar } from "@/components/flavor-radar";
 
 /** BarRow with dates possibly serialized to strings (API JSON responses). */
@@ -41,20 +42,19 @@ function statusChipClass(status: string | null): string {
   }
 }
 
-function wedgeLabel(wedgeId: string): string {
-  const wedge = FLAVOR_WHEEL.find((w) => w.id === wedgeId);
-  return wedge ? wedge.label.split(" / ")[0] : wedgeId;
-}
-
 export function BarClient({
   initialRows,
-  flavorHeat,
+  personalFlavorHeat,
+  producerFlavorHeat,
 }: {
   initialRows: Row[];
-  flavorHeat: BarFlavorHeat;
+  personalFlavorHeat: BarFlavorHeat;
+  producerFlavorHeat: BarFlavorHeat;
 }) {
   const [rows, setRows] = useState<Row[]>(initialRows);
   const [tab, setTab] = useState<Tab>("bar");
+  const [flavorSource, setFlavorSource] = useState<"personal" | "producer">("personal");
+  const [selectedFlavorIds, setSelectedFlavorIds] = useState<string[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -161,6 +161,23 @@ export function BarClient({
   }
 
   const activeRows = tab === "bar" ? ownRows : tab === "wishlist" ? wishlistRows : triedRows;
+  const activeFlavorHeat = flavorSource === "personal" ? personalFlavorHeat : producerFlavorHeat;
+  const filteredRows = useMemo(() => {
+    if (tab !== "bar" || selectedFlavorIds.length === 0) return activeRows;
+    return activeRows.filter((row) => {
+      const tags = flavorSource === "personal" ? row.personalFlavorTags : row.bottle.producerFlavorTags ?? {};
+      return selectedFlavorIds.some((leafId) => (tags[leafId] ?? 0) > 0);
+    });
+  }, [activeRows, flavorSource, selectedFlavorIds, tab]);
+
+  function toggleFlavor(selection: FlavorSelection) {
+    setSelectedFlavorIds((current) => {
+      const allSelected = selection.leafIds.every((id) => current.includes(id));
+      return allSelected
+        ? current.filter((id) => !selection.leafIds.includes(id))
+        : Array.from(new Set([...current, ...selection.leafIds]));
+    });
+  }
 
   return (
     <div className="px-4 pt-5 pb-10 flex flex-col gap-6">
@@ -206,30 +223,61 @@ export function BarClient({
           </section>
 
           <section aria-label="Bar flavor map">
-            <h2 className="section-label mb-3">Bar flavor map</h2>
-            {flavorHeat.hasHeat ? (
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <div>
+                <h2 className="section-label">Bar flavor map</h2>
+                <p className="mt-1 text-xs text-muted">Tap any ring to filter your bar.</p>
+              </div>
+              <div role="tablist" aria-label="Flavor note source" className="flex rounded-xl border border-border-subtle p-1">
+                <button
+                  role="tab"
+                  aria-selected={flavorSource === "personal"}
+                  onClick={() => setFlavorSource("personal")}
+                  className={`inline-flex min-h-9 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium ${flavorSource === "personal" ? "bg-accent text-background" : "text-muted hover:text-foreground"}`}
+                >
+                  <UserRound size={14} aria-hidden /> My Notes
+                </button>
+                <button
+                  role="tab"
+                  aria-selected={flavorSource === "producer"}
+                  onClick={() => setFlavorSource("producer")}
+                  className={`inline-flex min-h-9 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium ${flavorSource === "producer" ? "bg-accent text-background" : "text-muted hover:text-foreground"}`}
+                >
+                  <BookOpen size={14} aria-hidden /> Producer Notes
+                </button>
+              </div>
+            </div>
+            {activeFlavorHeat.hasHeat ? (
               <div className="card p-4 flex flex-col items-center gap-3">
-                <FlavorWheel
-                  wedgeHeat={flavorHeat.wedges}
-                  leafHeat={flavorHeat.leaves}
-                  caption="Your bar"
-                  subCaption={
-                    flavorHeat.topWedgeIds.length > 0
-                      ? `leans ${flavorHeat.topWedgeIds.slice(0, 2).map(wedgeLabel).join(" & ").toLowerCase()}`
-                      : undefined
-                  }
+                <BarFlavorWheel
+                  wedgeHeat={activeFlavorHeat.wedges}
+                  leafHeat={activeFlavorHeat.leaves}
+                  caption={flavorSource === "personal" ? "My notes" : "Producer notes"}
+                  subCaption="family · group · flavor"
+                  selectedIds={selectedFlavorIds}
+                  onToggle={toggleFlavor}
                 />
-                <FlavorHeatLegend leafHeat={flavorHeat.leaves} />
+                <FlavorHeatLegend leafHeat={activeFlavorHeat.leaves} />
+                {selectedFlavorIds.length > 0 && (
+                  <div className="flex w-full flex-wrap items-center justify-center gap-2" aria-label="Active flavor filters">
+                    {selectedFlavorIds.map((id) => (
+                      <button key={id} onClick={() => toggleFlavor({ id, label: leafLabel(id) ?? id, leafIds: [id] })} className="chip chip-active px-3 py-1.5 text-xs">
+                        {leafLabel(id) ?? id} ×
+                      </button>
+                    ))}
+                    <button onClick={() => setSelectedFlavorIds([])} className="min-h-9 px-2 text-xs text-muted hover:text-foreground underline-offset-2 hover:underline">
+                      Clear
+                    </button>
+                  </div>
+                )}
+                {selectedFlavorIds.length > 0 && <p className="text-xs text-muted">Showing {filteredRows.length} of {ownRows.length} bottles</p>}
               </div>
             ) : (
               <div className="card p-6 text-center flex flex-col items-center gap-2">
-                <div aria-hidden className="text-3xl">
-                  🎯
-                </div>
-                <p className="font-display text-base font-semibold">No flavor map yet</p>
+                <div aria-hidden className="text-3xl">🎯</div>
+                <p className="font-display text-base font-semibold">No {flavorSource === "personal" ? "personal" : "producer"} flavor notes yet</p>
                 <p className="text-sm text-muted max-w-[30ch] leading-relaxed">
-                  Add bottles and tag flavors on your pours — the wheel heats up where your bar
-                  leans.
+                  {flavorSource === "personal" ? "Log a pour and tag what you taste to build your personal map." : "Published bottle notes appear here as the catalog and scanner are enriched."}
                 </p>
               </div>
             )}
@@ -259,11 +307,11 @@ export function BarClient({
         </>
       )}
 
-      {activeRows.length === 0 ? (
+      {filteredRows.length === 0 ? (
         <EmptyState tab={tab} />
       ) : (
         <ul className="flex flex-col gap-2.5">
-          {activeRows.map((row) => (
+          {filteredRows.map((row) => (
             <li key={row.id} className="card-flat overflow-hidden">
               {tab === "bar" ? (
                 <>
