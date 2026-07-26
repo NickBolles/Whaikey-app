@@ -5,10 +5,10 @@
 #   - cola:   TTB label approvals for the last 8 days (registry maintenance
 #             can interrupt this source, and the run reports any interruption)
 #   - enrich: fill flavor profiles for new bottles (community notes first,
-#             then Sonnet 5 with web search grounding; needs ANTHROPIC_API_KEY)
+#             then an OpenRouter-backed model (preferred) or Anthropic fallback)
 #
 # Requires repo secrets: DATABASE_URL (Postgres/Supabase pooler URL) and, for
-# the enrich step, ANTHROPIC_API_KEY. Without DATABASE_URL the run stops early
+# the enrich step, OPENROUTER_API_KEY (preferred) or ANTHROPIC_API_KEY. Without DATABASE_URL the run stops early
 # with a clear message instead of failing cryptically.
 name: catalog sync
 
@@ -61,6 +61,7 @@ jobs:
         continue-on-error: true
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          NODE_EXTRA_CA_CERTS: ${{ github.workspace }}/.github/certificates/entrust-ov-tls-issuing-rsa-ca-2.pem
         run: pnpm ingest cola --since "$(date -u -d '8 days ago' +%F)"
 
       - id: enrich
@@ -69,10 +70,11 @@ jobs:
         continue-on-error: true
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          if [ -z "$ANTHROPIC_API_KEY" ]; then
-            echo "ANTHROPIC_API_KEY secret is not set — skipping enrichment."
+          if [ -z "$OPENROUTER_API_KEY" ] && [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "OPENROUTER_API_KEY and ANTHROPIC_API_KEY secrets are not set — skipping enrichment."
             exit 0
           fi
           pnpm ingest enrich

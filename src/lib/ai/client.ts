@@ -1,13 +1,17 @@
 import Anthropic from "@anthropic-ai/sdk";
 
 /**
- * Anthropic client factory for the AI gateway vertical.
+ * Anthropic-Messages-compatible client factory for the AI gateway vertical.
  *
- * All Anthropic calls happen server-side through this module. Tests inject a
- * fake via setAnthropicForTests(); production code lazily builds a singleton
- * from ANTHROPIC_API_KEY. When no key is configured, API routes return a 503
- * and the UI renders a friendly setup note.
+ * OpenRouter is preferred when OPENROUTER_API_KEY is configured; it exposes
+ * the Anthropic Messages API at a compatible endpoint. Direct Anthropic stays
+ * as a fallback for existing deployments. Tests inject a fake client via
+ * setAnthropicForTests().
  */
+
+const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
+
+type AiProvider = "openrouter" | "anthropic";
 
 let testClient: Anthropic | null = null;
 let singleton: Anthropic | null = null;
@@ -19,17 +23,38 @@ export class AiNotConfiguredError extends Error {
   }
 }
 
-/** True when either a test client is injected or an API key is present. */
-export function isAiConfigured(): boolean {
-  return testClient !== null || Boolean(process.env.ANTHROPIC_API_KEY);
+/** The configured production provider, with OpenRouter taking precedence. */
+export function activeAiProvider(): AiProvider | null {
+  if (process.env.OPENROUTER_API_KEY) return "openrouter";
+  if (process.env.ANTHROPIC_API_KEY) return "anthropic";
+  return null;
 }
 
-/** Singleton Anthropic client. Throws AiNotConfiguredError when no key is set. */
+/** OpenRouter's Anthropic-compatible endpoint does not accept Anthropic's hosted web-search tool. */
+export function aiSupportsServerWebSearch(): boolean {
+  return activeAiProvider() !== "openrouter";
+}
+
+/** True when either a test client is injected or an API key is present. */
+export function isAiConfigured(): boolean {
+  return testClient !== null || activeAiProvider() !== null;
+}
+
+/**
+ * Singleton client for Anthropic Messages-compatible calls. OpenRouter is
+ * selected first so one OPENROUTER_API_KEY can serve every AI feature.
+ */
 export function getAnthropic(): Anthropic {
   if (testClient) return testClient;
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) throw new AiNotConfiguredError();
-  if (!singleton) singleton = new Anthropic({ apiKey });
+  const provider = activeAiProvider();
+  if (!provider) throw new AiNotConfiguredError();
+  if (!singleton) {
+    singleton = new Anthropic(
+      provider === "openrouter"
+        ? { apiKey: process.env.OPENROUTER_API_KEY!, baseURL: OPENROUTER_BASE_URL }
+        : { apiKey: process.env.ANTHROPIC_API_KEY! },
+    );
+  }
   return singleton;
 }
 
@@ -41,10 +66,14 @@ export function setAnthropicForTests(client: Anthropic | null): void {
 
 /** Model for chat + pairings. */
 export function chatModel(): string {
-  return process.env.WHAIKEY_CHAT_MODEL ?? "claude-sonnet-5";
+  if (process.env.WHAIKEY_CHAT_MODEL) return process.env.WHAIKEY_CHAT_MODEL;
+  return activeAiProvider() === "openrouter" ? "anthropic/claude-sonnet-4" : "claude-sonnet-5";
 }
 
 /** Fast model for extraction + label scan. */
 export function fastModel(): string {
-  return process.env.WHAIKEY_FAST_MODEL ?? "claude-haiku-4-5-20251001";
+  if (process.env.WHAIKEY_FAST_MODEL) return process.env.WHAIKEY_FAST_MODEL;
+  return activeAiProvider() === "openrouter"
+    ? "anthropic/claude-haiku-4.5"
+    : "claude-haiku-4-5-20251001";
 }

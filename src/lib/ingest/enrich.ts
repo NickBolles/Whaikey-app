@@ -2,7 +2,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { and, eq, isNull } from "drizzle-orm";
 import type { DB } from "@/db";
 import { bottles, distilleries, pours, tastingNotes } from "@/db/schema";
-import { getAnthropic } from "@/lib/ai/client";
+import { activeAiProvider, aiSupportsServerWebSearch, getAnthropic } from "@/lib/ai/client";
 import { parseModelJson, textFromContent } from "@/lib/ai/json";
 import { FLAVOR_WHEEL, WEDGE_IDS, rollUpToWedges } from "@/lib/flavor-wheel";
 
@@ -34,7 +34,8 @@ import { FLAVOR_WHEEL, WEDGE_IDS, rollUpToWedges } from "@/lib/flavor-wheel";
  * the current web search tool, and stays far cheaper than Opus.
  */
 export function enrichModel(): string {
-  return process.env.WHAIKEY_ENRICH_MODEL ?? "claude-sonnet-5";
+  return process.env.WHAIKEY_ENRICH_MODEL ??
+    (activeAiProvider() === "openrouter" ? "anthropic/claude-sonnet-4" : "claude-sonnet-5");
 }
 
 /** User notes needed before we trust the community roll-up over the model. */
@@ -180,7 +181,11 @@ export interface EnrichOptions {
 
 /** Fill flavorProfile for bottles that lack one: notes first, then the model. */
 export async function enrichBottleProfiles(db: DB, opts: EnrichOptions = {}): Promise<EnrichReport> {
-  const web = opts.web ?? true;
+  const requestedWeb = opts.web ?? true;
+  const web = requestedWeb && aiSupportsServerWebSearch();
+  if (requestedWeb && !web) {
+    console.warn("OpenRouter enrichment runs without Anthropic-hosted web search; use --no-web to silence this notice.");
+  }
   const batchSize = Math.max(1, opts.batchSize ?? (web ? 10 : 25));
 
   let targets = await db

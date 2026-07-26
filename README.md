@@ -25,7 +25,7 @@ pnpm dev          # http://localhost:3000
 pnpm test         # vitest suite
 ```
 
-Copy `.env.example` to `.env.local`. Auth is social-login-only: set `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` (and optionally Apple). AI features need `ANTHROPIC_API_KEY`.
+Copy `.env.example` to `.env.local`. Auth is social-login-only: set `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` (and optionally Apple). AI features prefer `OPENROUTER_API_KEY` (with `ANTHROPIC_API_KEY` as a direct-provider fallback).
 
 Local dev and the test suite run on [PGlite](https://pglite.dev) — an in-process WASM Postgres — so there's no server, network, or cloud account required. `DATABASE_URL` defaults to `file:./data/whaikey` (a local PGlite data dir); tests use an in-memory instance.
 
@@ -55,7 +55,8 @@ Import the GitHub repo at [vercel.com/new](https://vercel.com/new). Vercel auto-
 | `BETTER_AUTH_URL` | your production URL, e.g. `https://whaikey.vercel.app` | Production |
 | `GOOGLE_CLIENT_ID` | Google OAuth client ID (step 5) | Production |
 | `GOOGLE_CLIENT_SECRET` | Google OAuth client secret (step 5) | Production |
-| `ANTHROPIC_API_KEY` | Anthropic API key ([console](https://console.anthropic.com/)) | Production, Preview |
+| `OPENROUTER_API_KEY` | Preferred OpenRouter API key ([keys](https://openrouter.ai/keys)) | Production, Preview |
+| `ANTHROPIC_API_KEY` | Optional direct Anthropic fallback | Production, Preview |
 
 Notes:
 - On **preview** deploys `BETTER_AUTH_URL` is unset and the server falls back to the per-deploy `VERCEL_URL`, so the app boots. Google sign-in itself only works on production (its redirect URI is fixed), so exercise previews **signed-out** (search → bottle detail work without auth).

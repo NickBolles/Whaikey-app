@@ -95,8 +95,11 @@ describe("profileFromNotes", () => {
 });
 
 describe("enrichModel", () => {
-  it("defaults to Sonnet and honors the env override", () => {
+  it("defaults to the active provider's Sonnet model and honors the env override", () => {
     expect(enrichModel()).toBe("claude-sonnet-5");
+    process.env.OPENROUTER_API_KEY = "test-openrouter-key";
+    expect(enrichModel()).toBe("anthropic/claude-sonnet-4");
+    delete process.env.OPENROUTER_API_KEY;
     process.env.WHAIKEY_ENRICH_MODEL = "claude-opus-4-8";
     try {
       expect(enrichModel()).toBe("claude-opus-4-8");
