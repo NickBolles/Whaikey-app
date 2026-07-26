@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, isNotNull, sql } from "drizzle-orm";
+import { and, desc, eq, exists, gte, isNotNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
@@ -126,6 +126,17 @@ export interface BarRowBottle {
   avgPrice: number | null;
   flavorProfile: Record<string, number> | null;
   producerFlavorTags: Record<string, number> | null;
+  producerFlavorSourceUrl: string | null;
+  producerFlavorSourceLabel: string | null;
+}
+
+/** A producer claim is only displayable when it carries source attribution. */
+export function hasPublishedProducerFlavorNotes(bottle: Pick<BarRowBottle, "producerFlavorTags" | "producerFlavorSourceUrl" | "producerFlavorSourceLabel">): boolean {
+  return (
+    bottle.producerFlavorTags != null &&
+    Boolean(bottle.producerFlavorSourceUrl?.trim()) &&
+    Boolean(bottle.producerFlavorSourceLabel?.trim())
+  );
 }
 
 /** Personal note tags rolled up per bottle for client-side wheel filtering. */
@@ -153,6 +164,8 @@ export async function listUserBottles(
       avgPrice: schema.bottles.avgPrice,
       flavorProfile: schema.bottles.flavorProfile,
       producerFlavorTags: schema.bottles.producerFlavorTags,
+      producerFlavorSourceUrl: schema.bottles.producerFlavorSourceUrl,
+      producerFlavorSourceLabel: schema.bottles.producerFlavorSourceLabel,
     })
     .from(schema.userBottles)
     .innerJoin(schema.bottles, eq(schema.userBottles.bottleId, schema.bottles.id))
@@ -188,6 +201,8 @@ export async function listUserBottles(
       avgPrice: r.avgPrice,
       flavorProfile: r.flavorProfile,
       producerFlavorTags: r.producerFlavorTags,
+      producerFlavorSourceUrl: r.producerFlavorSourceUrl,
+      producerFlavorSourceLabel: r.producerFlavorSourceLabel,
     },
   }));
 }
@@ -331,26 +346,31 @@ export async function getBarFlavorHeat(
     }
   };
 
-  if (source === "combined" || source === "producer") {
+  if (source === "combined" || source === "personal" || source === "producer") {
     const owned = await db
       .select({
         flavorProfile: schema.bottles.flavorProfile,
         producerFlavorTags: schema.bottles.producerFlavorTags,
+        producerFlavorSourceUrl: schema.bottles.producerFlavorSourceUrl,
+        producerFlavorSourceLabel: schema.bottles.producerFlavorSourceLabel,
       })
       .from(schema.userBottles)
       .innerJoin(schema.bottles, eq(schema.userBottles.bottleId, schema.bottles.id))
       .where(and(eq(schema.userBottles.userId, userId), eq(schema.userBottles.relationship, "own")));
 
     for (const row of owned) {
-      // The legacy profile can include AI/community estimates; never present it
-      // as a producer claim. Only the combined legacy map may consume it.
-      if (source === "combined" && row.flavorProfile) {
+      // Catalog wedge profiles fill My Bar even before personal descriptors are
+      // logged. They are estimates, not producer claims, so never use them in
+      // the Producer Notes source.
+      if (source !== "producer" && row.flavorProfile) {
         for (const [wedgeId, score] of Object.entries(row.flavorProfile)) {
           if (!validWedges.has(wedgeId) || typeof score !== "number") continue;
           wedgeTotals[wedgeId] = (wedgeTotals[wedgeId] ?? 0) + Math.max(0, score);
         }
       }
-      if (source === "producer") addTags(row.producerFlavorTags);
+      if (source === "producer" && hasPublishedProducerFlavorNotes(row)) {
+        addTags(row.producerFlavorTags);
+      }
     }
   }
 
@@ -359,7 +379,25 @@ export async function getBarFlavorHeat(
       .select({ flavorTags: schema.tastingNotes.flavorTags })
       .from(schema.tastingNotes)
       .innerJoin(schema.pours, eq(schema.tastingNotes.pourId, schema.pours.id))
-      .where(eq(schema.pours.userId, userId));
+      .where(
+        source === "personal"
+          ? and(
+              eq(schema.pours.userId, userId),
+              exists(
+                db
+                  .select({ id: schema.userBottles.id })
+                  .from(schema.userBottles)
+                  .where(
+                    and(
+                      eq(schema.userBottles.userId, userId),
+                      eq(schema.userBottles.bottleId, schema.pours.bottleId),
+                      eq(schema.userBottles.relationship, "own"),
+                    ),
+                  ),
+              ),
+            )
+          : eq(schema.pours.userId, userId),
+      );
     for (const note of notes) addTags(note.flavorTags);
   }
 

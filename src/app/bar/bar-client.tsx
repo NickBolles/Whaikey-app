@@ -3,8 +3,8 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { BookOpen, GlassWater, Hourglass, Plus, UserRound } from "lucide-react";
-import type { BarFlavorHeat, BarRow } from "@/lib/bar";
-import { leafLabel } from "@/lib/flavor-wheel";
+import { hasPublishedProducerFlavorNotes, type BarFlavorHeat, type BarRow } from "@/lib/bar";
+import { FLAVOR_WHEEL, leafLabel } from "@/lib/flavor-wheel";
 import { BarFlavorWheel, type FlavorSelection } from "@/components/bar-flavor-wheel";
 import { FillGauge } from "@/components/fill-gauge";
 import { FlavorHeatLegend } from "@/components/flavor-wheel";
@@ -166,13 +166,33 @@ export function BarClient({
 
   const activeRows = tab === "bar" ? ownRows : tab === "wishlist" ? wishlistRows : triedRows;
   const activeFlavorHeat = flavorSource === "personal" ? personalFlavorHeat : producerFlavorHeat;
+  const selectedProfileFamilies = useMemo(
+    () =>
+      FLAVOR_WHEEL.filter((wedge) => wedge.leaves.every((leaf) => selectedFlavorIds.includes(leaf.id))).map(
+        (wedge) => wedge.id,
+      ),
+    [selectedFlavorIds],
+  );
   const filteredRows = useMemo(() => {
     if (tab !== "bar" || selectedFlavorIds.length === 0) return activeRows;
     return activeRows.filter((row) => {
-      const tags = flavorSource === "personal" ? row.personalFlavorTags : row.bottle.producerFlavorTags ?? {};
-      return selectedFlavorIds.some((leafId) => (tags[leafId] ?? 0) > 0);
+      const tags =
+        flavorSource === "personal"
+          ? row.personalFlavorTags
+          : hasPublishedProducerFlavorNotes(row.bottle)
+            ? row.bottle.producerFlavorTags ?? {}
+            : {};
+      const profileMatches =
+        flavorSource === "personal" &&
+        selectedProfileFamilies.some((wedgeId) => (row.bottle.flavorProfile?.[wedgeId] ?? 0) > 0);
+      return profileMatches || selectedFlavorIds.some((leafId) => (tags[leafId] ?? 0) > 0);
     });
-  }, [activeRows, flavorSource, selectedFlavorIds, tab]);
+  }, [activeRows, flavorSource, selectedFlavorIds, selectedProfileFamilies, tab]);
+
+  function changeFlavorSource(source: "personal" | "producer") {
+    setFlavorSource(source);
+    setSelectedFlavorIds([]);
+  }
 
   function toggleFlavor(selection: FlavorSelection) {
     setSelectedFlavorIds((current) => {
@@ -230,13 +250,13 @@ export function BarClient({
             <div className="flex items-center justify-between gap-3 mb-3">
               <div>
                 <h2 className="section-label">Bar flavor map</h2>
-                <p className="mt-1 text-xs text-muted">Tap any ring to filter your bar.</p>
+                <p className="mt-1 text-xs text-muted">Your bottles’ flavor profiles fill the wheel; tagged notes refine its details.</p>
               </div>
               <div role="tablist" aria-label="Flavor note source" className="flex rounded-xl border border-border-subtle p-1">
                 <button
                   role="tab"
                   aria-selected={flavorSource === "personal"}
-                  onClick={() => setFlavorSource("personal")}
+                  onClick={() => changeFlavorSource("personal")}
                   className={`inline-flex min-h-9 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium ${flavorSource === "personal" ? "bg-accent text-background" : "text-muted hover:text-foreground"}`}
                 >
                   <UserRound size={14} aria-hidden /> My Notes
@@ -244,7 +264,7 @@ export function BarClient({
                 <button
                   role="tab"
                   aria-selected={flavorSource === "producer"}
-                  onClick={() => setFlavorSource("producer")}
+                  onClick={() => changeFlavorSource("producer")}
                   className={`inline-flex min-h-9 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium ${flavorSource === "producer" ? "bg-accent text-background" : "text-muted hover:text-foreground"}`}
                 >
                   <BookOpen size={14} aria-hidden /> Producer Notes

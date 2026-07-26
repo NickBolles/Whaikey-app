@@ -67,8 +67,16 @@ function heatForLeaves(leafIds: string[], heat: Record<string, number>): number 
   return Math.max(0, ...leafIds.map((id) => heat[id] ?? 0));
 }
 
+type SelectionState = "none" | "mixed" | "all";
+
+function selectionState(selection: FlavorSelection, selectedIds: string[]): SelectionState {
+  const selectedCount = selection.leafIds.filter((id) => selectedIds.includes(id)).length;
+  if (selectedCount === 0) return "none";
+  return selectedCount === selection.leafIds.length ? "all" : "mixed";
+}
+
 function selected(selection: FlavorSelection, selectedIds: string[]): boolean {
-  return selection.leafIds.some((id) => selectedIds.includes(id));
+  return selectionState(selection, selectedIds) !== "none";
 }
 
 /**
@@ -90,7 +98,7 @@ export function BarFlavorWheel({ wedgeHeat, leafHeat, caption, subCaption, selec
     const familyActive = selected(family, selectedIds);
     const familyMid = start + wedgeSpan / 2;
     segments.push(
-      <WheelSegment key={`family-${wedge.id}`} selection={family} active={familyActive} fill={color} opacity={familyOpacity} d={arcPath(C, INNER[0], INNER[1], start, start + wedgeSpan)} onToggle={onToggle} />,
+      <WheelSegment key={`family-${wedge.id}`} selection={family} active={familyActive} pressed={selectionState(family, selectedIds)} fill={color} opacity={familyOpacity} d={arcPath(C, INNER[0], INNER[1], start, start + wedgeSpan)} onToggle={onToggle} />,
     );
     labels.push(
       <text key={`family-label-${wedge.id}`} transform={labelTransform(C, (INNER[0] + INNER[1]) / 2, familyMid)} textAnchor="middle" dominantBaseline="central" fontSize={9} fontWeight={700} fill={inkOn(color, familyOpacity)} pointerEvents="none">
@@ -99,16 +107,23 @@ export function BarFlavorWheel({ wedgeHeat, leafHeat, caption, subCaption, selec
     );
 
     const groups = GROUPS[wedge.id] ?? [];
-    const groupSpan = wedgeSpan / groups.length;
-    groups.forEach((group, groupIndex) => {
-      const groupStart = start + groupIndex * groupSpan;
+    const orderedLeaves = groups
+      .flatMap((group) => group.leaves)
+      .map((leafId) => wedge.leaves.find((leaf) => leaf.id === leafId))
+      .filter((leaf): leaf is (typeof wedge.leaves)[number] => leaf !== undefined);
+    const leafCount = orderedLeaves.length || wedge.leaves.length;
+    let groupStart = start;
+    groups.forEach((group) => {
+      // The group boundary must land on descriptor boundaries. Groups with more
+      // descriptors occupy proportionally more of the middle ring.
+      const groupSpan = wedgeSpan * (group.leaves.length / leafCount);
       const groupMid = groupStart + groupSpan / 2;
       const groupSelection: FlavorSelection = { id: `${wedge.id}.${group.id}`, label: group.label, leafIds: group.leaves };
       const groupHeat = heatForLeaves(group.leaves, leafHeat);
       const groupOpacity = 0.14 + Math.max(groupHeat, familyHeat * 0.45) * 0.72;
       const groupActive = selected(groupSelection, selectedIds);
       segments.push(
-        <WheelSegment key={`group-${groupSelection.id}`} selection={groupSelection} active={groupActive} fill={color} opacity={groupOpacity} d={arcPath(C, MIDDLE[0], MIDDLE[1], groupStart, groupStart + groupSpan)} onToggle={onToggle} />,
+        <WheelSegment key={`group-${groupSelection.id}`} selection={groupSelection} active={groupActive} pressed={selectionState(groupSelection, selectedIds)} fill={color} opacity={groupOpacity} d={arcPath(C, MIDDLE[0], MIDDLE[1], groupStart, groupStart + groupSpan)} onToggle={onToggle} />,
       );
       const groupText = bandLabelTransform(C, MIDDLE[0], MIDDLE[1], groupMid, group.label, 7);
       labels.push(
@@ -116,18 +131,20 @@ export function BarFlavorWheel({ wedgeHeat, leafHeat, caption, subCaption, selec
           {group.label}
         </text>,
       );
+      groupStart += groupSpan;
     });
 
-    const leafSpan = wedgeSpan / wedge.leaves.length;
-    wedge.leaves.forEach((leaf, leafIndex) => {
+    const leaves = orderedLeaves.length === wedge.leaves.length ? orderedLeaves : wedge.leaves;
+    const leafSpan = wedgeSpan / leaves.length;
+    leaves.forEach((leaf, leafIndex) => {
       const leafStart = start + leafIndex * leafSpan;
       const leafMid = leafStart + leafSpan / 2;
       const leafSelection: FlavorSelection = { id: leaf.id, label: leaf.label, leafIds: [leaf.id] };
       const descriptorHeat = clamp01(leafHeat[leaf.id] ?? 0);
-      const shade = leafShade(color, leafIndex, wedge.leaves.length);
+      const shade = leafShade(color, leafIndex, leaves.length);
       const opacity = 0.12 + descriptorHeat * 0.8;
       segments.push(
-        <WheelSegment key={`leaf-${leaf.id}`} selection={leafSelection} active={selected(leafSelection, selectedIds)} fill={shade} opacity={opacity} d={arcPath(C, OUTER[0], OUTER[1], leafStart, leafStart + leafSpan, Math.min(0.75, leafSpan / 8))} onToggle={onToggle} />,
+        <WheelSegment key={`leaf-${leaf.id}`} selection={leafSelection} active={selected(leafSelection, selectedIds)} pressed={selectionState(leafSelection, selectedIds)} fill={shade} opacity={opacity} d={arcPath(C, OUTER[0], OUTER[1], leafStart, leafStart + leafSpan, Math.min(0.75, leafSpan / 8))} onToggle={onToggle} />,
       );
       if (descriptorHeat >= 0.5 || selected(leafSelection, selectedIds)) {
         const leafText = bandLabelTransform(C, OUTER[0], OUTER[1], leafMid, shortLabel(leaf.label), 7);
@@ -140,24 +157,60 @@ export function BarFlavorWheel({ wedgeHeat, leafHeat, caption, subCaption, selec
     });
   });
 
+  const descriptorSelections = FLAVOR_WHEEL.flatMap((wedge) => wedge.leaves)
+    .filter((leaf) => (leafHeat[leaf.id] ?? 0) > 0 || selectedIds.includes(leaf.id))
+    .map((leaf) => ({ id: leaf.id, label: leaf.label, leafIds: [leaf.id] }));
+
   return (
-    <svg viewBox={`0 0 ${SIZE} ${SIZE}`} className="w-full max-w-[360px] select-none" role="group" aria-label={`${caption} flavor wheel`} data-testid="bar-flavor-wheel">
-      {segments}
-      <circle cx={C} cy={C} r={INNER[0] - 2} fill="var(--surface-raised)" stroke="var(--border)" />
-      {labels}
-      <text x={C} y={C - (subCaption ? 5 : 0)} textAnchor="middle" dominantBaseline="central" fontSize={14} fontWeight={600} fill="var(--foreground)" pointerEvents="none">
-        {caption}
-      </text>
-      {subCaption && <text x={C} y={C + 12} textAnchor="middle" dominantBaseline="central" fontSize={8.5} fill="var(--muted)" pointerEvents="none">{subCaption}</text>}
-    </svg>
+    <div className="flex w-full flex-col items-center gap-3" data-testid="bar-flavor-wheel">
+      <svg viewBox={`0 0 ${SIZE} ${SIZE}`} className="w-full max-w-[360px] select-none" role="group" aria-label={`${caption} flavor wheel`}>
+        {segments}
+        <circle cx={C} cy={C} r={INNER[0] - 2} fill="var(--surface-raised)" stroke="var(--border)" />
+        {labels}
+        <text x={C} y={C - (subCaption ? 5 : 0)} textAnchor="middle" dominantBaseline="central" fontSize={14} fontWeight={600} fill="var(--foreground)" pointerEvents="none">
+          {caption}
+        </text>
+        {subCaption && <text x={C} y={C + 12} textAnchor="middle" dominantBaseline="central" fontSize={8.5} fill="var(--muted)" pointerEvents="none">{subCaption}</text>}
+      </svg>
+      {descriptorSelections.length > 0 && (
+        <div aria-label="Flavor descriptor filters" className="flex w-full max-w-[360px] flex-wrap justify-center gap-2">
+          {descriptorSelections.map((selection) => (
+            <button
+              key={`descriptor-control-${selection.id}`}
+              type="button"
+              aria-pressed={selected(selection, selectedIds)}
+              onClick={() => onToggle(selection)}
+              className={`chip min-h-11 px-3 text-xs ${selected(selection, selectedIds) ? "chip-active" : "hover:text-foreground"}`}
+            >
+              {selection.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
-function WheelSegment({ selection, active, fill, opacity, d, onToggle }: { selection: FlavorSelection; active: boolean; fill: string; opacity: number; d: string; onToggle: (selection: FlavorSelection) => void }) {
+function WheelSegment({ selection, active, pressed, fill, opacity, d, onToggle }: { selection: FlavorSelection; active: boolean; pressed: SelectionState; fill: string; opacity: number; d: string; onToggle: (selection: FlavorSelection) => void }) {
   const toggle = () => onToggle(selection);
   return (
-    <g role="button" tabIndex={0} aria-label={`Filter by ${selection.label}`} aria-pressed={active} className="cursor-pointer focus-visible:outline-none" onClick={toggle} onKeyDown={pressableKeys(toggle)}>
-      <path d={d} fill={fill} fillOpacity={opacity} stroke={active ? "var(--accent)" : "var(--border)"} strokeWidth={active ? 2 : 0.65}>
+    <g
+      role="button"
+      tabIndex={0}
+      aria-label={`Filter by ${selection.label}`}
+      aria-pressed={pressed === "mixed" ? "mixed" : pressed === "all"}
+      className="cursor-pointer focus-visible:outline-none focus-visible:[&>path]:stroke-[var(--accent)] focus-visible:[&>path]:[stroke-width:3]"
+      onClick={toggle}
+      onKeyDown={pressableKeys(toggle)}
+    >
+      <path
+        d={d}
+        fill={fill}
+        fillOpacity={opacity}
+        stroke={active ? "var(--accent)" : "var(--border)"}
+        strokeWidth={active ? 2 : 0.65}
+        className="transition-[stroke,stroke-width] duration-150 focus-visible:stroke-[var(--accent)] focus-visible:[stroke-width:3]"
+      >
         <title>{selection.label}</title>
       </path>
     </g>
