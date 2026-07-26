@@ -95,6 +95,93 @@ export function radialLabelTransform(
   };
 }
 
+/**
+ * Radial (spoke) label placed so it always stays *inside* a ring band. The
+ * anchor sits at the band's inner edge and the text grows outward; when the
+ * label's natural width would spill past the outer edge (or off the viewBox)
+ * it is condensed to exactly the band width via `textLength`. Flipped on the
+ * left half so it stays upright.
+ */
+export interface BandLabel {
+  transform: string;
+  anchor: "start" | "end";
+  /** Present only when the label had to be condensed to fit the band. */
+  textLength?: number;
+}
+
+/** Rough advance width of one glyph of the wheel's bold sans, in ems. */
+const AVG_GLYPH_EM = 0.55;
+/** Headroom over the estimate before we clamp, covering per-string variance. */
+const FIT_SLACK = 1.3;
+
+export function bandLabelTransform(
+  c: number,
+  rIn: number,
+  rOut: number,
+  deg: number,
+  text: string,
+  fontSize: number,
+  pad = 4,
+): BandLabel {
+  const band = Math.max(0, rOut - rIn - pad * 2);
+  const natural = text.length * fontSize * AVG_GLYPH_EM;
+  const fits = natural * FIT_SLACK <= band;
+  const { x, y } = polar(c, rIn + pad, deg);
+  const norm = ((deg % 360) + 360) % 360;
+  const flip = norm > 180;
+  const rot = flip ? deg + 90 : deg - 90;
+  return {
+    transform: `translate(${x.toFixed(2)} ${y.toFixed(2)}) rotate(${rot.toFixed(2)})`,
+    anchor: flip ? "end" : "start",
+    textLength: fits ? undefined : band,
+  };
+}
+
+type RGB = [number, number, number];
+
+/** Card surface the wheel is composited over (surface gradient midpoint). */
+const BACKDROP: RGB = [36, 29, 21];
+const DARK_INK = "#16110c";
+const LIGHT_INK = "var(--foreground)";
+const DARK_INK_RGB: RGB = [22, 17, 12];
+const LIGHT_INK_RGB: RGB = [244, 236, 221];
+
+function toRgb(hex: string): RGB {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+function relativeLuminance([r, g, b]: RGB): number {
+  const lin = [r, g, b].map((ch) => {
+    const s = ch / 255;
+    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+  });
+  return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2];
+}
+
+function contrast(a: number, b: number): number {
+  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+}
+
+/**
+ * Pick the label ink with the most contrast against a wheel segment. Heat is
+ * drawn as fill opacity, so the same base color can end up anywhere between
+ * "ghosted over a dark card" (needs the cream foreground) and "near-opaque
+ * light brass" (needs dark ink) — compositing first is what keeps hot
+ * segments' labels readable.
+ */
+export function inkOn(fillHex: string, fillOpacity: number): string {
+  const fill = toRgb(fillHex);
+  const composited = fill.map(
+    (ch, i) => ch * fillOpacity + BACKDROP[i] * (1 - fillOpacity),
+  ) as RGB;
+  const l = relativeLuminance(composited);
+  return contrast(l, relativeLuminance(DARK_INK_RGB)) >=
+    contrast(l, relativeLuminance(LIGHT_INK_RGB))
+    ? DARK_INK
+    : LIGHT_INK;
+}
+
 export function shortLabel(label: string): string {
   return label.split(" / ")[0];
 }

@@ -2,7 +2,7 @@ import { and, desc, eq, gte, isNotNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
-import { WEDGE_IDS, wedgeForLeaf } from "@/lib/flavor-wheel";
+import { WEDGE_IDS, rollUpToWedges, wedgeForLeaf } from "@/lib/flavor-wheel";
 import {
   BOTTLE_STATUSES,
   RELATIONSHIPS,
@@ -272,9 +272,15 @@ export interface BarFlavorHeat {
 /**
  * Aggregate where a user's bar leans on the flavor wheel. Wedge heat sums the
  * flavor profiles (0-10 per wedge) of owned bottles; the user's tasting-note
- * flavor tags (1-3 per leaf) add leaf heat and warm their parent wedge, so
- * pours on tried bottles count too. Both maps are normalized to their own
- * max — heat is relative ("where does MY bar lean"), never an absolute score.
+ * flavor tags add leaf heat and warm their parent wedge, so pours on tried
+ * bottles count too. Both maps are normalized to their own max — heat is
+ * relative ("where does MY bar lean"), never an absolute score.
+ *
+ * Two things keep the wheel's inner and outer rings telling the same story:
+ * note tags are rolled up through `rollUpToWedges` so a pour lands on the same
+ * 0-10 scale a bottle profile uses (raw 1-3 intensities would be worth ~a tenth
+ * of a bottle and never register), and a wedge is floored at its own hottest
+ * leaf so the wheel can never paint a blazing leaf inside a cold family.
  */
 export async function getBarFlavorHeat(db: DB, userId: string): Promise<BarFlavorHeat> {
   const validWedges = new Set<string>(WEDGE_IDS);
@@ -303,11 +309,16 @@ export async function getBarFlavorHeat(db: DB, userId: string): Promise<BarFlavo
 
   for (const note of notes) {
     if (!note.flavorTags) continue;
+    const tags: Record<string, number> = {};
     for (const [leafId, intensity] of Object.entries(note.flavorTags)) {
-      const wedgeId = wedgeForLeaf(leafId);
-      if (!wedgeId || typeof intensity !== "number") continue;
+      if (!wedgeForLeaf(leafId) || typeof intensity !== "number") continue;
       leafTotals[leafId] = (leafTotals[leafId] ?? 0) + intensity;
-      wedgeTotals[wedgeId] = (wedgeTotals[wedgeId] ?? 0) + intensity;
+      tags[leafId] = intensity;
+    }
+    // Onto the same 0-10 scale bottle profiles use, via the taxonomy's own
+    // leaf -> wedge contract rather than a second, incompatible rollup.
+    for (const [wedgeId, score] of Object.entries(rollUpToWedges(tags))) {
+      wedgeTotals[wedgeId] = (wedgeTotals[wedgeId] ?? 0) + score;
     }
   }
 
@@ -323,6 +334,16 @@ export async function getBarFlavorHeat(db: DB, userId: string): Promise<BarFlavo
 
   const wedges = normalize(wedgeTotals);
   const leaves = normalize(leafTotals);
+
+  // A family is never colder than its own hottest flavor: the two rings are
+  // normalized against different denominators, and without this floor the
+  // brightest leaf on the wheel can sit inside a barely-lit wedge.
+  for (const [leafId, heat] of Object.entries(leaves)) {
+    const wedgeId = wedgeForLeaf(leafId);
+    if (!wedgeId) continue;
+    if (heat > (wedges[wedgeId] ?? 0)) wedges[wedgeId] = heat;
+  }
+
   const topWedgeIds = Object.entries(wedges)
     .sort((a, b) => b[1] - a[1])
     .map(([id]) => id);

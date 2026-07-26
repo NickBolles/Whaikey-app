@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
 import { createTestBottle, createTestUser, setupTestDb, uid } from "@/test/helpers";
+import { wedgeForLeaf } from "@/lib/flavor-wheel";
 import { getBarFlavorHeat, getBarStats, getSpendByMonth, listUserBottles, monthKey } from "./bar";
 
 async function seedUserBottle(
@@ -308,10 +309,74 @@ describe("getBarFlavorHeat", () => {
     expect(heat.leaves.campfire).toBe(1);
     expect(heat.leaves.brine).toBeCloseTo(0.33, 2);
     expect(heat.leaves.vanilla).toBeCloseTo(0.67, 2);
-    // Wedges: peaty = 3+1 = 4 (max), sweet = 2.
+    // Wedges: peaty (campfire+brine) outweighs sweet (vanilla) -> peaty is max.
     expect(heat.wedges.peaty).toBe(1);
-    expect(heat.wedges.sweet).toBe(0.5);
     expect(heat.topWedgeIds[0]).toBe("peaty");
+    // Sweet is floored at vanilla's own heat rather than its lower rolled-up
+    // share, so the wheel never paints a hot leaf inside a colder family.
+    expect(heat.wedges.sweet).toBe(heat.leaves.vanilla);
+  });
+
+  it("never renders a wedge colder than its own hottest leaf", async () => {
+    const user = await createTestUser(db);
+    // A bourbon-heavy shelf: sweet/woody accumulate across every bottle while
+    // the single peated bottle contributes once.
+    const profiles: Array<Record<string, number>> = [
+      { sweet: 7, woody: 7, fruity: 4 },
+      { sweet: 7, woody: 5, fruity: 5 },
+      { sweet: 6, woody: 4, fruity: 7 },
+      { peaty: 9, sweet: 5, fruity: 5 },
+    ];
+    for (const profile of profiles) {
+      const bottle = await createTestBottle(db, { flavorProfile: profile });
+      await seedUserBottle(db, { userId: user.id, bottleId: bottle.id, relationship: "own" });
+    }
+    // ...but the drinker's notes are overwhelmingly about the peated one.
+    const noted = await createTestBottle(db, { flavorProfile: null });
+    const [pour] = await db
+      .insert(schema.pours)
+      .values({ id: uid("pour"), userId: user.id, bottleId: noted.id, rating: 5 })
+      .returning();
+    await db.insert(schema.tastingNotes).values({
+      id: uid("note"),
+      pourId: pour.id,
+      flavorTags: { campfire: 3, brine: 2 },
+      extractedBy: "user",
+    });
+
+    const heat = await getBarFlavorHeat(db, user.id);
+    expect(heat.leaves.campfire).toBe(1);
+    // Summing raw wedge scores alone would leave peaty dim under the wheel's
+    // brightest leaf; the floor keeps the two rings consistent.
+    expect(heat.wedges.peaty).toBe(1);
+    for (const [leafId, leafHeat] of Object.entries(heat.leaves)) {
+      const wedgeId = wedgeForLeaf(leafId)!;
+      expect(heat.wedges[wedgeId]).toBeGreaterThanOrEqual(leafHeat);
+    }
+  });
+
+  it("weighs a pour's note against a bottle profile on the same 0-10 scale", async () => {
+    const user = await createTestUser(db);
+    const bottle = await createTestBottle(db, { flavorProfile: { woody: 10 } });
+    await seedUserBottle(db, { userId: user.id, bottleId: bottle.id, relationship: "own" });
+
+    const [pour] = await db
+      .insert(schema.pours)
+      .values({ id: uid("pour"), userId: user.id, bottleId: bottle.id, rating: 4 })
+      .returning();
+    // rollUpToWedges caps a 4-intensity tag set at the bottle scale's 10.
+    await db.insert(schema.tastingNotes).values({
+      id: uid("note"),
+      pourId: pour.id,
+      flavorTags: { campfire: 3, peat: 1 },
+      extractedBy: "user",
+    });
+
+    const heat = await getBarFlavorHeat(db, user.id);
+    // Raw 1-3 intensities would have made peaty 4/14 = 0.29 against the bottle;
+    // rolled up it matches the bottle's 10, so a logged pour actually shows.
+    expect(heat.wedges.peaty).toBe(1);
+    expect(heat.wedges.woody).toBe(1);
   });
 
   it("ignores another user's notes and unknown leaf ids", async () => {

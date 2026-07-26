@@ -1,10 +1,12 @@
+import type { ReactElement } from "react";
 import { FLAVOR_WHEEL } from "@/lib/flavor-wheel";
 import {
   SERIF,
   arcPath,
+  bandLabelTransform,
+  inkOn,
   labelTransform,
   leafShade,
-  radialLabelTransform,
   shortLabel,
   warmify,
 } from "@/components/wheel-geometry";
@@ -25,13 +27,22 @@ const C = SIZE / 2;
 const R_WEDGE_IN = 54;
 const R_WEDGE_OUT = 96;
 const R_LEAF_IN = 100;
-const R_LEAF_OUT = 152;
+/** Wide enough that a labeled leaf's name fits inside the band (see LEAF_FONT). */
+const R_LEAF_OUT = 160;
 const WEDGE_LABEL_R = (R_WEDGE_IN + R_WEDGE_OUT) / 2;
+const LEAF_FONT = 8;
 /** Leaves hotter than this get their name written on the wheel. */
 const LEAF_LABEL_THRESHOLD = 0.45;
 
 function clamp01(n: number): number {
   return Math.max(0, Math.min(1, n));
+}
+
+interface WheelLabel {
+  id: string;
+  text: string;
+  ink: string;
+  mid: number;
 }
 
 /**
@@ -45,6 +56,75 @@ function clamp01(n: number): number {
 export function FlavorWheel({ wedgeHeat = {}, leafHeat = {}, caption, subCaption }: FlavorWheelProps) {
   const wedgeSpan = 360 / FLAVOR_WHEEL.length;
 
+  // SVG has no z-index: anything drawn later wins. Collect the arcs and the
+  // labels separately so every label can be painted in one pass on top of
+  // every arc — otherwise a labeled leaf gets sliced by its neighbours' arcs.
+  const wedgeArcs: ReactElement[] = [];
+  const leafArcs: ReactElement[] = [];
+  const wedgeLabels: WheelLabel[] = [];
+  const leafLabels: WheelLabel[] = [];
+
+  FLAVOR_WHEEL.forEach((wedge, wi) => {
+    const start = wi * wedgeSpan;
+    const mid = start + wedgeSpan / 2;
+    const color = warmify(wedge.color);
+    const heat = clamp01(wedgeHeat[wedge.id] ?? 0);
+    const opacity = 0.16 + 0.72 * heat;
+
+    wedgeArcs.push(
+      <g key={wedge.id} data-wedge-id={wedge.id} data-heat={heat.toFixed(2)}>
+        <path
+          d={arcPath(C, R_WEDGE_IN, R_WEDGE_OUT, start, start + wedgeSpan)}
+          fill={color}
+          fillOpacity={opacity}
+          stroke="var(--border)"
+          strokeWidth={0.75}
+        >
+          <title>{`${wedge.label}${heat > 0 ? ` — heat ${Math.round(heat * 100)}%` : ""}`}</title>
+        </path>
+      </g>,
+    );
+    wedgeLabels.push({
+      id: wedge.id,
+      text: shortLabel(wedge.label),
+      ink: inkOn(color, opacity),
+      mid,
+    });
+
+    const span = wedgeSpan / wedge.leaves.length;
+    wedge.leaves.forEach((leaf, li) => {
+      const lStart = start + li * span;
+      const lMid = lStart + span / 2;
+      const lHeat = clamp01(leafHeat[leaf.id] ?? 0);
+      const shade = leafShade(color, li, wedge.leaves.length);
+      const lOpacity = 0.14 + 0.78 * lHeat;
+
+      leafArcs.push(
+        <g key={leaf.id} data-leaf-id={leaf.id} data-heat={lHeat.toFixed(2)}>
+          <path
+            d={arcPath(C, R_LEAF_IN, R_LEAF_OUT, lStart, lStart + span, Math.min(0.9, span / 8))}
+            fill={shade}
+            fillOpacity={lOpacity}
+            stroke="var(--border)"
+            strokeWidth={0.5}
+          >
+            <title>{`${leaf.label} (${wedge.label})${
+              lHeat > 0 ? ` — heat ${Math.round(lHeat * 100)}%` : ""
+            }`}</title>
+          </path>
+        </g>,
+      );
+      if (lHeat >= LEAF_LABEL_THRESHOLD) {
+        leafLabels.push({
+          id: leaf.id,
+          text: shortLabel(leaf.label),
+          ink: inkOn(shade, lOpacity),
+          mid: lMid,
+        });
+      }
+    });
+  });
+
   return (
     <svg
       viewBox={`0 0 ${SIZE} ${SIZE}`}
@@ -53,88 +133,52 @@ export function FlavorWheel({ wedgeHeat = {}, leafHeat = {}, caption, subCaption
       aria-label="Flavor wheel heat map"
       data-testid="flavor-wheel"
     >
-      {FLAVOR_WHEEL.map((wedge, wi) => {
-        const start = wi * wedgeSpan;
-        const end = start + wedgeSpan;
-        const mid = start + wedgeSpan / 2;
-        const color = warmify(wedge.color);
-        const heat = clamp01(wedgeHeat[wedge.id] ?? 0);
-        return (
-          <g key={wedge.id}>
-            <path
-              d={arcPath(C, R_WEDGE_IN, R_WEDGE_OUT, start, end)}
-              fill={color}
-              fillOpacity={0.16 + 0.72 * heat}
-              stroke="var(--border)"
-              strokeWidth={0.75}
-            >
-              <title>{`${wedge.label}${heat > 0 ? ` — heat ${Math.round(heat * 100)}%` : ""}`}</title>
-            </path>
-            <text
-              transform={labelTransform(C, WEDGE_LABEL_R, mid)}
-              textAnchor="middle"
-              dominantBaseline="central"
-              fontSize={10.5}
-              fontWeight={600}
-              fill={heat > 0.4 ? "#16110c" : "var(--foreground)"}
-              opacity={heat > 0.4 ? 0.9 : 0.75}
-              pointerEvents="none"
-            >
-              {shortLabel(wedge.label)}
-            </text>
+      {wedgeArcs}
+      {leafArcs}
+      <RingSeam />
 
-            {wedge.leaves.map((leaf, li) => {
-              const span = wedgeSpan / wedge.leaves.length;
-              const lStart = start + li * span;
-              const lEnd = lStart + span;
-              const lMid = lStart + span / 2;
-              const lHeat = clamp01(leafHeat[leaf.id] ?? 0);
-              const shade = leafShade(color, li, wedge.leaves.length);
-              const labeled = lHeat >= LEAF_LABEL_THRESHOLD;
-              const spoke = radialLabelTransform(C, R_LEAF_IN + 5, lMid);
-              return (
-                <g key={leaf.id} data-leaf-id={leaf.id} data-heat={lHeat.toFixed(2)}>
-                  <path
-                    d={arcPath(C, R_LEAF_IN, R_LEAF_OUT, lStart, lEnd, Math.min(0.9, span / 8))}
-                    fill={shade}
-                    fillOpacity={0.14 + 0.78 * lHeat}
-                    stroke="var(--border)"
-                    strokeWidth={0.5}
-                  >
-                    <title>{`${leaf.label} (${wedge.label})${
-                      lHeat > 0 ? ` — heat ${Math.round(lHeat * 100)}%` : ""
-                    }`}</title>
-                  </path>
-                  {labeled && (
-                    <text
-                      transform={spoke.transform}
-                      textAnchor={spoke.anchor}
-                      dominantBaseline="central"
-                      fontSize={7.5}
-                      fontWeight={700}
-                      fill="var(--foreground)"
-                      pointerEvents="none"
-                    >
-                      {shortLabel(leaf.label)}
-                    </text>
-                  )}
-                </g>
-              );
-            })}
-          </g>
+      {wedgeLabels.map((label) => (
+        <text
+          key={label.id}
+          transform={labelTransform(C, WEDGE_LABEL_R, label.mid)}
+          textAnchor="middle"
+          dominantBaseline="central"
+          fontSize={10.5}
+          fontWeight={600}
+          fill={label.ink}
+          opacity={0.92}
+          pointerEvents="none"
+        >
+          {label.text}
+        </text>
+      ))}
+
+      {leafLabels.map((label) => {
+        const spoke = bandLabelTransform(
+          C,
+          R_LEAF_IN,
+          R_LEAF_OUT,
+          label.mid,
+          label.text,
+          LEAF_FONT,
+        );
+        return (
+          <text
+            key={label.id}
+            transform={spoke.transform}
+            textAnchor={spoke.anchor}
+            textLength={spoke.textLength}
+            lengthAdjust={spoke.textLength ? "spacingAndGlyphs" : undefined}
+            dominantBaseline="central"
+            fontSize={LEAF_FONT}
+            fontWeight={700}
+            fill={label.ink}
+            pointerEvents="none"
+          >
+            {label.text}
+          </text>
         );
       })}
-
-      {/* Gap ring between families and subsections; masks arc padding seams */}
-      <circle
-        cx={C}
-        cy={C}
-        r={(R_WEDGE_OUT + R_LEAF_IN) / 2}
-        fill="none"
-        stroke="var(--background)"
-        strokeWidth={R_LEAF_IN - R_WEDGE_OUT}
-      />
-      <RingSeam />
 
       {caption && (
         <text
@@ -168,7 +212,7 @@ export function FlavorWheel({ wedgeHeat = {}, leafHeat = {}, caption, subCaption
   );
 }
 
-/** Hairline circles that keep the two rings crisp where the mask ring sits. */
+/** Hairline circles that keep the family/subsection ring boundaries crisp. */
 function RingSeam() {
   return (
     <>
