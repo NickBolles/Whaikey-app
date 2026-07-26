@@ -19,6 +19,13 @@ on:
         description: "Skip the AI enrichment step"
         type: boolean
         default: false
+      cola_scope:
+        description: "TTB COLA range to import (full history is whiskey-only and can take hours)"
+        type: choice
+        options:
+          - recent
+          - full-history
+        default: recent
   schedule:
     # Mondays 09:00 UTC — after Iowa's monthly refresh lands and clear of
     # TTB's Sunday maintenance window.
@@ -57,6 +64,7 @@ jobs:
 
       - id: cola
         name: Sync TTB COLA approvals (last 8 days)
+        if: ${{ inputs.cola_scope != 'full-history' }}
         # Preserve the failure outcome so the final step can report a partial sync.
         continue-on-error: true
         env:
@@ -64,9 +72,22 @@ jobs:
           NODE_EXTRA_CA_CERTS: ${{ github.workspace }}/.github/certificates/entrust-ov-tls-issuing-rsa-ca-2.pem
         run: pnpm ingest cola --since "$(date -u -d '8 days ago' +%F)"
 
+      - id: cola-full-history
+        name: Backfill full TTB whiskey COLA history
+        if: ${{ inputs.cola_scope == 'full-history' }}
+        # A full history import partitions capped registry downloads until each
+        # is complete. Do not hide a failure: an incomplete seed must be rerun.
+        timeout-minutes: 360
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          NODE_EXTRA_CA_CERTS: ${{ github.workspace }}/.github/certificates/entrust-ov-tls-issuing-rsa-ca-2.pem
+        run: pnpm ingest cola --full
+
       - id: enrich
         name: Enrich flavor profiles
-        if: ${{ inputs.skip_enrich != true }}
+        # A full backfill can add a large number of bottles. Seed first, then
+        # explicitly dispatch a separate enrichment run when desired.
+        if: ${{ inputs.skip_enrich != true && inputs.cola_scope != 'full-history' }}
         continue-on-error: true
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
@@ -80,7 +101,7 @@ jobs:
           pnpm ingest enrich
 
       - name: Report incomplete catalog sync
-        if: ${{ always() && (steps.cola.outcome == 'failure' || steps.enrich.outcome == 'failure') }}
+        if: ${{ always() && (steps.cola.outcome == 'failure' || steps.cola-full-history.outcome == 'failure' || steps.enrich.outcome == 'failure') }}
         run: |
           echo "## Catalog sync incomplete" >> "$GITHUB_STEP_SUMMARY"
           echo "One or more optional source steps failed after the Iowa import. Read the failed step logs and remediate the source or credential before rerunning." >> "$GITHUB_STEP_SUMMARY"

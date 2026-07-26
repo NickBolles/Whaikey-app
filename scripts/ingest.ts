@@ -4,6 +4,7 @@
  *
  *   pnpm ingest iowa [--dry-run]
  *   pnpm ingest cola --since 2026-01-01 [--until 2026-07-01] [--dry-run]
+ *   pnpm ingest cola --full [--until 2026-07-01] [--dry-run]
  *   pnpm ingest enrich [--limit N] [--batch-size N] [--no-web] [--dry-run]
  *   pnpm ingest prune            # delete imported bottles untouched by users
  *
@@ -26,6 +27,7 @@ import { createDb, resolveDbUrl } from "../src/db";
 import { migrateDb } from "../src/db/migrate";
 import {
   countBottles,
+  COLA_FULL_HISTORY_START,
   enrichBottleProfiles,
   enrichModel,
   fetchColaRecords,
@@ -96,13 +98,13 @@ async function main(): Promise<void> {
   }
 
   if (source === "cola") {
-    const since = arg("since");
+    const since = hasFlag("full") ? COLA_FULL_HISTORY_START : arg("since");
     const until = arg("until") ?? new Date().toISOString().slice(0, 10);
     if (!since) {
-      console.error("cola requires --since YYYY-MM-DD (e.g. the date of the last sync)");
+      console.error("cola requires --since YYYY-MM-DD or --full (backfill from 1999-01-01)");
       process.exit(1);
     }
-    console.log(`Fetching TTB COLA whisky approvals ${since}..${until}…`);
+    console.log(`Fetching TTB COLA whiskey approvals ${since}..${until}${hasFlag("full") ? " (full history)" : ""}…`);
     const records = await fetchColaRecords({ since, until });
     const { scanned, candidates } = colaRecordsToCandidates(records);
     const report = await ingestCandidates(db, "cola", candidates, { dryRun, scanned });
@@ -111,7 +113,7 @@ async function main(): Promise<void> {
   }
 
   console.error(
-    "Usage: pnpm ingest <iowa|cola|enrich|prune> [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--limit N] [--batch-size N] [--no-web] [--dry-run]",
+    "Usage: pnpm ingest <iowa|cola|enrich|prune> [--since YYYY-MM-DD|--full] [--until YYYY-MM-DD] [--limit N] [--batch-size N] [--no-web] [--dry-run]",
   );
   process.exit(1);
 }
