@@ -284,6 +284,15 @@ export const pairings = pgTable(
   (t) => [index("pairings_bottle_idx").on(t.bottleId)],
 );
 
+/** A short, durable lease so only one app instance generates a bottle's cache. */
+export const pairingGenerationLocks = pgTable("pairing_generation_locks", {
+  bottleId: text("bottle_id")
+    .primaryKey()
+    .references(() => bottles.id, { onDelete: "cascade" }),
+  token: text("token").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }).notNull(),
+});
+
 export const chatSessions = pgTable(
   "chat_sessions",
   {
@@ -311,6 +320,20 @@ export const chatMessages = pgTable(
     createdAt: createdAt(),
   },
   (t) => [index("chat_messages_session_idx").on(t.sessionId)],
+);
+
+/** Durable per-user counters for AI request rate limits. */
+export const aiRateLimits = pgTable(
+  "ai_rate_limits",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    window: text("window").$type<"hour" | "day">().notNull(),
+    windowStart: timestamp("window_start", { withTimezone: true, mode: "date" }).notNull(),
+    count: integer("count").notNull().default(0),
+  },
+  (t) => [uniqueIndex("ai_rate_limits_user_window_start_uq").on(t.userId, t.window, t.windowStart)],
 );
 
 export const REC_MODES = ["discovery", "tonight"] as const;

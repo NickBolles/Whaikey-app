@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import { requireUser, withErrorHandling } from "@/lib/session";
 import { isAiConfigured } from "@/lib/ai/client";
+import { reserveAiRequest } from "@/lib/ai/rate-limit";
 import type { ChatStreamEvent } from "@/lib/ai/chat";
 import { ChatSessionNotFoundError, getChatMessages, runChatStream } from "@/lib/ai/chat";
 
@@ -35,6 +36,9 @@ export async function POST(request: Request) {
     if (!parsed.success) {
       return NextResponse.json({ error: "A non-empty message is required" }, { status: 400 });
     }
+    if (!(await reserveAiRequest(getDb(), user.id))) {
+      return NextResponse.json({ error: "AI request limit reached. Try again later." }, { status: 429 });
+    }
 
     const generator = runChatStream(
       getDb(),
@@ -65,7 +69,8 @@ export async function POST(request: Request) {
           if (!first.done) send(first.value);
           for await (const event of generator) send(event);
         } catch (err) {
-          console.error(err);
+          console.error("chat stream failed", err instanceof Error ? err.name : "unknown error");
+          send({ type: "error", message: "The concierge couldn't finish that response. Please try again." });
         } finally {
           controller.close();
         }

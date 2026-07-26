@@ -5,6 +5,7 @@ import { requireUser, withErrorHandling } from "@/lib/session";
 import { isAiConfigured } from "@/lib/ai/client";
 import { attachAiExplanations } from "@/lib/ai/recommend-explain";
 import { recommendBottles } from "@/lib/recommend";
+import { MAX_RECOMMENDATIONS } from "@/lib/recommend";
 
 export const runtime = "nodejs";
 
@@ -29,8 +30,8 @@ export async function GET(req: Request) {
     const rawLimit = url.searchParams.get("limit");
     if (rawLimit !== null) {
       limit = Number(rawLimit);
-      if (!Number.isInteger(limit) || limit < 1) {
-        return NextResponse.json({ error: "limit must be a positive integer" }, { status: 400 });
+      if (!Number.isInteger(limit) || limit < 1 || limit > MAX_RECOMMENDATIONS) {
+        return NextResponse.json({ error: `limit must be an integer from 1 to ${MAX_RECOMMENDATIONS}` }, { status: 400 });
       }
     }
 

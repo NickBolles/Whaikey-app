@@ -415,7 +415,7 @@ export function PourFlow() {
                             ? "What do you taste?"
                             : "How does it linger?"
                       }
-                      className="rounded-xl bg-surface border border-border-subtle p-3 text-sm placeholder:text-muted focus:outline-none focus:border-accent resize-y"
+                      className="rounded-xl bg-surface border border-border-subtle p-3 text-sm placeholder:text-muted focus:outline-none focus:border-accent focus-visible:ring-2 focus-visible:ring-accent/60 resize-y"
                     />
                   </label>
                 ))}

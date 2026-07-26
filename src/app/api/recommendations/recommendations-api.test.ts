@@ -11,6 +11,8 @@ import {
   uid,
 } from "@/test/helpers";
 import { setAnthropicForTests } from "@/lib/ai/client";
+import { AI_HOURLY_LIMIT, reserveAiRequest } from "@/lib/ai/rate-limit";
+import { makeFakeAnthropic } from "@/lib/ai/testing";
 
 vi.mock("@/lib/session", async () => mockSessionModule());
 
@@ -95,5 +97,25 @@ describe("GET /api/recommendations", () => {
     const { GET } = await import("./route");
     const res = await GET(jsonRequest("/api/recommendations?limit=0", "GET"));
     expect(res.status).toBe(400);
+  });
+
+  it("rejects limits above the bounded recommendation response size", async () => {
+    const { GET } = await import("./route");
+    const res = await GET(jsonRequest("/api/recommendations?limit=13", "GET"));
+    expect(res.status).toBe(400);
+  });
+
+  it("keeps deterministic recommendations when explanation generation has exhausted AI quota", async () => {
+    await seedPalateAndBottles();
+    const fake = makeFakeAnthropic([]);
+    setAnthropicForTests(fake.client);
+    for (let i = 0; i < AI_HOURLY_LIMIT; i += 1) await reserveAiRequest(db, user.id);
+
+    const { GET } = await import("./route");
+    const res = await GET(jsonRequest("/api/recommendations?mode=discovery", "GET"));
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).recommendations).not.toHaveLength(0);
+    expect(fake.create).not.toHaveBeenCalled();
   });
 });

@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { getDb } from "@/db";
 import { requireUser, withErrorHandling } from "@/lib/session";
 import { fastModel, getAnthropic, isAiConfigured } from "@/lib/ai/client";
 import { parseModelJson, textFromContent } from "@/lib/ai/json";
 import { heuristicMapping, IMPORT_FIELDS, type ColumnMapping } from "@/lib/import";
+import { reserveAiRequest } from "@/lib/ai/rate-limit";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -38,7 +40,7 @@ const PROMPT_INTRO = [
  */
 export async function POST(request: Request) {
   return withErrorHandling(async () => {
-    await requireUser();
+    const user = await requireUser();
 
     const body = await request.json().catch(() => null);
     const parsed = bodySchema.safeParse(body);
@@ -56,6 +58,9 @@ export async function POST(request: Request) {
     }
 
     try {
+      if (!(await reserveAiRequest(getDb(), user.id))) {
+        return NextResponse.json({ mapping: fallback, source: "heuristic" });
+      }
       const anthropic = getAnthropic();
       const response = await anthropic.messages.create({
         model: fastModel(),

@@ -53,9 +53,19 @@ function trustedOrigins(): string[] {
     .map((host) => `https://${host}`);
 }
 
+function authSecret(): string {
+  const secret = process.env.BETTER_AUTH_SECRET;
+  // Never silently sign production sessions with a public development value.
+  // Build evaluation intentionally remains possible without deployment secrets.
+  if (!secret && process.env.NODE_ENV === "production" && process.env.NEXT_PHASE !== "phase-production-build") {
+    throw new Error("BETTER_AUTH_SECRET must be configured in production");
+  }
+  return secret ?? "dev-only-secret-change-me";
+}
+
 export const auth = betterAuth({
   database: drizzleAdapter(getDb(), { provider: "pg", schema }),
-  secret: process.env.BETTER_AUTH_SECRET ?? "dev-only-secret-change-me",
+  secret: authSecret(),
   baseURL: baseURL(),
   trustedOrigins: trustedOrigins(),
   socialProviders: socialProviders(),

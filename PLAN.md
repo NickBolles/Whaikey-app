@@ -133,7 +133,7 @@ Implementation: LLM with **tool calling** into the app's own APIs (query invento
 ### 4.1 Recommended stack
 
 - **App:** React Native + Expo (iOS + Android + web from one codebase; fast iteration, OTA updates). Tamagui or NativeWind for UI.
-- **Backend:** Supabase (Postgres + Auth + Storage + Realtime + Edge Functions) — fast to ship, Postgres gives us `pgvector` for embeddings and full-text search for instant bottle lookup.
+- **Backend:** Postgres (Supabase is the intended hosted option; PGlite provides local/test parity) + Better Auth + storage/realtime integrations as needed. Postgres gives us `pgvector` for embeddings and full-text search for instant bottle lookup.
 - **AI layer:** Anthropic Claude via a thin server-side gateway (Edge Function):
   - `claude-sonnet-5` for chat, note extraction, pairing/rec explanations.
   - `claude-haiku-4-5` for cheap/fast tasks (autocomplete, flavor-chip extraction).

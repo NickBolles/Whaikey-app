@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
-import { inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { RELATIONSHIPS, BOTTLE_STATUSES } from "@/db/schema";
 import { requireUser, withErrorHandling } from "@/lib/session";
-import { upsertUserBottle } from "@/lib/bar";
-import { confirmUpcMapping, isValidUpc, normalizeUpc } from "@/lib/scan";
+import { toUserBottleValues } from "@/lib/bar";
+import { isValidUpc, normalizeUpc } from "@/lib/scan";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -56,49 +56,87 @@ export async function POST(request: Request) {
       );
     }
     const items = parsed.data.items;
+    if (new Set(items.map((item) => item.bottleId)).size !== items.length) {
+      return NextResponse.json({ error: "Each bottle may appear only once per import" }, { status: 400 });
+    }
 
     const db = getDb();
     const ids = [...new Set(items.map((i) => i.bottleId))];
-    const known = new Set(
-      (
-        await db
-          .select({ id: schema.bottles.id })
-          .from(schema.bottles)
-          .where(inArray(schema.bottles.id, ids))
-      ).map((r) => r.id),
-    );
+    const { added, updated, upcsTaught, skipped } = await db.transaction(async (tx) => {
+      const known = new Set(
+        (await tx.select({ id: schema.bottles.id }).from(schema.bottles).where(inArray(schema.bottles.id, ids))).map((r) => r.id),
+      );
+      const valid = items.filter((item) => known.has(item.bottleId));
+      const existing = new Set(
+        (
+          await tx
+            .select({ bottleId: schema.userBottles.bottleId })
+            .from(schema.userBottles)
+            .where(and(eq(schema.userBottles.userId, user.id), inArray(schema.userBottles.bottleId, valid.map((item) => item.bottleId))))
+        ).map((row) => row.bottleId),
+      );
 
-    let added = 0;
-    let updated = 0;
-    let upcsTaught = 0;
-    let skipped = 0;
-
-    for (const item of items) {
-      if (!known.has(item.bottleId)) {
-        skipped += 1;
-        continue;
+      // Group by supplied optional fields so each group can be one set-based
+      // UPSERT while preserving patch semantics (undefined stays untouched).
+      const groups = new Map<string, typeof valid>();
+      for (const item of valid) {
+        const fields = ["status", "fillLevel", "quantity", "purchasePrice", "purchaseDate", "store", "location", "notes"]
+          .filter((field) => item[field as keyof typeof item] !== undefined)
+          .join(",");
+        groups.set(fields, [...(groups.get(fields) ?? []), item]);
       }
-      const { created } = await upsertUserBottle(db, user.id, {
-        bottleId: item.bottleId,
-        relationship: item.relationship,
-        status: item.status ?? undefined,
-        fillLevel: item.fillLevel,
-        quantity: item.quantity ?? undefined,
-        purchasePrice: item.purchasePrice,
-        purchaseDate: item.purchaseDate,
-        store: item.store,
-        location: item.location,
-        notes: item.notes,
-      });
-      if (created) added += 1;
-      else updated += 1;
-
-      const upc = item.upc ? normalizeUpc(item.upc) : null;
-      if (upc && isValidUpc(upc)) {
-        await confirmUpcMapping(db, upc, item.bottleId);
-        upcsTaught += 1;
+      for (const [fields, group] of groups) {
+        const included = new Set(fields ? fields.split(",") : []);
+        const update = {
+          relationship: sql`excluded.relationship`,
+          ...(included.has("status") ? { status: sql`excluded.status` } : {}),
+          ...(included.has("fillLevel") ? { fillLevel: sql`excluded.fill_level` } : {}),
+          ...(included.has("quantity") ? { quantity: sql`excluded.quantity` } : {}),
+          ...(included.has("purchasePrice") ? { purchasePrice: sql`excluded.purchase_price` } : {}),
+          ...(included.has("purchaseDate") ? { purchaseDate: sql`excluded.purchase_date` } : {}),
+          ...(included.has("store") ? { store: sql`excluded.store` } : {}),
+          ...(included.has("location") ? { location: sql`excluded.location` } : {}),
+          ...(included.has("notes") ? { notes: sql`excluded.notes` } : {}),
+          updatedAt: new Date(),
+        };
+        await tx
+          .insert(schema.userBottles)
+          .values(
+            group.map((item) => ({
+              id: crypto.randomUUID(),
+              userId: user.id,
+              bottleId: item.bottleId,
+              relationship: item.relationship,
+              ...(item.relationship === "own" ? { status: "sealed" as const, fillLevel: 100, quantity: 1 } : {}),
+              ...toUserBottleValues({
+                status: item.status ?? undefined,
+                fillLevel: item.fillLevel,
+                quantity: item.quantity ?? undefined,
+                purchasePrice: item.purchasePrice,
+                purchaseDate: item.purchaseDate,
+                store: item.store,
+                location: item.location,
+                notes: item.notes,
+              }),
+            })),
+          )
+          .onConflictDoUpdate({ target: [schema.userBottles.userId, schema.userBottles.bottleId], set: update });
       }
-    }
+      const upcs = valid
+        .map((item) => ({ ...item, upc: item.upc ? normalizeUpc(item.upc) : null }))
+        .filter((item): item is typeof item & { upc: string } => Boolean(item.upc && isValidUpc(item.upc)));
+      if (upcs.length > 0) {
+        await tx
+          .insert(schema.bottleUpcs)
+          .values(upcs.map((item) => ({ id: crypto.randomUUID(), upc: item.upc, bottleId: item.bottleId, source: "user" as const, confirmedCount: 1 })))
+          .onConflictDoUpdate({
+            target: [schema.bottleUpcs.upc, schema.bottleUpcs.bottleId],
+            set: { confirmedCount: sql`${schema.bottleUpcs.confirmedCount} + 1`, updatedAt: new Date() },
+          });
+      }
+      const added = valid.filter((item) => !existing.has(item.bottleId)).length;
+      return { added, updated: valid.length - added, upcsTaught: upcs.length, skipped: items.length - valid.length };
+    });
 
     return NextResponse.json({ added, updated, upcsTaught, skipped });
   });

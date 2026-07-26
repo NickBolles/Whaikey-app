@@ -11,6 +11,7 @@ import {
   setupTestDb,
 } from "@/test/helpers";
 import { setAnthropicForTests } from "@/lib/ai/client";
+import { AI_HOURLY_LIMIT, reserveAiRequest } from "@/lib/ai/rate-limit";
 import { makeFakeAnthropic, textResponse } from "@/lib/ai/testing";
 import { confirmUpcMapping, resolveUpc } from "@/lib/scan";
 import { POST as analyzePost } from "./analyze/route";
@@ -103,6 +104,21 @@ describe("POST /api/import/analyze", () => {
     const body = await res.json();
     expect(body.source).toBe("heuristic");
     expect(body.mapping.name).toBe(0);
+  });
+
+  it("degrades to heuristics without calling the model when AI quota is exhausted", async () => {
+    setSessionUser(user);
+    const fake = makeFakeAnthropic([]);
+    setAnthropicForTests(fake.client);
+    for (let i = 0; i < AI_HOURLY_LIMIT; i += 1) await reserveAiRequest(db, user.id);
+
+    const res = await analyzePost(
+      jsonRequest("/api/import/analyze", "POST", { headers: ["Bottle", "UPC"], sampleRows: [] }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ source: "heuristic", mapping: { name: 0, upc: 1 } });
+    expect(fake.create).not.toHaveBeenCalled();
   });
 });
 
@@ -211,5 +227,20 @@ describe("POST /api/import/commit", () => {
       .where(eq(dbSchema.userBottles.userId, user.id));
     expect(rows).toHaveLength(1);
     expect(rows[0].purchasePrice).toBe(12);
+  });
+
+  it("rejects duplicate bottle rows before a batch can partially mutate the shelf", async () => {
+    setSessionUser(user);
+    const bottle = await createTestBottle(db);
+    const res = await commitPost(
+      jsonRequest("/api/import/commit", "POST", {
+        items: [
+          { bottleId: bottle.id, relationship: "own", purchasePrice: 10 },
+          { bottleId: bottle.id, relationship: "wishlist", purchasePrice: 20 },
+        ],
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(await db.select().from(dbSchema.userBottles).where(eq(dbSchema.userBottles.bottleId, bottle.id))).toHaveLength(0);
   });
 });

@@ -9,6 +9,8 @@ import {
   getChatSessions,
   getChatMessages,
   ChatSessionNotFoundError,
+  boundChatHistory,
+  MAX_CHAT_CONTEXT_CHARS,
   type ChatStreamEvent,
 } from "./chat";
 import { makeFakeAnthropic, textResponse, toolUseResponse } from "./testing";
@@ -259,6 +261,25 @@ describe("runChatStream", () => {
 });
 
 describe("getChatSessions / getChatMessages", () => {
+  it("bounds model history to recent turns and a 12k text budget", () => {
+    const messages = Array.from({ length: 30 }, (_, i) => ({
+      id: String(i), sessionId: "s", role: i % 2 ? "assistant" : "user", content: "x".repeat(1_000),
+      toolCalls: null, createdAt: new Date(),
+    })) as schema.ChatMessage[];
+    const bounded = boundChatHistory(messages);
+    expect(bounded.length).toBeLessThanOrEqual(24);
+    expect(bounded.reduce((total, message) => total + message.content.length, 0)).toBeLessThanOrEqual(MAX_CHAT_CONTEXT_CHARS);
+    expect(bounded.at(-1)?.id).toBe("29");
+  });
+
+  it("counts persisted tool-result payloads against the model context budget", () => {
+    const messages = [
+      { id: "old", sessionId: "s", role: "assistant", content: "short", toolCalls: [{ name: "get_my_bar", input: {}, result: "x".repeat(12_000) }], createdAt: new Date() },
+      { id: "new", sessionId: "s", role: "user", content: "newest request", toolCalls: null, createdAt: new Date() },
+    ] as schema.ChatMessage[];
+    expect(boundChatHistory(messages).map((message) => message.id)).toEqual(["new"]);
+  });
+
   it("scopes sessions and messages to the user", async () => {
     const other = await createTestUser(db);
     const fake = makeFakeAnthropic([textResponse("a"), textResponse("b")]);

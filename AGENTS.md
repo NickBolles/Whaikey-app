@@ -16,7 +16,7 @@ AI-native whiskey tracking app: search/scan bottles → own/tried/wishlist → l
 
 ## Stack & commands
 
-Next.js App Router (TS, Tailwind v4) · Drizzle + better-sqlite3 (local file DB) · Better Auth (**social login only — never add password auth**) · Anthropic SDK (server-side only) · Vitest · Playwright.
+Next.js App Router (TS, Tailwind v4) · Drizzle + PGlite locally/tests and Postgres in production · Better Auth (**social login only — never add password auth**) · Anthropic SDK (server-side only) · Vitest · Playwright.
 
 ```bash
 pnpm dev                 # http://localhost:3000 (needs pnpm db:push && pnpm db:seed once)

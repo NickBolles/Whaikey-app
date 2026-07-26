@@ -114,7 +114,7 @@ function rankOf(name: string, q: string): number {
  *   recovers typos occurring AFTER the 4th character — a typo inside the
  *   first 4 characters (e.g. "lafroig" for Laphroaig, prefix "lafr") only
  *   matches when an alias happens to share that prefix. Real fuzzy matching
- *   (edit distance / trigrams) is out of scope for SQLite LIKE.
+ *   (edit distance / trigrams) is out of scope for this substring-search path.
  * - Ranking: exact-name matches first, then startsWith, then contains, then
  *   alias/distillery-only matches; ties break alphabetically.
  *

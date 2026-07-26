@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
@@ -99,40 +99,26 @@ export async function logPour(db: DB, userId: string, input: PourInput): Promise
   });
   if (!bottle) throw new BottleNotFoundError(parsed.bottleId);
 
-  const userBottle = await db.query.userBottles.findFirst({
-    where: and(
-      eq(schema.userBottles.userId, userId),
-      eq(schema.userBottles.bottleId, parsed.bottleId),
-    ),
-  });
-
   const amountMl = parsed.amountMl ?? DEFAULT_POUR_ML;
-
-  const [pour] = await db
-    .insert(schema.pours)
-    .values({
-      id: crypto.randomUUID(),
-      userId,
-      bottleId: parsed.bottleId,
-      userBottleId: userBottle?.id ?? null,
-      rating: parsed.rating ?? null,
-      servingStyle: parsed.servingStyle ?? null,
-      amountMl,
-      context: parsed.context ?? null,
-    })
-    .returning();
-
-  if (userBottle && userBottle.status === "open" && userBottle.fillLevel != null) {
-    const nextFill = Math.max(0, userBottle.fillLevel - fillDecrementFor(amountMl));
-    await db
-      .update(schema.userBottles)
-      .set({ fillLevel: nextFill, updatedAt: new Date() })
-      .where(eq(schema.userBottles.id, userBottle.id));
-  }
-
-  let note: TastingNote | null = null;
-  if (parsed.note && noteHasContent(parsed.note)) {
-    const [inserted] = await db
+  const { pour, note } = await db.transaction(async (tx) => {
+    const userBottle = await tx.query.userBottles.findFirst({
+      where: and(eq(schema.userBottles.userId, userId), eq(schema.userBottles.bottleId, parsed.bottleId)),
+    });
+    const [pour] = await tx
+      .insert(schema.pours)
+      .values({
+        id: crypto.randomUUID(), userId, bottleId: parsed.bottleId, userBottleId: userBottle?.id ?? null,
+        rating: parsed.rating ?? null, servingStyle: parsed.servingStyle ?? null, amountMl, context: parsed.context ?? null,
+      })
+      .returning();
+    if (userBottle?.status === "open" && userBottle.fillLevel != null) {
+      await tx.update(schema.userBottles).set({
+        fillLevel: sql`greatest(0, ${schema.userBottles.fillLevel} - ${fillDecrementFor(amountMl)})`, updatedAt: new Date(),
+      }).where(and(eq(schema.userBottles.id, userBottle.id), eq(schema.userBottles.status, "open"), isNotNull(schema.userBottles.fillLevel)));
+    }
+    let note: TastingNote | null = null;
+    if (parsed.note && noteHasContent(parsed.note)) {
+      const [inserted] = await tx
       .insert(schema.tastingNotes)
       .values({
         id: crypto.randomUUID(),
@@ -148,11 +134,13 @@ export async function logPour(db: DB, userId: string, input: PourInput): Promise
         extractedBy: "user",
       })
       .returning();
-    note = inserted;
-  }
-
-  // Fold this pour into the user's accumulated palate snapshot.
-  await refreshUserPalate(db, userId);
+      note = inserted;
+    }
+    // The materialized palate is part of this write: a failed refresh must
+    // roll back the pour, note, and fill-level decrement together.
+    await refreshUserPalate(tx as DB, userId);
+    return { pour, note };
+  });
 
   return { pour, note };
 }
