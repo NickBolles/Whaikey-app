@@ -56,6 +56,22 @@ describe("parseColaCsv", () => {
       expect.objectContaining({ ttbId: "26001001000006", fancifulName: "RESERVE\r\nEDITION" }),
     ]);
   });
+
+  it("tolerates legacy literal quotes and finds Class/Type by its header", () => {
+    const csv = [
+      "TTB ID,Permit No.,Serial Number,Completed Date,Fanciful Name,Brand Name,Origin,Origin Desc,Class/Type,Class/Type Desc",
+      "'14083001000196',DSP-CO-20006,14QSRY,05/16/2014,QUEEN\"S SHARE,FEISTY SPIRITS,13,COLORADO,142,RYE WHISKY",
+    ].join("\r\n");
+
+    expect(parseColaCsv(csv)).toEqual([
+      expect.objectContaining({
+        ttbId: "14083001000196",
+        fancifulName: 'QUEEN"S SHARE',
+        origin: "13",
+        classType: "142",
+      }),
+    ]);
+  });
 });
 
 const rec = (over: Partial<ColaRecord>): ColaRecord => ({

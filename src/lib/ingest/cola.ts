@@ -63,22 +63,26 @@ function parseColaCsvResult(csv: string): ColaCsvResult {
   if (rows.length === 0) return { records: [], dataRows: 0 };
   const records: ColaRecord[] = [];
   let dataRows = 0;
+  let columns = new Map<string, number>();
   for (const row of rows) {
     const cells = splitCsvLine(row);
-    if (cells[0]?.trim() === "TTB ID") continue;
+    if (cells[0]?.trim() === "TTB ID") {
+      columns = new Map(cells.map((cell, index) => [cell.trim(), index]));
+      continue;
+    }
     dataRows += 1;
-    if (cells.length < 8) continue;
-    const ttbId = cells[0].replace(/^'+|'+$/g, "").trim();
-    if (!/^\d{6,}$/.test(ttbId)) continue; // header or malformed row
+    const get = (name: string, fallback: number): string => cells[columns.get(name) ?? fallback] ?? "";
+    const ttbId = get("TTB ID", 0).replace(/^'+|'+$/g, "").trim();
+    if (!/^\d{6,}$/.test(ttbId)) continue; // malformed row
     records.push({
       ttbId,
-      permitNo: cells[1].trim(),
-      serialNumber: cells[2].trim(),
-      completedDate: cells[3].trim(),
-      fancifulName: cells[4].trim(),
-      brandName: cells[5].trim(),
-      origin: cells[6].trim(),
-      classType: cells[7].trim(),
+      permitNo: get("Permit No.", 1).trim(),
+      serialNumber: get("Serial Number", 2).trim(),
+      completedDate: get("Completed Date", 3).trim(),
+      fancifulName: get("Fanciful Name", 4).trim(),
+      brandName: get("Brand Name", 5).trim(),
+      origin: get("Origin", 6).trim(),
+      classType: get("Class/Type", 7).trim(),
     });
   }
   return { records, dataRows };
@@ -92,11 +96,19 @@ function splitCsvRecords(csv: string): string[] {
   for (let i = 0; i < csv.length; i++) {
     const ch = csv[i];
     if (ch === '"') {
-      row += ch;
-      if (inQuotes && csv[i + 1] === '"') {
-        row += csv[++i];
+      if (inQuotes) {
+        row += ch;
+        if (csv[i + 1] === '"') {
+          row += csv[++i];
+        } else {
+          inQuotes = false;
+        }
+      } else if (row.length === 0 || row.endsWith(",")) {
+        row += ch;
+        inQuotes = true;
       } else {
-        inQuotes = !inQuotes;
+        // Historic TTB exports contain literal quotes in unquoted names.
+        row += ch;
       }
     } else if (ch === "\r" && csv[i + 1] === "\n" && !inQuotes) {
       rows.push(row);
@@ -131,7 +143,7 @@ function splitCsvLine(line: string): string[] {
       } else {
         cur += ch;
       }
-    } else if (ch === '"') {
+    } else if (ch === '"' && cur.length === 0) {
       inQuotes = true;
     } else if (ch === ",") {
       cells.push(cur);
