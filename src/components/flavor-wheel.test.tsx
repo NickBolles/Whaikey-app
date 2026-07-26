@@ -41,6 +41,40 @@ describe("FlavorWheel", () => {
     expect(screen.getByText("leans peaty & sweet")).toBeInTheDocument();
   });
 
+  it("paints every label after every arc so neighbours can't slice them", () => {
+    const { container } = render(<FlavorWheel leafHeat={{ campfire: 1, vanilla: 0.8 }} />);
+    const nodes = Array.from(container.querySelectorAll("path, text"));
+    const lastArc = nodes.findLastIndex((n) => n.tagName.toLowerCase() === "path");
+    const firstLabel = nodes.findIndex((n) => n.tagName.toLowerCase() === "text");
+    expect(firstLabel).toBeGreaterThan(lastArc);
+  });
+
+  it("keeps leaf labels inside the ring, condensing the ones that would spill", () => {
+    const { container } = render(<FlavorWheel leafHeat={{ campfire: 1, oak: 1 }} />);
+    const byText = (t: string) =>
+      Array.from(container.querySelectorAll("text")).find((n) => n.textContent === t)!;
+    // "Campfire smoke" is wider than the ring band -> clamped to it.
+    const long = byText("Campfire smoke");
+    expect(long).toHaveAttribute("lengthAdjust", "spacingAndGlyphs");
+    expect(Number(long.getAttribute("textLength"))).toBeGreaterThan(0);
+    // "Oak" fits comfortably -> left at its natural width, no distortion.
+    expect(byText("Oak")).not.toHaveAttribute("textLength");
+  });
+
+  it("darkens label ink on hot segments, which render light and near-opaque", () => {
+    const { container } = render(
+      <FlavorWheel wedgeHeat={{ sweet: 1, floral: 0 }} leafHeat={{ vanilla: 1, cherry: 0.5 }} />,
+    );
+    const byText = (t: string) =>
+      Array.from(container.querySelectorAll("text")).find((n) => n.textContent === t)!;
+    // Hot sweet wedge / hot pale vanilla leaf -> dark ink.
+    expect(byText("Sweet")).toHaveAttribute("fill", "#16110c");
+    expect(byText("Vanilla")).toHaveAttribute("fill", "#16110c");
+    // Ghosted floral wedge and the mid-dark cherry leaf keep the cream ink.
+    expect(byText("Floral")).toHaveAttribute("fill", "var(--foreground)");
+    expect(byText("Cherry")).toHaveAttribute("fill", "var(--foreground)");
+  });
+
   it("grades leaf shades within a family so subsections are distinct", () => {
     const family = warmify("#5b6b74");
     const shades = [0, 1, 2].map((i) => leafShade(family, i, 3));

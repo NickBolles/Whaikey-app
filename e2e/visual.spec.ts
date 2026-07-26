@@ -115,6 +115,17 @@ test.describe("signed in (demo collector)", () => {
     await expect(page).toHaveScreenshot(shot("bar-own"), { fullPage: true });
   });
 
+  // The wheel is a couple percent of the full-page capture above, so a total
+  // redraw of it still lands inside maxDiffPixelRatio. Snapshot the card on
+  // its own, where the heat map is judged on its own pixels.
+  test("my bar: flavor map", async ({ page }) => {
+    await page.goto("/bar");
+    const map = page.getByRole("region", { name: /bar flavor map/i });
+    await expect(page.getByTestId("flavor-wheel")).toBeVisible();
+    await settle(page);
+    await expect(map).toHaveScreenshot(shot("bar-flavor-map"));
+  });
+
   test("wishlist tab", async ({ page }) => {
     await page.goto("/bar");
     await page.getByRole("tab", { name: /wishlist/i }).click();
