@@ -59,7 +59,7 @@ interface ColaCsvResult {
 
 /** Parse a COLA export and retain its raw row count for cap safety checks. */
 function parseColaCsvResult(csv: string): ColaCsvResult {
-  const rows = splitCsvRecords(csv).filter((row) => row.trim().length > 0);
+  const rows = coalesceColaCsvRows(splitCsvRecords(csv)).filter((row) => row.trim().length > 0);
   if (rows.length === 0) return { records: [], dataRows: 0 };
   const records: ColaRecord[] = [];
   let dataRows = 0;
@@ -123,6 +123,39 @@ function splitCsvRecords(csv: string): string[] {
   }
   rows.push(row);
   return rows;
+}
+
+/**
+ * Some historic TTB exports split an unquoted product name over two physical
+ * lines. A logical data record always starts with a TTB ID, so join a
+ * non-record continuation to its preceding source row before parsing fields.
+ */
+function coalesceColaCsvRows(rows: string[]): string[] {
+  const logicalRows: string[] = [];
+  let expectedCellCount = 0;
+  for (const row of rows) {
+    if (row.trim().length === 0) continue;
+    const firstCell = splitCsvLine(row)[0]?.trim() ?? "";
+    const isHeader = firstCell === "TTB ID";
+    const isRecordStart = isHeader || /^'?\d{6,}'?$/.test(firstCell);
+    if (isHeader) {
+      expectedCellCount = splitCsvLine(row).length;
+    }
+    if (isRecordStart || logicalRows.length === 0) {
+      logicalRows.push(row);
+      continue;
+    }
+    const previous = logicalRows.length - 1;
+    // Only repair a continuation when the prior physical line is incomplete.
+    // Otherwise retain it as a separate malformed row so the completeness
+    // check can reject capped/truncated exports rather than hide data loss.
+    if (expectedCellCount > 0 && splitCsvLine(logicalRows[previous]).length < expectedCellCount) {
+      logicalRows[previous] += logicalRows[previous].endsWith(" ") ? row : ` ${row}`;
+    } else {
+      logicalRows.push(row);
+    }
+  }
+  return logicalRows;
 }
 
 /** Minimal RFC-4180 line splitter (quoted cells, doubled quotes). */

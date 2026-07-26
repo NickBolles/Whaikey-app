@@ -72,6 +72,22 @@ describe("parseColaCsv", () => {
       }),
     ]);
   });
+
+  it("joins an unquoted continuation line into its prior TTB record", () => {
+    const csv = [
+      "TTB ID,Permit No.,Serial Number,Completed Date,Fanciful Name,Brand Name,Origin,Origin Desc,Class/Type,Class/Type Desc",
+      "'17363001000216',DSP-NY-21069,170002,01/30/2018,,SAVAGE WINERY ",
+      "BOURBON WHISKEY,02,NEW YORK,141,BOURBON WHISKY",
+    ].join("\r\n");
+
+    expect(parseColaCsv(csv)).toEqual([
+      expect.objectContaining({
+        ttbId: "17363001000216",
+        brandName: "SAVAGE WINERY BOURBON WHISKEY",
+        classType: "141",
+      }),
+    ]);
+  });
 });
 
 const rec = (over: Partial<ColaRecord>): ColaRecord => ({
