@@ -31,9 +31,9 @@
  * Workers never migrate — they only ever receive an already-migrated `db`.
  *
  * Worker safety cap: --workers is hard-capped at MAX_WORKERS (4); operate
- * with 2-4. This controller performs exactly one bounded claim+process pass
- * per invocation (leaseCap = workers × batch-size) — it never polls the
- * provider in a loop; run it again to process more.
+ * with 2-4. This controller processes up to `--limit` rows per invocation,
+ * scheduling them in `--batch-size` chunks; it never polls the provider.
+ * Run a new bounded invocation to process the next queue slice.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -220,7 +220,10 @@ async function main(): Promise<void> {
       throw new Error("Preflight smoke probe failed — aborting before claiming any work. See the artifact for details.");
     }
 
-    const leaseCap = workers * batchSize;
+    // `--limit` is the total bounded work budget. Workers consume it in
+    // `--batch-size` chunks; multiplying by worker count here would make a
+    // user-requested 100-row run silently process only (workers × batchSize).
+    const leaseCap = limit;
     const workerRun = await runVerificationWorkers(db, {
       runId: run!.id,
       workers,
