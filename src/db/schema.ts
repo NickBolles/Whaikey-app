@@ -420,6 +420,162 @@ export const bottleVerifications = pgTable(
   ],
 );
 
+// ---------------------------------------------------------------------------
+// Catalog verification queue (docs/DATA_SOURCES.md; src/lib/ingest/verification-queue.ts)
+//
+// Durable, subscription-only bulk verification of imported ("imported" status)
+// bottles, replacing ad hoc `status=imported` batch selection. A bottle's
+// catalog state stays on `bottles.status`; these tables track the *queue
+// mechanics* around verifying it (work item lifecycle, run configuration, and
+// an auditable attempt ledger), and are never themselves read as catalog
+// truth. Queue finalization never mutates `bottles` directly.
+// ---------------------------------------------------------------------------
+
+export const VERIFICATION_RUN_MODES = ["dry_run", "apply"] as const;
+export type VerificationRunMode = (typeof VERIFICATION_RUN_MODES)[number];
+
+/**
+ * "created": row inserted, nothing done yet.
+ * "snapshotting"/"ready": queue population in progress / done for this run.
+ * "completed": a dry run finished (nothing durable was queued).
+ * "failed"/"cancelled": operator or error terminated the run.
+ */
+export const VERIFICATION_RUN_STATUSES = [
+  "created",
+  "snapshotting",
+  "ready",
+  "completed",
+  "failed",
+  "cancelled",
+] as const;
+export type VerificationRunStatus = (typeof VERIFICATION_RUN_STATUSES)[number];
+
+/**
+ * "queued"/"retry_wait": eligible for claim once `next_eligible_at` passes.
+ * "leased": claimed by a worker, tracked via the lease_* columns.
+ * "verified"/"not_evidenced"/"failed_terminal"/"cancelled": durable terminal
+ * states — no longer selected for claim, regardless of `bottles.status`.
+ */
+export const VERIFICATION_WORK_STATUSES = [
+  "queued",
+  "leased",
+  "verified",
+  "not_evidenced",
+  "retry_wait",
+  "failed_terminal",
+  "cancelled",
+] as const;
+export type VerificationWorkStatus = (typeof VERIFICATION_WORK_STATUSES)[number];
+
+export const VERIFICATION_ATTEMPT_OUTCOMES = ["verified", "not_evidenced", "retry", "error"] as const;
+export type VerificationAttemptOutcome = (typeof VERIFICATION_ATTEMPT_OUTCOMES)[number];
+
+/**
+ * One controller invocation's configuration and lifecycle. `requestedModel`
+ * is the raw operator-supplied alias (e.g. "sonnet"); `resolvedModel` is the
+ * pinned concrete model id it resolved to (resolveModel() in
+ * verification-queue.ts) — both are kept so a resumed run can refuse a
+ * conflicting `--model` instead of silently drifting mid-run.
+ */
+export const catalogVerificationRuns = pgTable(
+  "catalog_verification_runs",
+  {
+    id: id(),
+    mode: text("mode").$type<VerificationRunMode>().notNull(),
+    status: text("status").$type<VerificationRunStatus>().notNull().default("created"),
+    requestedModel: text("requested_model").notNull(),
+    resolvedModel: text("resolved_model").notNull(),
+    workers: integer("workers").notNull(),
+    batchSize: integer("batch_size").notNull(),
+    limit: integer("limit_count").notNull(),
+    partitions: integer("partitions").notNull().default(1),
+    config: jsonb("config").$type<Record<string, unknown>>(),
+    /** Snapshot/attempt/lease counters, refreshed on every --report. */
+    summary: jsonb("summary").$type<Record<string, unknown>>(),
+    startedAt: timestamp("started_at", { withTimezone: true, mode: "date" }),
+    completedAt: timestamp("completed_at", { withTimezone: true, mode: "date" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("catalog_verification_runs_status_idx").on(t.status)],
+);
+
+/**
+ * One durable queue slot per candidate bottle (bottleId is the PK — a bottle
+ * enters the queue at most once across every run, ever). This is what makes a
+ * "not_evidenced" outcome durable: the row moves to a terminal status and is
+ * never re-selected by claimWork, even though `bottles.status` stays
+ * "imported" and a naive `status=imported` scan would keep finding it.
+ */
+export const catalogVerificationWork = pgTable(
+  "catalog_verification_work",
+  {
+    bottleId: text("bottle_id")
+      .primaryKey()
+      .references(() => bottles.id, { onDelete: "cascade" }),
+    status: text("status").$type<VerificationWorkStatus>().notNull().default("queued"),
+    /** Ascending — lower claims first. See computeCandidatePriority(). */
+    priority: integer("priority").notNull(),
+    /** sha256 of the candidate's identity+facts at snapshot time (change detection). */
+    fingerprint: text("fingerprint").notNull(),
+    reasonCodes: jsonb("reason_codes").$type<string[]>().notNull().default([]),
+    attempts: integer("attempts").notNull().default(0),
+    /** Claimable once <= now; used for both initial queueing and retry backoff. */
+    nextEligibleAt: timestamp("next_eligible_at", { withTimezone: true, mode: "date" })
+      .$defaultFn(() => new Date())
+      .notNull(),
+    leaseToken: text("lease_token"),
+    leaseWorker: text("lease_worker"),
+    leaseRunId: text("lease_run_id").references(() => catalogVerificationRuns.id, { onDelete: "set null" }),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true, mode: "date" }),
+    lastOutcome: text("last_outcome").$type<VerificationAttemptOutcome>(),
+    lastError: text("last_error"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("catalog_verification_work_claim_idx").on(t.status, t.priority, t.nextEligibleAt),
+    index("catalog_verification_work_lease_run_idx").on(t.leaseRunId),
+  ],
+);
+
+/**
+ * Append-only attempt ledger, kept even after a work row's lease is released
+ * — it's the only durable link back to which run touched a bottle, since
+ * catalog_verification_work.lease_run_id is cleared on finalize.
+ */
+export const catalogVerificationAttempts = pgTable(
+  "catalog_verification_attempts",
+  {
+    id: id(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => catalogVerificationRuns.id, { onDelete: "cascade" }),
+    bottleId: text("bottle_id")
+      .notNull()
+      .references(() => bottles.id, { onDelete: "cascade" }),
+    leaseToken: text("lease_token").notNull(),
+    worker: text("worker").notNull(),
+    partition: integer("partition").notNull(),
+    inputSnapshot: jsonb("input_snapshot").$type<Record<string, unknown>>().notNull(),
+    outcome: text("outcome").$type<VerificationAttemptOutcome>().notNull(),
+    evidence: jsonb("evidence").$type<Record<string, unknown>>(),
+    error: text("error"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("catalog_verification_attempts_run_idx").on(t.runId),
+    index("catalog_verification_attempts_bottle_idx").on(t.bottleId),
+  ],
+);
+
+export type VerificationRun = typeof catalogVerificationRuns.$inferSelect;
+export type NewVerificationRun = typeof catalogVerificationRuns.$inferInsert;
+export type VerificationWork = typeof catalogVerificationWork.$inferSelect;
+export type NewVerificationWork = typeof catalogVerificationWork.$inferInsert;
+export type VerificationAttempt = typeof catalogVerificationAttempts.$inferSelect;
+export type NewVerificationAttempt = typeof catalogVerificationAttempts.$inferInsert;
+
 export type User = typeof user.$inferSelect;
 export type BottleUpc = typeof bottleUpcs.$inferSelect;
 export type BottleVerification = typeof bottleVerifications.$inferSelect;

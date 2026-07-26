@@ -52,3 +52,6 @@ next-env.d.ts
 
 # pnpm store created when generating visual baselines in the Playwright container
 .pnpm-store/
+
+# generated verification-queue controller reports (scripts/verify-sold.ts)
+/artifacts/
