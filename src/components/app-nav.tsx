@@ -25,8 +25,8 @@ export function AppNav() {
   const actionsTriggerRef = useRef<HTMLButtonElement>(null);
 
   const closeActions = () => {
+    actionsTriggerRef.current?.focus();
     setActionsOpen(false);
-    requestAnimationFrame(() => actionsTriggerRef.current?.focus());
   };
 
   useEffect(() => {
