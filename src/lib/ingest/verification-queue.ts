@@ -571,3 +571,70 @@ export async function summarizeRun(db: DB, runId: string): Promise<RunSummary> {
 
   return summary;
 }
+
+export interface WorkStatusSummary {
+  runId: string;
+  /** Distinct bottles this run has ever attempted, per the durable ledger. */
+  touched: number;
+  leased: number;
+  verified: number;
+  notEvidenced: number;
+  /** Currently `retry_wait` — still eligible for another attempt. */
+  retryable: number;
+  /** Currently `failed_terminal` — retries exhausted. */
+  rejected: number;
+  cancelled: number;
+  /** Count of ledger attempts (not distinct bottles) whose outcome was "error". */
+  errors: number;
+  generatedAt: string;
+}
+
+/**
+ * Current-state tally for every bottle this run has ever touched, derived
+ * from `catalog_verification_work.status` as of right now rather than the
+ * (possibly stale) outcome recorded on an older ledger row — a bottle can be
+ * re-leased and re-attempted after a "retry" outcome, so only the row's
+ * current status says whether it's still retryable or has become durably
+ * rejected/verified. Used for the --apply/--report/--resume checkpoint JSON,
+ * which is why it's safe to call for a run that crashed mid-batch as well as
+ * one that just finished.
+ */
+export async function summarizeRunWorkStatuses(db: DB, runId: string): Promise<WorkStatusSummary> {
+  const attemptRows = await db
+    .select({ bottleId: catalogVerificationAttempts.bottleId, outcome: catalogVerificationAttempts.outcome })
+    .from(catalogVerificationAttempts)
+    .where(eq(catalogVerificationAttempts.runId, runId));
+
+  const bottleIds = [...new Set(attemptRows.map((r) => r.bottleId))];
+  const errors = attemptRows.filter((r) => r.outcome === "error").length;
+
+  const summary: WorkStatusSummary = {
+    runId,
+    touched: bottleIds.length,
+    leased: 0,
+    verified: 0,
+    notEvidenced: 0,
+    retryable: 0,
+    rejected: 0,
+    cancelled: 0,
+    errors,
+    generatedAt: new Date().toISOString(),
+  };
+  if (!bottleIds.length) return summary;
+
+  const workRows = await db
+    .select({ bottleId: catalogVerificationWork.bottleId, status: catalogVerificationWork.status })
+    .from(catalogVerificationWork)
+    .where(inArray(catalogVerificationWork.bottleId, bottleIds));
+
+  for (const row of workRows) {
+    if (row.status === "leased") summary.leased += 1;
+    else if (row.status === "verified") summary.verified += 1;
+    else if (row.status === "not_evidenced") summary.notEvidenced += 1;
+    else if (row.status === "retry_wait") summary.retryable += 1;
+    else if (row.status === "failed_terminal") summary.rejected += 1;
+    else if (row.status === "cancelled") summary.cancelled += 1;
+  }
+
+  return summary;
+}

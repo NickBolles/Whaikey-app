@@ -1,38 +1,47 @@
 #!/usr/bin/env tsx
 /**
  * Bulk catalog verification queue controller (durable work/run/attempt
- * foundation — src/lib/ingest/verification-queue.ts, docs/DATA_SOURCES.md).
+ * foundation — src/lib/ingest/verification-queue.ts; worker execution phase
+ * — src/lib/ingest/verification-worker.ts; docs/DATA_SOURCES.md).
  *
- * Phase 1 scope: this controller may only create a run, snapshot imported
- * bottles into durable work rows, lease (claim) bounded batches, and report.
- * It NEVER calls Claude — the worker execution loop that would actually
- * verify a leased batch is a future PR, and there is no API fallback path:
- * if that loop isn't wired up, leased rows simply sit until their lease
- * expires and self-heals back to "queued" (see reclaimExpiredLeases).
+ * `--apply` snapshots imported bottles into durable work rows, then runs a
+ * bounded in-process pool of workers that claim leased batches, verify them
+ * against the authenticated Claude Code CLI *subscription* (never an API
+ * key — see src/lib/ingest/claude-code-client.ts), and finalize every
+ * claimed row exactly once. There is no API fallback: if the CLI isn't
+ * logged in, or the preflight smoke probe fails, the run aborts before any
+ * lease is claimed, and any already-leased rows simply self-heal back to
+ * "queued" once their lease expires (see reclaimExpiredLeases).
  *
  * This is unrelated to `enrich-claude-code.ts --verify-sold`, which still
  * does synchronous, immediate LLM-based verification against
- * src/lib/ingest/verify-sold.ts — that path is untouched by this PR.
+ * src/lib/ingest/verify-sold.ts — that path is untouched by this change.
  *
  * Usage:
  *   pnpm verify-sold --dry-run --limit 50 --model sonnet
- *   pnpm verify-sold --apply   --limit 50 --model sonnet [--workers 2] [--batch-size 5] [--partitions 1]
+ *   pnpm verify-sold --apply   --limit 50 --model sonnet [--workers 2] [--batch-size 5]
  *   pnpm verify-sold --report <run-id>
  *   pnpm verify-sold --resume <run-id> --apply --limit 50 --model sonnet
  *
+ * `--dry-run` only previews what would be enqueued — it never touches
+ * `catalog_verification_work` and never calls Claude (no subscription usage).
+ *
  * Preflight: one `migrateDb` call against DATABASE_URL runs before any queue
  * operation (same one-migration preflight every other script here uses).
+ * Workers never migrate — they only ever receive an already-migrated `db`.
  *
  * Worker safety cap: --workers is hard-capped at MAX_WORKERS (4); operate
- * with 2-4. This controller does not itself poll a provider repeatedly — it
- * performs exactly one bounded claim per partition per invocation.
+ * with 2-4. This controller performs exactly one bounded claim+process pass
+ * per invocation (leaseCap = workers × batch-size) — it never polls the
+ * provider in a loop; run it again to process more.
  */
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { closeDb, createDb, resolveDbUrl } from "../src/db";
 import { migrateDb } from "../src/db/migrate";
+import { runClaudeStructured } from "../src/lib/ingest/claude-code-client";
 import {
-  claimWork,
   createVerificationRun,
   DEFAULT_LEASE_MS,
   getVerificationRun,
@@ -41,7 +50,10 @@ import {
   resolveModel,
   snapshotRun,
   summarizeRun,
+  summarizeRunWorkStatuses,
+  type WorkStatusSummary,
 } from "../src/lib/ingest/verification-queue";
+import { runSmokeProbe, runVerificationWorkers, summarizeWorkerOutcomes } from "../src/lib/ingest/verification-worker";
 
 const DEFAULT_WORKERS = 2;
 const DEFAULT_BATCH_SIZE = 5;
@@ -96,6 +108,28 @@ function writeArtifact(runId: string, payload: unknown): string {
   return file;
 }
 
+/** Fails fast with a clear message rather than letting the CLI fall back to any other auth path. */
+function requireClaudeCodeLogin(): void {
+  const result = spawnSync("claude", ["auth", "status", "--text"], { stdio: "inherit" });
+  if (result.error || result.status !== 0) {
+    throw new Error("Claude Code is not authenticated. Run `claude auth login` first — this controller never falls back to an API key.");
+  }
+}
+
+/** The seven-field checkpoint report shape shared by --apply, --report, and --resume. */
+function buildCheckpointReport(scanned: number, workStatus: WorkStatusSummary) {
+  return {
+    runId: workStatus.runId,
+    scanned,
+    leased: workStatus.touched,
+    verified: workStatus.verified,
+    not_evidenced: workStatus.notEvidenced,
+    retryable: workStatus.retryable,
+    rejected: workStatus.rejected,
+    errors: workStatus.errors,
+  };
+}
+
 async function main(): Promise<void> {
   const reportId = value("report");
   const resumeId = value("resume");
@@ -113,9 +147,11 @@ async function main(): Promise<void> {
     if (reportId) {
       const run = await getVerificationRun(db, reportId);
       if (!run) throw new Error(`No verification run found for id ${reportId}`);
-      const summary = await summarizeRun(db, reportId);
-      const file = writeArtifact(reportId, { run: await getVerificationRun(db, reportId), summary });
-      console.log(`[verify-sold] run ${reportId} (${run.mode}, ${run.status}): ${JSON.stringify(summary)}`);
+      const scanned = (run.summary as { snapshot?: { scanned?: number } } | null)?.snapshot?.scanned ?? 0;
+      const workStatus = await summarizeRunWorkStatuses(db, reportId);
+      const report = buildCheckpointReport(scanned, workStatus);
+      const file = writeArtifact(reportId, { run, report, workStatus });
+      console.log(`[verify-sold] run ${reportId} (${run.mode}, ${run.status}): ${JSON.stringify(report)}`);
       console.log(`Report written to ${file}`);
       return;
     }
@@ -151,10 +187,11 @@ async function main(): Promise<void> {
     }
 
     console.log(
-      `[verify-sold] run ${run!.id} (${run!.mode}) model=${run!.resolvedModel} workers=${workers} batchSize=${batchSize} partitions=${partitions} limit=${limit}`,
+      `[verify-sold] run ${run!.id} (${run!.mode}) model=${run!.resolvedModel} workers=${workers} batchSize=${batchSize} limit=${limit}`,
     );
 
     if (dryRun) {
+      // No lease is claimed, no row is written, and — critically — no Claude call is ever made on this path.
       const { result, candidates } = await previewSnapshot(db, limit);
       const file = writeArtifact(run!.id, {
         run: run!,
@@ -162,39 +199,58 @@ async function main(): Promise<void> {
         candidates: candidates.map(({ id, priority, reasonCodes, alreadyQueued }) => ({ id, priority, reasonCodes, alreadyQueued })),
       });
       console.log(
-        `[verify-sold] (dry run, no writes) ${result.scanned} imported bottles scanned → ${result.enqueued} would be newly queued, ${result.skippedExisting} already in the durable queue.`,
+        `[verify-sold] (dry run, no writes, no Claude calls) ${result.scanned} imported bottles scanned → ${result.enqueued} would be newly queued, ${result.skippedExisting} already in the durable queue.`,
       );
       console.log(`Report written to ${file}`);
       return;
     }
+
+    requireClaudeCodeLogin();
 
     const snapshot = await snapshotRun(db, run!.id);
     console.log(
       `[verify-sold] snapshot: ${snapshot.scanned} scanned → ${snapshot.enqueued} newly queued, ${snapshot.skippedExisting} already queued.`,
     );
 
-    const leaseResults: Array<{ partition: number; leased: number }> = [];
-    let totalLeased = 0;
-    const leaseCap = workers * batchSize;
-    for (let partition = 0; partition < partitions && totalLeased < leaseCap; partition++) {
-      const claimed = await claimWork(db, {
-        runId: run!.id,
-        worker: `controller-p${partition}`,
-        partition,
-        batchSize: Math.min(batchSize, leaseCap - totalLeased),
-        leaseMs: DEFAULT_LEASE_MS,
-      });
-      leaseResults.push({ partition, leased: claimed.length });
-      totalLeased += claimed.length;
+    const smokeProbe = await runSmokeProbe(runClaudeStructured, run!.resolvedModel);
+    console.log(`[verify-sold] preflight smoke probe (model=${smokeProbe.model}): ${smokeProbe.ok ? "ok" : "FAILED"} ${JSON.stringify(smokeProbe.output ?? smokeProbe.error)}`);
+    if (!smokeProbe.ok) {
+      const file = writeArtifact(run!.id, { run: run!, snapshot, smokeProbe });
+      console.log(`Report written to ${file}`);
+      throw new Error("Preflight smoke probe failed — aborting before claiming any work. See the artifact for details.");
     }
+
+    const leaseCap = workers * batchSize;
+    const workerRun = await runVerificationWorkers(db, {
+      runId: run!.id,
+      workers,
+      batchSize,
+      leaseCap,
+      model: run!.resolvedModel,
+      claudeRunner: runClaudeStructured,
+      leaseMs: DEFAULT_LEASE_MS,
+    });
+    const invocationReport = summarizeWorkerOutcomes(workerRun.outcomes);
     console.log(
-      `[verify-sold] leased ${totalLeased} row(s) across ${leaseResults.length} partition(s). ` +
-        "No worker execution loop is wired up yet — leased rows sit until a future worker finalizes them, " +
-        `or self-heal back to "queued" after their ${Math.round(DEFAULT_LEASE_MS / 60_000)}-minute lease expires.`,
+      `[verify-sold] this invocation: leased ${workerRun.leased} row(s) → ` +
+        `${invocationReport.verified} verified, ${invocationReport.notEvidenced} not_evidenced, ` +
+        `${invocationReport.retryable} retryable, ${invocationReport.rejected} rejected, ${invocationReport.errors} errors.`,
     );
 
-    const summary = await summarizeRun(db, run!.id);
-    const file = writeArtifact(run!.id, { run: await getVerificationRun(db, run!.id), snapshot, leaseResults, summary });
+    const durableSummary = await summarizeRun(db, run!.id);
+    const workStatus = await summarizeRunWorkStatuses(db, run!.id);
+    const report = buildCheckpointReport(snapshot.scanned, workStatus);
+    console.log(`[verify-sold] run totals: ${JSON.stringify(report)}`);
+
+    const file = writeArtifact(run!.id, {
+      run: await getVerificationRun(db, run!.id),
+      snapshot,
+      smokeProbe,
+      invocation: { ...invocationReport, outcomes: workerRun.outcomes },
+      report,
+      workStatus,
+      durableSummary,
+    });
     console.log(`Report written to ${file}`);
   } finally {
     await closeDb(db);
