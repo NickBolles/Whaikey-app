@@ -20,7 +20,7 @@ import type { CatalogCandidate } from "./types";
 const COLA_BASE = "https://www.ttbonline.gov/colasonline";
 export const COLA_SEARCH_PAGE_URL = `${COLA_BASE}/publicSearchColasBasic.do`;
 export const COLA_SEARCH_PROCESS_URL = `${COLA_BASE}/publicSearchColasBasicProcess.do`;
-export const COLA_SAVE_RESULTS_URL = `${COLA_BASE}/publicSaveSearchResultsToFile.do?path=/publicSaveSearchResultsToFile`;
+export const COLA_SAVE_RESULTS_URL = `${COLA_BASE}/publicSaveSearchResultsToFile.do?path=/publicSearchColasBasicProcess`;
 
 /**
  * TTB class/type codes for the whisky family sit in the 100–199 range

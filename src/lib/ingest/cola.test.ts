@@ -145,8 +145,10 @@ describe("fetchColaRecords", () => {
     });
     // Two month-chunks × 5 rows each.
     expect(records).toHaveLength(10);
-    expect(calls.filter((u) => u.includes("publicSaveSearchResultsToFile"))).toHaveLength(2);
-    const searches = calls.filter((u) => u.includes("publicSearchColasBasicProcess"));
+    const downloads = calls.filter((u) => u.includes("publicSaveSearchResultsToFile"));
+    expect(downloads).toHaveLength(2);
+    expect(downloads[0]).toContain("path=/publicSearchColasBasicProcess");
+    const searches = calls.filter((u) => u.includes("publicSearchColasBasicProcess.do?"));
     expect(searches[0]).toContain("searchCriteria.dateCompletedFrom=01%2F01%2F2026");
     expect(searches[0]).toContain("searchCriteria.dateCompletedTo=01%2F31%2F2026");
     expect(searches[1]).toContain("searchCriteria.dateCompletedFrom=02%2F01%2F2026");
