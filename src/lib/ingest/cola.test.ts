@@ -44,6 +44,18 @@ describe("parseColaCsv", () => {
     expect(parseColaCsv("")).toEqual([]);
     expect(parseColaCsv("some,short,line")).toEqual([]);
   });
+
+  it("keeps a quoted newline in its source row", () => {
+    const csv = [
+      "TTB ID,Permit No.,Serial Number,Completed Date,Fanciful Name,Brand Name,Origin,Class/Type",
+      "'26001001000006',DSP-KY-10,26A01,1/5/2026,\"RESERVE",
+      "EDITION\",EXAMPLE,50,101",
+    ].join("\r\n");
+
+    expect(parseColaCsv(csv)).toEqual([
+      expect.objectContaining({ ttbId: "26001001000006", fancifulName: "RESERVE\r\nEDITION" }),
+    ]);
+  });
 });
 
 const rec = (over: Partial<ColaRecord>): ColaRecord => ({
