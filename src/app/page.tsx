@@ -2,16 +2,14 @@ import Link from "next/link";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { getSessionUser } from "@/lib/session";
-import { getUserPalate } from "@/lib/palate-store";
-import { PalateWheel } from "@/components/palate-wheel";
-import { RecommendationRail } from "@/components/recommendation-rail";
+import { isAiConfigured } from "@/lib/ai/client";
+import { HomeConcierge } from "@/components/home-concierge";
 import {
   Search,
   ScanLine,
   Wine,
   GlassWater,
   GraduationCap,
-  MessageCircle,
   ChevronRight,
   Star,
 } from "lucide-react";
@@ -80,7 +78,6 @@ export default async function HomePage() {
     .orderBy(desc(schema.pours.createdAt))
     .limit(5);
 
-  const palate = await getUserPalate(db, user.id);
 
   const firstName = user.name?.split(" ")[0] ?? "there";
   const stats = [
@@ -94,49 +91,22 @@ export default async function HomePage() {
       <Wordmark />
 
       <header>
-        <h1 className="font-display text-[2rem] leading-tight font-semibold">
-          Welcome back, {firstName}
-        </h1>
-        <p className="text-muted mt-1">What are we pouring tonight?</p>
+        <h1 className="font-display text-[2rem] leading-tight font-semibold">Welcome back, {firstName}</h1>
+        <p className="text-muted mt-1">Your shelf, your next pour, and a concierge when you want one.</p>
       </header>
 
-      <section aria-label="Your stats" className="grid grid-cols-3 gap-3">
-        {stats.map((s) => (
-          <div key={s.label} className="card p-4">
-            <div className="stat-number text-[1.7rem] leading-none text-accent">{s.value}</div>
-            <div className="text-[11px] text-muted mt-2">{s.label}</div>
-          </div>
-        ))}
+      <section aria-label="Your bar" className="card p-5">
+        <div className="flex items-start justify-between gap-4"><div><p className="section-label">Start with your shelf</p><h2 className="font-display mt-1 text-xl font-semibold">Choose a bottle from My Bar</h2><p className="mt-1 text-sm text-muted">Pick a bottle first, then log the pour — no extra hunt.</p></div><Wine size={28} className="shrink-0 text-accent" aria-hidden /></div>
+        <div className="mt-4 grid grid-cols-2 gap-2"><Link href="/bar" className="btn-primary flex items-center justify-center gap-2 px-3 py-3 text-sm"><Wine size={16} aria-hidden /> My Bar</Link><Link href="/pour" className="btn-secondary flex items-center justify-center gap-2 px-3 py-3 text-sm"><GlassWater size={16} aria-hidden /> Pick any bottle</Link></div>
       </section>
 
-      <section aria-label="Quick actions" className="flex flex-col gap-3">
-        <Link href="/pour" className="btn-primary flex items-center justify-center gap-3 p-4 text-base">
-          <GlassWater size={20} aria-hidden /> Log a pour
-        </Link>
-        <div className="grid grid-cols-2 gap-3">
-          {[
-            { href: "/search", label: "Find a bottle", icon: Search },
-            { href: "/scan", label: "Scan bottles", icon: ScanLine },
-            { href: "/bar", label: "My Bar", icon: Wine },
-            { href: "/chat", label: "Concierge", icon: MessageCircle },
-          ].map(({ href, label, icon: Icon }) => (
-            <Link
-              key={href}
-              href={href}
-              className="card flex flex-col items-center gap-2 p-4 text-center text-[13px] hover:brightness-110 transition-[filter]"
-            >
-              <Icon size={20} className="text-accent" aria-hidden />
-              {label}
-            </Link>
-          ))}
-        </div>
+      <section aria-label="Your stats" className="grid grid-cols-3 gap-3">{stats.map((s) => <div key={s.label} className="card p-4"><div className="stat-number text-[1.7rem] leading-none text-accent">{s.value}</div><div className="text-[11px] text-muted mt-2">{s.label}</div></div>)}</section>
+
+      <HomeConcierge aiConfigured={isAiConfigured()} />
+
+      <section aria-label="Quick actions" className="grid grid-cols-2 gap-3">
+        {[{ href: "/search", label: "Find a bottle", icon: Search }, { href: "/scan", label: "Scan bottles", icon: ScanLine }].map(({ href, label, icon: Icon }) => <Link key={href} href={href} className="card flex items-center gap-3 p-4 text-sm hover:brightness-110 transition-[filter]"><Icon size={20} className="text-accent" aria-hidden />{label}</Link>)}
       </section>
-
-      <RecommendationRail mode="tonight" title="What to pour tonight" />
-
-      <RecommendationRail mode="discovery" title="For your palate" />
-
-      <PalateWheel vector={palate.vector} sampleSize={palate.sampleSize} />
 
       <section aria-label="Whiskey School">
         <h2 className="section-label mb-3">Whiskey School</h2>

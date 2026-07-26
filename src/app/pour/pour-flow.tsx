@@ -8,7 +8,7 @@ import { StarRating } from "@/components/star-rating";
 import { FlavorWheelInput } from "@/components/flavor-wheel-input";
 import { NoteCapture, type ExtractedTastingNote } from "@/components/note-capture";
 
-interface BottlePick {
+export interface BottlePick {
   id: string;
   name: string;
   distillery?: string | null;
@@ -188,8 +188,8 @@ function BottlePicker({ onPick }: { onPick: (bottle: BottlePick) => void }) {
 // The flow
 // ---------------------------------------------------------------------------
 
-export function PourFlow() {
-  const [bottle, setBottle] = useState<BottlePick | null>(null);
+export function PourFlow({ initialBottle = null, initialBottleMissing = false }: { initialBottle?: BottlePick | null; initialBottleMissing?: boolean }) {
+  const [bottle, setBottle] = useState<BottlePick | null>(initialBottle);
   const [rating, setRating] = useState<number | null>(null);
   const [servingStyle, setServingStyle] = useState<ServingStyle | null>(null);
   const [amountMl, setAmountMl] = useState<number>(45);
@@ -316,7 +316,10 @@ export function PourFlow() {
       </header>
 
       {!bottle ? (
-        <BottlePicker onPick={setBottle} />
+        <>
+          {initialBottleMissing && <p role="alert" className="rounded-xl border border-danger/40 bg-danger/10 p-3 text-sm text-danger">We couldn’t load that bottle. Pick one below instead.</p>}
+          <BottlePicker onPick={setBottle} />
+        </>
       ) : (
         <div className="flex flex-col gap-6">
           <div className="card flex items-center justify-between p-4">

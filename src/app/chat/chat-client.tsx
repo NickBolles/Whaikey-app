@@ -91,11 +91,11 @@ function TypingIndicator() {
   );
 }
 
-export function ChatClient({ aiConfigured }: { aiConfigured: boolean }) {
+export function ChatClient({ aiConfigured, initialMessage = null }: { aiConfigured: boolean; initialMessage?: string | null }) {
   const [sessions, setSessions] = useState<ChatSessionSummary[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [input, setInput] = useState("");
+  const [input, setInput] = useState(initialMessage ?? "");
   const [pending, setPending] = useState(false);
   const [streamingId, setStreamingId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);

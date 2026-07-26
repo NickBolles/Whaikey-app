@@ -100,10 +100,7 @@ test.describe("signed in (demo collector)", () => {
   test("home dashboard", async ({ page }) => {
     await page.goto("/");
     await expect(page.getByText(/Welcome back/i)).toBeVisible();
-    // Wait for the recommendation rails to resolve (match chips render on
-    // loaded cards) so the palate-driven content is captured, not a skeleton.
-    await expect(page.getByRole("heading", { name: "What to pour tonight" })).toBeVisible();
-    await expect(page.getByText(/% match/i).first()).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Ask your bar" })).toBeVisible();
     await settle(page);
     await expect(page).toHaveScreenshot(shot("home-dashboard"), { fullPage: true });
   });
@@ -111,6 +108,7 @@ test.describe("signed in (demo collector)", () => {
   test("my bar", async ({ page }) => {
     await page.goto("/bar");
     await expect(page.getByText(/Eagle Rare/i).first()).toBeVisible();
+    await expect(page.getByRole("heading", { name: "What to pour tonight" })).toBeVisible();
     await settle(page);
     await expect(page).toHaveScreenshot(shot("bar-own"), { fullPage: true });
   });

@@ -110,7 +110,7 @@ function RecCard({ rec, mode }: { rec: Recommendation; mode: RecommendationRailP
 
       {mode === "tonight" && (
         <Link
-          href="/pour"
+          href={`/pour?bottleId=${rec.bottleId}`}
           className="mt-auto inline-flex items-center min-h-11 text-sm font-medium text-accent hover:text-foreground transition-colors"
         >
           Log a pour

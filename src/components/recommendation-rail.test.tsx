@@ -49,7 +49,7 @@ describe("RecommendationRail", () => {
 
     await waitFor(() => expect(screen.getByText("Smoky Match")).toBeInTheDocument());
     const pourLink = screen.getByRole("link", { name: /Log a pour/i });
-    expect(pourLink).toHaveAttribute("href", "/pour");
+    expect(pourLink).toHaveAttribute("href", "/pour?bottleId=b1");
   });
 
   it("renders the empty state when there are no recommendations", async () => {
