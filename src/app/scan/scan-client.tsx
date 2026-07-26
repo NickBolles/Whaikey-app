@@ -125,6 +125,7 @@ function newId(): string {
 
 export function ScanClient() {
   const [cameraState, setCameraState] = useState<"starting" | "on" | "unavailable">("starting");
+  const [cameraFacing, setCameraFacing] = useState<"environment" | "user">("environment");
   const [relationship, setRelationship] = useState<Relationship>("own");
   const [items, setItems] = useState<QueueItem[]>([]);
   const [reviewId, setReviewId] = useState<string | null>(null);
@@ -430,7 +431,7 @@ export function ScanClient() {
       }
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "environment" },
+          video: { facingMode: { ideal: cameraFacing } },
           audio: false,
         });
         if (cancelled) {
@@ -532,7 +533,7 @@ export function ScanClient() {
       setTorchOn(false);
       setTorchChanging(false);
     };
-  }, [enqueueCode, flashLockBox, sampleFrameStats]);
+  }, [cameraFacing, enqueueCode, flashLockBox, sampleFrameStats]);
 
   /** Shutter: grab the current frame for on-device framing confirmation. */
   const captureFrame = useCallback(
@@ -682,6 +683,16 @@ export function ScanClient() {
               </span>
             </span>
             <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => setCameraFacing((facing) => facing === "environment" ? "user" : "environment")}
+                disabled={cameraState !== "on"}
+                aria-label={cameraFacing === "environment" ? "Switch to front camera" : "Use rear camera"}
+                title={cameraFacing === "environment" ? "Switch to front camera" : "Use rear camera"}
+                className="btn-secondary px-3 py-2 text-xs font-medium disabled:opacity-50"
+              >
+                {cameraFacing === "environment" ? "Rear camera" : "Use rear camera"}
+              </button>
               <button
                 type="button"
                 onClick={() => setManualOpen((v) => !v)}
