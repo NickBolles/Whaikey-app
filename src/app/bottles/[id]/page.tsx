@@ -186,7 +186,10 @@ export default async function BottleDetailPage({
                   : "Not on your shelf yet."}
                 {userBottle?.status ? ` Status: ${userBottle.status}.` : ""}
               </p>
-              <ShelfActions bottleId={bottle.id} current={userBottle?.relationship ?? null} />
+              <div className="flex flex-col gap-2">
+                <Link href={`/pour?bottleId=${bottle.id}`} className="btn-primary flex items-center justify-center px-4 py-3 text-sm font-medium">Log a pour</Link>
+                <ShelfActions bottleId={bottle.id} current={userBottle?.relationship ?? null} />
+              </div>
             </>
           ) : (
             <p className="text-sm text-muted">

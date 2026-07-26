@@ -2,6 +2,7 @@ import Link from "next/link";
 import { getDb } from "@/db";
 import { getSessionUser } from "@/lib/session";
 import { getBarFlavorHeat, listUserBottles } from "@/lib/bar";
+import { getUserPalate } from "@/lib/palate-store";
 import { BarClient } from "./bar-client";
 
 export const dynamic = "force-dynamic";
@@ -26,16 +27,19 @@ export default async function BarPage() {
   }
 
   const db = getDb();
-  const [rows, personalFlavorHeat, producerFlavorHeat] = await Promise.all([
+  const [rows, personalFlavorHeat, producerFlavorHeat, palate] = await Promise.all([
     listUserBottles(db, user.id),
     getBarFlavorHeat(db, user.id, "personal"),
     getBarFlavorHeat(db, user.id, "producer"),
+    getUserPalate(db, user.id),
   ]);
   return (
     <BarClient
       initialRows={rows}
       personalFlavorHeat={personalFlavorHeat}
       producerFlavorHeat={producerFlavorHeat}
+      palate={palate}
     />
   );
+
 }

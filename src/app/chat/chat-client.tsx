@@ -91,7 +91,8 @@ function TypingIndicator() {
   );
 }
 
-export function ChatClient({ aiConfigured }: { aiConfigured: boolean }) {
+export function ChatClient({ aiConfigured, initialMessage = null }: { aiConfigured: boolean; initialMessage?: string | null }) {
+  const initialMessageSent = useRef(false);
   const [sessions, setSessions] = useState<ChatSessionSummary[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -274,6 +275,13 @@ export function ChatClient({ aiConfigured }: { aiConfigured: boolean }) {
     },
     [pending, sessionId, refreshSessions],
   );
+
+  useEffect(() => {
+    if (!aiConfigured || !initialMessage || initialMessageSent.current) return;
+    initialMessageSent.current = true;
+    window.history.replaceState(window.history.state, "", "/chat");
+    void send(initialMessage);
+  }, [aiConfigured, initialMessage, send]);
 
   if (!aiConfigured) return <SetupCard />;
 

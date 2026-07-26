@@ -31,18 +31,29 @@ test.describe("signed-out smoke", () => {
     await expect(page.getByText(/Lagavulin/i).first()).toBeVisible();
   });
 
-  test("bottom nav is present with all six tabs", async ({ page }) => {
+  test("bottom nav keeps destinations focused and exposes quick actions", async ({ page }) => {
     await page.goto("/");
     const nav = page.getByRole("navigation", { name: "Primary" });
-    for (const label of ["Home", "Search", "Scan", "My Bar", "Pour", "Chat"]) {
+    for (const label of ["Home", "My Bar", "Search", "Chat"]) {
       await expect(nav.getByText(label)).toBeVisible();
     }
+    await nav.getByRole("button", { name: "Open quick actions" }).click();
+    await expect(page.getByRole("link", { name: "Log a pour" })).toHaveAttribute("href", "/pour");
+    await expect(page.getByRole("link", { name: "Scan a bottle" })).toHaveAttribute("href", "/scan");
   });
 });
 
 test.describe("signed-in scan flow", () => {
   test.beforeEach(async ({ context, baseURL }) => {
     await signIn(context, baseURL!, SCAN_SESSION_TOKEN);
+  });
+
+  test("a bottle-linked pour starts at the tasting form and can be changed", async ({ page }) => {
+    await page.goto("/pour?bottleId=eagle-rare-10");
+    await expect(page.getByText("Eagle Rare 10 Year")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Rating" })).toBeVisible();
+    await page.getByRole("button", { name: "Change" }).click();
+    await expect(page.getByPlaceholder("What are you pouring?")).toBeVisible();
   });
 
   test("rapid barcode entry shelves bottles one after another", async ({ page }) => {

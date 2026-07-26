@@ -2,12 +2,14 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { BookOpen, Hourglass, Plus, UserRound } from "lucide-react";
+import { BookOpen, GlassWater, Hourglass, Plus, UserRound } from "lucide-react";
 import type { BarFlavorHeat, BarRow } from "@/lib/bar";
 import { leafLabel } from "@/lib/flavor-wheel";
 import { BarFlavorWheel, type FlavorSelection } from "@/components/bar-flavor-wheel";
 import { FillGauge } from "@/components/fill-gauge";
 import { FlavorHeatLegend } from "@/components/flavor-wheel";
+import { PalateWheel } from "@/components/palate-wheel";
+import { RecommendationRail } from "@/components/recommendation-rail";
 import { FlavorRadar } from "@/components/flavor-radar";
 
 /** BarRow with dates possibly serialized to strings (API JSON responses). */
@@ -46,10 +48,12 @@ export function BarClient({
   initialRows,
   personalFlavorHeat,
   producerFlavorHeat,
+  palate,
 }: {
   initialRows: Row[];
   personalFlavorHeat: BarFlavorHeat;
   producerFlavorHeat: BarFlavorHeat;
+  palate: { vector: Record<string, number>; sampleSize: number };
 }) {
   const [rows, setRows] = useState<Row[]>(initialRows);
   const [tab, setTab] = useState<Tab>("bar");
@@ -283,6 +287,10 @@ export function BarClient({
             )}
           </section>
 
+          <RecommendationRail mode="tonight" title="What to pour tonight" />
+          <RecommendationRail mode="discovery" title="For your palate" />
+          <PalateWheel vector={palate.vector} sampleSize={palate.sampleSize} />
+
           {killList.length > 0 && (
             <section
               aria-label="Kill list"
@@ -336,22 +344,11 @@ export function BarClient({
                       )}
                     </span>
                     <span className="flex flex-col items-end gap-1.5 shrink-0">
-                      <span
-                        className={`stat-number text-lg leading-none ${
-                          row.purchasePrice != null ? "" : "text-muted"
-                        }`}
-                      >
-                        {row.purchasePrice != null ? `$${row.purchasePrice.toFixed(0)}` : "—"}
-                      </span>
-                      {row.status && (
-                        <span
-                          className={`chip px-2 py-0.5 text-[10px] font-medium ${statusChipClass(row.status)}`}
-                        >
-                          {row.status}
-                        </span>
-                      )}
+                      <span className={`stat-number text-lg leading-none ${row.purchasePrice != null ? "" : "text-muted"}`}>{row.purchasePrice != null ? `$${row.purchasePrice.toFixed(0)}` : "—"}</span>
+                      {row.status && <span className={`chip px-2 py-0.5 text-[10px] font-medium ${statusChipClass(row.status)}`}>{row.status}</span>}
                     </span>
                   </button>
+                  <div className="flex justify-end border-t border-border-subtle px-3 py-2"><Link href={`/pour?bottleId=${row.bottleId}`} className="inline-flex min-h-9 items-center gap-1.5 px-2 text-xs font-medium text-accent hover:underline"><GlassWater size={14} aria-hidden /> Log this pour</Link></div>
                   {expandedId === row.id && (
                     <RowDetails
                       key={row.id}
