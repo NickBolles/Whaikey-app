@@ -142,6 +142,7 @@ export function ScanClient() {
   const [torchOn, setTorchOn] = useState(false);
   const [torchChanging, setTorchChanging] = useState(false);
   const [torchUnavailable, setTorchUnavailable] = useState(false);
+  const [torchReportedUnsupported, setTorchReportedUnsupported] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -438,11 +439,14 @@ export function ScanClient() {
         }
         streamRef.current = stream;
         setTorchUnavailable(false);
+        setTorchReportedUnsupported(false);
         const track = stream.getVideoTracks()[0] as TorchTrack | undefined;
         try {
-          const supported = track?.getCapabilities?.().torch === true;
+          const torchCapability = track?.getCapabilities?.().torch;
+          const supported = torchCapability === true;
           torchSupportedRef.current = supported;
           setTorchSupported(supported);
+          setTorchReportedUnsupported(torchCapability === false);
         } catch {
           torchSupportedRef.current = false;
           setTorchSupported(false);
@@ -689,7 +693,7 @@ export function ScanClient() {
                 type="button"
                 onClick={() => void toggleTorch()}
                 aria-label={
-                  torchUnavailable
+                  torchUnavailable || torchReportedUnsupported
                     ? "Flashlight unavailable"
                     : torchOn
                       ? "Turn flashlight off"
@@ -697,13 +701,13 @@ export function ScanClient() {
                 }
                 aria-pressed={torchOn}
                 title={
-                  torchUnavailable
+                  torchUnavailable || torchReportedUnsupported
                     ? "Flashlight unavailable on this camera"
                     : torchOn
                       ? "Turn flashlight off"
                       : "Turn flashlight on"
                 }
-                disabled={cameraState !== "on" || torchChanging || torchUnavailable}
+                disabled={cameraState !== "on" || torchChanging || torchUnavailable || torchReportedUnsupported}
                 className={`btn-secondary p-2.5 rounded-full disabled:opacity-50 ${torchOn ? "text-accent" : ""}`}
               >
                 {torchOn ? (

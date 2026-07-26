@@ -104,7 +104,7 @@ describe("ScanClient (manual fallback mode)", () => {
     expect(enabledFlashlight).not.toBeDisabled();
   });
 
-  it("lets the user try the flashlight when the camera omits torch capability metadata", async () => {
+  it("keeps the flashlight disabled when the camera explicitly reports no torch", async () => {
     const applyConstraints = vi.fn().mockResolvedValue(undefined);
     const track = {
       getCapabilities: () => ({ torch: false }),
@@ -128,12 +128,9 @@ describe("ScanClient (manual fallback mode)", () => {
     mockFetch(() => scanMiss());
     render(<ScanClient />);
 
-    const flashlight = await screen.findByRole("button", { name: /turn flashlight on/i });
-    expect(flashlight).not.toBeDisabled();
-    await userEvent.setup().click(flashlight);
-    await waitFor(() =>
-      expect(applyConstraints).toHaveBeenCalledWith({ advanced: [{ torch: true }] }),
-    );
+    const flashlight = await screen.findByRole("button", { name: /flashlight unavailable/i });
+    expect(flashlight).toBeDisabled();
+    expect(applyConstraints).not.toHaveBeenCalled();
   });
 
   it("rejects an invalid code inline without calling the API", async () => {
