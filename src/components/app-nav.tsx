@@ -63,7 +63,7 @@ export function AppNav() {
     <>
       {actionsOpen && (
         <div className="fixed inset-0 z-40 flex items-end bg-black/55 px-4 pb-24" role="dialog" aria-modal="true" aria-label="Quick actions">
-          <button className="absolute inset-0" type="button" aria-label="Close quick actions" onClick={closeActions} />
+          <button className="absolute inset-0" type="button" aria-label="Dismiss quick actions" onClick={closeActions} />
           <div ref={actionsPanelRef} className="card relative z-10 mx-auto w-full max-w-md p-3 shadow-2xl">
             <div className="flex items-center justify-between px-2 pb-2">
               <p className="section-label">Do something with your bar</p>
