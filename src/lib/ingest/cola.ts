@@ -59,12 +59,12 @@ interface ColaCsvResult {
 
 /** Parse a COLA export and retain its raw row count for cap safety checks. */
 function parseColaCsvResult(csv: string): ColaCsvResult {
-  const lines = csv.split(/\r?\n/).filter((l) => l.trim().length > 0);
-  if (lines.length === 0) return { records: [], dataRows: 0 };
+  const rows = splitCsvRecords(csv).filter((row) => row.trim().length > 0);
+  if (rows.length === 0) return { records: [], dataRows: 0 };
   const records: ColaRecord[] = [];
   let dataRows = 0;
-  for (const line of lines) {
-    const cells = splitCsvLine(line);
+  for (const row of rows) {
+    const cells = splitCsvLine(row);
     if (cells[0]?.trim() === "TTB ID") continue;
     dataRows += 1;
     if (cells.length < 8) continue;
@@ -82,6 +82,35 @@ function parseColaCsvResult(csv: string): ColaCsvResult {
     });
   }
   return { records, dataRows };
+}
+
+/** Split RFC-4180 records without treating a quoted newline as a new row. */
+function splitCsvRecords(csv: string): string[] {
+  const rows: string[] = [];
+  let row = "";
+  let inQuotes = false;
+  for (let i = 0; i < csv.length; i++) {
+    const ch = csv[i];
+    if (ch === '"') {
+      row += ch;
+      if (inQuotes && csv[i + 1] === '"') {
+        row += csv[++i];
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (ch === "\r" && csv[i + 1] === "\n" && !inQuotes) {
+      rows.push(row);
+      row = "";
+      i++;
+    } else if (ch === "\n" && !inQuotes) {
+      rows.push(row);
+      row = "";
+    } else {
+      row += ch;
+    }
+  }
+  rows.push(row);
+  return rows;
 }
 
 /** Minimal RFC-4180 line splitter (quoted cells, doubled quotes). */
