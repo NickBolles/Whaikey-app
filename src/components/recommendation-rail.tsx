@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { categoryLabel } from "@/components/category-chip";
 import type { Recommendation } from "@/lib/recommend";
@@ -15,6 +15,52 @@ interface EmptyCopy {
   emoji: string;
   headline: string;
   sub: string;
+}
+
+export interface TonightPourContext {
+  title: string;
+  detail: string;
+}
+
+const TONIGHT_CONTEXTS = {
+  morning: {
+    title: "For later today",
+    detail: "Your bar’s considered pick, ready when the moment is right.",
+  },
+  afternoon: {
+    title: "This afternoon’s selection",
+    detail: "A personal pick from your bar, at your pace.",
+  },
+  evening: {
+    title: "Tonight’s pour",
+    detail: "A personal pick from your bar for the evening.",
+  },
+  lateEvening: {
+    title: "Tonight’s selection",
+    detail: "A personal pick from your bar for a quieter moment.",
+  },
+} as const satisfies Record<string, TonightPourContext>;
+
+/** A restrained, local-time cue that keeps the recommendation moment personal. */
+export function getTonightPourContext(hour: number): TonightPourContext {
+  if (hour < 12) return TONIGHT_CONTEXTS.morning;
+  if (hour < 17) return TONIGHT_CONTEXTS.afternoon;
+  if (hour < 22) return TONIGHT_CONTEXTS.evening;
+  return TONIGHT_CONTEXTS.lateEvening;
+}
+
+function subscribeToLocalTime(onStoreChange: () => void) {
+  let timeout: ReturnType<typeof setTimeout>;
+  const scheduleNextHour = () => {
+    const now = new Date();
+    const msUntilNextHour = (60 - now.getMinutes()) * 60_000 - now.getSeconds() * 1_000 - now.getMilliseconds();
+    timeout = setTimeout(() => {
+      onStoreChange();
+      scheduleNextHour();
+    }, msUntilNextHour);
+  };
+  scheduleNextHour();
+  return () => clearTimeout(timeout);
 }
 
 const EMPTY_COPY: Record<RecommendationRailProps["mode"], EmptyCopy> = {
@@ -38,6 +84,11 @@ const EMPTY_COPY: Record<RecommendationRailProps["mode"], EmptyCopy> = {
 export function RecommendationRail({ mode, title }: RecommendationRailProps) {
   const [recs, setRecs] = useState<Recommendation[] | null>(null);
   const [error, setError] = useState(false);
+  const tonightContext = useSyncExternalStore(
+    subscribeToLocalTime,
+    () => (mode === "tonight" ? getTonightPourContext(new Date().getHours()) : null),
+    () => null,
+  );
 
   useEffect(() => {
     const controller = new AbortController();
@@ -55,9 +106,14 @@ export function RecommendationRail({ mode, title }: RecommendationRailProps) {
     return () => controller.abort();
   }, [mode]);
 
+  const heading = tonightContext?.title ?? title;
+
   return (
-    <section aria-label={title} className="flex flex-col gap-3">
-      <h2 className="section-label">{title}</h2>
+    <section aria-label={heading} className="flex flex-col gap-3">
+      <div>
+        <h2 className="section-label">{heading}</h2>
+        {tonightContext && <p className="mt-1 text-sm text-muted">{tonightContext.detail}</p>}
+      </div>
 
       {error && (
         <p role="alert" className="text-sm text-muted">

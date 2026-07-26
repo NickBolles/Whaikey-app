@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
-import { RecommendationRail } from "@/components/recommendation-rail";
+import { RecommendationRail, getTonightPourContext } from "@/components/recommendation-rail";
 import type { Recommendation } from "@/lib/recommend";
 
 afterEach(() => {
@@ -29,6 +29,17 @@ const REC: Recommendation = {
   matchPercent: 87,
   reason: "Leans into your taste for smoky and woody drams, in your usual $50–70 range.",
 };
+
+describe("getTonightPourContext", () => {
+  it.each([
+    [8, "For later today", "Your bar’s considered pick, ready when the moment is right."],
+    [14, "This afternoon’s selection", "A personal pick from your bar, at your pace."],
+    [19, "Tonight’s pour", "A personal pick from your bar for the evening."],
+    [23, "Tonight’s selection", "A personal pick from your bar for a quieter moment."],
+  ])("uses a personal time-of-day cue at %i:00", (hour, title, detail) => {
+    expect(getTonightPourContext(hour)).toEqual({ title, detail });
+  });
+});
 
 describe("RecommendationRail", () => {
   it("renders a card with name, match chip, reason, and bottle link", async () => {

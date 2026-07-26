@@ -87,7 +87,7 @@ My Bar is a **top-2 surface** (with scan/search-to-add) — not a list of rows w
 - 🔵 Budgets ("$150/mo") with gentle nudges; 🔵 insurance export (PDF/CSV with values).
 
 ### 3.3 Bottle lifecycle nudges (🟡)
-- Kill list: bottles < 20% full — "finish these."
+- Low-fill inventory context can inform a personal recommendation without a standalone finish-first list.
 - Oxidation awareness: open + low fill + long time → "this one may be fading."
 - "You haven't poured X in 6 months — still love it?" (feeds recommendations too.)
 
@@ -176,7 +176,7 @@ My Bar is a **top-2 surface** (with scan/search-to-add) — not a list of rows w
 - Formats: weekly "3 bottles for you" refresh, "similar to this" rail on bottle pages, "cheaper cousin" callouts.
 
 ### 7.2 What to pour tonight (🟡)
-- From *your open bottles*: considers mood/occasion input, recent pours (variety), fill levels (kill list bias), evening context.
+- From *your open bottles*: considers mood/occasion input, recent pours (variety), and local time-of-day context with a personal, explainable cue.
 - One-tap re-roll; logging the pour from the suggestion card closes the loop.
 
 ### 7.3 Gift & social recs (🔵)

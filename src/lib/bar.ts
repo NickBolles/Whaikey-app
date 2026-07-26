@@ -211,15 +211,6 @@ export async function listUserBottles(
 // Stats
 // ---------------------------------------------------------------------------
 
-export const KILL_LIST_THRESHOLD = 20;
-
-export interface KillListEntry {
-  userBottleId: string;
-  bottleId: string;
-  bottleName: string;
-  fillLevel: number;
-}
-
 export interface BarStats {
   bottleCount: number;
   openCount: number;
@@ -229,20 +220,16 @@ export interface BarStats {
   avgBottlePrice: number;
   /** userBottleId -> purchasePrice / max(1, pours logged against that userBottle) */
   costPerPour: Record<string, number>;
-  killList: KillListEntry[];
 }
 
 export async function getBarStats(db: DB, userId: string): Promise<BarStats> {
   const own = await db
     .select({
       id: schema.userBottles.id,
-      bottleId: schema.userBottles.bottleId,
       status: schema.userBottles.status,
-      fillLevel: schema.userBottles.fillLevel,
       quantity: schema.userBottles.quantity,
       purchasePrice: schema.userBottles.purchasePrice,
       estValue: schema.userBottles.estValue,
-      bottleName: schema.bottles.name,
       avgPrice: schema.bottles.avgPrice,
     })
     .from(schema.userBottles)
@@ -260,7 +247,6 @@ export async function getBarStats(db: DB, userId: string): Promise<BarStats> {
   let estValue = 0;
   let spentQty = 0;
   const costPerPour: Record<string, number> = {};
-  const killList: KillListEntry[] = [];
 
   for (const r of own) {
     const qty = r.quantity ?? 1;
@@ -271,17 +257,7 @@ export async function getBarStats(db: DB, userId: string): Promise<BarStats> {
     }
     const unitValue = r.estValue ?? r.avgPrice;
     if (unitValue != null) estValue += unitValue * qty;
-    if (r.status === "open" && r.fillLevel != null && r.fillLevel <= KILL_LIST_THRESHOLD) {
-      killList.push({
-        userBottleId: r.id,
-        bottleId: r.bottleId,
-        bottleName: r.bottleName,
-        fillLevel: r.fillLevel,
-      });
-    }
   }
-
-  killList.sort((a, b) => a.fillLevel - b.fillLevel);
 
   return {
     bottleCount: own.length,
@@ -291,7 +267,6 @@ export async function getBarStats(db: DB, userId: string): Promise<BarStats> {
     estValue,
     avgBottlePrice: spentQty > 0 ? totalSpent / spentQty : 0,
     costPerPour,
-    killList,
   };
 }
 

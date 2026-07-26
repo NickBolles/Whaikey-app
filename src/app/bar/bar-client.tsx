@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { BookOpen, GlassWater, Hourglass, Plus, UserRound } from "lucide-react";
+import { BookOpen, GlassWater, Plus, UserRound } from "lucide-react";
 import { hasPublishedProducerFlavorNotes, type BarFlavorHeat, type BarRow } from "@/lib/bar";
 import { FLAVOR_WHEEL, leafLabel } from "@/lib/flavor-wheel";
 import { BarFlavorWheel, type FlavorSelection } from "@/components/bar-flavor-wheel";
@@ -79,14 +79,6 @@ export function BarClient({
     }
     return { bottleCount: ownRows.length, openCount, totalSpent, estValue };
   }, [ownRows]);
-
-  const killList = useMemo(
-    () =>
-      ownRows
-        .filter((r) => r.status === "open" && r.fillLevel != null && r.fillLevel <= 20)
-        .sort((a, b) => (a.fillLevel ?? 0) - (b.fillLevel ?? 0)),
-    [ownRows],
-  );
 
   function fail(message: string) {
     setError(message);
@@ -311,27 +303,6 @@ export function BarClient({
           <RecommendationRail mode="discovery" title="For your palate" />
           <PalateWheel vector={palate.vector} sampleSize={palate.sampleSize} />
 
-          {killList.length > 0 && (
-            <section
-              aria-label="Kill list"
-              className="rounded-2xl border border-accent/25 bg-accent/[0.07] p-4"
-            >
-              <h2 className="flex items-center gap-2 text-sm font-semibold text-accent">
-                <Hourglass size={18} strokeWidth={1.8} aria-hidden />
-                Finish these first
-              </h2>
-              <ul className="mt-2.5 flex flex-col gap-1.5 text-sm">
-                {killList.map((r) => (
-                  <li key={r.id} className="flex items-baseline justify-between gap-3">
-                    <span className="truncate font-medium text-foreground/90">{r.bottle.name}</span>
-                    <span className="shrink-0 text-muted">
-                      <span className="stat-number text-accent">{r.fillLevel}%</span> left
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
         </>
       )}
 

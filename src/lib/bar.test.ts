@@ -23,7 +23,7 @@ describe("getBarStats", () => {
     db = await setupTestDb();
   });
 
-  it("computes counts, spend, value, cost-per-pour and kill list", async () => {
+  it("computes counts, spend, value, and cost-per-pour", async () => {
     const user = await createTestUser(db);
     const other = await createTestUser(db);
 
@@ -53,7 +53,7 @@ describe("getBarStats", () => {
       purchasePrice: 100,
       estValue: 120,
     });
-    // Own, open but healthy fill -> not on kill list.
+    // Another owned, open bottle contributes to counts and spend.
     const ub3 = await seedUserBottle(db, {
       userId: user.id,
       bottleId: bottleC.id,
@@ -109,37 +109,9 @@ describe("getBarStats", () => {
     expect(stats.costPerPour[ub1.id]).toBeCloseTo(25);
     expect(stats.costPerPour[ub2.id]).toBeCloseTo(100);
     expect(stats.costPerPour[ub3.id]).toBeCloseTo(30);
-    // kill list: own + open + fillLevel <= 20 only
-    expect(stats.killList).toEqual([
-      { userBottleId: ub1.id, bottleId: bottleA.id, bottleName: "A", fillLevel: 15 },
-    ]);
   });
 
-  it("includes bottles at exactly the 20% threshold and excludes finished ones", async () => {
-    const user = await createTestUser(db);
-    const bottleA = await createTestBottle(db, { name: "Edge" });
-    const bottleB = await createTestBottle(db, { name: "Done" });
 
-    const edge = await seedUserBottle(db, {
-      userId: user.id,
-      bottleId: bottleA.id,
-      relationship: "own",
-      status: "open",
-      fillLevel: 20,
-    });
-    await seedUserBottle(db, {
-      userId: user.id,
-      bottleId: bottleB.id,
-      relationship: "own",
-      status: "finished",
-      fillLevel: 0,
-    });
-
-    const stats = await getBarStats(db, user.id);
-    expect(stats.killList.map((k) => k.userBottleId)).toEqual([edge.id]);
-    expect(stats.totalSpent).toBe(0);
-    expect(stats.avgBottlePrice).toBe(0);
-  });
 });
 
 describe("getSpendByMonth", () => {
