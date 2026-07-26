@@ -38,8 +38,8 @@ test.describe("signed-out smoke", () => {
       await expect(nav.getByText(label)).toBeVisible();
     }
     await nav.getByRole("button", { name: "Open quick actions" }).click();
-    await expect(page.getByRole("link", { name: "Log a pour" })).toHaveAttribute("href", "/pour");
-    await expect(page.getByRole("link", { name: "Scan a bottle" })).toHaveAttribute("href", "/scan");
+    await expect(page.getByRole("link", { name: /Log a pour/i })).toHaveAttribute("href", "/pour");
+    await expect(page.getByRole("link", { name: /Scan a bottle/i })).toHaveAttribute("href", "/scan");
   });
 });
 

@@ -20,8 +20,8 @@ describe("AppNav", () => {
     expect(nav.queryByText("Scan")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Open quick actions" }));
-    expect(screen.getByRole("link", { name: "Log a pour" })).toHaveAttribute("href", "/pour");
-    expect(screen.getByRole("link", { name: "Scan a bottle" })).toHaveAttribute("href", "/scan");
-    expect(screen.getByRole("link", { name: "Find a bottle" })).toHaveAttribute("href", "/search");
+    expect(screen.getByRole("link", { name: /Log a pour/i })).toHaveAttribute("href", "/pour");
+    expect(screen.getByRole("link", { name: /Scan a bottle/i })).toHaveAttribute("href", "/scan");
+    expect(screen.getByRole("link", { name: /Find a bottle/i })).toHaveAttribute("href", "/search");
   });
 });
