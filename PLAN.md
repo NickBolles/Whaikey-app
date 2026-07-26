@@ -41,7 +41,7 @@ An AI-native whiskey tracking app, inspired by wine apps like **Vivino** (social
   - **Collection value**: total spent, estimated current market value, value change over time.
   - **Cost per pour** — auto-computed from price ÷ pours logged.
   - Spending dashboard: monthly spend, average bottle price, most expensive open bottle.
-- **Kill list** — bottles nearly empty; "finish these first" nudges.
+- **Low-fill context** — can inform a personal recommendation without a standalone finish-first nudge.
 - Sort/filter by region, style, price, rating, open status, "haven't touched in 6 months."
 
 ### 2.3 Tasting Notes & Ratings
