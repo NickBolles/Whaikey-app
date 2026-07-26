@@ -4,6 +4,9 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import userEvent from "@testing-library/user-event";
 import { ScanClient } from "./scan-client";
 
+const initialMediaDevices = Object.getOwnPropertyDescriptor(navigator, "mediaDevices");
+const initialSrcObject = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "srcObject");
+
 const UPC = "080244002145"; // valid check digit
 const EAGLE = {
   id: "eagle-rare-10",
@@ -41,9 +44,12 @@ function scanMiss() {
 
 afterEach(() => {
   cleanup();
-  Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: undefined });
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  if (initialMediaDevices) Object.defineProperty(navigator, "mediaDevices", initialMediaDevices);
+  else delete (navigator as { mediaDevices?: MediaDevices }).mediaDevices;
+  if (initialSrcObject) Object.defineProperty(HTMLMediaElement.prototype, "srcObject", initialSrcObject);
+  else delete (HTMLMediaElement.prototype as { srcObject?: unknown }).srcObject;
 });
 
 describe("ScanClient (manual fallback mode)", () => {
@@ -56,7 +62,9 @@ describe("ScanClient (manual fallback mode)", () => {
   });
 
   it("toggles the camera flashlight when the rear-camera track supports it", async () => {
-    const applyConstraints = vi.fn().mockResolvedValue(undefined);
+    let releaseTorch: () => void = () => {};
+    const torchApplied = new Promise<void>((resolve) => (releaseTorch = resolve));
+    const applyConstraints = vi.fn().mockReturnValue(torchApplied);
     const track = {
       getCapabilities: () => ({ torch: true }),
       applyConstraints,
@@ -86,7 +94,14 @@ describe("ScanClient (manual fallback mode)", () => {
     await waitFor(() =>
       expect(applyConstraints).toHaveBeenCalledWith({ advanced: [{ torch: true }] }),
     );
-    expect(screen.getByRole("button", { name: /turn flashlight off/i })).toBeTruthy();
+    expect(flashlight).toBeDisabled();
+    await user.click(flashlight);
+    expect(applyConstraints).toHaveBeenCalledTimes(1);
+
+    releaseTorch();
+    const enabledFlashlight = await screen.findByRole("button", { name: /turn flashlight off/i });
+    expect(enabledFlashlight).toHaveAttribute("aria-pressed", "true");
+    expect(enabledFlashlight).not.toBeDisabled();
   });
 
   it("rejects an invalid code inline without calling the API", async () => {

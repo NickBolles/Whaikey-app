@@ -139,6 +139,7 @@ export function ScanClient() {
   const [lockBox, setLockBox] = useState<Box | null>(null);
   const [torchSupported, setTorchSupported] = useState(false);
   const [torchOn, setTorchOn] = useState(false);
+  const [torchChanging, setTorchChanging] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -147,6 +148,7 @@ export function ScanClient() {
   const lastCodeRef = useRef<{ code: string; at: number } | null>(null);
   const lastDetectionAtRef = useRef<number | null>(null);
   const lockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const torchChangingRef = useRef(false);
   const sampleCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Mirrors for the detector loop, which runs outside React's render cycle.
@@ -376,9 +378,12 @@ export function ScanClient() {
 
   /** Toggle the rear camera's hardware torch when the browser exposes it. */
   const toggleTorch = useCallback(async () => {
+    if (torchChangingRef.current) return;
     const track = streamRef.current?.getVideoTracks()[0] as TorchTrack | undefined;
     if (!track?.applyConstraints) return;
     const next = !torchOn;
+    torchChangingRef.current = true;
+    setTorchChanging(true);
     try {
       await track.applyConstraints({ advanced: [{ torch: next } as MediaTrackConstraintSet] });
       setTorchOn(next);
@@ -386,6 +391,9 @@ export function ScanClient() {
       // Torch support can be withdrawn by the device; keep scanning uninterrupted.
       setTorchSupported(false);
       setTorchOn(false);
+    } finally {
+      torchChangingRef.current = false;
+      setTorchChanging(false);
     }
   }, [torchOn]);
 
@@ -489,6 +497,8 @@ export function ScanClient() {
       streamRef.current = null;
       setTorchSupported(false);
       setTorchOn(false);
+      torchChangingRef.current = false;
+      setTorchChanging(false);
     };
   }, [enqueueCode, flashLockBox, sampleFrameStats]);
 
@@ -652,8 +662,10 @@ export function ScanClient() {
                   type="button"
                   onClick={() => void toggleTorch()}
                   aria-label={torchOn ? "Turn flashlight off" : "Turn flashlight on"}
+                  aria-pressed={torchOn}
                   title={torchOn ? "Turn flashlight off" : "Turn flashlight on"}
-                  className={`btn-secondary p-2.5 rounded-full ${torchOn ? "text-accent" : ""}`}
+                  disabled={torchChanging}
+                  className={`btn-secondary p-2.5 rounded-full disabled:opacity-50 ${torchOn ? "text-accent" : ""}`}
                 >
                   {torchOn ? (
                     <FlashlightOff size={18} strokeWidth={1.8} aria-hidden />
