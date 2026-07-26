@@ -18,7 +18,9 @@
  *            with enough user tasting notes are rolled up directly (no AI);
  *            the rest go to the model with description + user-note context
  *            and web search to discover published tasting notes (requires
- *            ANTHROPIC_API_KEY). --no-web disables search for a cheaper run.
+ *            OPENROUTER_API_KEY or ANTHROPIC_API_KEY). OpenRouter uses its
+ *            Anthropic-compatible Messages API but does not accept Anthropic
+ *            hosted web search, so --no-web is implied there.
  */
 import { createDb, resolveDbUrl } from "../src/db";
 import { migrateDb } from "../src/db/migrate";
@@ -68,7 +70,7 @@ async function main(): Promise<void> {
     } catch (err) {
       if (err instanceof AiNotConfiguredError) {
         console.error(
-          "ANTHROPIC_API_KEY is not set. Set it (see .env.example) and re-run: pnpm ingest enrich",
+          "No AI key is set. Set OPENROUTER_API_KEY (preferred) or ANTHROPIC_API_KEY (see .env.example) and re-run: pnpm ingest enrich",
         );
         process.exit(1);
       }

@@ -23,6 +23,8 @@
 # misc
 .DS_Store
 *.pem
+# Verified public CA intermediate used only by the catalog-sync TTB fetch.
+!.github/certificates/entrust-ov-tls-issuing-rsa-ca-2.pem
 
 # debug
 npm-debug.log*
