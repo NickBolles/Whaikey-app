@@ -8,6 +8,8 @@ import { executeTool, TOOL_DEFINITIONS } from "./tools";
 
 /** Max number of tool-executing iterations per user turn. */
 const MAX_TOOL_ITERATIONS = 6;
+export const MAX_CHAT_HISTORY_TURNS = 12;
+export const MAX_CHAT_CONTEXT_CHARS = 12_000;
 
 export class ChatSessionNotFoundError extends Error {
   constructor() {
@@ -56,7 +58,25 @@ export type ChatStreamEvent =
   | { type: "session"; sessionId: string }
   | { type: "text"; text: string }
   | { type: "tool"; name: string }
+  | { type: "error"; message: string }
   | { type: "done"; sessionId: string; message: string; toolCalls: ChatToolCall[] };
+
+function historyChars(message: schema.ChatMessage): number {
+  return message.content.length + (message.toolCalls ? JSON.stringify(message.toolCalls).length : 0);
+}
+
+/** Most recent complete turns, constrained by both text and tool-result budget. */
+export function boundChatHistory(messages: schema.ChatMessage[]): schema.ChatMessage[] {
+  const recent = messages.slice(-(MAX_CHAT_HISTORY_TURNS * 2));
+  const kept: schema.ChatMessage[] = [];
+  let used = 0;
+  for (const message of recent.toReversed()) {
+    if (used + historyChars(message) > MAX_CHAT_CONTEXT_CHARS) break;
+    kept.push(message);
+    used += historyChars(message);
+  }
+  return kept.toReversed();
+}
 
 /** Resolve an existing (owned) session or create a titled new one. */
 async function resolveOrCreateSession(
@@ -100,11 +120,13 @@ export async function runChat(
   const session = await resolveOrCreateSession(db, userId, sessionId, trimmed);
 
   // Prior history for model context (text only; tool traces are display-only).
-  const history = await db
+  const historyRows = await db
     .select()
     .from(schema.chatMessages)
     .where(eq(schema.chatMessages.sessionId, session.id))
-    .orderBy(asc(schema.chatMessages.createdAt));
+    .orderBy(desc(schema.chatMessages.createdAt), desc(schema.chatMessages.id))
+    .limit(MAX_CHAT_HISTORY_TURNS * 2);
+  const history = boundChatHistory(historyRows.toReversed());
 
   // Persist the user message.
   await db.insert(schema.chatMessages).values({
@@ -226,11 +248,13 @@ export async function* runChatStream(
   yield { type: "session", sessionId: session.id };
 
   // Prior history for model context (text only; tool traces are display-only).
-  const history = await db
+  const historyRows = await db
     .select()
     .from(schema.chatMessages)
     .where(eq(schema.chatMessages.sessionId, session.id))
-    .orderBy(asc(schema.chatMessages.createdAt));
+    .orderBy(desc(schema.chatMessages.createdAt), desc(schema.chatMessages.id))
+    .limit(MAX_CHAT_HISTORY_TURNS * 2);
+  const history = boundChatHistory(historyRows.toReversed());
 
   // Persist the user message.
   await db.insert(schema.chatMessages).values({

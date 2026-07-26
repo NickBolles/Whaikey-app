@@ -121,6 +121,7 @@ export function ScanClient() {
   const [relationship, setRelationship] = useState<Relationship>("own");
   const [items, setItems] = useState<QueueItem[]>([]);
   const [reviewId, setReviewId] = useState<string | null>(null);
+  const reviewTriggerRef = useRef<HTMLElement | null>(null);
   const [capture, setCapture] = useState<Capture | null>(null);
   const [toast, setToast] = useState<{ text: string; kind: "ok" | "warn" } | null>(null);
   const [manualOpen, setManualOpen] = useState(false);
@@ -531,7 +532,11 @@ export function ScanClient() {
   const addedCount = items.filter((it) => it.status === "added").length;
   const reviewCount = items.filter((it) => it.status === "review").length;
   const resolvingCount = items.filter((it) => it.status === "resolving").length;
-  const reviewItem = reviewId ? (items.find((it) => it.id === reviewId) ?? null) : null;
+  const reviewItem = reviewId ? items.find((item) => item.id === reviewId) ?? null : null;
+  const closeReview = () => {
+    setReviewId(null);
+    requestAnimationFrame(() => reviewTriggerRef.current?.focus());
+  };
   const manualVisible = cameraState !== "on" || manualOpen;
 
   return (
@@ -783,7 +788,10 @@ export function ScanClient() {
                   {item.status === "review" && (
                     <button
                       type="button"
-                      onClick={() => setReviewId(item.id)}
+                      onClick={(event) => {
+                        reviewTriggerRef.current = event.currentTarget;
+                        setReviewId(item.id);
+                      }}
                       className="btn-primary px-3.5 py-2 text-xs font-medium"
                     >
                       Needs you
@@ -878,7 +886,10 @@ export function ScanClient() {
       {reviewItem && (
         <DecisionSheet
           item={reviewItem}
-          onPick={(bottle) => void confirmAdd(reviewItem.id, reviewItem.upc, bottle)}
+          onPick={(bottle) => {
+            closeReview();
+            void confirmAdd(reviewItem.id, reviewItem.upc, bottle);
+          }}
           onLabelPhoto={() => {
             if (cameraState === "on") {
               setReviewId(null);
@@ -893,7 +904,7 @@ export function ScanClient() {
             setItems((prev) => prev.filter((it) => it.id !== reviewItem.id));
             setReviewId(null);
           }}
-          onClose={() => setReviewId(null)}
+          onClose={closeReview}
         />
       )}
     </div>
@@ -920,6 +931,12 @@ function DecisionSheet({
 }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<BottleSearchResult[]>([]);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    searchRef.current?.focus();
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -953,6 +970,27 @@ function DecisionSheet({
       role="dialog"
       aria-modal="true"
       aria-label={item.title}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          onClose();
+          return;
+        }
+        if (event.key !== "Tab") return;
+        const focusable = panelRef.current?.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), input:not([disabled]), [href]:not([tabindex="-1"])',
+        );
+        if (!focusable?.length) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      }}
     >
       <button
         type="button"
@@ -960,7 +998,7 @@ function DecisionSheet({
         onClick={onClose}
         className="absolute inset-0 bg-black/60"
       />
-      <div className="relative card rounded-b-none p-5 max-h-[80dvh] overflow-y-auto flex flex-col gap-4">
+      <div ref={panelRef} className="relative card rounded-b-none p-5 max-h-[80dvh] overflow-y-auto flex flex-col gap-4">
         <div className="flex items-start justify-between gap-3">
           <div>
             <h2 className="font-display text-xl font-semibold">{item.title}</h2>
@@ -1008,6 +1046,7 @@ function DecisionSheet({
             {item.options.length > 0 ? "None of these? Search" : "Search the catalog"}
           </label>
           <input
+            ref={searchRef}
             id="scan-sheet-search"
             type="search"
             value={query}

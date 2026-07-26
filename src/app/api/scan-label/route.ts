@@ -5,6 +5,7 @@ import { requireUser, withErrorHandling } from "@/lib/session";
 import { fastModel, getAnthropic, isAiConfigured } from "@/lib/ai/client";
 import { parseModelJson, textFromContent } from "@/lib/ai/json";
 import { searchBottlesLike, type BottleSearchResult } from "@/lib/ai/tools";
+import { reserveAiRequest } from "@/lib/ai/rate-limit";
 
 // Node runtime (not edge): uses the DB driver and the Anthropic SDK.
 export const runtime = "nodejs";
@@ -41,7 +42,7 @@ function cleanString(value: unknown): string | null {
 /** POST /api/scan-label {imageBase64, mediaType} → {extracted, candidates} */
 export async function POST(request: Request) {
   return withErrorHandling(async () => {
-    await requireUser();
+    const user = await requireUser();
     if (!isAiConfigured()) {
       return NextResponse.json({ error: "AI features are not configured" }, { status: 503 });
     }
@@ -60,6 +61,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Image too large (max 5MB)" }, { status: 413 });
     }
 
+    const db = getDb();
+    if (!(await reserveAiRequest(db, user.id))) {
+      return NextResponse.json({ error: "AI request limit reached. Try again later." }, { status: 429 });
+    }
     const anthropic = getAnthropic();
     const response = await anthropic.messages.create({
       model: fastModel(),
@@ -92,7 +97,6 @@ export async function POST(request: Request) {
     };
 
     // Match against the catalog via the same LIKE search the concierge uses.
-    const db = getDb();
     const seen = new Set<string>();
     const candidates: BottleSearchResult[] = [];
     const queries = [

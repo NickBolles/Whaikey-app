@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { and, eq, lte } from "drizzle-orm";
 import type Anthropic from "@anthropic-ai/sdk";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
@@ -7,6 +7,8 @@ import { chatModel, getAnthropic, isAiConfigured } from "./client";
 import { parseModelJson, textFromContent } from "./json";
 
 export type PairingRow = schema.Pairing;
+const PAIRING_LEASE_MS = 60_000;
+const PAIRING_WAIT_MS = 25;
 
 interface GeneratedPairing {
   pairingType: "food" | "cocktail";
@@ -63,6 +65,56 @@ export async function getOrGeneratePairings(
     .where(eq(schema.pairings.bottleId, bottleId));
   if (cached.length > 0) return cached;
 
+  // A process-local promise map cannot protect serverless/concurrent instances.
+  // Use a DB lease; waiters serve the cache as soon as the lease holder commits.
+  const deadline = Date.now() + PAIRING_LEASE_MS;
+  while (Date.now() < deadline) {
+    const token = randomUUID();
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + PAIRING_LEASE_MS);
+    const [lease] = await db
+      .insert(schema.pairingGenerationLocks)
+      .values({ bottleId, token, expiresAt })
+      .onConflictDoUpdate({
+        target: schema.pairingGenerationLocks.bottleId,
+        set: { token, expiresAt },
+        where: lte(schema.pairingGenerationLocks.expiresAt, now),
+      })
+      .returning({ token: schema.pairingGenerationLocks.token });
+    if (lease?.token === token) {
+      try {
+        // A concurrent cache-miss caller can acquire after the original
+        // generator has committed its rows but before it observed the cache.
+        // The lease serializes generation only when the persisted cache is
+        // still empty.
+        const refreshed = await db
+          .select()
+          .from(schema.pairings)
+          .where(eq(schema.pairings.bottleId, bottleId));
+        if (refreshed.length > 0) return refreshed;
+        return await generatePairings(db, bottle, client);
+      } finally {
+        await db
+          .delete(schema.pairingGenerationLocks)
+          .where(and(eq(schema.pairingGenerationLocks.bottleId, bottleId), eq(schema.pairingGenerationLocks.token, token)));
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, PAIRING_WAIT_MS));
+    const rows = await getCachedPairings(db, bottleId);
+    if (rows && rows.length > 0) return rows;
+  }
+  // A crashed holder's expired lease will be recovered by the next request;
+  // don't make a waiting caller spin indefinitely.
+  return [];
+}
+
+export async function getCachedPairings(db: DB, bottleId: string): Promise<PairingRow[] | null> {
+  const [bottle] = await db.select({ id: schema.bottles.id }).from(schema.bottles).where(eq(schema.bottles.id, bottleId)).limit(1);
+  if (!bottle) return null;
+  return db.select().from(schema.pairings).where(eq(schema.pairings.bottleId, bottleId));
+}
+
+async function generatePairings(db: DB, bottle: schema.Bottle, client?: Anthropic): Promise<PairingRow[]> {
   const anthropic = client ?? (isAiConfigured() ? getAnthropic() : null);
   if (!anthropic) return [];
 
@@ -92,7 +144,7 @@ export async function getOrGeneratePairings(
     .values(
       valid.map((p) => ({
         id: randomUUID(),
-        bottleId,
+        bottleId: bottle.id,
         pairingType: p.pairingType,
         suggestion: p.suggestion,
         rationale: p.rationale || null,

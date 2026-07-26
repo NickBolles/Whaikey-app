@@ -57,6 +57,7 @@ export interface RecommendOptions {
 
 const DISCOVERY_LIMIT = 8;
 const TONIGHT_LIMIT = 5;
+export const MAX_RECOMMENDATIONS = 12;
 /** How many recent pours count toward the "poured this lately" variety bias. */
 const RECENT_POUR_WINDOW = 3;
 /** Weight of the kill-list bias: an empty bottle gains up to this much score. */
@@ -268,7 +269,7 @@ export async function recommendBottles(
   opts: RecommendOptions,
 ): Promise<Recommendation[]> {
   const { mode } = opts;
-  const limit = opts.limit ?? (mode === "tonight" ? TONIGHT_LIMIT : DISCOVERY_LIMIT);
+  const limit = Math.min(Math.max(opts.limit ?? (mode === "tonight" ? TONIGHT_LIMIT : DISCOVERY_LIMIT), 1), MAX_RECOMMENDATIONS);
 
   const palate = await getUserPalate(db, userId);
   if (palate.sampleSize === 0) return [];

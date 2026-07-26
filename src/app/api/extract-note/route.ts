@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { getDb } from "@/db";
 import { requireUser, withErrorHandling } from "@/lib/session";
 import { isAiConfigured } from "@/lib/ai/client";
 import { extractTastingNote } from "@/lib/ai/extract";
+import { reserveAiRequest } from "@/lib/ai/rate-limit";
 
 // Node runtime (not edge): uses the Anthropic SDK.
 export const runtime = "nodejs";
@@ -15,7 +17,7 @@ const bodySchema = z.object({
 /** POST /api/extract-note {text} → structured tasting note */
 export async function POST(request: Request) {
   return withErrorHandling(async () => {
-    await requireUser();
+    const user = await requireUser();
     if (!isAiConfigured()) {
       return NextResponse.json({ error: "AI features are not configured" }, { status: 503 });
     }
@@ -26,6 +28,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "A non-empty text field is required" }, { status: 400 });
     }
 
+    if (!(await reserveAiRequest(getDb(), user.id))) {
+      return NextResponse.json({ error: "AI request limit reached. Try again later." }, { status: 429 });
+    }
     const result = await extractTastingNote(parsed.data.text);
     return NextResponse.json(result);
   });

@@ -15,17 +15,19 @@ An AI-native whiskey tracking app — think Vivino/InVintory, but for whiskey, w
 
 Next.js (App Router, TypeScript, Tailwind) · Drizzle ORM + Postgres — [Supabase](https://supabase.com) in production, [PGlite](https://pglite.dev) (in-process WASM Postgres) locally and in tests · [Better Auth](https://better-auth.com) (social login only) · Anthropic Claude (server-side AI gateway) · Vitest + Playwright · deployed on Vercel.
 
+Requires Node `>=20.19 <23` and pnpm `10.17.x` (pinned in `packageManager`).
+
 ## Development
 
 ```bash
 pnpm install
-pnpm db:push      # create local SQLite schema
+pnpm db:push      # create or migrate the local PGlite schema
 pnpm db:seed      # seed the bottle catalog
 pnpm dev          # http://localhost:3000
 pnpm test         # vitest suite
 ```
 
-Copy `.env.example` to `.env.local`. Auth is social-login-only: set `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` (and optionally Apple). AI features prefer `OPENROUTER_API_KEY` (with `ANTHROPIC_API_KEY` as a direct-provider fallback).
+Copy `.env.example` to `.env.local`. Auth is social-login-only: set `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` (and optionally Apple). AI features prefer `OPENROUTER_API_KEY` (with `ANTHROPIC_API_KEY` as a direct-provider fallback). Production must set a high-entropy `BETTER_AUTH_SECRET`; startup fails closed if it is absent.
 
 Local dev and the test suite run on [PGlite](https://pglite.dev) — an in-process WASM Postgres — so there's no server, network, or cloud account required. `DATABASE_URL` defaults to `file:./data/whaikey` (a local PGlite data dir); tests use an in-memory instance.
 

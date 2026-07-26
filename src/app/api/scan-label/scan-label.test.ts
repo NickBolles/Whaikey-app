@@ -10,6 +10,7 @@ import {
   setupTestDb,
 } from "@/test/helpers";
 import { setAnthropicForTests } from "@/lib/ai/client";
+import { AI_HOURLY_LIMIT, reserveAiRequest } from "@/lib/ai/rate-limit";
 import { makeFakeAnthropic, textResponse } from "@/lib/ai/testing";
 import { POST } from "./route";
 
@@ -56,6 +57,20 @@ describe("POST /api/scan-label", () => {
       jsonRequest("/api/scan-label", "POST", { imageBase64: huge, mediaType: "image/jpeg" }),
     );
     expect(res.status).toBe(413);
+    expect(fake.create).not.toHaveBeenCalled();
+  });
+
+  it("returns 429 before sending a valid label to the model when AI quota is exhausted", async () => {
+    setSessionUser(user);
+    const fake = makeFakeAnthropic([]);
+    setAnthropicForTests(fake.client);
+    for (let i = 0; i < AI_HOURLY_LIMIT; i += 1) await reserveAiRequest(db, user.id);
+
+    const res = await POST(
+      jsonRequest("/api/scan-label", "POST", { imageBase64: TINY_PNG, mediaType: "image/png" }),
+    );
+
+    expect(res.status).toBe(429);
     expect(fake.create).not.toHaveBeenCalled();
   });
 

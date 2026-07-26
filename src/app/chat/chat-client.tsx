@@ -246,6 +246,8 @@ export function ChatClient({ aiConfigured }: { aiConfigured: boolean }) {
               if (event.sessionId) setSessionId(event.sessionId);
             } else if (event.type === "text") {
               renderText(event.text ?? "");
+            } else if (event.type === "error") {
+              setError(event.message ?? "The concierge couldn't finish that response. Please try again.");
             } else if (event.type === "done") {
               if (event.sessionId) setSessionId(event.sessionId);
               const finalMsg: ChatMessage = {
@@ -439,7 +441,7 @@ export function ChatClient({ aiConfigured }: { aiConfigured: boolean }) {
             rows={1}
             placeholder="Ask the concierge…"
             aria-label="Message the concierge"
-            className="flex-1 resize-none rounded-xl bg-transparent px-3 py-2.5 text-[15px] placeholder:text-muted focus:outline-none"
+            className="flex-1 resize-none rounded-xl bg-transparent px-3 py-2.5 text-[15px] placeholder:text-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
           />
           <button
             type="submit"

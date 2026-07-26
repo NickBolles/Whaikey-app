@@ -18,6 +18,7 @@ import type { RecMode } from "@/db/schema";
 import type { Recommendation } from "@/lib/recommend";
 import { chatModel, getAnthropic, isAiConfigured } from "./client";
 import { parseModelJson, textFromContent } from "./json";
+import { reserveAiRequest } from "./rate-limit";
 
 /** A few of the user's highest-rated pours, to ground the explanation. */
 async function loadUserContext(db: DB, userId: string): Promise<string> {
@@ -147,6 +148,7 @@ export async function attachAiExplanations(
 
   for (const rec of uncached) {
     try {
+      if (!(await reserveAiRequest(db, userId))) continue;
       const reason = await generateReason(anthropic, mode, rec, context);
       if (!reason) continue;
       await db

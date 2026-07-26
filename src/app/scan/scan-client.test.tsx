@@ -139,6 +139,31 @@ describe("ScanClient (manual fallback mode)", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  it("focuses, traps, and restores keyboard focus for the review sheet", async () => {
+    mockFetch((url) => {
+      if (url.includes("/api/scan/upc"))
+        return { upc: UPC, matches: [EAGLE, STAGG], candidates: [], externalName: null };
+      return confirmResponse(STAGG, "ub-focus");
+    });
+    const user = userEvent.setup();
+    render(<ScanClient />);
+    await user.type(screen.getByLabelText(/barcode number/i), UPC);
+    await user.click(screen.getByRole("button", { name: "Scan" }));
+    const trigger = await screen.findByRole("button", { name: /needs you/i });
+    await user.click(trigger);
+
+    const search = await screen.findByLabelText(/search/i);
+    expect(search).toHaveFocus();
+    const skip = screen.getByRole("button", { name: /skip this one/i });
+    skip.focus();
+    await user.tab();
+    expect(screen.getByRole("button", { name: /close/i })).toHaveFocus();
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await waitFor(() => expect(trigger).toHaveFocus());
+  });
+
   it("keeps accepting scans while earlier ones are still resolving", async () => {
     // First scan's resolution hangs until we release it; the second completes.
     let releaseFirst: (v: Response) => void = () => {};

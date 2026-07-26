@@ -199,7 +199,7 @@ export function ImportClient() {
               onChange={(e) => setText(e.target.value)}
               rows={7}
               placeholder={"Bottle,UPC,Price Paid,Store\nEagle Rare 10,080244002145,39.99,Total Wine"}
-              className="w-full rounded-xl border border-border-subtle bg-surface p-4 font-mono text-xs text-foreground placeholder:text-muted transition-colors focus:outline-none focus:border-accent/70"
+              className="w-full rounded-xl border border-border-subtle bg-surface p-4 font-mono text-xs text-foreground placeholder:text-muted transition-colors focus:outline-none focus:border-accent/70 focus-visible:ring-2 focus-visible:ring-accent/60"
             />
             <div className="flex gap-2">
               <button
@@ -272,7 +272,7 @@ export function ImportClient() {
                         [field]: e.target.value === "" ? null : Number(e.target.value),
                       })
                     }
-                    className="rounded-xl border border-border-subtle bg-surface py-2 px-3 text-sm text-foreground max-w-[55%]"
+                    className="rounded-xl border border-border-subtle bg-surface py-2 px-3 text-sm text-foreground max-w-[55%] focus-visible:ring-2 focus-visible:ring-accent/60"
                   >
                     <option value="">—</option>
                     {table.headers.map((h, i) => (
@@ -359,7 +359,7 @@ export function ImportClient() {
                       ),
                     )
                   }
-                  className="rounded-xl border border-border-subtle bg-surface py-2.5 px-3 text-sm text-foreground"
+                  className="rounded-xl border border-border-subtle bg-surface py-2.5 px-3 text-sm text-foreground focus-visible:ring-2 focus-visible:ring-accent/60"
                 >
                   <option value="">Skip this row</option>
                   {r.candidates.map((c) => (
