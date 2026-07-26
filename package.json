@@ -18,6 +18,7 @@
     "db:seed": "tsx src/db/seed/run.ts",
     "ingest": "tsx scripts/ingest.ts",
     "enrich:claude-code": "tsx scripts/enrich-claude-code.ts",
+    "verify-sold": "tsx scripts/verify-sold.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",

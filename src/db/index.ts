@@ -96,4 +96,19 @@ export function setDb(db: DB | undefined): void {
   globalForDb.__whaikeyDb = db;
 }
 
+/**
+ * Close the underlying driver connection. Both `drizzle()` calls in this file
+ * attach the raw client as `$client`; postgres-js exposes `end()`, PGlite
+ * exposes `close()`. Long-lived server code never calls this (the singleton
+ * outlives a request), but one-shot CLI scripts must, or the process hangs on
+ * an open socket/WASM handle after `main()` resolves.
+ */
+export async function closeDb(db: DB): Promise<void> {
+  const client = (db as unknown as { $client?: unknown }).$client;
+  if (!client || typeof client !== "object") return;
+  const closable = client as { end?: () => Promise<unknown>; close?: () => Promise<unknown> };
+  if (typeof closable.end === "function") await closable.end();
+  else if (typeof closable.close === "function") await closable.close();
+}
+
 export { schema };
