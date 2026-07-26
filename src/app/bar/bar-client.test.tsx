@@ -19,6 +19,8 @@ const producerFlavorHeat = {
   hasHeat: false,
 };
 
+const palate = { vector: {}, sampleSize: 0 };
+
 describe("BarClient flavor source controls", () => {
   it("filters profile-only bottles by a selected flavor family", () => {
     const rows = [
@@ -67,6 +69,7 @@ describe("BarClient flavor source controls", () => {
         initialRows={rows}
         personalFlavorHeat={personalFlavorHeat}
         producerFlavorHeat={producerFlavorHeat}
+        palate={palate}
       />,
     );
 
@@ -81,6 +84,7 @@ describe("BarClient flavor source controls", () => {
         initialRows={[]}
         personalFlavorHeat={personalFlavorHeat}
         producerFlavorHeat={producerFlavorHeat}
+        palate={palate}
       />,
     );
 
