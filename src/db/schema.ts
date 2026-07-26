@@ -165,7 +165,10 @@ export const bottleAliases = pgTable(
   (t) => [index("bottle_aliases_bottle_idx").on(t.bottleId), index("bottle_aliases_alias_idx").on(t.alias)],
 );
 
-export const UPC_SOURCES = ["seed", "user", "iowa"] as const;
+// "verified": a GTIN read off a cited retail product during source-backed
+// catalog verification (src/lib/ingest/verify-sold.ts) — distinct from a bulk
+// "seed"/"iowa" import or a first-party "user" confirmation.
+export const UPC_SOURCES = ["seed", "user", "iowa", "verified"] as const;
 export type UpcSource = (typeof UPC_SOURCES)[number];
 
 /**
@@ -385,8 +388,41 @@ export const priceHistory = pgTable(
   (t) => [index("price_history_bottle_idx").on(t.bottleId)],
 );
 
+/**
+ * Auditable provenance for source-backed catalog verification
+ * (src/lib/ingest/verify-sold.ts). Each row is one cited retail product page
+ * that evidenced an imported COLA label is a bottle actually offered for sale.
+ * Persisted BEFORE a bottle is promoted imported → verified, so every
+ * promotion is traceable to at least one URL + retrieval timestamp. Retailer
+ * SKUs are captured here as source-specific context, never as canonical bottle
+ * fields.
+ */
+export const bottleVerifications = pgTable(
+  "bottle_verifications",
+  {
+    id: id(),
+    bottleId: text("bottle_id")
+      .notNull()
+      .references(() => bottles.id, { onDelete: "cascade" }),
+    /** The cited product URL the evidence was read from. */
+    url: text("url").notNull(),
+    /** Retailer/source label as reported alongside the URL, e.g. "Total Wine". */
+    label: text("label"),
+    /** Source-specific retailer SKU, if any — NOT a canonical bottle field. */
+    retailerSku: text("retailer_sku"),
+    /** When the model retrieved the cited page. */
+    retrievedAt: timestamp("retrieved_at", { withTimezone: true, mode: "date" }).notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("bottle_verifications_bottle_idx").on(t.bottleId),
+    uniqueIndex("bottle_verifications_bottle_url_uq").on(t.bottleId, t.url),
+  ],
+);
+
 export type User = typeof user.$inferSelect;
 export type BottleUpc = typeof bottleUpcs.$inferSelect;
+export type BottleVerification = typeof bottleVerifications.$inferSelect;
 export type Distillery = typeof distilleries.$inferSelect;
 export type Bottle = typeof bottles.$inferSelect;
 export type NewBottle = typeof bottles.$inferInsert;

@@ -43,6 +43,13 @@
       "when": 1785044210654,
       "tag": "0005_aromatic_maelstrom",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1785074347945,
+      "tag": "0006_normal_luckman",
+      "breakpoints": true
     }
   ]
 }

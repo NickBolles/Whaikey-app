@@ -1,0 +1,119 @@
+import { randomUUID } from "node:crypto";
+import { and, eq } from "drizzle-orm";
+import type { DB } from "@/db";
+import { bottles, bottleUpcs, bottleVerifications, priceHistory } from "@/db/schema";
+import { isValidUpc } from "@/lib/upc";
+
+export type VerificationCandidate = {
+  id: string;
+  name: string;
+  category: string;
+  region: string | null;
+  abv: number | null;
+  ageYears: number | null;
+};
+
+export type SoldVerification = {
+  id: string;
+  sold: boolean;
+  evidenceUrl: string | null;
+  evidenceLabel: string | null;
+  retailerSku: string | null;
+  upcs: string[];
+  abv: number | null;
+  ageYears: number | null;
+  price: number | null;
+  description: string | null;
+};
+
+export function buildSoldVerificationSchema(): Record<string, unknown> {
+  return {
+    type: "object",
+    properties: {
+      results: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            id: { type: "string" }, sold: { type: "boolean" },
+            evidenceUrl: { type: ["string", "null"] }, evidenceLabel: { type: ["string", "null"] },
+            retailerSku: { type: ["string", "null"] }, upcs: { type: "array", items: { type: "string" } },
+            abv: { type: ["number", "null"] }, ageYears: { type: ["integer", "null"] },
+            price: { type: ["number", "null"] }, description: { type: ["string", "null"] },
+          },
+          required: ["id", "sold", "evidenceUrl", "evidenceLabel", "retailerSku", "upcs", "abv", "ageYears", "price", "description"],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ["results"],
+    additionalProperties: false,
+  };
+}
+
+export function buildSoldVerificationPrompt(rows: VerificationCandidate[]): string {
+  return `Verify whether each TTB-label-derived whiskey is an actual consumer product currently or historically offered for sale. Search the web. A TTB COLA record alone is NOT evidence.\n\nFor sold=true, require a specific manufacturer or retailer product page and return its direct http(s) URL and source label. Only return facts explicitly supported by that page. Never guess a UPC, retailer SKU, price, ABV, age, or description. If no qualifying product page exists, return sold=false with all fact fields null/empty. UPCs must be numeric GTINs as printed by the source. Retailer SKU is source context only.\n\nReturn a JSON object with a results array containing one result per supplied id. Candidates:\n${JSON.stringify(rows)}`;
+}
+
+function finiteInRange(value: unknown, min: number, max: number): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= min && value <= max ? value : null;
+}
+
+function safeUrl(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    if (url.hostname.endsWith("ttb.gov")) return null;
+    return url.toString();
+  } catch { return null; }
+}
+
+/** Reject rather than partially trust any claimed sale without non-TTB evidence. */
+export function normalizeSoldVerification(value: unknown): SoldVerification | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  if (typeof row.id !== "string" || row.sold !== true) return null;
+  const evidenceUrl = safeUrl(row.evidenceUrl);
+  if (!evidenceUrl) return null;
+  const upcs = Array.isArray(row.upcs)
+    ? [...new Set(row.upcs.filter((v): v is string => typeof v === "string").map((v) => v.replace(/\D/g, "")).filter(isValidUpc))]
+    : [];
+  return {
+    id: row.id, sold: true, evidenceUrl,
+    evidenceLabel: typeof row.evidenceLabel === "string" && row.evidenceLabel.trim() ? row.evidenceLabel.trim().slice(0, 200) : null,
+    retailerSku: typeof row.retailerSku === "string" && row.retailerSku.trim() ? row.retailerSku.trim().slice(0, 200) : null,
+    upcs, abv: finiteInRange(row.abv, 0, 100), ageYears: finiteInRange(row.ageYears, 0, 100),
+    price: finiteInRange(row.price, 0.01, 100_000),
+    description: typeof row.description === "string" && row.description.trim() ? row.description.trim().slice(0, 2_000) : null,
+  };
+}
+
+export async function findImportedBottles(db: DB, limit: number): Promise<VerificationCandidate[]> {
+  return db.select({ id: bottles.id, name: bottles.name, category: bottles.category, region: bottles.region, abv: bottles.abv, ageYears: bottles.ageYears })
+    .from(bottles).where(eq(bottles.status, "imported")).limit(limit);
+}
+
+/** Persist only source-backed, normalized facts; existing curated values always win. */
+export async function persistSoldVerification(db: DB, verification: SoldVerification, dryRun: boolean): Promise<boolean> {
+  const [current] = await db.select().from(bottles).where(and(eq(bottles.id, verification.id), eq(bottles.status, "imported"))).limit(1);
+  if (!current || !verification.evidenceUrl) return false;
+  if (dryRun) return true;
+
+  await db.insert(bottleVerifications).values({ id: randomUUID(), bottleId: current.id, url: verification.evidenceUrl, label: verification.evidenceLabel, retailerSku: verification.retailerSku, retrievedAt: new Date() }).onConflictDoNothing();
+  const patch: Record<string, unknown> = { status: "verified" };
+  if (current.abv == null && verification.abv != null) patch.abv = verification.abv;
+  if (current.ageYears == null && verification.ageYears != null) patch.ageYears = verification.ageYears;
+  if (current.avgPrice == null && verification.price != null) patch.avgPrice = verification.price;
+  if (current.description == null && verification.description != null) patch.description = verification.description;
+  await db.update(bottles).set(patch).where(eq(bottles.id, current.id));
+  for (const upc of verification.upcs) {
+    await db.insert(bottleUpcs).values({ id: `${current.id}--verified-${upc}`, bottleId: current.id, upc, source: "verified", confirmedCount: 0 }).onConflictDoNothing();
+  }
+  if (verification.price != null) {
+    const source = `verified:${verification.evidenceUrl}`;
+    const exists = await db.select({ id: priceHistory.id }).from(priceHistory).where(and(eq(priceHistory.bottleId, current.id), eq(priceHistory.source, source))).limit(1);
+    if (!exists.length) await db.insert(priceHistory).values({ id: randomUUID(), bottleId: current.id, date: new Date(), price: verification.price, source });
+  }
+  return true;
+}
