@@ -2,6 +2,10 @@
 #
 # Runs `pnpm ingest` against the DATABASE_URL secret:
 #   - iowa:   full Iowa Liquor Products sync (feed updates monthly; idempotent)
+#   - oregon/utah/bc/systembolaget/whiskyedition/vinmonopolet: secondary
+#             retail catalogs (docs/DATA_SOURCES.md §2.2b) — each is
+#             best-effort like cola; a flaky external feed only marks the
+#             run partial instead of blocking the rest
 #   - cola:   TTB label approvals for the last 8 days (registry maintenance
 #             can interrupt this source, and the run reports any interruption)
 #   - enrich: fill flavor profiles for new bottles (community notes first,
@@ -9,7 +13,8 @@
 #
 # Requires repo secrets: DATABASE_URL (Postgres/Supabase pooler URL) and, for
 # the enrich step, OPENROUTER_API_KEY (preferred) or ANTHROPIC_API_KEY. Without DATABASE_URL the run stops early
-# with a clear message instead of failing cryptically.
+# with a clear message instead of failing cryptically. Optional secret
+# VINMONOPOLET_API_KEY enables the Vinmonopolet source (skipped when unset).
 name: catalog sync
 
 on:
@@ -61,6 +66,54 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: pnpm ingest iowa
 
+      - id: oregon
+        name: Sync Oregon OLCC pricing
+        continue-on-error: true
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: pnpm ingest oregon
+
+      - id: utah
+        name: Sync Utah DABS product list
+        continue-on-error: true
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: pnpm ingest utah
+
+      - id: bc
+        name: Sync BC Liquor price list
+        continue-on-error: true
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: pnpm ingest bc
+
+      - id: systembolaget
+        name: Sync Systembolaget assortment mirror
+        continue-on-error: true
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: pnpm ingest systembolaget
+
+      - id: whiskyedition
+        name: Sync WHISKY:EDITION review catalog
+        continue-on-error: true
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: pnpm ingest whiskyedition
+
+      - id: vinmonopolet
+        name: Sync Vinmonopolet products
+        continue-on-error: true
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          VINMONOPOLET_API_KEY: ${{ secrets.VINMONOPOLET_API_KEY }}
+        run: |
+          if [ -z "$VINMONOPOLET_API_KEY" ]; then
+            echo "VINMONOPOLET_API_KEY secret is not set — skipping the Vinmonopolet source."
+            exit 0
+          fi
+          pnpm ingest vinmonopolet
+
       - id: cola
         name: Sync TTB COLA approvals (last 8 days)
         if: ${{ inputs.cola_scope != 'full-history' }}
@@ -102,9 +155,9 @@ jobs:
           pnpm ingest enrich --no-web
 
       - name: Report incomplete catalog sync
-        if: ${{ always() && (steps.cola.outcome == 'failure' || steps.cola-full-history.outcome == 'failure' || steps.enrich.outcome == 'failure') }}
+        if: ${{ always() && (steps.oregon.outcome == 'failure' || steps.utah.outcome == 'failure' || steps.bc.outcome == 'failure' || steps.systembolaget.outcome == 'failure' || steps.whiskyedition.outcome == 'failure' || steps.vinmonopolet.outcome == 'failure' || steps.cola.outcome == 'failure' || steps.cola-full-history.outcome == 'failure' || steps.enrich.outcome == 'failure') }}
         run: |
           echo "## Catalog sync incomplete" >> "$GITHUB_STEP_SUMMARY"
           echo "One or more optional source steps failed after the Iowa import. Read the failed step logs and remediate the source or credential before rerunning." >> "$GITHUB_STEP_SUMMARY"
-          echo "::error::Catalog sync completed only partially; inspect the COLA and enrichment steps."
+          echo "::error::Catalog sync completed only partially; inspect the failed source steps."
           exit 1
