@@ -1,6 +1,6 @@
 # Whaikey — Data Sourcing Strategy
 
-Companion to [PLAN.md](../PLAN.md), [FEATURES.md](./FEATURES.md), and [COMPETITORS.md](./COMPETITORS.md). Based on live web research (July 2026). Items marked *(unverified)* couldn't be confirmed against a primary source.
+Companion to [PLAN.md](../PLAN.md), [FEATURES.md](./FEATURES.md), and [COMPETITORS.md](./COMPETITORS.md). Based on live web research (July 2026). Items marked *(unverified)* couldn't be confirmed against a primary source. For scaling the enrichment/verification pipeline to the full ~25k-bottle backlog and the July 2026 sweep of additional sources/datasets, see [SOURCING_AT_SCALE.md](./SOURCING_AT_SCALE.md).
 
 **TL;DR:** There is no single whiskey API — that's *why* the competitor field is fragmented. But a surprisingly strong catalog can be assembled almost entirely from **free, legally clean sources**: the US TTB label-approval registry (labels + images + barcodes), Iowa's open liquor dataset (clean SKU catalog + prices), Wikidata (distilleries, CC0), and control-state price books — then layered with affiliate feeds (live prices + revenue), a free auction-trend API, and user contributions as the long-term moat.
 
