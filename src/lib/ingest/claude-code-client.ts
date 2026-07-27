@@ -160,23 +160,23 @@ export function structuredOutputText(stdout: string): string {
   return JSON.stringify(profiles);
 }
 
-/** Promisified `claude -p` runner. The print prompt immediately follows `-p`. */
+/** Promisified `claude -p` runner. Send prompts over stdin to avoid positional-argument failures for structured prompts. */
 function runClaude(args: string[], prompt: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    const [printFlag, ...options] = args;
     const child = execFile(
       "claude",
-      [printFlag, prompt, ...options],
+      args,
       { timeout: CLAUDE_TIMEOUT_MS, maxBuffer: MAX_BUFFER_BYTES },
       (err: Error | null, stdout: string, stderr: string) => {
         if (err) {
-          reject(new ClaudeCliError(`claude -p failed: ${stderr?.trim() || err.message}`));
+          const detail = stderr?.trim() || stdout?.trim() || err.message;
+          reject(new ClaudeCliError(`claude -p failed: ${detail}`));
           return;
         }
         resolve(stdout);
       },
     );
-    child.stdin?.end();
+    child.stdin?.end(prompt);
   });
 }
 
