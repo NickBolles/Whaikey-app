@@ -12,6 +12,7 @@ export { fetchUtahCandidates } from "./utah";
 export { fetchBcCandidates } from "./bc";
 export { fetchSystembolagetCandidates } from "./systembolaget";
 export { fetchWhiskyEditionCandidates } from "./whiskyedition";
+export { fetchVinmonopoletCandidates } from "./vinmonopolet";
 export { enrichBottleProfiles, enrichModel, type EnrichReport } from "./enrich";
 
 /** UPC provenance for a candidate's barcodes: the source's own tag when it is a UpcSource, else "seed". */

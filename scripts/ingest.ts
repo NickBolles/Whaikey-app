@@ -5,7 +5,7 @@
  *   pnpm ingest iowa [--dry-run]
  *   pnpm ingest cola --since 2026-01-01 [--until 2026-07-01] [--dry-run]
  *   pnpm ingest cola --full [--until 2026-07-01] [--dry-run]
- *   pnpm ingest oregon|utah|bc|systembolaget|whiskyedition [--dry-run]
+ *   pnpm ingest oregon|utah|bc|systembolaget|whiskyedition|vinmonopolet [--dry-run]
  *   pnpm ingest enrich [--limit N] [--batch-size N] [--no-web] [--dry-run]
  *   pnpm ingest prune            # delete imported bottles untouched by users
  *
@@ -27,6 +27,10 @@
  *            Prices are SEK and not imported. Enrichment source only.
  *   whiskyedition — WHISKY:EDITION review API (CC BY 4.0, attribution
  *            required): ~500 reviewed bottlings with region, age, ABV.
+ *   vinmonopolet — official Norwegian monopoly products API (free key from
+ *            api.vinmonopolet.no via VINMONOPOLET_API_KEY). The sanctioned
+ *            API returns names only; value is European name coverage and
+ *            sold-at-retail evidence, with conservative name-cue categories.
  *   enrich — fills flavor-wheel profiles for bottles without one
  *            (imported/user-submitted), making them recommendable. Bottles
  *            with enough user tasting notes are rolled up directly (no AI);
@@ -50,6 +54,7 @@ import {
   fetchOregonCandidates,
   fetchSystembolagetCandidates,
   fetchUtahCandidates,
+  fetchVinmonopoletCandidates,
   fetchWhiskyEditionCandidates,
   ingestCandidates,
   pruneImportedBottles,
@@ -121,6 +126,7 @@ async function main(): Promise<void> {
     bc: { label: "BC Liquor price list", fetch: fetchBcCandidates },
     systembolaget: { label: "Systembolaget assortment mirror", fetch: fetchSystembolagetCandidates },
     whiskyedition: { label: "WHISKY:EDITION review catalog", fetch: fetchWhiskyEditionCandidates },
+    vinmonopolet: { label: "Vinmonopolet products API (needs VINMONOPOLET_API_KEY)", fetch: fetchVinmonopoletCandidates },
   } as const;
   if (source && source in simpleSources) {
     const entry = simpleSources[source as keyof typeof simpleSources];
@@ -147,7 +153,7 @@ async function main(): Promise<void> {
   }
 
   console.error(
-    "Usage: pnpm ingest <iowa|cola|oregon|utah|bc|systembolaget|whiskyedition|enrich|prune> [--since YYYY-MM-DD|--full] [--until YYYY-MM-DD] [--limit N] [--batch-size N] [--no-web] [--dry-run]",
+    "Usage: pnpm ingest <iowa|cola|oregon|utah|bc|systembolaget|whiskyedition|vinmonopolet|enrich|prune> [--since YYYY-MM-DD|--full] [--until YYYY-MM-DD] [--limit N] [--batch-size N] [--no-web] [--dry-run]",
   );
   process.exit(1);
 }
