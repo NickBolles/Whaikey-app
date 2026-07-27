@@ -5,6 +5,7 @@
  *   pnpm ingest iowa [--dry-run]
  *   pnpm ingest cola --since 2026-01-01 [--until 2026-07-01] [--dry-run]
  *   pnpm ingest cola --full [--until 2026-07-01] [--dry-run]
+ *   pnpm ingest oregon|utah|bc|systembolaget|whiskyedition|vinmonopolet [--dry-run]
  *   pnpm ingest enrich [--limit N] [--batch-size N] [--no-web] [--dry-run]
  *   pnpm ingest prune            # delete imported bottles untouched by users
  *
@@ -14,6 +15,22 @@
  *            whiskey SKUs; safe to re-run monthly (the feed updates monthly).
  *   cola   — TTB public COLA registry: newly label-approved whiskies (name +
  *            category only). Date-ranged; run e.g. weekly with a short window.
+ *   oregon — Oregon OLCC monthly pricing (state open data): names, categories,
+ *            age, ABV, 750ml shelf price. ~1.3k whiskey SKUs; monthly.
+ *   utah   — Utah DABS product list (fiscal-period XLSX discovered from the
+ *            product-list page): names, categories, 750ml price. Monthly.
+ *   bc     — BC Liquor price list (Open Government Licence — BC, via the BC
+ *            Data Catalogue): names, categories, ABV, and real product
+ *            barcodes. Prices are CAD and not imported. Monthly.
+ *   systembolaget — Swedish monopoly assortment via the community data mirror
+ *            (susbolaget.emrik.org): European/Scotch names, categories, ABV.
+ *            Prices are SEK and not imported. Enrichment source only.
+ *   whiskyedition — WHISKY:EDITION review API (CC BY 4.0, attribution
+ *            required): ~500 reviewed bottlings with region, age, ABV.
+ *   vinmonopolet — official Norwegian monopoly products API (free key from
+ *            api.vinmonopolet.no via VINMONOPOLET_API_KEY). The sanctioned
+ *            API returns names only; value is European name coverage and
+ *            sold-at-retail evidence, with conservative name-cue categories.
  *   enrich — fills flavor-wheel profiles for bottles without one
  *            (imported/user-submitted), making them recommendable. Bottles
  *            with enough user tasting notes are rolled up directly (no AI);
@@ -30,9 +47,15 @@ import {
   COLA_FULL_HISTORY_START,
   enrichBottleProfiles,
   enrichModel,
+  fetchBcCandidates,
   fetchColaRecords,
   colaRecordsToCandidates,
   fetchIowaCandidates,
+  fetchOregonCandidates,
+  fetchSystembolagetCandidates,
+  fetchUtahCandidates,
+  fetchVinmonopoletCandidates,
+  fetchWhiskyEditionCandidates,
   ingestCandidates,
   pruneImportedBottles,
 } from "../src/lib/ingest";
@@ -97,6 +120,23 @@ async function main(): Promise<void> {
     return;
   }
 
+  const simpleSources = {
+    oregon: { label: "Oregon OLCC monthly pricing", fetch: fetchOregonCandidates },
+    utah: { label: "Utah DABS product list", fetch: fetchUtahCandidates },
+    bc: { label: "BC Liquor price list", fetch: fetchBcCandidates },
+    systembolaget: { label: "Systembolaget assortment mirror", fetch: fetchSystembolagetCandidates },
+    whiskyedition: { label: "WHISKY:EDITION review catalog", fetch: fetchWhiskyEditionCandidates },
+    vinmonopolet: { label: "Vinmonopolet products API (needs VINMONOPOLET_API_KEY)", fetch: fetchVinmonopoletCandidates },
+  } as const;
+  if (source && source in simpleSources) {
+    const entry = simpleSources[source as keyof typeof simpleSources];
+    console.log(`Downloading ${entry.label}…`);
+    const { scanned, candidates } = await entry.fetch();
+    const report = await ingestCandidates(db, source, candidates, { dryRun, scanned });
+    printReport(report, before, await countBottles(db));
+    return;
+  }
+
   if (source === "cola") {
     const since = hasFlag("full") ? COLA_FULL_HISTORY_START : arg("since");
     const until = arg("until") ?? new Date().toISOString().slice(0, 10);
@@ -113,7 +153,7 @@ async function main(): Promise<void> {
   }
 
   console.error(
-    "Usage: pnpm ingest <iowa|cola|enrich|prune> [--since YYYY-MM-DD|--full] [--until YYYY-MM-DD] [--limit N] [--batch-size N] [--no-web] [--dry-run]",
+    "Usage: pnpm ingest <iowa|cola|oregon|utah|bc|systembolaget|whiskyedition|vinmonopolet|enrich|prune> [--since YYYY-MM-DD|--full] [--until YYYY-MM-DD] [--limit N] [--batch-size N] [--no-web] [--dry-run]",
   );
   process.exit(1);
 }

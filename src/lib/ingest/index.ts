@@ -1,13 +1,26 @@
 import { eq } from "drizzle-orm";
 import type { DB } from "@/db";
-import { bottleAliases, bottles, bottleUpcs, pours, userBottles } from "@/db/schema";
+import { bottleAliases, bottles, bottleUpcs, pours, userBottles, UPC_SOURCES, type UpcSource } from "@/db/schema";
 import { slugify } from "./normalize";
 import type { CatalogCandidate, IngestReport } from "./types";
 
 export type { CatalogCandidate, IngestReport } from "./types";
 export { fetchIowaCandidates } from "./iowa";
 export { COLA_FULL_HISTORY_START, colaRecordsToCandidates, fetchColaRecords } from "./cola";
+export { fetchOregonCandidates } from "./oregon";
+export { fetchUtahCandidates } from "./utah";
+export { fetchBcCandidates } from "./bc";
+export { fetchSystembolagetCandidates } from "./systembolaget";
+export { fetchWhiskyEditionCandidates } from "./whiskyedition";
+export { fetchVinmonopoletCandidates } from "./vinmonopolet";
 export { enrichBottleProfiles, enrichModel, type EnrichReport } from "./enrich";
+
+/** UPC provenance for a candidate's barcodes: the source's own tag when it is a UpcSource, else "seed". */
+function upcSourceFor(candidate: CatalogCandidate): UpcSource {
+  return (UPC_SOURCES as readonly string[]).includes(candidate.source)
+    ? (candidate.source as UpcSource)
+    : "seed";
+}
 
 /**
  * Merge source candidates into the catalog (docs/DATA_SOURCES.md §2, §6).
@@ -98,7 +111,7 @@ export async function ingestCandidates(
             id: `${bottleId}--upc-${upc}`,
             bottleId,
             upc,
-            source: candidate.source === "iowa" ? "iowa" : "seed",
+            source: upcSourceFor(candidate),
             confirmedCount: 0,
           })
           .onConflictDoNothing();
