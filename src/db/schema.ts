@@ -168,7 +168,7 @@ export const bottleAliases = pgTable(
 // "verified": a GTIN read off a cited retail product during source-backed
 // catalog verification (src/lib/ingest/verify-sold.ts) — distinct from a bulk
 // "seed"/"iowa" import or a first-party "user" confirmation.
-export const UPC_SOURCES = ["seed", "user", "iowa", "verified"] as const;
+export const UPC_SOURCES = ["seed", "user", "iowa", "bc", "verified"] as const;
 export type UpcSource = (typeof UPC_SOURCES)[number];
 
 /**

@@ -113,11 +113,11 @@ BAXUS (hackathon API endpoint now 404s; no public API), EU e-label (no central r
 | 2 | Port `enrich` to Message Batches (caching + structured outputs, offline tier) | ~1–2 days | 25k profiles ≈ $25–40, done in hours |
 | 3 | Verification triage: retail-source cross-match counts as sold-evidence | ~1 day | Large slice of the verify queue closed with zero model calls |
 | 4 | Residual verification as a web-search batch (or Brave + judge at ~$140) | ~1 day | Replaces the 30–80 h CLI loop |
-| 5 | New ingest adapters: Oregon → Utah → BC (CSV, Iowa-shaped) | ~1 day each | Prices/proof corroboration + sold-evidence for triage |
-| 6 | Vinmonopolet API + Alko Excel + Systembolaget mirror | ~2–3 days | European/Scotch coverage + numeric taste-clock flavor data |
+| 5 | ✅ **Done** — ingest adapters: Oregon, Utah, BC (`pnpm ingest oregon\|utah\|bc`) | — | Prices/proof corroboration + BC barcodes into scan; sold-evidence for triage |
+| 6 | Nordic sources: ✅ Systembolaget mirror (`pnpm ingest systembolaget`); Vinmonopolet needs a (free) API-key signup at api.vinmonopolet.no first; Alko's Excel is bot-blocked from datacenter IPs — fetch manually or from a residential runner | ~1 day left | European/Scotch coverage + numeric taste-clock flavor data |
 | 7 | WhiskyAnalysis sheet (with permission) + Reddit archive join | ~1–2 days | Flavor clusters, ratings, real prices for the head of the catalog |
 | 8 | TTB permittee list as distillery entity table | ~1 day | Producer normalization backbone |
-| 9 | Email WHISKY:EDITION; evaluate WhiskyDB paid tier as make-vs-buy | hours | Optional accelerators |
+| 9 | ✅ WHISKY:EDITION ingested (`pnpm ingest whiskyedition`, CC BY 4.0 attribution required); WhiskyDB pluggable at scan time via `WHAIKEY_WHISKY_UPC_URL`/`_KEY` once licensed | hours | Whisky-specialized data in catalog + scanner |
 
 ### Legal checklist additions (extends DATA_SOURCES.md)
 - [ ] WhiskyAnalysis: author permission before commercial use of meta-critic scores.

@@ -137,6 +137,51 @@ describe("lookupExternalUpc", () => {
   });
 });
 
+describe("lookupExternalUpc: whiskey-first provider", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  it("tries the configured whiskey API before the generic providers", async () => {
+    vi.stubEnv("WHAIKEY_WHISKY_UPC_URL", "https://whisky.example/api/v1/spirits?barcode={upc}");
+    vi.stubEnv("WHAIKEY_WHISKY_UPC_KEY", "secret");
+    const fetchMock = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      expect(String(url)).toBe(`https://whisky.example/api/v1/spirits?barcode=${UPC}`);
+      expect((init?.headers as Record<string, string>)["API-Key"]).toBe("secret");
+      return Response.json({ spirits: [{ name: "Ardbeg 10 Year" }] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const product = await lookupExternalUpc(UPC);
+    expect(product).toEqual({ name: "Ardbeg 10 Year", provider: "whiskyapi" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls through to UPCitemdb when the whiskey API misses", async () => {
+    vi.stubEnv("WHAIKEY_WHISKY_UPC_URL", "https://whisky.example/lookup/{upc}");
+    const fetchMock = vi.fn(async (url: string | URL) => {
+      if (String(url).startsWith("https://whisky.example/")) {
+        return Response.json({ items: [] });
+      }
+      return Response.json({ items: [{ title: "Buffalo Trace Bourbon" }] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const product = await lookupExternalUpc(UPC);
+    expect(product).toEqual({ name: "Buffalo Trace Bourbon", provider: "upcitemdb" });
+  });
+
+  it("skips the provider when the template is unset or lacks the {upc} slot", async () => {
+    vi.stubEnv("WHAIKEY_WHISKY_UPC_URL", "https://whisky.example/no-slot");
+    const fetchMock = vi.fn(async (url: string | URL) => {
+      expect(String(url)).toContain("upcitemdb");
+      return Response.json({ items: [{ title: "Generic Hit" }] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const product = await lookupExternalUpc(UPC);
+    expect(product?.provider).toBe("upcitemdb");
+  });
+});
+
 describe("candidatesFromExternalName", () => {
   let db: DB;
 

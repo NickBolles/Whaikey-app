@@ -74,3 +74,38 @@ export function parseAgeYears(age: number | string | null | undefined): number |
   const years = Math.round(n);
   return years >= 1 && years <= 60 ? years : null;
 }
+
+/**
+ * Age statements that arrive as text ("3 YRS", "12 Year", "10 år") → years.
+ * Falls back to parseAgeYears for plain numeric input.
+ */
+export function parseAgeText(age: string | number | null | undefined): number | null {
+  if (typeof age !== "string") return parseAgeYears(age);
+  const m = age.match(/(\d+)\s*(yrs?|years?|år)?\b/i);
+  return m ? parseAgeYears(m[1]) : null;
+}
+
+/** Tokens that stay uppercase when un-shouting a name (proof/edition markers). */
+const KEEP_UPPER = new Set(["XO", "VS", "VSOP", "XR", "BIB", "IPA", "II", "III", "IV", "VI", "VII"]);
+
+/**
+ * Retail feeds that shout in ALL CAPS ("BAKER'S STRAIGHT 7 YEAR BOURBON") get
+ * title-cased for display; genuinely mixed-case names are returned unchanged.
+ * Shouty is judged by uppercase dominance, not "no lowercase at all" —
+ * cleanProductName's "16YR → 16 Year" rewrite injects a few lowercase letters
+ * into otherwise-shouty names. Slug matching is case-insensitive, so this is
+ * cosmetic only — and the curated catalog always wins over imported names.
+ */
+export function unshoutName(raw: string): string {
+  const upper = (raw.match(/[A-Z]/g) ?? []).length;
+  const lower = (raw.match(/[a-z]/g) ?? []).length;
+  if (upper < 3 || lower / Math.max(1, upper + lower) >= 0.2) return raw;
+  return raw
+    .toLowerCase()
+    .replace(/[a-z0-9']+/g, (word) => {
+      const upper = word.toUpperCase();
+      if (KEEP_UPPER.has(upper)) return upper;
+      return word.charAt(0).toUpperCase() + word.slice(1);
+    })
+    .replace(/'S\b/g, "'s");
+}

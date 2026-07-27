@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { cleanProductName, looksFlavored, parseAgeYears, proofToAbv, slugify } from "./normalize";
+import {
+  cleanProductName,
+  looksFlavored,
+  parseAgeText,
+  parseAgeYears,
+  proofToAbv,
+  slugify,
+  unshoutName,
+} from "./normalize";
 
 describe("cleanProductName", () => {
   it("strips packaging and program noise", () => {
@@ -74,5 +82,38 @@ describe("slugify", () => {
   it("matches the seed id convention", () => {
     expect(slugify("Wayne Gretzky No. 99 Red Cask")).toBe("wayne-gretzky-no-99-red-cask");
     expect(slugify("W.L. Weller 12 Year")).toBe("w-l-weller-12-year");
+  });
+});
+
+describe("parseAgeText", () => {
+  it("parses textual age statements", () => {
+    expect(parseAgeText("3 YRS")).toBe(3);
+    expect(parseAgeText("12 Year")).toBe(12);
+    expect(parseAgeText("10 år")).toBe(10);
+    expect(parseAgeText("7")).toBe(7);
+    expect(parseAgeText("NAS")).toBeNull();
+    expect(parseAgeText(null)).toBeNull();
+  });
+
+  it("delegates numeric input to parseAgeYears bounds", () => {
+    expect(parseAgeText(12)).toBe(12);
+    expect(parseAgeText(0)).toBeNull();
+  });
+});
+
+describe("unshoutName", () => {
+  it("title-cases ALL-CAPS retail names and keeps possessives", () => {
+    expect(unshoutName("BAKER'S STRAIGHT 7 YEAR BOURBON")).toBe("Baker's Straight 7 Year Bourbon");
+    expect(unshoutName("ELIJAH CRAIG SMALL BATCH")).toBe("Elijah Craig Small Batch");
+  });
+
+  it("leaves mixed-case names untouched and preserves known abbreviations", () => {
+    expect(unshoutName("Wayne Gretzky No. 99 Red Cask")).toBe("Wayne Gretzky No. 99 Red Cask");
+    expect(unshoutName("COURVOISIER XO")).toBe("Courvoisier XO");
+  });
+
+  it("still un-shouts after cleanProductName injects a lowercase 'Year'", () => {
+    expect(unshoutName("PENDLETON 20 Year DIRECTOR'S RESERVE")).toBe("Pendleton 20 Year Director's Reserve");
+    expect(unshoutName("Thy BOG Single Malt Whisky")).toBe("Thy BOG Single Malt Whisky");
   });
 });

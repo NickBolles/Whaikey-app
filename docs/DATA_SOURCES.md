@@ -37,6 +37,15 @@ Every US Certificate of Label Approval since 1999: brand name, fanciful name, cl
 - **⚠️ Platform migration (July 2026):** data.iowa.gov moved off Socrata to the new **Iowa Data Hub**; the old `/resource/<id>.json` SODA endpoints are dead. Products now downloads from `https://idh-be.iowa.gov/api/v1/datasets/1029/rows.json` (a ZIP containing NDJSON; CC-BY 4.0). **Implemented:** `pnpm ingest iowa` (src/lib/ingest/iowa.ts) syncs the whiskey categories into the catalog — names, ABV, 750ml state retail price, and UPCs — deduped against the curated seed.
 - **Gotchas:** Iowa assortment only (mainstream; few imports/allocated bottles); names carry program noise (barrel-pick/allocation prefixes, "Mini"/"PET"/"DISCO" suffixes — handled in src/lib/ingest/normalize.ts); category buckets are shelving, not taxonomy (Japanese malts under "Scotch Whiskies"); wholesale-oriented pricing.
 
+### 2.2b Additional retail catalogs — Oregon, Utah, BC, Systembolaget, WHISKY:EDITION
+**Implemented** (July 2026, from the SOURCING_AT_SCALE.md research): `pnpm ingest oregon|utah|bc|systembolaget|whiskyedition`, all flowing through the same `ingestCandidates` matching (curated catalog always wins; imported rows only add what's missing).
+
+- **Oregon OLCC** (src/lib/ingest/oregon.ts) — state open-data CSV, latest monthly snapshot only: names, categories, age, ABV, 750ml shelf price. ~1k whiskey candidates.
+- **Utah DABS** (src/lib/ingest/utah.ts) — fiscal-period XLSX discovered from the product-list page (URL changes each period): names, categories, 750ml price. No ABV/UPCs.
+- **BC Liquor** (src/lib/ingest/bc.ts) — monthly CSV resolved via the BC Data Catalogue CKAN API (Open Government Licence — BC): names, categories, ABV, and **real product barcodes** (0.75 L container only, same rule as Iowa). Prices are CAD and not imported.
+- **Systembolaget** (src/lib/ingest/systembolaget.ts) — via the C4illin/systembolaget-data community mirror (~2k whisky rows, European/Scotch coverage, ABV). Prices are SEK and not imported; per §2.6 this is an enrichment source only, never a hard dependency. The mirror's numeric "taste clock" fields are a future enrichment input.
+- **WHISKY:EDITION** (src/lib/ingest/whiskyedition.ts) — free review API (CC BY 4.0, **attribution required wherever the data surfaces**): ~500 bottlings with region, age, ABV, distillery. Factual metadata only — review prose/ratings stay out (guardrails + copyright).
+
 ### 2.3 Wikidata / DBpedia — distillery reference layer
 Distilleries with country, region, owner, founding date, coordinates, photos. **CC0 (no attribution needed)** via SPARQL. Good for notable distilleries worldwide; weak on craft/new ones and bottle-level data. Use for distillery pages (map, history), not the catalog.
 
@@ -61,10 +70,11 @@ Iowa/COLA-imported bottles are label approvals or wholesale SKUs, not proof a co
 
 Order of resolution at scan time:
 
-1. **Own DB** (seeded from COLA Cloud barcode extractions + Iowa identifiers + user confirmations).
-2. **UPCitemdb** — 715M+ claimed UPCs; free 100 req/day, Dev $99/mo (20k/day). Best volume-per-dollar.
-3. **Open Food Facts** — free, no key, but spirits coverage is thin and **ODbL share-alike licensing** means we must NOT merge OFF data into our proprietary DB (use as transient lookup only; consider contributing user scans back as goodwill).
-4. **Miss → photo + OCR flow** that grows our own DB (every miss is a data-acquisition event).
+1. **Own DB** (seeded from COLA Cloud barcode extractions + Iowa identifiers + **BC price-list barcodes** + user confirmations).
+2. **Whiskey-specialized provider** (optional, env-configured `WHAIKEY_WHISKY_UPC_URL`/`_KEY`) — a licensed spirits API such as WhiskyDB's per-license endpoint, tried before the generic catalogs because spirits-aware data beats them on whiskey. Skipped when unset.
+3. **UPCitemdb** — 715M+ claimed UPCs; free 100 req/day, Dev $99/mo (20k/day). Best volume-per-dollar.
+4. **Open Food Facts** — free, no key, but spirits coverage is thin and **ODbL share-alike licensing** means we must NOT merge OFF data into our proprietary DB (use as transient lookup only; consider contributing user scans back as goodwill).
+5. **Miss → photo + OCR flow** that grows our own DB (every miss is a data-acquisition event).
 
 Alternatives: Go-UPC ($74.95/mo for 5k req/mo, explicitly advertises liquor coverage), Barcode Lookup (~$99–999/mo *(unverified)*).
 

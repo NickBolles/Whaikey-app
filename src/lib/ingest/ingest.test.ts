@@ -45,6 +45,19 @@ describe("ingestCandidates", () => {
     });
   });
 
+  it("tags UPC provenance with the source when it is a UpcSource, else seed", async () => {
+    await ingestCandidates(db, "bc", [
+      candidate({ name: "BC Import Rye", source: "bc", category: "rye", upcs: ["080244002145"] }),
+    ]);
+    await ingestCandidates(db, "whiskyedition", [
+      candidate({ name: "Edition Malt", source: "whiskyedition", upcs: ["083664004607"] }),
+    ]);
+    const [bcUpc] = await db.select().from(bottleUpcs).where(eq(bottleUpcs.upc, "080244002145"));
+    expect(bcUpc).toMatchObject({ bottleId: "bc-import-rye", source: "bc" });
+    const [editionUpc] = await db.select().from(bottleUpcs).where(eq(bottleUpcs.upc, "083664004607"));
+    expect(editionUpc).toMatchObject({ bottleId: "edition-malt", source: "seed" });
+  });
+
   it("never duplicates a curated bottle: matches by name and by alias", async () => {
     const curated = await createTestBottle(db, {
       id: "eagle-rare-10",

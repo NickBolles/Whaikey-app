@@ -11,7 +11,7 @@ export interface CatalogCandidate {
   name: string;
   category: WhiskeyCategory;
   /** Data source tag, recorded in the ingest report and UPC rows. */
-  source: "iowa" | "cola";
+  source: "iowa" | "cola" | "oregon" | "utah" | "bc" | "systembolaget" | "whiskyedition";
   region?: string;
   ageYears?: number | null;
   abv?: number | null;
