@@ -30,8 +30,8 @@
  * operation (same one-migration preflight every other script here uses).
  * Workers never migrate — they only ever receive an already-migrated `db`.
  *
- * Worker safety cap: --workers is hard-capped at MAX_WORKERS (4); operate
- * with 2-4. This controller processes up to `--limit` rows per invocation,
+ * Worker safety cap: --workers is hard-capped at MAX_WORKERS (10); use 2-4
+ * normally and up to 10 only for an explicit throughput test. This controller processes up to `--limit` rows per invocation,
  * scheduling them in `--batch-size` chunks; it never polls the provider.
  * Run a new bounded invocation to process the next queue slice.
  */
@@ -162,7 +162,7 @@ async function main(): Promise<void> {
     const batchSize = positiveInteger("batch-size", DEFAULT_BATCH_SIZE);
     const partitions = positiveInteger("partitions", DEFAULT_PARTITIONS);
     if (workers > MAX_WORKERS) {
-      throw new Error(`--workers (${workers}) exceeds the safety cap of ${MAX_WORKERS}. Use 2-4 workers.`);
+      throw new Error(`--workers (${workers}) exceeds the safety cap of ${MAX_WORKERS}. Use 2-4 workers normally, or up to 10 for an explicit throughput test.`);
     }
 
     let run = resumeId ? await getVerificationRun(db, resumeId) : null;

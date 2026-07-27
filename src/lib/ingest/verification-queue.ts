@@ -1,5 +1,5 @@
 import { randomUUID, createHash } from "node:crypto";
-import { and, asc, eq, inArray, lt, lte } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, lt, lte } from "drizzle-orm";
 import type { DB } from "@/db";
 import {
   bottles,
@@ -48,8 +48,8 @@ export function resolveModel(requested: string): string {
 // Worker safety cap
 // ---------------------------------------------------------------------------
 
-/** Hard ceiling on concurrent workers per run — a subscription-usage safety cap, not a tuning knob. */
-export const MAX_WORKERS = 4;
+/** Hard ceiling on concurrent workers per run. Ten is an explicit operator-approved throughput-test cap. */
+export const MAX_WORKERS = 10;
 
 export function assertWorkerCount(workers: number): void {
   if (!Number.isInteger(workers) || workers < 1) {
@@ -226,7 +226,9 @@ async function loadCandidates(db: DB, limit: number): Promise<SnapshotCandidate[
       ageYears: bottles.ageYears,
     })
     .from(bottles)
-    .where(eq(bottles.status, "imported"))
+    .leftJoin(catalogVerificationWork, eq(catalogVerificationWork.bottleId, bottles.id))
+    .where(and(eq(bottles.status, "imported"), isNull(catalogVerificationWork.bottleId)))
+    .orderBy(asc(bottles.id))
     .limit(limit);
   if (!rows.length) return [];
 
