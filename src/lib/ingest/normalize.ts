@@ -85,6 +85,37 @@ export function parseAgeText(age: string | number | null | undefined): number | 
   return m ? parseAgeYears(m[1]) : null;
 }
 
+/**
+ * Filler tokens dropped when building a cross-source match key: style/origin
+ * descriptors retailers append inconsistently ("Elijah Craig Small Batch"
+ * vs "… Small Batch Bourbon" vs "… Kentucky Straight Bourbon Whiskey").
+ * Deliberately narrow — "rye", "malt" (alone), and "old" stay, because they
+ * distinguish real products (Old Forester, Highland Malt, X Straight Rye).
+ */
+const MATCH_KEY_FILLERS = new Set(["whisky", "whiskey", "scotch", "bourbon", "straight", "kentucky"]);
+
+/**
+ * Normalize a bottle name to a cross-source match key, collapsing the naming
+ * variants different feeds use for the same product: age-statement spellings
+ * ("12 YO" / "12 yrs" / "12 Years Old" / "12 år" → "12 year"), a leading
+ * "The", the "Single Malt" descriptor, and trailing style fillers. Distinct
+ * products must keep distinct keys, so this is deliberately conservative —
+ * a missed match only costs a duplicate row, a false merge corrupts data.
+ */
+export function matchKey(name: string): string {
+  let n = name.toLowerCase();
+  n = n.replace(/\b(?:aged\s+)?(\d+)\s*(?:yo|yrs?|years?|års?)\b\.?(?:\s+old\b)?/g, " $1 year ");
+  n = n.replace(/^\s*the\s+/, " ");
+  n = n.replace(/\bsingle\s+malt\b/g, " ");
+  const tokens = n.split(/[^a-z0-9]+/).filter((t) => t.length > 0);
+  const kept = tokens.filter((t) => !MATCH_KEY_FILLERS.has(t));
+  // A key needs at least two distinguishing tokens: "Redemption Bourbon"
+  // must NOT collapse to "redemption" and merge with "Redemption Rye" via
+  // the brand-only alias — when fillers ARE the distinguishing tokens, keep
+  // everything.
+  return (kept.length >= 2 ? kept : tokens).join("-");
+}
+
 /** Tokens that stay uppercase when un-shouting a name (proof/edition markers). */
 const KEEP_UPPER = new Set(["XO", "VS", "VSOP", "XR", "BIB", "IPA", "II", "III", "IV", "VI", "VII"]);
 

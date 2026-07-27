@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   cleanProductName,
   looksFlavored,
+  matchKey,
   parseAgeText,
   parseAgeYears,
   proofToAbv,
@@ -115,5 +116,35 @@ describe("unshoutName", () => {
   it("still un-shouts after cleanProductName injects a lowercase 'Year'", () => {
     expect(unshoutName("PENDLETON 20 Year DIRECTOR'S RESERVE")).toBe("Pendleton 20 Year Director's Reserve");
     expect(unshoutName("Thy BOG Single Malt Whisky")).toBe("Thy BOG Single Malt Whisky");
+  });
+});
+
+describe("matchKey", () => {
+  it("collapses cross-source naming variants of the same product", () => {
+    const curated = matchKey("Glenlivet 12 Year");
+    expect(matchKey("The Glenlivet 12 YO Single Malt")).toBe(curated);
+    expect(matchKey("Glenlivet 12 Yrs Single Malt Scotch Whisky")).toBe(curated);
+    expect(matchKey("Dalwhinnie Single Malt 15 Years Old")).toBe(matchKey("Dalwhinnie 15 Year"));
+    expect(matchKey("Elijah Craig Small Batch Kentucky Straight Bourbon Whiskey")).toBe(
+      matchKey("Elijah Craig Small Batch"),
+    );
+  });
+
+  it("keeps distinct products distinct", () => {
+    expect(matchKey("Glenfiddich 12 Year")).not.toBe(matchKey("Glenfiddich 15 Year"));
+    expect(matchKey("Old Forester 86")).not.toBe(matchKey("Forester 86"));
+    expect(matchKey("Sazerac Rye")).not.toBe(matchKey("Sazerac"));
+    expect(matchKey("Jameson Black Barrel")).not.toBe(matchKey("Jameson"));
+    expect(matchKey("Wild Turkey 101")).toBe("wild-turkey-101");
+  });
+
+  it("keeps filler tokens when they are the distinguishing ones", () => {
+    // Brand-only aliases ("Redemption") must not swallow the brand's other
+    // expressions when a style word is all that distinguishes them.
+    expect(matchKey("Redemption Bourbon")).toBe("redemption-bourbon");
+    expect(matchKey("Redemption Bourbon")).not.toBe(matchKey("Redemption Rye"));
+    expect(matchKey("Redemption Bourbon")).not.toBe(matchKey("Redemption"));
+    // Two real tokens are enough to drop trailing style fillers.
+    expect(matchKey("Tin Cup Whiskey")).toBe(matchKey("Tin Cup Straight Bourbon Whiskey"));
   });
 });

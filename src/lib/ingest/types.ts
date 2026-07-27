@@ -27,12 +27,18 @@ export interface IngestReport {
   scanned: number;
   /** Candidates produced after filtering/dedupe. */
   candidates: number;
-  /** Candidates that matched an existing bottle (by id, name, or alias). */
+  /** Candidates that matched an existing bottle (by id, name, alias, or variant match key). */
   matchedExisting: number;
   /** New bottles inserted (status "imported"). */
   inserted: number;
   /** New UPC mappings attached (to both new and existing bottles). */
   upcsAdded: number;
+  /** Variant spellings recorded into bottle_aliases for matched bottles. */
+  aliasesAdded: number;
+  /** Null attributes (abv/ageYears/avgPrice/region) filled on matched bottles. */
+  fieldsFilled: number;
+  /** Human-readable disagreements between a candidate and stored values (nothing was overwritten). */
+  conflicts: string[];
   /** True when the run made no writes. */
   dryRun: boolean;
 }

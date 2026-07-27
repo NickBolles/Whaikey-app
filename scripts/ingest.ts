@@ -158,6 +158,8 @@ async function main(): Promise<void> {
   process.exit(1);
 }
 
+const MAX_CONFLICT_LINES = 20;
+
 function printReport(
   report: Awaited<ReturnType<typeof ingestCandidates>>,
   before: number,
@@ -165,10 +167,18 @@ function printReport(
 ): void {
   console.log(
     `[${report.source}]${report.dryRun ? " (dry run)" : ""} scanned ${report.scanned} rows → ` +
-      `${report.candidates} candidates: ${report.matchedExisting} matched existing, ` +
+      `${report.candidates} candidates: ${report.matchedExisting} matched existing ` +
+      `(${report.aliasesAdded} new aliases, ${report.fieldsFilled} null fields filled), ` +
       `${report.inserted} new bottles, ${report.upcsAdded} new barcodes. ` +
       `Catalog: ${before} → ${after} bottles.`,
   );
+  if (report.conflicts.length > 0) {
+    console.warn(`[${report.source}] ${report.conflicts.length} attribute conflicts (stored values kept):`);
+    for (const line of report.conflicts.slice(0, MAX_CONFLICT_LINES)) console.warn(`  ${line}`);
+    if (report.conflicts.length > MAX_CONFLICT_LINES) {
+      console.warn(`  … and ${report.conflicts.length - MAX_CONFLICT_LINES} more`);
+    }
+  }
 }
 
 main()

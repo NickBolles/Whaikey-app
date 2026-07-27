@@ -109,7 +109,7 @@ BAXUS (hackathon API endpoint now 404s; no public API), EU e-label (no central r
 
 | # | Action | Effort | Payoff |
 |---|---|---|---|
-| 1 | Dedupe/cluster the 25k + embedding propagation (`profileSource: "inferred"`) | ~1 day | 30–50% of all model work disappears; ~$0.05 cost |
+| 1 | Dedupe/cluster the 25k + embedding propagation (`profileSource: "inferred"`) — ✅ ingest-time variant dedupe + auto-aliases + fill-if-null shipped (DATA_SOURCES.md §2.2b); embedding propagation for the existing backlog still open | ~1 day left | 30–50% of all model work disappears; ~$0.05 cost |
 | 2 | Port `enrich` to Message Batches (caching + structured outputs, offline tier) | ~1–2 days | 25k profiles ≈ $25–40, done in hours |
 | 3 | Verification triage: retail-source cross-match counts as sold-evidence | ~1 day | Large slice of the verify queue closed with zero model calls |
 | 4 | Residual verification as a web-search batch (or Brave + judge at ~$140) | ~1 day | Replaces the 30–80 h CLI loop |
