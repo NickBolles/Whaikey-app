@@ -67,8 +67,9 @@ describe("verification queue: priority", () => {
     expect(reasonCodes).not.toContain("valid_upc");
   });
 
-  it("enforces the worker safety cap", async () => {
+  it("allows the explicit ten-worker throughput-test cap and rejects larger pools", async () => {
     const db = await setupTestDb();
+    await expect(createRun(db, { workers: MAX_WORKERS })).resolves.toMatchObject({ workers: MAX_WORKERS });
     await expect(createRun(db, { workers: MAX_WORKERS + 1 })).rejects.toThrow(/safety cap/);
   });
 });
@@ -89,7 +90,7 @@ describe("verification queue: snapshot", () => {
     expect(first).toEqual({ scanned: 2, enqueued: 2, skippedExisting: 0 });
 
     const second = await snapshotRun(db, run.id);
-    expect(second).toEqual({ scanned: 2, enqueued: 0, skippedExisting: 2 });
+    expect(second).toEqual({ scanned: 0, enqueued: 0, skippedExisting: 0 });
 
     const rows = await db.select().from(catalogVerificationWork);
     expect(rows).toHaveLength(2);
@@ -97,6 +98,19 @@ describe("verification queue: snapshot", () => {
     const eagleRow = rows.find((r) => r.bottleId === "b1")!;
     expect(eagleRow.reasonCodes).toContain("valid_upc");
     expect(eagleRow.reasonCodes).toContain("iowa_upc");
+  });
+
+  it("advances past existing queue rows to enqueue the next imported slice", async () => {
+    await createTestBottle(db, { id: "b1", status: "imported" });
+    await createTestBottle(db, { id: "b2", status: "imported" });
+    await createTestBottle(db, { id: "b3", status: "imported" });
+
+    const firstRun = await createRun(db, { limit: 2 });
+    expect(await snapshotRun(db, firstRun.id)).toEqual({ scanned: 2, enqueued: 2, skippedExisting: 0 });
+
+    const secondRun = await createRun(db, { limit: 2 });
+    expect(await snapshotRun(db, secondRun.id)).toEqual({ scanned: 1, enqueued: 1, skippedExisting: 0 });
+    expect((await db.select().from(catalogVerificationWork)).map((row) => row.bottleId).sort()).toEqual(["b1", "b2", "b3"]);
   });
 
   it("never enqueues verified or user_submitted bottles", async () => {
