@@ -19,6 +19,8 @@ export const WHISKY_EDITION_API_URL = "https://thewhiskyedition.com/api/whisky-r
 /** The subset of review fields the adapter reads. */
 export interface WhiskyEditionReview {
   name?: string;
+  /** Site-relative review path, e.g. "/whisky-reviews/<slug>". */
+  url?: string;
   metadata?: {
     country?: string | null;
     region?: string | null;
@@ -80,10 +82,18 @@ export function whiskyEditionReviewsToCandidates(
 
     const abv = review.metadata?.abv;
     const age = review.metadata?.age;
+    // A published review is sold-evidence: the bottle was bought and tasted.
+    const reviewUrl = review.url?.startsWith("/")
+      ? `https://thewhiskyedition.com${review.url}`
+      : review.url;
     bySlug.set(slug, {
       name,
       category,
       source: "whiskyedition",
+      retailEvidence: {
+        url: reviewUrl ?? WHISKY_EDITION_API_URL,
+        label: "WHISKY:EDITION review",
+      },
       region: review.metadata?.region ?? undefined,
       ageYears: typeof age === "number" && age >= 1 && age <= 60 ? Math.round(age) : null,
       abv: typeof abv === "number" && abv >= 20 && abv <= 80 ? abv : null,

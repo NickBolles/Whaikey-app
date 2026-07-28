@@ -111,7 +111,7 @@ BAXUS (hackathon API endpoint now 404s; no public API), EU e-label (no central r
 |---|---|---|---|
 | 1 | Dedupe/cluster the 25k + embedding propagation (`profileSource: "inferred"`) — ✅ ingest-time variant dedupe + auto-aliases + fill-if-null shipped (DATA_SOURCES.md §2.2b); embedding propagation for the existing backlog still open | ~1 day left | 30–50% of all model work disappears; ~$0.05 cost |
 | 2 | Port `enrich` to Message Batches (caching + structured outputs, offline tier) | ~1–2 days | 25k profiles ≈ $25–40, done in hours |
-| 3 | Verification triage: retail-source cross-match counts as sold-evidence | ~1 day | Large slice of the verify queue closed with zero model calls |
+| 3 | ✅ **Done** — retail triage at ingest: retail-listed candidates are born `verified` (or promote imported matches) with a cited evidence row; only COLA-derived rows still need the model queue | — | Large slice of the verify queue closed with zero model calls |
 | 4 | Residual verification as a web-search batch (or Brave + judge at ~$140) | ~1 day | Replaces the 30–80 h CLI loop |
 | 5 | ✅ **Done** — ingest adapters: Oregon, Utah, BC (`pnpm ingest oregon\|utah\|bc`) | — | Prices/proof corroboration + BC barcodes into scan; sold-evidence for triage |
 | 6 | Nordic sources: ✅ Systembolaget mirror (`pnpm ingest systembolaget`); ✅ Vinmonopolet (`pnpm ingest vinmonopolet` with `VINMONOPOLET_API_KEY` — the sanctioned API is names-only now, so it contributes name coverage + sold-evidence, not attributes); Alko's Excel is bot-blocked from datacenter IPs — fetch manually or from a residential runner | Alko left | European/Scotch coverage + numeric taste-clock flavor data |

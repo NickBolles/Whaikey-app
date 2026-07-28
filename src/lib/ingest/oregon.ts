@@ -113,6 +113,7 @@ export function oregonRowsToCandidates(rows: OregonRow[]): OregonAdapterResult {
           abv: proofToAbv(row.Proof),
           avgPrice: null,
           upcs: [],
+          retailEvidence: { url: OREGON_PRICING_URL, label: "Oregon OLCC monthly pricing" },
         },
         has750Price: false,
       };

@@ -206,5 +206,12 @@ export async function fetchUtahCandidates(
   if (!url) throw new Error("Utah product-list page had no Product-List .xlsx link");
   const res = await fetchImpl(url);
   if (!res.ok) throw new Error(`Utah workbook download failed: HTTP ${res.status} from ${url}`);
-  return utahRowsToCandidates(readXlsxRows(new Uint8Array(await res.arrayBuffer())));
+  const result = utahRowsToCandidates(readXlsxRows(new Uint8Array(await res.arrayBuffer())));
+  return {
+    ...result,
+    candidates: result.candidates.map((c) => ({
+      ...c,
+      retailEvidence: { url, label: "Utah DABS product list" },
+    })),
+  };
 }

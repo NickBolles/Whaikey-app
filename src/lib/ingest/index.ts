@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import type { DB } from "@/db";
-import { bottleAliases, bottles, bottleUpcs, pours, userBottles, UPC_SOURCES, type UpcSource } from "@/db/schema";
+import { bottleAliases, bottles, bottleUpcs, bottleVerifications, pours, userBottles, UPC_SOURCES, type UpcSource } from "@/db/schema";
 import { matchKey, slugify } from "./normalize";
 import type { CatalogCandidate, IngestReport } from "./types";
 
@@ -28,6 +28,7 @@ interface BottleAttrs {
   ageYears: number | null;
   avgPrice: number | null;
   region: string | null;
+  status: string;
 }
 
 /**
@@ -70,6 +71,7 @@ export async function ingestCandidates(
     upcsAdded: 0,
     aliasesAdded: 0,
     fieldsFilled: 0,
+    verifiedByRetail: 0,
     conflicts: [],
     dryRun: opts.dryRun ?? false,
   };
@@ -96,6 +98,7 @@ export async function ingestCandidates(
       ageYears: bottles.ageYears,
       avgPrice: bottles.avgPrice,
       region: bottles.region,
+      status: bottles.status,
     })
     .from(bottles);
   for (const b of bottleRows) {
@@ -103,7 +106,13 @@ export async function ingestCandidates(
     const nameSlug = slugify(b.name);
     if (nameSlug && !slugToBottle.has(nameSlug)) slugToBottle.set(nameSlug, b.id);
     registerKey(matchKey(b.name), b.id);
-    attrsByBottle.set(b.id, { abv: b.abv, ageYears: b.ageYears, avgPrice: b.avgPrice, region: b.region });
+    attrsByBottle.set(b.id, {
+      abv: b.abv,
+      ageYears: b.ageYears,
+      avgPrice: b.avgPrice,
+      region: b.region,
+      status: b.status,
+    });
   }
   for (const a of await db
     .select({ bottleId: bottleAliases.bottleId, alias: bottleAliases.alias })
@@ -146,7 +155,7 @@ export async function ingestCandidates(
 
       const stored = attrsByBottle.get(bottleId);
       if (stored) {
-        const fills: Partial<BottleAttrs> = {};
+        const fills: Partial<Omit<BottleAttrs, "status">> = {};
         const conflict = (field: string, candidateValue: unknown, storedValue: unknown): void => {
           report.conflicts.push(
             `${candidate.name} → ${bottleId}: ${field} ${String(candidateValue)} (${source}) vs ${String(storedValue)} (stored)`,
@@ -178,10 +187,35 @@ export async function ingestCandidates(
             await db.update(bottles).set(fills).where(eq(bottles.id, bottleId));
           }
         }
+
+        // Retail triage (docs/DATA_SOURCES.md §2.4b): appearing in a real
+        // retail listing is sold-evidence — promote imported bottles without
+        // a model call. Curated/user-submitted statuses are never touched.
+        if (stored.status === "imported" && candidate.retailEvidence) {
+          report.verifiedByRetail += 1;
+          stored.status = "verified";
+          if (!report.dryRun) {
+            await db
+              .insert(bottleVerifications)
+              .values({
+                id: `${bottleId}--retail-${candidate.source}`,
+                bottleId,
+                url: candidate.retailEvidence.url,
+                label: candidate.retailEvidence.label,
+                retrievedAt: new Date(),
+              })
+              .onConflictDoNothing();
+            await db.update(bottles).set({ status: "verified" }).where(eq(bottles.id, bottleId));
+          }
+        }
       }
     } else {
       bottleId = slug;
       report.inserted += 1;
+      // A candidate straight from a retail listing is born sold-verified;
+      // only evidence-less sources (COLA label approvals) start "imported".
+      const status = candidate.retailEvidence ? "verified" : "imported";
+      if (candidate.retailEvidence) report.verifiedByRetail += 1;
       slugToBottle.set(slug, bottleId);
       registerKey(matchKey(candidate.name), bottleId);
       attrsByBottle.set(bottleId, {
@@ -189,6 +223,7 @@ export async function ingestCandidates(
         ageYears: candidate.ageYears ?? null,
         avgPrice: candidate.avgPrice ?? null,
         region: candidate.region ?? null,
+        status,
       });
       if (!report.dryRun) {
         await db
@@ -201,9 +236,21 @@ export async function ingestCandidates(
             ageYears: candidate.ageYears ?? null,
             abv: candidate.abv ?? null,
             avgPrice: candidate.avgPrice ?? null,
-            status: "imported",
+            status,
           })
           .onConflictDoNothing();
+        if (candidate.retailEvidence) {
+          await db
+            .insert(bottleVerifications)
+            .values({
+              id: `${bottleId}--retail-${candidate.source}`,
+              bottleId,
+              url: candidate.retailEvidence.url,
+              label: candidate.retailEvidence.label,
+              retrievedAt: new Date(),
+            })
+            .onConflictDoNothing();
+        }
       }
     }
 

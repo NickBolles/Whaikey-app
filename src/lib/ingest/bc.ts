@@ -139,5 +139,12 @@ export async function fetchBcCandidates(
   if (!url) throw new Error("BC catalogue package contained no CSV resources");
   const res = await fetchImpl(url);
   if (!res.ok) throw new Error(`BC price list download failed: HTTP ${res.status} from ${url}`);
-  return bcRowsToCandidates(parseCsvRecords(await res.text()) as BcRow[]);
+  const result = bcRowsToCandidates(parseCsvRecords(await res.text()) as BcRow[]);
+  return {
+    ...result,
+    candidates: result.candidates.map((c) => ({
+      ...c,
+      retailEvidence: { url, label: "BC Liquor Distribution Branch price list" },
+    })),
+  };
 }

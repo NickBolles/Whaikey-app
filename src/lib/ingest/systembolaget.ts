@@ -108,6 +108,7 @@ export function systembolagetProductsToCandidates(
       abv: typeof abv === "number" && abv >= 20 && abv <= 80 ? abv : null,
       avgPrice: null,
       upcs: [],
+      retailEvidence: { url: SYSTEMBOLAGET_MIRROR_URL, label: "Systembolaget assortment (community mirror)" },
     });
   }
 

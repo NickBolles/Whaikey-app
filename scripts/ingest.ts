@@ -169,7 +169,8 @@ function printReport(
     `[${report.source}]${report.dryRun ? " (dry run)" : ""} scanned ${report.scanned} rows → ` +
       `${report.candidates} candidates: ${report.matchedExisting} matched existing ` +
       `(${report.aliasesAdded} new aliases, ${report.fieldsFilled} null fields filled), ` +
-      `${report.inserted} new bottles, ${report.upcsAdded} new barcodes. ` +
+      `${report.inserted} new bottles, ${report.upcsAdded} new barcodes, ` +
+      `${report.verifiedByRetail} retail-verified. ` +
       `Catalog: ${before} → ${after} bottles.`,
   );
   if (report.conflicts.length > 0) {

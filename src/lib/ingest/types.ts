@@ -19,6 +19,14 @@ export interface CatalogCandidate {
   avgPrice?: number | null;
   /** Normalized, check-digit-valid GTINs. */
   upcs?: string[];
+  /**
+   * Present when this candidate comes from a real retail listing (state price
+   * list, monopoly assortment, published review) — evidence the product
+   * actually shipped, used to promote imported bottles to "verified" without
+   * a model call (docs/DATA_SOURCES.md §2.4b triage). TTB COLA candidates
+   * never carry this: a label approval is not proof of sale.
+   */
+  retailEvidence?: { url: string; label: string };
 }
 
 export interface IngestReport {
@@ -37,6 +45,8 @@ export interface IngestReport {
   aliasesAdded: number;
   /** Null attributes (abv/ageYears/avgPrice/region) filled on matched bottles. */
   fieldsFilled: number;
+  /** Imported bottles promoted to "verified" on retail-listing evidence (no model call). */
+  verifiedByRetail: number;
   /** Human-readable disagreements between a candidate and stored values (nothing was overwritten). */
   conflicts: string[];
   /** True when the run made no writes. */

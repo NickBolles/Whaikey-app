@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import type { DB } from "@/db";
-import { bottleAliases, bottles, bottleUpcs, pours, userBottles } from "@/db/schema";
+import { bottleAliases, bottles, bottleUpcs, bottleVerifications, pours, userBottles } from "@/db/schema";
 import { createTestBottle, createTestUser, setupTestDb, uid } from "@/test/helpers";
 import { ingestCandidates, pruneImportedBottles } from "./index";
 import type { CatalogCandidate } from "./types";
@@ -194,6 +194,94 @@ describe("ingestCandidates", () => {
     expect(report).toMatchObject({ inserted: 1, upcsAdded: 1, dryRun: true });
     expect(await db.select().from(bottles)).toHaveLength(0);
     expect(await db.select().from(bottleUpcs)).toHaveLength(0);
+  });
+
+  it("promotes imported bottles to verified on retail-listing evidence", async () => {
+    await createTestBottle(db, { id: "cola-only-bourbon", name: "Cola Only Bourbon", status: "imported" });
+
+    const report = await ingestCandidates(db, "oregon", [
+      candidate({
+        name: "Cola Only Bourbon",
+        source: "oregon",
+        retailEvidence: { url: "https://data.oregon.gov/export.csv", label: "Oregon OLCC monthly pricing" },
+      }),
+    ]);
+    expect(report).toMatchObject({ matchedExisting: 1, verifiedByRetail: 1 });
+
+    const [after] = await db.select().from(bottles).where(eq(bottles.id, "cola-only-bourbon"));
+    expect(after.status).toBe("verified");
+    const evidence = await db.select().from(bottleVerifications);
+    expect(evidence).toHaveLength(1);
+    expect(evidence[0]).toMatchObject({
+      bottleId: "cola-only-bourbon",
+      url: "https://data.oregon.gov/export.csv",
+      label: "Oregon OLCC monthly pricing",
+    });
+
+    // Re-run: already verified, nothing re-promoted or duplicated.
+    const rerun = await ingestCandidates(db, "oregon", [
+      candidate({
+        name: "Cola Only Bourbon",
+        source: "oregon",
+        retailEvidence: { url: "https://data.oregon.gov/export.csv", label: "Oregon OLCC monthly pricing" },
+      }),
+    ]);
+    expect(rerun.verifiedByRetail).toBe(0);
+    expect(await db.select().from(bottleVerifications)).toHaveLength(1);
+  });
+
+  it("inserts retail-evidenced candidates as verified, evidence-less ones as imported", async () => {
+    const report = await ingestCandidates(db, "bc", [
+      candidate({
+        name: "Fresh Retail Rye",
+        category: "rye",
+        source: "bc",
+        retailEvidence: { url: "https://catalogue.data.gov.bc.ca/latest.csv", label: "BC price list" },
+      }),
+      candidate({ name: "Label Approval Only", source: "cola" }),
+    ]);
+    expect(report).toMatchObject({ inserted: 2, verifiedByRetail: 1 });
+
+    const [retail] = await db.select().from(bottles).where(eq(bottles.id, "fresh-retail-rye"));
+    expect(retail.status).toBe("verified");
+    const [labelOnly] = await db.select().from(bottles).where(eq(bottles.id, "label-approval-only"));
+    expect(labelOnly.status).toBe("imported");
+    expect(await db.select().from(bottleVerifications)).toHaveLength(1);
+  });
+
+  it("never touches curated or user-submitted statuses", async () => {
+    await createTestBottle(db, { id: "user-sub", name: "User Sub Bourbon", status: "user_submitted" });
+    const report = await ingestCandidates(db, "oregon", [
+      candidate({
+        name: "User Sub Bourbon",
+        source: "oregon",
+        retailEvidence: { url: "https://data.oregon.gov/export.csv", label: "Oregon" },
+      }),
+    ]);
+    expect(report.verifiedByRetail).toBe(0);
+    const [after] = await db.select().from(bottles).where(eq(bottles.id, "user-sub"));
+    expect(after.status).toBe("user_submitted");
+    expect(await db.select().from(bottleVerifications)).toHaveLength(0);
+  });
+
+  it("dry run previews retail promotion without writing", async () => {
+    await createTestBottle(db, { id: "dry-imported", name: "Dry Imported Rye", status: "imported" });
+    const report = await ingestCandidates(
+      db,
+      "oregon",
+      [
+        candidate({
+          name: "Dry Imported Rye",
+          source: "oregon",
+          retailEvidence: { url: "https://data.oregon.gov/export.csv", label: "Oregon" },
+        }),
+      ],
+      { dryRun: true },
+    );
+    expect(report.verifiedByRetail).toBe(1);
+    const [after] = await db.select().from(bottles).where(eq(bottles.id, "dry-imported"));
+    expect(after.status).toBe("imported");
+    expect(await db.select().from(bottleVerifications)).toHaveLength(0);
   });
 
   it("dry run previews aliases and fills without writing them", async () => {

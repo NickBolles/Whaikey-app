@@ -146,6 +146,7 @@ export function iowaRowsToCandidates(rows: IowaProductRow[]): IowaAdapterResult 
           abv: proofToAbv(row.proof),
           avgPrice: null,
           upcs: [],
+          retailEvidence: { url: IOWA_PRODUCTS_URL, label: "Iowa Liquor Products dataset" },
         },
         has750Price: false,
         upcs: new Set(),

@@ -88,6 +88,7 @@ export function vinmonopoletProductsToCandidates(
       name,
       category,
       source: "vinmonopolet",
+      retailEvidence: { url: VINMONOPOLET_PRODUCTS_URL, label: "Vinmonopolet products API" },
       ageYears: (() => {
         const m = name.match(/\b(\d{1,2})\s*(?:yo|years?|års?)\b/i);
         const years = m ? Number(m[1]) : NaN;
