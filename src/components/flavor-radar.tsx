@@ -25,6 +25,13 @@ export function radarLabel(wedgeId: string, fallback: string): string {
 /**
  * Pure-SVG radar (octagon) of the 8 flavor-wheel wedge scores. No chart
  * library; safe to render from server components.
+ *
+ * Scope: ONE bottle's catalog profile, where a compact shape is easier to read
+ * at a glance than a full wheel. Anything describing a *set* — a shelf, or the
+ * user's own palate — belongs on the flavor wheel instead, so the app has a
+ * single visual language for "where does this collection of flavors lean".
+ * A palate radar used to sit beside the Bar's wheel drawing the same 8 wedges
+ * a second way; don't reintroduce one.
  */
 export function FlavorRadar({ profile, size = 300 }: FlavorRadarProps) {
   const wedges = FLAVOR_WHEEL;

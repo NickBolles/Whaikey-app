@@ -4,6 +4,7 @@ import { getDb } from "@/db";
 import { getSessionUser } from "@/lib/session";
 import { FLAVOR_HEAT_SCOPES, getBarFlavorHeat, listUserBottles } from "@/lib/bar";
 import { getUserPalate } from "@/lib/palate-store";
+import { palateHeat, topWedges } from "@/lib/palate";
 import { BarClient, type FlavorHeatMatrix } from "./bar-client";
 
 export const dynamic = "force-dynamic";
@@ -48,6 +49,18 @@ export default async function BarPage() {
     loadFlavorHeat(db, user.id),
     getUserPalate(db, user.id),
   ]);
-  return <BarClient initialRows={rows} flavorHeat={flavorHeat} palate={palate} />;
-
+  return (
+    <BarClient
+      initialRows={rows}
+      flavorHeat={flavorHeat}
+      palate={{
+        // The palate reaches the client already in wheel-heat form: it is one
+        // more way to light the same wheel, not a second kind of chart.
+        wedges: palateHeat(palate.vector),
+        leaves: palateHeat(palate.leaves),
+        topWedgeIds: topWedges(palate.vector, 3),
+        sampleSize: palate.sampleSize,
+      }}
+    />
+  );
 }
