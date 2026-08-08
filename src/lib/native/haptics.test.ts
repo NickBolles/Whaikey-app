@@ -12,7 +12,7 @@ afterEach(() => {
 
 function stubVibrate() {
   // Typed parameter so `mock.calls` stays inspectable rather than a `[]` tuple.
-  const vibrate = vi.fn((_pattern: number | number[]) => true);
+  const vibrate = vi.fn((pattern: number | number[]) => pattern !== undefined);
   Object.defineProperty(navigator, "vibrate", { value: vibrate, configurable: true });
   return vibrate;
 }

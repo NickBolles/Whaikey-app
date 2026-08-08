@@ -284,21 +284,31 @@ throughout the scan flow. Full unit coverage.
 **Exit:** `pnpm typecheck && pnpm lint && pnpm test && pnpm build` green; every native
 module no-ops correctly under jsdom.
 
-### Phase 2 — It runs on a device
-`cap add ios` / `cap add android`, committed platform projects; native auth exchange
-(§2.3) + Sign in with Apple; deep links / Universal Links / App Links; `minShellVersion`
-manifest check; app icons and splash generated; permission strings.
-**Exit:** signed builds install and complete sign-in → scan → pour on both platforms.
+### Phase 2 — It runs on a device ✅ (implemented)
+Committed `ios/` and `android/` projects; permission strings, export-compliance flag,
+`whaikey://` scheme, associated-domains entitlement, App Links intent filter with an
+env-driven host, and the `/.well-known/` verification files both platforms fetch;
+Whaikey icon and splash art generated for every density; native auth exchange (§2.3).
+**Exit:** `./gradlew assembleDebug` produces an APK with the deep links, permissions,
+and MLKit components merged in — verified. Signed builds and the device smoke list
+still need real credentials and hardware.
 
-### Phase 3 — Offline + engagement
-Offline pour queue with reconnect flush and a visible pending-sync state; push
-notification registration + token storage + the first two notification types;
-share-a-note-card; app shortcuts.
+### Phase 3 — Offline + engagement ✅ (partly implemented)
+Done: offline pour queue with durable storage, ordered flush on reconnect and resume,
+and a visible "saved on your phone" state; push registration + token storage endpoint.
+Remaining: sending the first notification types (needs FCM/APNs credentials), a
+share-a-note-card surface, app shortcuts, and an idempotency key on `/api/pours` so a
+flush whose response is lost cannot double-log.
 **Exit:** log a pour in airplane mode, reconnect, see it sync.
 
-### Phase 4 — Store launch
-TestFlight → closed testing → production, per [APP_STORE_SETUP.md](./APP_STORE_SETUP.md).
-Widgets, IAP via RevenueCat, Sentry/PostHog native SDKs, crash-free-rate monitoring.
+### Phase 4 — Store launch (CI ready, credentials pending)
+Done: `.github/workflows/native-release.yml` ships to TestFlight and the Play internal
+track via Fastlane, with run-number versioning, env-only signing material, and a
+preflight that names any missing secret. CI compiles Android on every PR and iOS on
+every push to main.
+Remaining (all human/account work — [APP_STORE_SETUP.md](./APP_STORE_SETUP.md)):
+enrolment, store records, the secrets in §12, screenshots, closed testing. Then
+widgets, IAP via RevenueCat, and Sentry/PostHog native SDKs.
 **Exit:** live on both stores.
 
 ### Phase 5 — Optional local-first
@@ -374,8 +384,10 @@ and equivalent (Google) should be done early — they're free and one-time.
 2. **Bundle ID.** Proposed `com.whaikey.app` — depends on the name question in PLAN.md §7.3.
 3. **Android minSdk.** Capacitor 8 defaults to 23; MLKit wants 21+. Default is fine
    unless there's a reason to go lower.
-4. **iPad support?** The layout is `max-w-2xl` and mobile-first. Shipping iPhone-only is
-   defensible for v1 and removes an entire screenshot set from the store submission.
+4. ~~**iPad support?**~~ **Decided: iPhone-only for v1.** `TARGETED_DEVICE_FAMILY = 1`
+   in the Xcode project. The layout is `max-w-2xl` and mobile-first, and this removes an
+   entire screenshot set plus the obligation to make the app work on a 13" canvas.
+   Reversing it is a one-line change back to `"1,2"` plus iPad screenshots.
 5. **Push provider.** Firebase Cloud Messaging covers both platforms via Capacitor's
    plugin; confirm before Phase 3 that adding Firebase is acceptable alongside the
    existing stack.

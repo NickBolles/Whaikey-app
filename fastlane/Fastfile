@@ -1,0 +1,129 @@
+# Store delivery for the Capacitor shell (docs/NATIVE_APP.md §4 Phase 4,
+# docs/APP_STORE_SETUP.md §12).
+#
+# Design rules:
+#   * No credential is ever committed. Every secret arrives as an environment
+#     variable and is written to a temp file by the workflow, never by a lane.
+#   * Apple auth uses an App Store Connect API key, not an Apple ID — CI cannot
+#     answer a 2FA prompt, and an API key has no session to expire.
+#   * Versioning is derived from the workflow run, so two uploads can never
+#     collide on a build number, which both stores reject outright.
+
+default_platform(:ios)
+
+# The web assets and native config have to be in sync before either platform
+# builds, or the shell ships pointing at the wrong origin.
+def sync_native
+  sh("cd .. && pnpm native:check --release && pnpm native:sync")
+end
+
+# --- iOS ---------------------------------------------------------------------
+
+platform :ios do
+  desc "Build and upload to TestFlight"
+  lane :beta do
+    sync_native
+
+    api_key = app_store_connect_api_key(
+      key_id: ENV.fetch("APP_STORE_CONNECT_KEY_ID"),
+      issuer_id: ENV.fetch("APP_STORE_CONNECT_ISSUER_ID"),
+      key_content: ENV.fetch("APP_STORE_CONNECT_KEY_P8"),
+      is_key_content_base64: true,
+      in_house: false,
+    )
+
+    # A dedicated keychain keeps the runner's default keychain untouched and is
+    # discarded with the ephemeral VM.
+    create_keychain(
+      name: "whaikey_ci",
+      password: ENV.fetch("KEYCHAIN_PASSWORD"),
+      default_keychain: true,
+      unlock: true,
+      timeout: 3600,
+      lock_when_sleeps: false,
+    )
+    import_certificate(
+      certificate_path: ENV.fetch("IOS_CERTIFICATE_PATH"),
+      certificate_password: ENV.fetch("IOS_CERTIFICATE_PASSWORD"),
+      keychain_name: "whaikey_ci",
+      keychain_password: ENV.fetch("KEYCHAIN_PASSWORD"),
+    )
+    install_provisioning_profile(path: ENV.fetch("IOS_PROVISIONING_PROFILE_PATH"))
+
+    # TestFlight rejects a build number it has seen before, so take the
+    # monotonic run number rather than anything derived from the working tree.
+    increment_build_number(
+      xcodeproj: "ios/App/App.xcodeproj",
+      build_number: ENV.fetch("BUILD_NUMBER"),
+    )
+    if ENV["MARKETING_VERSION"]
+      increment_version_number(
+        xcodeproj: "ios/App/App.xcodeproj",
+        version_number: ENV.fetch("MARKETING_VERSION"),
+      )
+    end
+
+    build_app(
+      project: "ios/App/App.xcodeproj",
+      scheme: "App",
+      configuration: "Release",
+      export_method: "app-store",
+      output_directory: "build/ios",
+      clean: true,
+    )
+
+    upload_to_testflight(
+      api_key: api_key,
+      # Beta App Review is a human step; the lane's job ends at a processed build.
+      skip_waiting_for_build_processing: true,
+      distribute_external: false,
+    )
+  end
+
+  desc "Compile only — no signing, no upload. Used as a PR check."
+  lane :verify do
+    sync_native
+    build_app(
+      project: "ios/App/App.xcodeproj",
+      scheme: "App",
+      configuration: "Debug",
+      skip_package_ipa: true,
+      skip_archive: true,
+      skip_codesigning: true,
+      destination: "generic/platform=iOS Simulator",
+    )
+  end
+end
+
+# --- Android -----------------------------------------------------------------
+
+platform :android do
+  desc "Build an AAB and upload to the Play internal track"
+  lane :beta do
+    sync_native
+
+    gradle(
+      project_dir: "android",
+      task: "clean bundle",
+      build_type: "Release",
+      # Signing config and version come from the environment (android/app/build.gradle).
+      print_command: false,
+    )
+
+    upload_to_play_store(
+      track: "internal",
+      aab: "android/app/build/outputs/bundle/release/app-release.aab",
+      # A first upload has no prior release to compare against, and Play refuses
+      # release notes for a track the app has never been on.
+      skip_upload_metadata: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true,
+      release_status: "draft",
+    )
+  end
+
+  desc "Assemble a debug APK — no signing, no upload. Used as a PR check."
+  lane :verify do
+    gradle(project_dir: "android", task: "assemble", build_type: "Debug", print_command: false)
+  end
+end

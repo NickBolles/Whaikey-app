@@ -71,14 +71,19 @@ export function onBackButton(handler: (canGoBack: boolean) => void): Unsubscribe
   });
 }
 
-/** Fires when a deep link opens the app, with the resolved in-app path. */
-export function onDeepLink(handler: (path: string) => void): Unsubscribe {
+/**
+ * Fires when a deep link opens the app, with the resolved in-app path and the
+ * raw URL. The raw URL is passed through because the sign-in callback carries an
+ * exchange code that needs handling before any routing happens
+ * (docs/NATIVE_APP.md §2.3).
+ */
+export function onDeepLink(handler: (path: string, rawUrl: string) => void): Unsubscribe {
   return listen(async () => {
     const plugin = await loadPlugin(() => import("@capacitor/app"));
     if (!plugin) return null;
     return plugin.App.addListener("appUrlOpen", ({ url }) => {
       const path = deepLinkPath(url);
-      if (path) handler(path);
+      if (path) handler(path, url);
     });
   });
 }

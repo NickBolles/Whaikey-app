@@ -104,8 +104,12 @@ In Xcode: select the `App` target → Signing & Capabilities → your Team → c
 capabilities from §3.2 are present → set the version and build number → Product ▸
 Archive → Distribute App ▸ App Store Connect ▸ Upload.
 
-### 4.2 Info.plist permission strings (required — the app is rejected without them)
-Set these in the iOS project before archiving:
+### 4.2 Info.plist permission strings — already set
+`ios/App/App/Info.plist` already carries these, along with
+`ITSAppUsesNonExemptEncryption = false` (so §5.2's export-compliance prompt never
+appears) and the `whaikey://` URL scheme. `ios/App/App/App.entitlements` carries
+associated domains and the APNs environment. Listed here so you can verify them, and so
+a new permission is added with the same care:
 
 | Key | String |
 |---|---|
@@ -302,14 +306,63 @@ sell more than the description does.
 
 ---
 
-## 12. Automation (optional, Phase 4+)
+## 12. Automation — already wired
 
-- **Fastlane** (`deliver` / `supply`) scripts metadata, screenshots, and uploads for both
-  stores from CI. Worth it by the third release.
-- **Xcode Cloud** or **Codemagic** for macOS build agents if no Mac is available.
-- Store all signing material (`.p8`, keystore, App Store Connect API key) in the CI
-  secret store. **Never commit them** — the repo's `.gitignore` covers the generated
-  platform directories, but keys must never reach a working tree in the first place.
+The pipeline exists; it needs credentials, not code.
+
+- **`.github/workflows/ci.yml`** builds the Android project on every PR
+  (`assembleDebug`) and compiles iOS on every push to `main`. No secrets involved.
+- **`.github/workflows/native-release.yml`** is manual (`workflow_dispatch`) and ships
+  to **TestFlight** and the **Play internal track** through the lanes in
+  `fastlane/Fastfile`. Pick a platform, optionally set a marketing version, run it.
+  Each job fails fast with a named list of any missing secret.
+- Versioning is automatic: `github.run_number` becomes the iOS build number and the
+  Android `versionCode`, so two uploads can never collide — which both stores reject.
+
+### 12.1 Secrets to configure
+
+Repository → Settings → Secrets and variables → Actions. Everything below is read from
+the environment; **nothing is ever committed**.
+
+| Secret | Where it comes from |
+|---|---|
+| `APPLE_TEAM_ID` | Apple Developer → Membership |
+| `APP_STORE_CONNECT_KEY_ID` | App Store Connect → Users and Access → Integrations → App Store Connect API |
+| `APP_STORE_CONNECT_ISSUER_ID` | Same page (one issuer ID per account) |
+| `APP_STORE_CONNECT_KEY_P8` | The downloaded `.p8`, **base64-encoded**. Downloadable once only. |
+| `IOS_CERTIFICATE_P12` | Distribution certificate + private key exported from Keychain, base64-encoded |
+| `IOS_CERTIFICATE_PASSWORD` | The password you set on that `.p12` export |
+| `IOS_PROVISIONING_PROFILE` | App Store provisioning profile, base64-encoded |
+| `ANDROID_KEYSTORE_BASE64` | Your **upload** keystore, base64-encoded |
+| `ANDROID_KEYSTORE_PASSWORD` / `ANDROID_KEY_ALIAS` / `ANDROID_KEY_PASSWORD` | Set when the keystore was created |
+| `PLAY_SERVICE_ACCOUNT_JSON` | Play Console → Setup → API access → service account with "Release manager" |
+
+And one **variable** (not secret): `APP_LINK_HOST` — the domain for Universal Links and
+App Links, e.g. `app.whaikey.com`.
+
+Base64 on macOS/Linux: `base64 -i file -o file.txt` (macOS) or `base64 -w0 file` (Linux).
+
+### 12.2 Prerequisites the pipeline assumes
+
+1. The app records from §3 and §9 already exist — Fastlane uploads to them, it doesn't
+   create them.
+2. The Apple **Agreements, Tax, and Banking** section is complete (§2.5); TestFlight
+   uploads fail without it.
+3. Play App Signing is enrolled and the **upload** key is what you put in the secret
+   (§4.3). Confusing the upload key with the app signing key is the most common failure.
+4. `APP_LINK_HOST` resolves to the deployment serving `/.well-known/apple-app-site-association`
+   and `/.well-known/assetlinks.json`. Those routes exist and are driven by the
+   `APPLE_TEAM_ID` and `ANDROID_CERT_FINGERPRINTS` environment variables on the **web
+   deployment** — they 404 until set, which leaves links unverified (falling back to the
+   browser) rather than broken.
+
+### 12.3 Upgrades worth making later
+
+- **Fastlane `match`** for certificate management once more than one person builds — the
+  base64-`.p12` approach here is the simplest thing that works for a solo setup.
+- **`deliver` / `supply` metadata** to script store listings and screenshots. Worth it by
+  the third release.
+- **Xcode Cloud** or **Codemagic** if GitHub's macOS minutes become the bottleneck.
 
 ---
 

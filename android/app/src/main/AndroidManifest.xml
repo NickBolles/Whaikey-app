@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/AppTheme">
+
+        <activity
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
+            android:name=".MainActivity"
+            android:label="@string/title_activity_main"
+            android:theme="@style/AppTheme.NoActionBarLaunch"
+            android:launchMode="singleTask"
+            android:exported="true">
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!--
+              Custom scheme. This is what the native sign-in flow returns to after
+              OAuth completes in the system browser (docs/NATIVE_APP.md §2.3), and
+              it always resolves to this app regardless of domain verification.
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="whaikey" />
+            </intent-filter>
+
+            <!--
+              App Links: https://<host>/* opens the app instead of the browser, so
+              a shared bottle link lands on the bottle page. autoVerify requires
+              /.well-known/assetlinks.json to be served from that host — the app
+              falls back to the browser until it verifies, so this is safe to ship
+              before the file is live. Host comes from the appLinkHost manifest
+              placeholder in build.gradle.
+            -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="${appLinkHost}" />
+            </intent-filter>
+
+        </activity>
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths"></meta-data>
+        </provider>
+
+        <!--
+          Download the MLKit barcode model through Google Play services on first
+          run rather than bundling it, which keeps the APK small
+          (docs/NATIVE_APP.md §6.2). The scanner installs it on demand too; this
+          just lets Play get a head start.
+        -->
+        <meta-data
+            android:name="com.google.mlkit.vision.DEPENDENCIES"
+            android:value="barcode_ui" />
+    </application>
+
+    <!-- Permissions -->
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Barcode scanning and label capture. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <!-- Haptic feedback on scan lock-on, ratings, and saves. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Offline pour queue: only flush when there is a connection to flush to. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Runtime notification permission, required from Android 13 (API 33). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!--
+      The camera is central to the core loop but not required to use the app —
+      you can search, type a barcode, and log pours without one. Declaring it
+      optional keeps Whaikey installable on camera-less devices.
+    -->
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+</manifest>

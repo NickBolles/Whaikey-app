@@ -1,0 +1,185 @@
+name: Native release
+
+# Ships the Capacitor shell to TestFlight and the Play internal track
+# (docs/NATIVE_APP.md §4 Phase 4, docs/APP_STORE_SETUP.md §12).
+#
+# Always manual. Native releases cost real store review cycles and burn build
+# numbers that can never be reused, so they are never triggered by a push.
+#
+# Nothing here runs without the secrets listed in APP_STORE_SETUP.md §12 — each
+# job is skipped when its platform's credentials are absent, so a repo with only
+# Android set up still gets Android releases.
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Which store to ship to
+        type: choice
+        options: [both, ios, android]
+        default: both
+      marketing_version:
+        description: 'User-visible version (e.g. 0.2.0). Leave blank to keep the current one.'
+        type: string
+        required: false
+      server_url:
+        description: Origin the shell loads
+        type: string
+        default: https://app.whaikey.com
+
+concurrency:
+  # Two releases in flight would race on build numbers.
+  group: native-release
+  cancel-in-progress: false
+
+jobs:
+  ios:
+    name: TestFlight
+    if: inputs.platform == 'both' || inputs.platform == 'ios'
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      CAP_SERVER_URL: ${{ inputs.server_url }}
+      APP_LINK_HOST: ${{ vars.APP_LINK_HOST }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+      APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+      APP_STORE_CONNECT_KEY_P8: ${{ secrets.APP_STORE_CONNECT_KEY_P8 }}
+      IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+      MARKETING_VERSION: ${{ inputs.marketing_version }}
+      # github.run_number is monotonic per workflow, which is exactly the
+      # guarantee App Store Connect needs from a build number.
+      BUILD_NUMBER: ${{ github.run_number }}
+      # Non-interactive fastlane: no prompts on a runner nobody is watching.
+      FASTLANE_SKIP_UPDATE_CHECK: "1"
+      FASTLANE_HIDE_CHANGELOG: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check credentials are present
+        run: |
+          missing=""
+          for key in APP_STORE_CONNECT_KEY_ID APP_STORE_CONNECT_ISSUER_ID \
+                     APP_STORE_CONNECT_KEY_P8 IOS_CERTIFICATE_PASSWORD; do
+            [ -z "${!key}" ] && missing="$missing $key"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing iOS release secrets:$missing"
+            echo "See docs/APP_STORE_SETUP.md §12."
+            exit 1
+          fi
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # Signing material lives on disk only for the length of this job, on an
+      # ephemeral runner that is destroyed afterwards.
+      - name: Materialise signing assets
+        run: |
+          mkdir -p "$RUNNER_TEMP/signing"
+          echo "${{ secrets.IOS_CERTIFICATE_P12 }}" | base64 --decode \
+            > "$RUNNER_TEMP/signing/certificate.p12"
+          echo "${{ secrets.IOS_PROVISIONING_PROFILE }}" | base64 --decode \
+            > "$RUNNER_TEMP/signing/profile.mobileprovision"
+          echo "IOS_CERTIFICATE_PATH=$RUNNER_TEMP/signing/certificate.p12" >> "$GITHUB_ENV"
+          echo "IOS_PROVISIONING_PROFILE_PATH=$RUNNER_TEMP/signing/profile.mobileprovision" >> "$GITHUB_ENV"
+          # Throwaway keychain password — the keychain does not outlive the job.
+          echo "KEYCHAIN_PASSWORD=$(openssl rand -base64 24)" >> "$GITHUB_ENV"
+
+      - name: Build and upload to TestFlight
+        run: fastlane ios beta   # preinstalled on GitHub's macOS images
+        env:
+          LANG: en_US.UTF-8
+          LC_ALL: en_US.UTF-8
+
+      - name: Remove signing material
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/signing"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-build-logs
+          path: |
+            build/ios
+            ~/Library/Logs/gym
+          retention-days: 7
+          if-no-files-found: ignore
+
+  android:
+    name: Play (internal)
+    if: inputs.platform == 'both' || inputs.platform == 'android'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CAP_SERVER_URL: ${{ inputs.server_url }}
+      APP_LINK_HOST: ${{ vars.APP_LINK_HOST }}
+      ANDROID_VERSION_CODE: ${{ github.run_number }}
+      ANDROID_VERSION_NAME: ${{ inputs.marketing_version }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      FASTLANE_SKIP_UPDATE_CHECK: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check credentials are present
+        run: |
+          missing=""
+          for key in ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            [ -z "${!key}" ] && missing="$missing $key"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing Android release secrets:$missing"
+            echo "See docs/APP_STORE_SETUP.md §12."
+            exit 1
+          fi
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: false
+      - run: pnpm install --frozen-lockfile
+      - run: gem install fastlane --no-document
+
+      # The upload keystore and the Play service-account key exist on disk only
+      # for this job. Losing the keystore is unrecoverable (APP_STORE_SETUP §4.3),
+      # so the copy of record lives in the secret store, never in the repo.
+      - name: Materialise signing assets
+        run: |
+          mkdir -p "$RUNNER_TEMP/signing"
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode \
+            > "$RUNNER_TEMP/signing/upload.keystore"
+          echo '${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}' \
+            > "$RUNNER_TEMP/signing/play-service-account.json"
+          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/signing/upload.keystore" >> "$GITHUB_ENV"
+          echo "PLAY_SERVICE_ACCOUNT_JSON_PATH=$RUNNER_TEMP/signing/play-service-account.json" >> "$GITHUB_ENV"
+
+      - name: Build and upload to Play
+        run: fastlane android beta
+
+      - name: Remove signing material
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/signing"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-aab
+          path: android/app/build/outputs/bundle/release/*.aab
+          retention-days: 7
+          if-no-files-found: ignore

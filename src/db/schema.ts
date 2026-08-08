@@ -569,6 +569,62 @@ export const catalogVerificationAttempts = pgTable(
   ],
 );
 
+// ---------------------------------------------------------------------------
+// Native app
+// ---------------------------------------------------------------------------
+
+/**
+ * Single-use codes that hand a session from the system browser into the app's
+ * WebView (docs/NATIVE_APP.md §2.3). Google refuses OAuth inside embedded
+ * WebViews, so sign-in runs in the real browser — but that browser's cookie jar
+ * is not the WebView's, so the resulting session has to be carried across.
+ *
+ * `codeHash` is a SHA-256 of the code, never the code itself: these rows are
+ * short-lived bearer credentials, and a database leak must not yield usable
+ * ones. `sessionCookie` holds the raw signed cookie value so the exchange can
+ * reproduce it verbatim rather than minting a second session.
+ */
+export const nativeAuthCodes = pgTable(
+  "native_auth_codes",
+  {
+    id: id(),
+    codeHash: text("code_hash").notNull().unique(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    sessionCookieName: text("session_cookie_name").notNull(),
+    sessionCookie: text("session_cookie").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }).notNull(),
+    /** Set the moment a code is redeemed; a second attempt must find it non-null. */
+    usedAt: timestamp("used_at", { withTimezone: true, mode: "date" }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("native_auth_codes_expires_idx").on(t.expiresAt)],
+);
+
+/**
+ * Push notification registrations. One row per device install; the same user can
+ * have several, and a token can migrate between users on a shared device, so
+ * `token` is unique on its own and re-registration reassigns it.
+ */
+export const pushDevices = pgTable(
+  "push_devices",
+  {
+    id: id(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    token: text("token").notNull().unique(),
+    platform: text("platform").$type<"ios" | "android">().notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("push_devices_user_idx").on(t.userId)],
+);
+
+export type NativeAuthCode = typeof nativeAuthCodes.$inferSelect;
+export type PushDevice = typeof pushDevices.$inferSelect;
+
 export type VerificationRun = typeof catalogVerificationRuns.$inferSelect;
 export type NewVerificationRun = typeof catalogVerificationRuns.$inferInsert;
 export type VerificationWork = typeof catalogVerificationWork.$inferSelect;
