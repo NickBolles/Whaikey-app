@@ -11,6 +11,16 @@ import { signIn } from "./fixtures";
 async function settle(page: Page) {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.waitForLoadState("networkidle");
+  // The recommendation rails fetch after hydration, so networkidle can be
+  // reached while they are still showing "Finding bottles…". A baseline
+  // captured mid-fetch is ~400px shorter than the settled page and fails
+  // wherever the fetch wins the race — which is how CI renders it. Resolves
+  // immediately on pages that have no rails.
+  await page
+    .getByText("Finding bottles…")
+    .first()
+    .waitFor({ state: "detached", timeout: 15_000 });
+  await page.waitForLoadState("networkidle");
   await page.evaluate(() => document.fonts.ready);
   // Sticky bars get painted at scroll seams in fullPage captures — pin them
   // into normal flow for screenshots so they appear once, at the page end.
@@ -93,6 +103,10 @@ test.describe("signed out", () => {
 });
 
 test.describe("signed in (demo collector)", () => {
+  // CI runners are UTC; pinning it here means a contributor in another zone
+  // renders the same time-dependent copy rather than a spurious diff.
+  test.use({ timezoneId: "UTC" });
+
   test.beforeEach(async ({ context, baseURL }) => {
     await signIn(context, baseURL!);
   });
@@ -106,13 +120,14 @@ test.describe("signed in (demo collector)", () => {
   });
 
   test("my bar", async ({ page }) => {
+    // The "tonight" rail picks its heading and detail line from the current
+    // hour, and those two strings wrap differently — enough to reflow this
+    // full-page shot by ~20px. Pin the clock (with the UTC timezone set on the
+    // describe) so the baseline is about the layout, not the hour CI ran at.
+    await page.clock.setFixedTime(new Date("2026-07-19T19:30:00Z"));
     await page.goto("/bar");
     await expect(page.getByText(/Eagle Rare/i).first()).toBeVisible();
-    await expect(
-      page.getByRole("heading", {
-        name: /For later today|This afternoon’s selection|Tonight’s pour|Tonight’s selection/,
-      }),
-    ).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Tonight’s pour" })).toBeVisible();
     await settle(page);
     await expect(page).toHaveScreenshot(shot("bar-own"), { fullPage: true });
   });
