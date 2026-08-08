@@ -1,7 +1,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { FLAVOR_WHEEL, isValidLeaf } from "@/lib/flavor-wheel";
 import { SERVING_STYLES, type ServingStyle } from "@/db/schema";
-import { fastModel, getAnthropic } from "./client";
+import { aiSupportsPromptCaching, fastModel, getAnthropic } from "./client";
 import { parseModelJson, textFromContent } from "./json";
 
 export interface ExtractedTastingNote {
@@ -28,25 +28,39 @@ const TAXONOMY = FLAVOR_WHEEL.map(
   (w) => `${w.label} (${w.id}): ${w.leaves.map((l) => `${l.id} ("${l.label}")`).join(", ")}`,
 ).join("\n");
 
-function buildPrompt(text: string): string {
-  return [
-    "Extract a structured whiskey tasting note from the user's freeform (possibly voice-dictated) note below.",
-    "",
-    "Flavor taxonomy — flavorTags keys MUST be leaf ids from this list only:",
-    TAXONOMY,
-    "",
-    "Return STRICT JSON only, no prose, no markdown fences, with exactly this shape:",
-    `{"nose": string|null, "palate": string|null, "finish": string|null, "flavorTags": {"<leafId>": 1|2|3, ...}, "suggestedRating": number|null, "servingStyle": ${SERVING_STYLES.map((s) => `"${s}"`).join("|")}|null}`,
-    "",
-    "Rules:",
-    "- nose/palate/finish: short phrases quoting or paraphrasing the note; null when the note doesn't cover that stage.",
-    "- flavorTags: intensity 1 (hint) to 3 (dominant). Only include flavors the note actually mentions.",
-    "- suggestedRating: only if the note states or strongly implies a score out of 5; otherwise null. Use half-star steps (0.5-5.0).",
-    "- servingStyle: only if mentioned (neat, rocks, splash of water, cocktail, highball); otherwise null.",
-    "",
-    "Tasting note:",
-    text,
-  ].join("\n");
+/**
+ * The taxonomy and output contract are identical on every call, so they live in
+ * the system prompt where a cache breakpoint can cover them. Only the note
+ * itself varies, which keeps the cached prefix byte-identical across users.
+ */
+const SYSTEM_PROMPT = [
+  "Extract a structured whiskey tasting note from the user's freeform (possibly voice-dictated) note.",
+  "",
+  "Flavor taxonomy — flavorTags keys MUST be leaf ids from this list only:",
+  TAXONOMY,
+  "",
+  "Return STRICT JSON only, no prose, no markdown fences, with exactly this shape:",
+  `{"nose": string|null, "palate": string|null, "finish": string|null, "flavorTags": {"<leafId>": 1|2|3, ...}, "suggestedRating": number|null, "servingStyle": ${SERVING_STYLES.map((s) => `"${s}"`).join("|")}|null}`,
+  "",
+  "Rules:",
+  "- nose/palate/finish: short phrases quoting or paraphrasing the note; null when the note doesn't cover that stage.",
+  "- flavorTags: intensity 1 (hint) to 3 (dominant). Only include flavors the note actually mentions.",
+  "- suggestedRating: only if the note states or strongly implies a score out of 5; otherwise null. Use half-star steps (0.5-5.0).",
+  "- servingStyle: only if mentioned (neat, rocks, splash of water, cocktail, highball); otherwise null.",
+].join("\n");
+
+/**
+ * A complete extraction runs ~250 tokens of JSON. Output tokens dominate this
+ * call's latency, so the ceiling is set just above what the schema can produce
+ * rather than at a round number.
+ */
+const MAX_TOKENS = 600;
+
+function systemPrompt(): Array<{ type: "text"; text: string; cache_control?: { type: "ephemeral" } }> {
+  const block = { type: "text" as const, text: SYSTEM_PROMPT };
+  return aiSupportsPromptCaching()
+    ? [{ ...block, cache_control: { type: "ephemeral" as const } }]
+    : [block];
 }
 
 function cleanString(value: unknown): string | null {
@@ -81,8 +95,10 @@ export async function extractTastingNote(
   const anthropic = client ?? getAnthropic();
   const response = await anthropic.messages.create({
     model: fastModel(),
-    max_tokens: 1500,
-    messages: [{ role: "user", content: buildPrompt(text) }],
+    max_tokens: MAX_TOKENS,
+    temperature: 0,
+    system: systemPrompt(),
+    messages: [{ role: "user", content: `Tasting note:\n${text}` }],
   });
 
   const parsed = parseModelJson(textFromContent(response.content as never));

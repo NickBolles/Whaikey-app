@@ -3,7 +3,12 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { BookOpen, GlassWater, Plus, UserRound } from "lucide-react";
-import { hasPublishedProducerFlavorNotes, type BarFlavorHeat, type BarRow } from "@/lib/bar";
+import {
+  hasPublishedProducerFlavorNotes,
+  type BarFlavorHeat,
+  type BarRow,
+  type FlavorHeatScope,
+} from "@/lib/bar";
 import { FLAVOR_WHEEL, leafLabel } from "@/lib/flavor-wheel";
 import { BarFlavorWheel, type FlavorSelection } from "@/components/bar-flavor-wheel";
 import { FillGauge } from "@/components/fill-gauge";
@@ -20,12 +25,31 @@ export type Row = Omit<BarRow, "createdAt" | "updatedAt" | "purchaseDate"> & {
 };
 
 type Tab = "bar" | "wishlist" | "tried";
+type FlavorSource = "personal" | "producer";
+
+/** Heat for every (source, scope) pair, keyed `${source}:${scope}`. */
+export type FlavorHeatMatrix = Record<string, BarFlavorHeat>;
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "bar", label: "My Bar" },
   { key: "wishlist", label: "Wishlist" },
   { key: "tried", label: "Tried" },
 ];
+
+// Labels stay distinct from the section tabs above them: two rows of chips
+// reading "Tried" would be ambiguous on screen and to a screen reader.
+const SCOPES: { key: FlavorHeatScope; label: string; blurb: string }[] = [
+  { key: "own", label: "On my shelf", blurb: "the bottles you own" },
+  { key: "tried", label: "Only tasted", blurb: "bottles you’ve tasted but don’t own" },
+  { key: "all", label: "Everything", blurb: "every bottle you’ve owned or tasted" },
+];
+
+/** The scope a tab opens on: each tab starts by describing its own rows. */
+const DEFAULT_SCOPE_FOR_TAB: Record<Tab, FlavorHeatScope> = {
+  bar: "own",
+  tried: "tried",
+  wishlist: "own",
+};
 
 const FILL_STEPS = [100, 75, 50, 25, 10];
 
@@ -44,20 +68,21 @@ function statusChipClass(status: string | null): string {
   }
 }
 
+const EMPTY_HEAT: BarFlavorHeat = { wedges: {}, leaves: {}, topWedgeIds: [], hasHeat: false };
+
 export function BarClient({
   initialRows,
-  personalFlavorHeat,
-  producerFlavorHeat,
+  flavorHeat,
   palate,
 }: {
   initialRows: Row[];
-  personalFlavorHeat: BarFlavorHeat;
-  producerFlavorHeat: BarFlavorHeat;
+  flavorHeat: FlavorHeatMatrix;
   palate: { vector: Record<string, number>; sampleSize: number };
 }) {
   const [rows, setRows] = useState<Row[]>(initialRows);
   const [tab, setTab] = useState<Tab>("bar");
-  const [flavorSource, setFlavorSource] = useState<"personal" | "producer">("personal");
+  const [flavorSource, setFlavorSource] = useState<FlavorSource>("personal");
+  const [flavorScope, setFlavorScope] = useState<FlavorHeatScope>("own");
   const [selectedFlavorIds, setSelectedFlavorIds] = useState<string[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -157,7 +182,7 @@ export function BarClient({
   }
 
   const activeRows = tab === "bar" ? ownRows : tab === "wishlist" ? wishlistRows : triedRows;
-  const activeFlavorHeat = flavorSource === "personal" ? personalFlavorHeat : producerFlavorHeat;
+  const activeFlavorHeat = flavorHeat[`${flavorSource}:${flavorScope}`] ?? EMPTY_HEAT;
   const selectedProfileFamilies = useMemo(
     () =>
       FLAVOR_WHEEL.filter((wedge) => wedge.leaves.every((leaf) => selectedFlavorIds.includes(leaf.id))).map(
@@ -165,8 +190,11 @@ export function BarClient({
       ),
     [selectedFlavorIds],
   );
+  // Wishlist bottles are untasted, so no flavor map describes them and their
+  // list is never filtered by one.
+  const flavorFilterable = tab !== "wishlist";
   const filteredRows = useMemo(() => {
-    if (tab !== "bar" || selectedFlavorIds.length === 0) return activeRows;
+    if (!flavorFilterable || selectedFlavorIds.length === 0) return activeRows;
     return activeRows.filter((row) => {
       const tags =
         flavorSource === "personal"
@@ -179,10 +207,25 @@ export function BarClient({
         selectedProfileFamilies.some((wedgeId) => (row.bottle.flavorProfile?.[wedgeId] ?? 0) > 0);
       return profileMatches || selectedFlavorIds.some((leafId) => (tags[leafId] ?? 0) > 0);
     });
-  }, [activeRows, flavorSource, selectedFlavorIds, selectedProfileFamilies, tab]);
+  }, [activeRows, flavorFilterable, flavorSource, selectedFlavorIds, selectedProfileFamilies]);
 
-  function changeFlavorSource(source: "personal" | "producer") {
+  function changeFlavorSource(source: FlavorSource) {
     setFlavorSource(source);
+    setSelectedFlavorIds([]);
+  }
+
+  function changeFlavorScope(scope: FlavorHeatScope) {
+    setFlavorScope(scope);
+    setSelectedFlavorIds([]);
+  }
+
+  // Each tab opens describing its own shelf; an explicit scope choice is only
+  // reset by moving to a tab whose rows it no longer matches.
+  function changeTab(next: Tab) {
+    setTab(next);
+    setFlavorScope((current) =>
+      current === "all" ? current : DEFAULT_SCOPE_FOR_TAB[next],
+    );
     setSelectedFlavorIds([]);
   }
 
@@ -213,7 +256,7 @@ export function BarClient({
             key={t.key}
             role="tab"
             aria-selected={tab === t.key}
-            onClick={() => setTab(t.key)}
+            onClick={() => changeTab(t.key)}
             className={`chip inline-flex items-center min-h-11 px-4 text-sm font-medium ${
               tab === t.key ? "chip-active" : "hover:text-foreground"
             }`}
@@ -230,79 +273,35 @@ export function BarClient({
       )}
 
       {tab === "bar" && (
+        <section aria-label="Bar stats" className="grid grid-cols-4 gap-2">
+          <StatCard value={String(stats.bottleCount)} label="bottles" />
+          <StatCard value={String(stats.openCount)} label="open" />
+          <StatCard value={money(stats.totalSpent)} label="spent" />
+          <StatCard value={money(stats.estValue)} label="est. value" />
+        </section>
+      )}
+
+      {flavorFilterable && (
+        <FlavorMapSection
+          heat={activeFlavorHeat}
+          source={flavorSource}
+          scope={flavorScope}
+          onSourceChange={changeFlavorSource}
+          onScopeChange={changeFlavorScope}
+          selectedFlavorIds={selectedFlavorIds}
+          onToggleFlavor={toggleFlavor}
+          onClearFlavors={() => setSelectedFlavorIds([])}
+          shownCount={filteredRows.length}
+          totalCount={activeRows.length}
+          rowNoun={tab === "bar" ? "bottles" : "tastings"}
+        />
+      )}
+
+      {tab === "bar" && (
         <>
-          <section aria-label="Bar stats" className="grid grid-cols-4 gap-2">
-            <StatCard value={String(stats.bottleCount)} label="bottles" />
-            <StatCard value={String(stats.openCount)} label="open" />
-            <StatCard value={money(stats.totalSpent)} label="spent" />
-            <StatCard value={money(stats.estValue)} label="est. value" />
-          </section>
-
-          <section aria-label="Bar flavor map">
-            <div className="flex items-center justify-between gap-3 mb-3">
-              <div>
-                <h2 className="section-label">Bar flavor map</h2>
-                <p className="mt-1 text-xs text-muted">Your bottles’ flavor profiles fill the wheel; tagged notes refine its details.</p>
-              </div>
-              <div role="tablist" aria-label="Flavor note source" className="flex rounded-xl border border-border-subtle p-1">
-                <button
-                  role="tab"
-                  aria-selected={flavorSource === "personal"}
-                  onClick={() => changeFlavorSource("personal")}
-                  className={`inline-flex min-h-9 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium ${flavorSource === "personal" ? "bg-accent text-background" : "text-muted hover:text-foreground"}`}
-                >
-                  <UserRound size={14} aria-hidden /> My Notes
-                </button>
-                <button
-                  role="tab"
-                  aria-selected={flavorSource === "producer"}
-                  onClick={() => changeFlavorSource("producer")}
-                  className={`inline-flex min-h-9 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium ${flavorSource === "producer" ? "bg-accent text-background" : "text-muted hover:text-foreground"}`}
-                >
-                  <BookOpen size={14} aria-hidden /> Producer Notes
-                </button>
-              </div>
-            </div>
-            {activeFlavorHeat.hasHeat ? (
-              <div className="card p-4 flex flex-col items-center gap-3">
-                <BarFlavorWheel
-                  wedgeHeat={activeFlavorHeat.wedges}
-                  leafHeat={activeFlavorHeat.leaves}
-                  caption={flavorSource === "personal" ? "My notes" : "Producer notes"}
-                  subCaption="family · group · flavor"
-                  selectedIds={selectedFlavorIds}
-                  onToggle={toggleFlavor}
-                />
-                <FlavorHeatLegend leafHeat={activeFlavorHeat.leaves} />
-                {selectedFlavorIds.length > 0 && (
-                  <div className="flex w-full flex-wrap items-center justify-center gap-2" aria-label="Active flavor filters">
-                    {selectedFlavorIds.map((id) => (
-                      <button key={id} onClick={() => toggleFlavor({ id, label: leafLabel(id) ?? id, leafIds: [id] })} className="chip chip-active px-3 py-1.5 text-xs">
-                        {leafLabel(id) ?? id} ×
-                      </button>
-                    ))}
-                    <button onClick={() => setSelectedFlavorIds([])} className="min-h-9 px-2 text-xs text-muted hover:text-foreground underline-offset-2 hover:underline">
-                      Clear
-                    </button>
-                  </div>
-                )}
-                {selectedFlavorIds.length > 0 && <p className="text-xs text-muted">Showing {filteredRows.length} of {ownRows.length} bottles</p>}
-              </div>
-            ) : (
-              <div className="card p-6 text-center flex flex-col items-center gap-2">
-                <div aria-hidden className="text-3xl">🎯</div>
-                <p className="font-display text-base font-semibold">No {flavorSource === "personal" ? "personal" : "producer"} flavor notes yet</p>
-                <p className="text-sm text-muted max-w-[30ch] leading-relaxed">
-                  {flavorSource === "personal" ? "Log a pour and tag what you taste to build your personal map." : "Published bottle notes appear here as the catalog and scanner are enriched."}
-                </p>
-              </div>
-            )}
-          </section>
-
           <RecommendationRail mode="tonight" title="What to pour tonight" />
           <RecommendationRail mode="discovery" title="For your palate" />
           <PalateWheel vector={palate.vector} sampleSize={palate.sampleSize} />
-
         </>
       )}
 
@@ -385,6 +384,130 @@ export function BarClient({
         </ul>
       )}
     </div>
+  );
+}
+
+/**
+ * The flavor wheel plus its two axes: which notes fill it (yours or the
+ * producer's) and which shelf it describes (owned, tried, or everything you've
+ * tasted). Scope is what makes "have I ever tried anything oak-forward?"
+ * answerable — before it, the wheel could only ever describe bottles you own.
+ */
+function FlavorMapSection({
+  heat,
+  source,
+  scope,
+  onSourceChange,
+  onScopeChange,
+  selectedFlavorIds,
+  onToggleFlavor,
+  onClearFlavors,
+  shownCount,
+  totalCount,
+  rowNoun,
+}: {
+  heat: BarFlavorHeat;
+  source: FlavorSource;
+  scope: FlavorHeatScope;
+  onSourceChange: (source: FlavorSource) => void;
+  onScopeChange: (scope: FlavorHeatScope) => void;
+  selectedFlavorIds: string[];
+  onToggleFlavor: (selection: FlavorSelection) => void;
+  onClearFlavors: () => void;
+  shownCount: number;
+  totalCount: number;
+  rowNoun: string;
+}) {
+  const scopeMeta = SCOPES.find((s) => s.key === scope) ?? SCOPES[0];
+  return (
+    <section aria-label="Flavor map">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="section-label">Flavor map</h2>
+        <div role="tablist" aria-label="Flavor note source" className="flex shrink-0 rounded-xl border border-border-subtle p-1">
+          <button
+            role="tab"
+            aria-selected={source === "personal"}
+            onClick={() => onSourceChange("personal")}
+            className={`inline-flex min-h-9 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium ${source === "personal" ? "bg-accent text-background" : "text-muted hover:text-foreground"}`}
+          >
+            <UserRound size={14} aria-hidden /> My Notes
+          </button>
+          <button
+            role="tab"
+            aria-selected={source === "producer"}
+            onClick={() => onSourceChange("producer")}
+            className={`inline-flex min-h-9 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium ${source === "producer" ? "bg-accent text-background" : "text-muted hover:text-foreground"}`}
+          >
+            <BookOpen size={14} aria-hidden /> Producer Notes
+          </button>
+        </div>
+      </div>
+
+      <div role="tablist" aria-label="Flavor map scope" className="mt-3 flex flex-wrap gap-2">
+        {SCOPES.map((s) => (
+          <button
+            key={s.key}
+            role="tab"
+            aria-selected={scope === s.key}
+            onClick={() => onScopeChange(s.key)}
+            className={`chip inline-flex min-h-9 items-center px-3 text-xs font-medium ${
+              scope === s.key ? "chip-active" : "text-muted hover:text-foreground"
+            }`}
+          >
+            {s.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Full width, under both toggles: squeezed beside them it wrapped to a
+          four-line column on a phone. */}
+      <p className="mt-2 mb-3 text-xs text-muted">
+        The wheel maps {scopeMeta.blurb}; tagged notes refine its details.
+      </p>
+
+      {heat.hasHeat ? (
+        <div className="card p-4 flex flex-col items-center gap-3">
+          <BarFlavorWheel
+            wedgeHeat={heat.wedges}
+            leafHeat={heat.leaves}
+            caption={source === "personal" ? "My notes" : "Producer notes"}
+            subCaption="family · group · flavor"
+            selectedIds={selectedFlavorIds}
+            onToggle={onToggleFlavor}
+          />
+          <FlavorHeatLegend leafHeat={heat.leaves} />
+          {selectedFlavorIds.length > 0 && (
+            <>
+              <div className="flex w-full flex-wrap items-center justify-center gap-2" aria-label="Active flavor filters">
+                {selectedFlavorIds.map((id) => (
+                  <button key={id} onClick={() => onToggleFlavor({ id, label: leafLabel(id) ?? id, leafIds: [id] })} className="chip chip-active px-3 py-1.5 text-xs">
+                    {leafLabel(id) ?? id} ×
+                  </button>
+                ))}
+                <button onClick={onClearFlavors} className="min-h-9 px-2 text-xs text-muted hover:text-foreground underline-offset-2 hover:underline">
+                  Clear
+                </button>
+              </div>
+              <p className="text-xs text-muted">
+                Showing {shownCount} of {totalCount} {rowNoun}
+              </p>
+            </>
+          )}
+        </div>
+      ) : (
+        <div className="card p-6 text-center flex flex-col items-center gap-2">
+          <div aria-hidden className="text-3xl">🎯</div>
+          <p className="font-display text-base font-semibold">
+            No {source === "personal" ? "personal" : "producer"} flavor notes yet
+          </p>
+          <p className="text-sm text-muted max-w-[30ch] leading-relaxed">
+            {source === "personal"
+              ? `Log a pour and tag what you taste to map ${scopeMeta.blurb}.`
+              : "Published bottle notes appear here as the catalog and scanner are enriched."}
+          </p>
+        </div>
+      )}
+    </section>
   );
 }
 

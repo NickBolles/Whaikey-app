@@ -151,4 +151,100 @@ describe("NoteCapture", () => {
     );
     expect(screen.getByRole("button", { name: /dictate/i })).toBeInTheDocument();
   });
+
+  it("takes a custom label and placeholder for the primary-capture framing", () => {
+    render(
+      <NoteCapture
+        freeform=""
+        onFreeformChange={() => {}}
+        onApplyExtraction={() => {}}
+        label="Say what you taste"
+      />,
+    );
+    expect(screen.getByLabelText("Say what you taste")).toBeInTheDocument();
+  });
+});
+
+describe("NoteCapture local flavor pass", () => {
+  it("shows flavors named in the note without calling the model", () => {
+    const fetchMock = mockFetchOnce({ ok: true, status: 200, body: PAYLOAD });
+    render(
+      <NoteCapture
+        freeform="loads of vanilla and oak"
+        onFreeformChange={() => {}}
+        onApplyExtraction={() => {}}
+      />,
+    );
+
+    const heard = screen.getByLabelText("Flavors heard in your note");
+    expect(heard).toHaveTextContent("Vanilla");
+    expect(heard).toHaveTextContent("Oak");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("applies the heard flavors at a neutral intensity", async () => {
+    const onApply = vi.fn();
+    render(
+      <NoteCapture
+        freeform="loads of vanilla and oak"
+        onFreeformChange={() => {}}
+        onApplyExtraction={onApply}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: /add these flavors/i }));
+    expect(onApply).toHaveBeenCalledWith({
+      nose: null,
+      palate: null,
+      finish: null,
+      flavorTags: { vanilla: 2, oak: 2 },
+      suggestedRating: null,
+      servingStyle: null,
+    });
+  });
+
+  it("works with AI switched off, so a slow or absent model never blocks tagging", async () => {
+    const onApply = vi.fn();
+    render(
+      <NoteCapture
+        freeform="smoky campfire notes"
+        onFreeformChange={() => {}}
+        onApplyExtraction={onApply}
+        aiConfigured={false}
+      />,
+    );
+
+    expect(
+      screen.queryByRole("button", { name: /auto-fill tasting fields/i }),
+    ).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /add this flavor/i }));
+    expect(onApply.mock.calls[0][0].flavorTags).toEqual({ campfire: 2 });
+  });
+
+  it("stands down once the model's own suggestion is on screen", async () => {
+    mockFetchOnce({ ok: true, status: 200, body: PAYLOAD });
+    render(
+      <NoteCapture
+        freeform="lovely citrus and honey"
+        onFreeformChange={() => {}}
+        onApplyExtraction={() => {}}
+      />,
+    );
+
+    expect(screen.getByLabelText("Flavors heard in your note")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /auto-fill tasting fields/i }));
+    await screen.findByText("4.5★");
+    expect(screen.queryByLabelText("Flavors heard in your note")).not.toBeInTheDocument();
+  });
+
+  it("shows nothing for a note that names no flavors", () => {
+    render(
+      <NoteCapture
+        freeform="poured this after work"
+        onFreeformChange={() => {}}
+        onApplyExtraction={() => {}}
+      />,
+    );
+    expect(screen.queryByLabelText("Flavors heard in your note")).not.toBeInTheDocument();
+  });
 });

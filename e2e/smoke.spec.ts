@@ -76,6 +76,34 @@ test.describe("signed-in scan flow", () => {
     await expect(page.getByText(/Elijah Craig Small Batch/i).first()).toBeVisible();
   });
 
+  test("scanning and logging a pour are reachable from each other", async ({ page }) => {
+    // Out from the pour flow...
+    await page.goto("/pour");
+    await page.getByRole("link", { name: /scan the bottle/i }).click();
+    await expect(page.getByRole("heading", { name: /scan what you're pouring/i })).toBeVisible();
+
+    // ...identify the bottle in hand. Its own UPC, so the tests above cannot
+    // leave it already shelved and change the wording of this one's toast.
+    await page.getByLabel(/barcode number/i).fill("085246000014"); // seeded: Maker's Mark
+    await page.getByRole("button", { name: "Scan" }).click();
+    await expect(page.getByRole("status")).toContainText(/Added Maker's Mark/i);
+
+    // ...and back into the pour flow with that bottle already chosen.
+    await page.getByRole("link", { name: "Pour" }).click();
+    await expect(page.getByRole("heading", { name: "Rating" })).toBeVisible();
+    await expect(page.getByText(/Maker's Mark/i).first()).toBeVisible();
+  });
+
+  test("a pour shelves an unfiled bottle so it shows up under Tried", async ({ page }) => {
+    await page.goto("/pour?bottleId=glenfarclas-105");
+    await page.getByRole("button", { name: "Save pour" }).click();
+    await expect(page.getByRole("heading", { name: "Poured." })).toBeVisible();
+
+    await page.goto("/bar");
+    await page.getByRole("tab", { name: "Tried" }).click();
+    await expect(page.getByText(/Glenfarclas 105/i).first()).toBeVisible();
+  });
+
   test("an unknown barcode can be taught via catalog search", async ({ page }) => {
     await page.goto("/scan");
     const input = page.getByLabel(/barcode number/i);

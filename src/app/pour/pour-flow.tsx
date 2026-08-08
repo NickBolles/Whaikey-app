@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ChevronDown, ChevronUp, CloudOff, GlassWater, Search, Star } from "lucide-react";
+import { ChevronDown, ChevronUp, CloudOff, GlassWater, ScanLine, Search, Star } from "lucide-react";
 import { SERVING_STYLES, type ServingStyle } from "@/db/schema";
 import { StarRating } from "@/components/star-rating";
 import { FlavorWheelInput } from "@/components/flavor-wheel-input";
@@ -123,6 +123,19 @@ function BottlePicker({ onPick }: { onPick: (bottle: BottlePick) => void }) {
         />
       </label>
 
+      {/* Scanning is the fastest way to pick a bottle you're holding, so it
+          sits with the search box rather than only on the shelf-building page. */}
+      <Link
+        href="/scan?then=pour"
+        className="card-flat flex items-center gap-3 p-4 hover:bg-surface-raised transition-colors"
+      >
+        <ScanLine size={18} strokeWidth={1.8} className="text-accent shrink-0" aria-hidden />
+        <span className="flex-1 min-w-0">
+          <span className="font-medium block">Scan the bottle</span>
+          <span className="text-xs text-muted">Barcode or label — faster than typing.</span>
+        </span>
+      </Link>
+
       {searchError && (
         <p className="card-flat text-sm text-muted p-4">
           Search is unavailable right now — try again in a moment, or pick from your recent
@@ -234,6 +247,14 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
     if (Object.keys(r.flavorTags).length > 0) {
       setFlavorTags((cur) => ({ ...r.flavorTags, ...cur }));
     }
+    // Anything that landed in the collapsed section is opened for review —
+    // applied values the user can't see are values they can't correct.
+    const filledDetails =
+      (r.nose && !nose.trim()) ||
+      (r.palate && !palate.trim()) ||
+      (r.finish && !finish.trim()) ||
+      Object.keys(r.flavorTags).length > 0;
+    if (filledDetails) setNotesOpen(true);
     if (r.suggestedRating != null && rating == null) setRating(r.suggestedRating);
     if (
       r.servingStyle &&
@@ -365,6 +386,20 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
             </button>
           </div>
 
+          {/* Speak first, correct after. This sits above the form because
+              dictating a note can fill most of what's below it — burying it in
+              the collapsed section made the app look like a form to type into. */}
+          <section aria-label="Capture your note" className="card flex flex-col gap-3 p-4">
+            <NoteCapture
+              freeform={freeform}
+              onFreeformChange={setFreeform}
+              onApplyExtraction={applyExtraction}
+              label="Say what you taste"
+              placeholder="“Loads of vanilla and charred oak, long warm finish — about a four.”"
+              hint="Auto-fill turns your words into a rating, flavors, and nose/palate/finish. You can edit everything after."
+            />
+          </section>
+
           <section aria-label="Rating" className="flex flex-col gap-3">
             <h2 className="section-label">Rating</h2>
             <StarRating value={rating} onChange={setRating} />
@@ -452,12 +487,6 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
                   <span className="section-label">Flavor wheel</span>
                   <FlavorWheelInput value={flavorTags} onChange={setFlavorTags} />
                 </div>
-
-                <NoteCapture
-                  freeform={freeform}
-                  onFreeformChange={setFreeform}
-                  onApplyExtraction={applyExtraction}
-                />
               </div>
             )}
           </section>
