@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { BarClient, type FlavorHeatMatrix, type Row } from "./bar-client";
+import { BarClient, type FlavorHeatMatrix, type PalateHeat, type Row } from "./bar-client";
 
 afterEach(cleanup);
 
@@ -39,7 +39,16 @@ function heatMatrix(overrides: Partial<FlavorHeatMatrix> = {}): FlavorHeatMatrix
   };
 }
 
-const palate = { vector: {}, sampleSize: 0 };
+/** No pours yet: the palate source shows its blank-page state. */
+const palate: PalateHeat = { wedges: {}, leaves: {}, topWedgeIds: [], sampleSize: 0 };
+
+/** A drinker whose ratings lean peaty, with campfire the strongest descriptor. */
+const peatyPalate: PalateHeat = {
+  wedges: { peaty: 1, sweet: 0.4 },
+  leaves: { campfire: 1, vanilla: 0.4 },
+  topWedgeIds: ["peaty", "sweet"],
+  sampleSize: 6,
+};
 
 function bottleRow(
   id: string,
@@ -89,7 +98,7 @@ describe("BarClient flavor source controls", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Filter by Vanilla" })[0]);
     expect(screen.getByLabelText("Active flavor filters")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("tab", { name: "Producer Notes" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Producer" }));
     expect(screen.queryByLabelText("Active flavor filters")).not.toBeInTheDocument();
     expect(screen.getByText("No producer flavor notes yet")).toBeInTheDocument();
   });
@@ -164,5 +173,71 @@ describe("BarClient flavor map scope", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "Wishlist" }));
     expect(screen.queryByLabelText("Flavor map")).not.toBeInTheDocument();
+  });
+});
+
+describe("BarClient palate on the unified wheel", () => {
+  it("paints the palate on the same wheel rather than a second chart", () => {
+    render(<BarClient initialRows={[]} flavorHeat={heatMatrix()} palate={peatyPalate} />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "My palate" }));
+
+    // One wheel on the page, now showing the palate's heat.
+    expect(screen.getAllByTestId("bar-flavor-wheel")).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Filter by Campfire smoke" }).length).toBeGreaterThan(0);
+    expect(screen.getByText("You lean toward")).toBeInTheDocument();
+    expect(screen.getByLabelText("Palate leanings")).toHaveTextContent("Peaty / Smoky");
+  });
+
+  it("hides the shelf scope, which does not apply to a drinker", () => {
+    render(<BarClient initialRows={[]} flavorHeat={heatMatrix()} palate={peatyPalate} />);
+
+    expect(screen.getByRole("tab", { name: "On my shelf" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "My palate" }));
+    expect(screen.queryByRole("tab", { name: "On my shelf" })).not.toBeInTheDocument();
+
+    // Switching back restores it.
+    fireEvent.click(screen.getByRole("tab", { name: "My notes" }));
+    expect(screen.getByRole("tab", { name: "On my shelf" })).toBeInTheDocument();
+  });
+
+  it("filters the shelf by a flavor tapped on the palate", () => {
+    const rows = [
+      bottleRow("peaty-row", "Peaty Bottle", "own", { flavorProfile: { peaty: 8 } }),
+      bottleRow("sweet-row", "Sweet Bottle", "own", { flavorProfile: { sweet: 8 } }),
+    ];
+
+    render(<BarClient initialRows={rows} flavorHeat={heatMatrix()} palate={peatyPalate} />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "My palate" }));
+    fireEvent.click(screen.getByRole("button", { name: "Filter by Peaty / Smoky" }));
+
+    expect(screen.getByText("Peaty Bottle")).toBeInTheDocument();
+    expect(screen.queryByText("Sweet Bottle")).not.toBeInTheDocument();
+  });
+
+  it("shows the blank-page state before any pours carry a signal", () => {
+    render(<BarClient initialRows={[]} flavorHeat={heatMatrix()} palate={palate} />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "My palate" }));
+    expect(screen.getByText("Your palate is still a blank page")).toBeInTheDocument();
+    expect(screen.queryByTestId("bar-flavor-wheel")).not.toBeInTheDocument();
+  });
+
+  it("still draws when a descriptor is liked but its family cancelled out", () => {
+    // A loved campfire pour and a hated brine one both land in Peaty, so the
+    // wedge nets to zero while campfire stays positive. That is a preference we
+    // know about, not a blank page.
+    const cancelled: PalateHeat = {
+      wedges: {},
+      leaves: { campfire: 1 },
+      topWedgeIds: [],
+      sampleSize: 2,
+    };
+    render(<BarClient initialRows={[]} flavorHeat={heatMatrix()} palate={cancelled} />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "My palate" }));
+    expect(screen.queryByText("Your palate is still a blank page")).not.toBeInTheDocument();
+    expect(screen.getByTestId("bar-flavor-wheel")).toBeInTheDocument();
   });
 });

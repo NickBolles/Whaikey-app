@@ -13,14 +13,19 @@
  *     taste rather than everything they ever poured.
  *
  * The signed vector grounds recommendations and taste-match (cosine similarity
- * vs a bottle's flavor profile); a non-negative display transform renders it as
- * the "palate wheel". Everything here is pure so it can be unit-tested and run
- * from either the server or (via serialized data) the client.
+ * vs a bottle's flavor profile); `palateHeat` clips and normalizes it onto the
+ * same 0-1 heat scale the Bar's flavor wheel uses, so the palate paints onto
+ * that one wheel instead of needing a chart of its own. Everything here is pure
+ * so it can be unit-tested and run from either the server or (via serialized
+ * data) the client.
  */
-import { WEDGE_IDS, rollUpToWedges } from "@/lib/flavor-wheel";
+import { WEDGE_IDS, floorWedgesAtLeaves, isValidLeaf, rollUpToWedges } from "@/lib/flavor-wheel";
 
 /** Rating midpoint on the 0.5–5 scale; pours above this read as "liked". */
 export const NEUTRAL_RATING = 3;
+/** Tag intensities run 1-3; dividing by the top of the scale matches the
+ * wedge path's `intensity / 10`, so leaf and wedge weights stay comparable. */
+const MAX_TAG_INTENSITY = 3;
 /** A pour with no rating still carries a mild positive signal (they poured it). */
 export const UNRATED_WEIGHT = 0.5;
 /** Preference contribution halves every this-many days. */
@@ -41,6 +46,14 @@ export type PalateVector = Record<string, number>;
 
 export interface PalateProfileResult {
   vector: PalateVector;
+  /**
+   * The same signed preference weights at leaf granularity. Only pours whose
+   * note carried flavor tags contribute — a bottle's catalog profile is
+   * wedge-level and cannot say which descriptor within a family you liked. So
+   * the leaf map is sparser than the wedge vector by design, and empty for a
+   * user who has never tagged a note.
+   */
+  leaves: PalateVector;
   /** Number of entries that carried a usable flavor signal. */
   sampleSize: number;
 }
@@ -77,6 +90,7 @@ function zeroVector(): PalateVector {
  */
 export function computePalateProfile(entries: PalateEntry[], now: Date): PalateProfileResult {
   const vector = zeroVector();
+  const leaves: PalateVector = {};
   let sampleSize = 0;
 
   for (const entry of entries) {
@@ -93,9 +107,18 @@ export function computePalateProfile(entries: PalateEntry[], now: Date): PalateP
       const intensity = scores[wedgeId] ?? 0;
       vector[wedgeId] += weight * (intensity / 10);
     }
+
+    // Leaf detail comes only from tagged notes, and carries the same sign as
+    // the wedge weight so a low-rated pour pushes its descriptors negative too.
+    if (entry.flavorTags) {
+      for (const [leafId, intensity] of Object.entries(entry.flavorTags)) {
+        if (!isValidLeaf(leafId) || typeof intensity !== "number") continue;
+        leaves[leafId] = (leaves[leafId] ?? 0) + weight * (intensity / MAX_TAG_INTENSITY);
+      }
+    }
   }
 
-  return { vector, sampleSize };
+  return { vector, leaves, sampleSize };
 }
 
 /** Cosine similarity of two wedge vectors in [-1, 1]; 0 when either is all-zero. */
@@ -133,25 +156,49 @@ export function tasteMatchPercent(
 }
 
 /**
- * Non-negative, max-normalized wedge scores (0-10) for the palate radar. The
- * signed preference vector is clipped at 0 (we only paint what the user likes)
- * and scaled so the strongest liked wedge reaches 10 — a taste *fingerprint*
- * shape rather than absolute magnitudes. Returns all-zero when there's no
- * positive signal.
+ * A signed palate vector as flavor-wheel heat: negatives clipped to 0 (the
+ * wheel paints what you like, not what you avoid) and the rest max-normalized
+ * to 0-1, the same relative scale `getBarFlavorHeat` produces. Works for either
+ * granularity — wedge weights or leaf weights — since it only clips and scales.
+ * Entries at zero are omitted so the wheel treats them as cold rather than
+ * "measured at zero".
  */
-export function displayPalateWheel(palate: PalateVector): Record<string, number> {
-  const positive: Record<string, number> = {};
+export function palateHeat(vector: PalateVector): Record<string, number> {
   let max = 0;
-  for (const wedgeId of WEDGE_IDS) {
-    const v = Math.max(0, palate[wedgeId] ?? 0);
-    positive[wedgeId] = v;
-    if (v > max) max = v;
+  for (const value of Object.values(vector)) {
+    if (value > max) max = value;
   }
+  if (max === 0) return {};
   const out: Record<string, number> = {};
-  for (const wedgeId of WEDGE_IDS) {
-    out[wedgeId] = max === 0 ? 0 : Math.round((positive[wedgeId] / max) * 100) / 10;
+  for (const [id, value] of Object.entries(vector)) {
+    if (value > 0) out[id] = Math.round((value / max) * 100) / 100;
   }
   return out;
+}
+
+/** The palate rendered as flavor-wheel heat, ready to hand to the Bar's wheel. */
+export interface PalateWheelHeat {
+  wedges: Record<string, number>;
+  leaves: Record<string, number>;
+  topWedgeIds: string[];
+  sampleSize: number;
+}
+
+/**
+ * Turn a computed palate into wheel heat. The palate is one more way to light
+ * the Bar's wheel rather than a chart of its own, so it owes that wheel the
+ * same ring reconciliation `getBarFlavorHeat` performs: wedges and leaves
+ * normalize against different maxima, and a family is never colder than its
+ * own hottest descriptor.
+ */
+export function palateWheelHeat(profile: PalateProfileResult): PalateWheelHeat {
+  const leaves = palateHeat(profile.leaves);
+  return {
+    wedges: floorWedgesAtLeaves(palateHeat(profile.vector), leaves),
+    leaves,
+    topWedgeIds: topWedges(profile.vector, 3),
+    sampleSize: profile.sampleSize,
+  };
 }
 
 /** The wedge ids a user most prefers, strongest first, positive weights only. */

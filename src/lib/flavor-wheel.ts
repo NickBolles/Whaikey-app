@@ -193,6 +193,28 @@ export function matchLeafIds(text: string): string[] {
 }
 
 /**
+ * Raise each wedge to at least the heat of its hottest leaf.
+ *
+ * The wheel's two rings are normalized against different denominators — the
+ * hottest wedge and the hottest leaf — so nothing otherwise stops the
+ * brightest leaf on the wheel from sitting inside a barely-lit family. Every
+ * producer of wheel heat has to reconcile them, so the rule lives here rather
+ * than being re-derived per call site. Returns a new map; inputs are untouched.
+ */
+export function floorWedgesAtLeaves(
+  wedges: Record<string, number>,
+  leaves: Record<string, number>,
+): Record<string, number> {
+  const out = { ...wedges };
+  for (const [leafId, heat] of Object.entries(leaves)) {
+    const wedgeId = wedgeForLeaf(leafId);
+    if (!wedgeId) continue;
+    if (heat > (out[wedgeId] ?? 0)) out[wedgeId] = heat;
+  }
+  return out;
+}
+
+/**
  * Roll leaf-level tags ({leafId: intensity 1-3}) up to wedge-level scores
  * (0-10 scale), for radar displays and the palate model.
  */
