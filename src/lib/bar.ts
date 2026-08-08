@@ -2,7 +2,7 @@ import { and, desc, eq, exists, gte, inArray, isNotNull, sql } from "drizzle-orm
 import { z } from "zod";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
-import { WEDGE_IDS, rollUpToWedges, wedgeForLeaf } from "@/lib/flavor-wheel";
+import { WEDGE_IDS, floorWedgesAtLeaves, rollUpToWedges, wedgeForLeaf } from "@/lib/flavor-wheel";
 import {
   BOTTLE_STATUSES,
   RELATIONSHIPS,
@@ -403,17 +403,9 @@ export async function getBarFlavorHeat(
     return out;
   };
 
-  const wedges = normalize(wedgeTotals);
   const leaves = normalize(leafTotals);
-
-  // A family is never colder than its own hottest flavor: the two rings are
-  // normalized against different denominators, and without this floor the
-  // brightest leaf on the wheel can sit inside a barely-lit wedge.
-  for (const [leafId, heat] of Object.entries(leaves)) {
-    const wedgeId = wedgeForLeaf(leafId);
-    if (!wedgeId) continue;
-    if (heat > (wedges[wedgeId] ?? 0)) wedges[wedgeId] = heat;
-  }
+  // A family is never colder than its own hottest flavor.
+  const wedges = floorWedgesAtLeaves(normalize(wedgeTotals), leaves);
 
   const topWedgeIds = Object.entries(wedges)
     .sort((a, b) => b[1] - a[1])

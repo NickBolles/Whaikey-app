@@ -2,8 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   computePalateProfile,
   cosineSimilarity,
-  displayPalateWheel,
   inferPriceBand,
+  palateHeat,
+  palateWheelHeat,
   priceInBand,
   recencyDecay,
   tasteMatchPercent,
@@ -121,17 +122,120 @@ describe("tasteMatchPercent", () => {
   });
 });
 
-describe("displayPalateWheel", () => {
-  it("clips negatives and normalizes the strongest wedge to 10", () => {
-    const wheel = displayPalateWheel({ peaty: 4, sweet: -3, woody: 2 });
-    expect(wheel.peaty).toBe(10);
-    expect(wheel.woody).toBe(5);
-    expect(wheel.sweet).toBe(0);
+describe("computePalateProfile leaf detail", () => {
+  it("carries the wedge weight's sign down to each tagged descriptor", () => {
+    const entries: PalateEntry[] = [
+      { rating: 5, flavorTags: { campfire: 3 }, bottleProfile: null, createdAt: NOW },
+      { rating: 1, flavorTags: { vanilla: 3 }, bottleProfile: null, createdAt: NOW },
+    ];
+    const { leaves } = computePalateProfile(entries, NOW);
+    expect(leaves.campfire).toBeGreaterThan(0);
+    expect(leaves.vanilla).toBeLessThan(0);
   });
 
-  it("is all-zero when there is no positive signal", () => {
-    const wheel = displayPalateWheel({ sweet: -1 });
-    expect(Object.values(wheel).every((v) => v === 0)).toBe(true);
+  it("scales a descriptor by its tagged intensity", () => {
+    const entries: PalateEntry[] = [
+      { rating: 5, flavorTags: { campfire: 3, brine: 1 }, bottleProfile: null, createdAt: NOW },
+    ];
+    const { leaves } = computePalateProfile(entries, NOW);
+    expect(leaves.campfire).toBeCloseTo(leaves.brine * 3, 6);
+  });
+
+  it("decays with age like the wedge vector does", () => {
+    const tags = { campfire: 3 };
+    const recent = computePalateProfile(
+      [{ rating: 5, flavorTags: tags, bottleProfile: null, createdAt: NOW }],
+      NOW,
+    );
+    const old = computePalateProfile(
+      [
+        {
+          rating: 5,
+          flavorTags: tags,
+          bottleProfile: null,
+          createdAt: daysAgo(RECENCY_HALF_LIFE_DAYS),
+        },
+      ],
+      NOW,
+    );
+    expect(old.leaves.campfire).toBeCloseTo(recent.leaves.campfire / 2, 6);
+  });
+
+  it("stays empty for pours with no tagged note, since a catalog profile has no leaves", () => {
+    const entries: PalateEntry[] = [
+      { rating: 5, flavorTags: null, bottleProfile: { peaty: 10 }, createdAt: NOW },
+    ];
+    const { vector, leaves } = computePalateProfile(entries, NOW);
+    expect(vector.peaty).toBeGreaterThan(0);
+    expect(leaves).toEqual({});
+  });
+
+  it("drops leaf ids outside the taxonomy", () => {
+    const entries: PalateEntry[] = [
+      { rating: 5, flavorTags: { campfire: 3, "not-a-leaf": 3 }, bottleProfile: null, createdAt: NOW },
+    ];
+    expect(Object.keys(computePalateProfile(entries, NOW).leaves)).toEqual(["campfire"]);
+  });
+});
+
+describe("palateHeat", () => {
+  it("clips negatives and normalizes the strongest entry to 1", () => {
+    expect(palateHeat({ peaty: 4, woody: 2, sweet: -3 })).toEqual({ peaty: 1, woody: 0.5 });
+  });
+
+  it("omits zero and negative entries rather than reporting them as measured", () => {
+    const heat = palateHeat({ peaty: 4, sweet: -3, woody: 0 });
+    expect(heat.sweet).toBeUndefined();
+    expect(heat.woody).toBeUndefined();
+  });
+
+  it("is empty when nothing is liked, so the wheel reads as cold", () => {
+    expect(palateHeat({ sweet: -1 })).toEqual({});
+    expect(palateHeat({})).toEqual({});
+  });
+
+  it("works at leaf granularity too", () => {
+    expect(palateHeat({ campfire: 2, vanilla: 1 })).toEqual({ campfire: 1, vanilla: 0.5 });
+  });
+});
+
+describe("palateWheelHeat", () => {
+  const profile = (vector: Record<string, number>, leaves: Record<string, number>, sampleSize = 3) =>
+    ({ vector, leaves, sampleSize });
+
+  it("floors a family at its hottest descriptor, like the bar heat map does", () => {
+    // Sweet dominates the wedge vector, so peaty normalizes low — but campfire
+    // is the only leaf and normalizes to 1. Without reconciliation the wheel
+    // would paint a blazing leaf inside a nearly cold family.
+    const heat = palateWheelHeat(profile({ sweet: 10, peaty: 1 }, { campfire: 2 }));
+    expect(heat.leaves).toEqual({ campfire: 1 });
+    expect(heat.wedges.peaty).toBe(1);
+    expect(heat.wedges.sweet).toBe(1);
+  });
+
+  it("keeps a family hotter than its descriptors unchanged", () => {
+    const heat = palateWheelHeat(profile({ peaty: 10 }, { campfire: 10, brine: 1 }));
+    expect(heat.wedges.peaty).toBe(1);
+    expect(heat.leaves.brine).toBeCloseTo(0.1, 6);
+  });
+
+  it("surfaces a liked descriptor whose family cancelled to nothing", () => {
+    // campfire liked, brine disliked, both Peaty: the wedge nets to zero.
+    const heat = palateWheelHeat(profile({ peaty: 0 }, { campfire: 2, brine: -2 }));
+    expect(heat.leaves).toEqual({ campfire: 1 });
+    expect(heat.wedges.peaty).toBe(1);
+  });
+
+  it("carries sampleSize and top wedges through", () => {
+    const heat = palateWheelHeat(profile({ peaty: 4, sweet: 2 }, {}, 7));
+    expect(heat.sampleSize).toBe(7);
+    expect(heat.topWedgeIds).toEqual(["peaty", "sweet"]);
+  });
+
+  it("is empty for a palate with no positive signal", () => {
+    const heat = palateWheelHeat(profile({ sweet: -1 }, {}, 1));
+    expect(heat.wedges).toEqual({});
+    expect(heat.leaves).toEqual({});
   });
 });
 
