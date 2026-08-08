@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ChevronDown, ChevronUp, GlassWater, ScanLine, Search, Star } from "lucide-react";
+import { ChevronDown, ChevronUp, CloudOff, GlassWater, ScanLine, Search, Star } from "lucide-react";
 import { SERVING_STYLES, type ServingStyle } from "@/db/schema";
 import { StarRating } from "@/components/star-rating";
 import { FlavorWheelInput } from "@/components/flavor-wheel-input";
 import { NoteCapture, type ExtractedTastingNote } from "@/components/note-capture";
+import { enqueuePour } from "@/lib/native/offline-queue";
 
 export interface BottlePick {
   id: string;
@@ -214,7 +215,12 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
   const [flavorTags, setFlavorTags] = useState<Record<string, number>>({});
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [done, setDone] = useState<{ bottleName: string; rating: number | null } | null>(null);
+  const [done, setDone] = useState<{
+    bottleName: string;
+    rating: number | null;
+    /** Saved locally because the network was gone; it syncs on reconnect. */
+    queued: boolean;
+  } | null>(null);
 
   const reset = () => {
     setBottle(null);
@@ -273,25 +279,36 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
     };
     const hasNote = Object.values(noteFields).some((v) => v !== undefined);
 
+    const payload = {
+      bottleId: bottle.id,
+      rating: rating ?? undefined,
+      servingStyle: servingStyle ?? undefined,
+      amountMl,
+      note: hasNote ? noteFields : undefined,
+    };
+
     try {
       const res = await fetch("/api/pours", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          bottleId: bottle.id,
-          rating: rating ?? undefined,
-          servingStyle: servingStyle ?? undefined,
-          amountMl,
-          note: hasNote ? noteFields : undefined,
-        }),
+        body: JSON.stringify(payload),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => null);
         throw new Error(data?.error ?? "Something went wrong saving your pour.");
       }
-      setDone({ bottleName: bottle.name, rating });
+      setDone({ bottleName: bottle.name, rating, queued: false });
     } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : "Something went wrong.");
+      // A pour is logged where the whiskey is, and that is routinely somewhere
+      // with no signal (PLAN.md §4.2). Losing the note the user just wrote is a
+      // far worse outcome than a delayed save, so a network failure queues it
+      // instead of erroring. A server that answered and said no is a real error.
+      if (err instanceof TypeError) {
+        await enqueuePour({ body: payload, bottleName: bottle.name });
+        setDone({ bottleName: bottle.name, rating, queued: true });
+      } else {
+        setSubmitError(err instanceof Error ? err.message : "Something went wrong.");
+      }
     } finally {
       setSubmitting(false);
     }
@@ -312,6 +329,14 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
             <p className="mt-2.5 flex items-center justify-center gap-1.5 text-accent">
               <Star size={16} fill="currentColor" aria-hidden />
               <span className="stat-number text-2xl leading-none">{done.rating.toFixed(1)}</span>
+            </p>
+          )}
+          {done.queued && (
+            // Reassurance, not an error: the pour is saved on the device and
+            // goes up on its own. Nothing for the user to do or remember.
+            <p role="status" className="text-sm text-muted mt-4 flex items-center justify-center gap-2">
+              <CloudOff size={15} strokeWidth={1.8} aria-hidden />
+              Saved on your phone — it&apos;ll sync when you&apos;re back online.
             </p>
           )}
         </div>

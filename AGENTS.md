@@ -13,6 +13,7 @@ AI-native whiskey tracking app: search/scan bottles → own/tried/wishlist → l
 - `PLAN.md` — product plan, architecture, data model, monetization, roadmap phases.
 - `docs/FEATURES.md` — feature specs with priorities; `docs/COMPETITORS.md` — market analysis; `docs/DATA_SOURCES.md` — catalog/price/scan data strategy.
 - `docs/DESIGN.md` — **binding** design system (recipes + rules + screenshot workflow). Any UI change must follow it.
+- `docs/NATIVE_APP.md` — iOS/Android via Capacitor: framework decision, architecture, phases, native capability catalog; `docs/APP_STORE_SETUP.md` — store onboarding runbook.
 
 ## Stack & commands
 
@@ -24,6 +25,9 @@ pnpm typecheck && pnpm lint && pnpm test && pnpm build   # must ALL pass before 
 pnpm e2e                 # functional Playwright smoke
 pnpm e2e:visual          # visual regression vs committed baselines
 pnpm e2e:update          # regenerate baselines after INTENTIONAL design changes
+pnpm native:check        # validate the Capacitor config (runs in CI)
+pnpm native:sync         # bake CAP_SERVER_URL into the offline shell + cap sync
+pnpm native:assets       # render native/assets/*.svg → app icons, splash, PWA icons
 ```
 
 Playwright in this dev container: prefix with `PLAYWRIGHT_CHROMIUM_PATH=/opt/pw-browsers/chromium-1194/chrome-linux/chrome` (adjust to the installed version). Parallel/e2e runs: set `PW_PORT=<unique>` per run — each port gets its own dev server + seeded DB. Next allows ONE dev server per tree (`.next/dev/lock`); kill stale servers rather than waiting.
@@ -33,6 +37,8 @@ Playwright in this dev container: prefix with `PLAYWRIGHT_CHROMIUM_PATH=/opt/pw-
 - **DB**: `getDb()` from `src/db/index.ts`; schema in `src/db/schema.ts`; migrations generated via `pnpm db:generate` (never hand-edit `src/db/migrations/`). Tests swap the singleton via `setupTestDb()`.
 - **Auth**: `getSessionUser()` / `requireUser()` / `withErrorHandling()` from `src/lib/session.ts` — the ONLY auth entry for app code; tests mock it with `mockSessionModule()` + `setSessionUser()` from `src/test/helpers.ts`.
 - **AI**: all Anthropic calls server-side through `src/lib/ai/client.ts` (`getAnthropic()` + `setAnthropicForTests()`); scripted fakes in `src/lib/ai/testing.ts`. Missing `ANTHROPIC_API_KEY` ⇒ routes return 503 and UI shows a setup card — AI failures must never block the manual core loop.
+- **Native**: every Capacitor plugin is reached through `src/lib/native/*` (`isNativeApp()`, `loadPlugin()`), never imported directly from `src/app` or `src/components`. Each capability has a web fallback, so features are written once; the native shell loads the deployed site over HTTPS rather than a static export, so server components and cookie auth are unchanged.
+- **Native sign-in**: OAuth cannot run in a WebView, so the device flow is system browser → one-time code → `/api/auth/native/exchange` (`src/lib/native-auth.ts`). Codes are single-use, 60s, stored hashed — treat them as session-equivalent credentials.
 - **Flavor taxonomy**: `src/lib/flavor-wheel.ts` is the shared contract (8 wedge ids, ~55 leaf ids) used by bottles.flavorProfile, tastingNotes.flavorTags, the wheel UI, and AI extraction. Do not rename ids.
 
 ## Conventions

@@ -132,7 +132,7 @@ Implementation: LLM with **tool calling** into the app's own APIs (query invento
 
 ### 4.1 Recommended stack
 
-- **App:** React Native + Expo (iOS + Android + web from one codebase; fast iteration, OTA updates). Tamagui or NativeWind for UI.
+- **App:** ~~React Native + Expo~~ → **Next.js App Router on the web, wrapped by Capacitor for iOS/Android.** This section predates any code; once the web app existed, React Native meant rewriting ~7k lines of UI plus the whole test and visual-regression harness while buying nothing on the server. The full comparison, tripwires for revisiting the decision, and the native architecture are in [docs/NATIVE_APP.md](./docs/NATIVE_APP.md).
 - **Backend:** Postgres (Supabase is the intended hosted option; PGlite provides local/test parity) + Better Auth + storage/realtime integrations as needed. Postgres gives us `pgvector` for embeddings and full-text search for instant bottle lookup.
 - **AI layer:** Anthropic Claude via a thin server-side gateway (Edge Function):
   - `claude-sonnet-5` for chat, note extraction, pairing/rec explanations.
@@ -330,7 +330,7 @@ Pricing logic: whiskey collectors routinely spend $50–100+ per bottle; $6/mo i
 
 **Open questions to resolve before Phase 1:**
 1. Rating scale default — 5 stars (casual, Vivino-like) vs. 100-pt (enthusiast)? *Proposal: 5 stars with 0.5 steps, optional 100-pt mode in settings.*
-2. iOS-first or simultaneous Android? *Proposal: build cross-platform, but polish/beta iOS first.*
+2. iOS-first or simultaneous Android? *Proposal: build cross-platform, but polish/beta iOS first.* (The Capacitor shell makes both one build — see [docs/NATIVE_APP.md](./docs/NATIVE_APP.md) §4.)
 3. Name: "Whaikey" — placeholder or keeper?
 
 ---

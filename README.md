@@ -10,10 +10,12 @@ An AI-native whiskey tracking app — think Vivino/InVintory, but for whiskey, w
 - 🗺️ **[docs/FEATURES.md](./docs/FEATURES.md)** — detailed feature map: ~60 features with priorities, UX flows, and the build-order dependency graph.
 - ⚔️ **[docs/COMPETITORS.md](./docs/COMPETITORS.md)** — competitor & market analysis (whiskey + wine apps), comparison matrix, gaps, and the decisions it feeds back into the plan.
 - 🗄️ **[docs/DATA_SOURCES.md](./docs/DATA_SOURCES.md)** — data sourcing strategy: bottle catalog, barcodes, prices/valuation, label scanning, costs, and legal checklist.
+- 📱 **[docs/NATIVE_APP.md](./docs/NATIVE_APP.md)** — the iOS/Android plan: why Capacitor over React Native, architecture, phases, native capability catalog.
+- 🚀 **[docs/APP_STORE_SETUP.md](./docs/APP_STORE_SETUP.md)** — step-by-step Apple + Google store onboarding runbook.
 
 ## Stack
 
-Next.js (App Router, TypeScript, Tailwind) · Drizzle ORM + Postgres — [Supabase](https://supabase.com) in production, [PGlite](https://pglite.dev) (in-process WASM Postgres) locally and in tests · [Better Auth](https://better-auth.com) (social login only) · Anthropic Claude (server-side AI gateway) · Vitest + Playwright · deployed on Vercel.
+Next.js (App Router, TypeScript, Tailwind) · Drizzle ORM + Postgres — [Supabase](https://supabase.com) in production, [PGlite](https://pglite.dev) (in-process WASM Postgres) locally and in tests · [Better Auth](https://better-auth.com) (social login only) · Anthropic Claude (server-side AI gateway) · Vitest + Playwright · deployed on Vercel · [Capacitor](https://capacitorjs.com) native shell for iOS/Android (see [docs/NATIVE_APP.md](./docs/NATIVE_APP.md)).
 
 Requires Node `>=20.19 <23` and pnpm `10.17.x` (pinned in `packageManager`).
 

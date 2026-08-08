@@ -146,3 +146,37 @@ body {
     animation-duration: 0.01ms !important;
   }
 }
+
+/* --- Native shell (docs/NATIVE_APP.md) ---
+   Scoped to classes that only the native app sets, so the web app — and the
+   visual-regression baselines rendered in desktop Chromium — are untouched. */
+
+/* iOS draws the WebView under the notch and home indicator (contentInset:
+   "never"), so the layout pays the insets back itself. On Android the status bar
+   does not overlay the WebView, so these resolve to 0 and cost nothing. */
+.native-app body {
+  padding-top: env(safe-area-inset-top);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+/* While the MLKit scanner runs, the OS renders the camera preview full-screen
+   *behind* the WebView, so the page itself has to be see-through. The app's own
+   surfaces (.card, .card-flat) keep their opaque backgrounds and stay readable
+   on top of it; only the viewfinder deliberately does not. */
+html.native-scanning,
+html.native-scanning body {
+  background: transparent !important;
+}
+
+/* Loose text on the scan screen now sits over a live camera image. */
+html.native-scanning body {
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
+}
+
+/* The viewfinder is the one card that shows the camera through it: keep the
+   border as a framing guide, drop the fill. */
+html.native-scanning .card-viewfinder {
+  background: transparent;
+  box-shadow: none;
+}

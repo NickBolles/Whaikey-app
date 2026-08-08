@@ -1,7 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { signIn } from "@/lib/auth-client";
+import { startNativeSignIn } from "@/lib/native/auth";
 
 type Provider = "google" | "apple";
 
@@ -27,15 +29,35 @@ function AppleIcon() {
   );
 }
 
-export default function SignInPage() {
+function SignInForm() {
   const oauthConfigured = process.env.NEXT_PUBLIC_OAUTH_CONFIGURED !== "false";
   const [pending, setPending] = useState<Provider | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // A failed or cancelled native sign-in comes back as a redirect, not a rejected
+  // promise, so its message arrives in the query string. Derived rather than
+  // copied into state, so the two sources can never disagree — and suppressed
+  // once the user tries again, since the stale message stays in the URL.
+  const searchParams = useSearchParams();
+  const [retried, setRetried] = useState(false);
+  const displayError = error ?? (retried ? null : searchParams.get("error"));
 
   async function handleSignIn(provider: Provider) {
     if (pending) return;
     setPending(provider);
     setError(null);
+    setRetried(true);
+
+    // Inside the native shell, OAuth cannot run in the WebView — Google rejects
+    // embedded user agents outright. Hand off to the system browser; the app is
+    // woken back up by the whaikey:// callback (docs/NATIVE_APP.md §2.3).
+    const native = await startNativeSignIn(provider);
+    if (native.status === "started") return; // the browser owns the flow now
+    if (native.status === "failed") {
+      setError(native.reason);
+      setPending(null);
+      return;
+    }
+
     try {
       // On success better-auth redirects to `callbackURL`, so we intentionally
       // leave `pending` set — the page is on its way out. Only an error path
@@ -81,9 +103,9 @@ export default function SignInPage() {
         >
           <AppleIcon /> {pending === "apple" ? "Connecting…" : "Continue with Apple"}
         </button>
-        {error && (
+        {displayError && (
           <p role="alert" className="text-sm text-danger text-center mt-1 leading-relaxed">
-            {error}
+            {displayError}
           </p>
         )}
         {!oauthConfigured && (
@@ -97,5 +119,17 @@ export default function SignInPage() {
         Sip responsibly. Whaikey never rewards drinking frequency — only curiosity.
       </p>
     </div>
+  );
+}
+
+/**
+ * useSearchParams opts a component into request-time rendering, so it lives
+ * behind a Suspense boundary and the page itself stays static.
+ */
+export default function SignInPage() {
+  return (
+    <Suspense fallback={null}>
+      <SignInForm />
+    </Suspense>
   );
 }

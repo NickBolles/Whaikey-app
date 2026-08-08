@@ -1,0 +1,12 @@
+# Identifiers shared by every lane. Everything secret comes from the environment
+# (docs/APP_STORE_SETUP.md §12) — nothing in this repo is a credential.
+
+app_identifier(ENV["APP_BUNDLE_ID"] || "com.whaikey.app")
+package_name(ENV["APP_BUNDLE_ID"] || "com.whaikey.app")
+
+# Team IDs are not secret, but they differ per account, so they stay env-driven.
+team_id(ENV["APPLE_TEAM_ID"]) if ENV["APPLE_TEAM_ID"]
+
+# Play uploads authenticate with a service-account JSON key that CI writes to
+# disk from a secret just before the lane runs.
+json_key_file(ENV["PLAY_SERVICE_ACCOUNT_JSON_PATH"]) if ENV["PLAY_SERVICE_ACCOUNT_JSON_PATH"]

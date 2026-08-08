@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   pull_request:
+  # GitHub occasionally drops a `pull_request: synchronize` event, and when it
+  # does the PR just sits showing stale checks with nothing to say the run was
+  # never created. Without a manual trigger the only recourse is pushing an empty
+  # commit; this makes a re-run one click from the Actions tab.
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -28,8 +33,70 @@ jobs:
       - run: pnpm lint
       - run: pnpm test
       - run: pnpm build
+      # Validates capacitor.config.ts and the bundled offline shell. Needs no
+      # Xcode, Android SDK, or network (docs/NATIVE_APP.md §5).
+      - run: pnpm native:check
         env:
           BETTER_AUTH_SECRET: ci-secret
+
+  # Compiles the Android project on every PR so a broken Gradle change, manifest
+  # error, or plugin mismatch is caught here rather than at release time. No
+  # signing material is involved — this is `assembleDebug` and nothing more.
+  # iOS gets the same check but only on pushes to main, not on PRs: it needs a
+  # macOS runner at roughly 10x the per-minute cost, and a broken Xcode project
+  # is rare enough that catching it on merge is a fair trade.
+  android-build:
+    name: android (debug build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+      - run: pnpm install --frozen-lockfile
+      # Bakes the server origin into the offline shell and runs `cap sync`, so the
+      # build exercises the same path a release does.
+      - run: pnpm native:sync
+        env:
+          CAP_SERVER_URL: https://app.whaikey.com
+      - run: ./gradlew assembleDebug --no-daemon
+        working-directory: android
+
+  ios-build:
+    name: ios (compile)
+    if: github.event_name == 'push'
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm native:sync
+        env:
+          CAP_SERVER_URL: https://app.whaikey.com
+      # Unsigned simulator build: proves the project, plugins, and entitlements
+      # file parse and compile without needing any certificate.
+      - name: Compile
+        working-directory: ios/App
+        run: |
+          xcodebuild \
+            -project App.xcodeproj \
+            -scheme App \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            build
 
   # Functional end-to-end smoke suite (playwright project "functional").
   # Runs inside the Playwright container so the browser + OS deps match the
