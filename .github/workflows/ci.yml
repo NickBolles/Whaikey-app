@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   pull_request:
+  # GitHub occasionally drops a `pull_request: synchronize` event, and when it
+  # does the PR just sits showing stale checks with nothing to say the run was
+  # never created. Without a manual trigger the only recourse is pushing an empty
+  # commit; this makes a re-run one click from the Actions tab.
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
