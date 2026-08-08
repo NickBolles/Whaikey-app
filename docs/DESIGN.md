@@ -4,13 +4,14 @@ The feel: **a well-lit whiskey lounge, not a dashboard.** Clean and sleek, warm 
 
 ## Type
 
-> **Fonts are pinned, deliberately.** They are self-hosted from version-locked
-> `@fontsource-variable/*` packages via `next/font/local` (src/app/layout.tsx), not
-> fetched with `next/font/google`. Google serves whatever revision is current on the
-> day of the build, so a font update silently re-wraps every line of type and breaks
-> the baselines below with no code change behind it — which is exactly what happened
-> in July 2026. Changing the type is now a lockfile bump: a reviewable diff that ships
-> new baselines alongside it, like any other design change.
+> **Fonts are pinned, deliberately.** The `.woff2` files live in `src/app/fonts/`
+> and load through `next/font/local` (src/app/layout.tsx); `next/font/google` is not
+> used. Google serves whatever revision is current on the day of the build, so a font
+> update silently re-wraps every line of type and breaks the baselines below with no
+> code change behind it — which is exactly what happened on 27 July 2026, when a
+> Fraunces revision put CI red on `main` for two weeks. Changing the type now means
+> replacing a file: a reviewable diff that ships new baselines alongside it, like any
+> other design change. Both faces are OFL-1.1 and the licences sit beside them.
 
 
 - **Display: Fraunces** (`--font-display`, class `font-display`) — headings, big numerals, brand wordmark. Optical sizing on; use weight 600 for headings, 500 for numerals.
