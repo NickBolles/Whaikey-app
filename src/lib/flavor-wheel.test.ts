@@ -4,6 +4,7 @@ import {
   WEDGE_IDS,
   isValidLeaf,
   leafLabel,
+  matchLeafIds,
   rollUpToWedges,
   wedgeForLeaf,
 } from "./flavor-wheel";
@@ -41,5 +42,52 @@ describe("flavor wheel taxonomy", () => {
 
   it("ignores unknown leaves in rollup", () => {
     expect(rollUpToWedges({ bogus: 3 })).toEqual({});
+  });
+});
+
+describe("matchLeafIds", () => {
+  it("finds flavors named outright in a dictated note", () => {
+    expect(matchLeafIds("Loads of vanilla and toasted oak, long warm finish")).toEqual(
+      expect.arrayContaining(["vanilla", "oak", "char"]),
+    );
+  });
+
+  it("stays literal — inflections the local pass misses are the model's job", () => {
+    // "Char / toast" is not matched by "charred": widening the suffix list far
+    // enough to catch it also starts matching unrelated words.
+    expect(matchLeafIds("charred oak")).toEqual(["oak"]);
+  });
+
+  it("tolerates plural and adjectival forms", () => {
+    expect(matchLeafIds("very oaky")).toContain("oak");
+    expect(matchLeafIds("raisins on the nose")).toContain("raisin");
+  });
+
+  it("matches multi-word labels and either side of a slashed label", () => {
+    expect(matchLeafIds("bright green apple")).toContain("green-apple");
+    expect(matchLeafIds("dried fig sweetness")).toContain("raisin");
+    expect(matchLeafIds("porridge and toast")).toContain("cereal");
+  });
+
+  it("matches on ids that read as synonyms of their label", () => {
+    // The label is "Fresh cut grass"; a real note just says "grassy".
+    expect(matchLeafIds("grassy and light")).toContain("grassy");
+  });
+
+  it("does not match a word that merely contains a flavor name", () => {
+    expect(matchLeafIds("the smoker outside")).not.toContain("smoke");
+    expect(matchLeafIds("peatland distillery tour")).not.toContain("peat");
+  });
+
+  it("returns nothing for empty or flavorless text", () => {
+    expect(matchLeafIds("")).toEqual([]);
+    expect(matchLeafIds("   ")).toEqual([]);
+    expect(matchLeafIds("poured this after work")).toEqual([]);
+  });
+
+  it("only ever returns valid leaf ids", () => {
+    for (const id of matchLeafIds("vanilla oak cherry brine campfire")) {
+      expect(isValidLeaf(id)).toBe(true);
+    }
   });
 });

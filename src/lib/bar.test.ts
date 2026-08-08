@@ -332,7 +332,7 @@ describe("getBarFlavorHeat", () => {
     });
 
     const heat = await getBarFlavorHeat(db, user.id);
-    const personalHeat = await getBarFlavorHeat(db, user.id, "personal");
+    const personalHeat = await getBarFlavorHeat(db, user.id, "personal", "own");
     // Leaves normalize to campfire (3): brine 1/3, vanilla 2/3.
     expect(heat.leaves.campfire).toBe(1);
     expect(heat.leaves.brine).toBeCloseTo(0.33, 2);
@@ -362,8 +362,10 @@ describe("getBarFlavorHeat", () => {
       const bottle = await createTestBottle(db, { flavorProfile: profile });
       await seedUserBottle(db, { userId: user.id, bottleId: bottle.id, relationship: "own" });
     }
-    // ...but the drinker's notes are overwhelmingly about the peated one.
+    // ...but the drinker's notes are overwhelmingly about the peated one,
+    // tasted somewhere else and never bought.
     const noted = await createTestBottle(db, { flavorProfile: null });
+    await seedUserBottle(db, { userId: user.id, bottleId: noted.id, relationship: "tried" });
     const [pour] = await db
       .insert(schema.pours)
       .values({ id: uid("pour"), userId: user.id, bottleId: noted.id, rating: 5 })
@@ -414,6 +416,8 @@ describe("getBarFlavorHeat", () => {
     const user = await createTestUser(db);
     const other = await createTestUser(db);
     const bottle = await createTestBottle(db, { flavorProfile: null });
+    await seedUserBottle(db, { userId: user.id, bottleId: bottle.id, relationship: "tried" });
+    await seedUserBottle(db, { userId: other.id, bottleId: bottle.id, relationship: "tried" });
 
     const [mine] = await db
       .insert(schema.pours)
@@ -440,5 +444,85 @@ describe("getBarFlavorHeat", () => {
     const heat = await getBarFlavorHeat(db, user.id);
     expect(heat.leaves).toEqual({ oak: 1 });
     expect(heat.wedges).toEqual({ woody: 1 });
+  });
+
+  describe("scope", () => {
+    /** An owned sweet bottle and a tried oaky one, each with a matching note. */
+    async function seedShelves(userId: string) {
+      const owned = await createTestBottle(db, { flavorProfile: { sweet: 10 } });
+      const tried = await createTestBottle(db, { flavorProfile: { woody: 10 } });
+      await seedUserBottle(db, { userId, bottleId: owned.id, relationship: "own" });
+      await seedUserBottle(db, { userId, bottleId: tried.id, relationship: "tried" });
+      for (const [bottleId, tags] of [
+        [owned.id, { vanilla: 3 }],
+        [tried.id, { oak: 3 }],
+      ] as const) {
+        const [pour] = await db
+          .insert(schema.pours)
+          .values({ id: uid("pour"), userId, bottleId })
+          .returning();
+        await db
+          .insert(schema.tastingNotes)
+          .values({ id: uid("note"), pourId: pour.id, flavorTags: tags, extractedBy: "user" });
+      }
+      return { owned, tried };
+    }
+
+    it("limits the owned scope to bottles on the shelf", async () => {
+      const user = await createTestUser(db);
+      await seedShelves(user.id);
+
+      const heat = await getBarFlavorHeat(db, user.id, "personal", "own");
+      expect(heat.leaves).toEqual({ vanilla: 1 });
+      expect(heat.wedges.woody).toBeUndefined();
+    });
+
+    it("limits the tried scope to bottles tasted but not owned", async () => {
+      const user = await createTestUser(db);
+      await seedShelves(user.id);
+
+      const heat = await getBarFlavorHeat(db, user.id, "personal", "tried");
+      expect(heat.leaves).toEqual({ oak: 1 });
+      expect(heat.wedges.sweet).toBeUndefined();
+      expect(heat.wedges.woody).toBe(1);
+    });
+
+    it("spans both shelves in the all scope", async () => {
+      const user = await createTestUser(db);
+      await seedShelves(user.id);
+
+      const heat = await getBarFlavorHeat(db, user.id, "personal", "all");
+      expect(heat.leaves).toEqual({ vanilla: 1, oak: 1 });
+      expect(heat.wedges.sweet).toBe(1);
+      expect(heat.wedges.woody).toBe(1);
+    });
+
+    it("never counts a wishlist bottle, which has not been tasted", async () => {
+      const user = await createTestUser(db);
+      const wished = await createTestBottle(db, { flavorProfile: { peaty: 10 } });
+      await seedUserBottle(db, { userId: user.id, bottleId: wished.id, relationship: "wishlist" });
+
+      for (const scope of ["own", "tried", "all"] as const) {
+        expect(await getBarFlavorHeat(db, user.id, "personal", scope)).toMatchObject({
+          hasHeat: false,
+        });
+      }
+    });
+
+    it("scopes producer notes too, so 'have I tried anything oaky' is answerable", async () => {
+      const user = await createTestUser(db);
+      const tried = await createTestBottle(db, {
+        flavorProfile: null,
+        producerFlavorTags: { oak: 3 },
+        producerFlavorSourceUrl: "https://example.com/notes",
+        producerFlavorSourceLabel: "Producer tasting notes",
+      });
+      await seedUserBottle(db, { userId: user.id, bottleId: tried.id, relationship: "tried" });
+
+      expect(await getBarFlavorHeat(db, user.id, "producer", "own")).toMatchObject({
+        hasHeat: false,
+      });
+      expect((await getBarFlavorHeat(db, user.id, "producer", "tried")).leaves).toEqual({ oak: 1 });
+    });
   });
 });

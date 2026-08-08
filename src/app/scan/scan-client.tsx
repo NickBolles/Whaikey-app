@@ -8,6 +8,7 @@ import {
   Check,
   Flashlight,
   FlashlightOff,
+  GlassWater,
   ImageUp,
   Keyboard,
   Loader2,
@@ -123,7 +124,7 @@ function newId(): string {
   return `q-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-export function ScanClient() {
+export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
   const [cameraState, setCameraState] = useState<"starting" | "on" | "unavailable">("starting");
   const [cameraFacing, setCameraFacing] = useState<"environment" | "user">("environment");
   const [relationship, setRelationship] = useState<Relationship>("own");
@@ -616,9 +617,13 @@ export function ScanClient() {
   return (
     <div className="px-4 pt-6 flex flex-col gap-5 pb-6">
       <header>
-        <h1 className="font-display text-[2rem] leading-tight font-semibold">Scan your shelf</h1>
+        <h1 className="font-display text-[2rem] leading-tight font-semibold">
+          {forPour ? "Scan what you're pouring" : "Scan your shelf"}
+        </h1>
         <p className="text-muted text-sm mt-1">
-          Keep scanning — bottles identify themselves in the background.
+          {forPour
+            ? "Point at the barcode or label, then log the pour."
+            : "Keep scanning — bottles identify themselves in the background."}
         </p>
       </header>
 
@@ -888,13 +893,25 @@ export function ScanClient() {
                     <Loader2 size={18} strokeWidth={1.8} aria-hidden className="animate-spin text-muted" />
                   )}
                   {item.status === "added" && (
-                    <button
-                      type="button"
-                      onClick={() => void undo(item)}
-                      className="btn-secondary px-3 py-2 text-xs font-medium flex items-center gap-1.5"
-                    >
-                      <Undo2 size={14} strokeWidth={1.8} aria-hidden /> Undo
-                    </button>
+                    <div className="flex items-center gap-2">
+                      {item.added && (
+                        <Link
+                          href={`/pour?bottleId=${encodeURIComponent(item.added.bottleId)}`}
+                          className={`px-3 py-2 text-xs font-medium flex items-center gap-1.5 ${
+                            forPour ? "btn-primary" : "btn-secondary"
+                          }`}
+                        >
+                          <GlassWater size={14} strokeWidth={1.8} aria-hidden /> Pour
+                        </Link>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => void undo(item)}
+                        className="btn-secondary px-3 py-2 text-xs font-medium flex items-center gap-1.5"
+                      >
+                        <Undo2 size={14} strokeWidth={1.8} aria-hidden /> Undo
+                      </button>
+                    </div>
                   )}
                   {item.status === "review" && (
                     <button

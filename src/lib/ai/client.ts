@@ -35,6 +35,15 @@ export function aiSupportsServerWebSearch(): boolean {
   return activeAiProvider() !== "openrouter";
 }
 
+/**
+ * Whether to send `cache_control` breakpoints. Only the direct Anthropic API is
+ * a guaranteed passthrough; a rejected block would fail the whole request, and
+ * caching is an optimization we can always do without.
+ */
+export function aiSupportsPromptCaching(): boolean {
+  return activeAiProvider() === "anthropic";
+}
+
 /** Client configuration for the active provider, or null when no key is set. */
 export function aiClientOptions(): { apiKey: string; baseURL?: string } | null {
   if (activeAiProvider() === "openrouter") {

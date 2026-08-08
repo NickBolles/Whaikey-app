@@ -1,4 +1,4 @@
-import { and, desc, eq, exists, gte, isNotNull, sql } from "drizzle-orm";
+import { and, desc, eq, exists, gte, inArray, isNotNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
@@ -276,6 +276,21 @@ export async function getBarStats(db: DB, userId: string): Promise<BarStats> {
 
 export type FlavorHeatSource = "combined" | "personal" | "producer";
 
+/**
+ * Which shelf a flavor map describes. Wishlist bottles are never included in
+ * any scope: you have not tasted them, so their profiles would describe an
+ * aspiration rather than a palate.
+ */
+export type FlavorHeatScope = "own" | "tried" | "all";
+
+export const FLAVOR_HEAT_SCOPES = ["own", "tried", "all"] as const satisfies readonly FlavorHeatScope[];
+
+const SCOPE_RELATIONSHIPS: Record<FlavorHeatScope, Relationship[]> = {
+  own: ["own"],
+  tried: ["tried"],
+  all: ["own", "tried"],
+};
+
 export interface BarFlavorHeat {
   /** Wedge id -> 0-1, relative to the hottest wedge. */
   wedges: Record<string, number>;
@@ -287,11 +302,15 @@ export interface BarFlavorHeat {
 }
 
 /**
- * Aggregate where a user's bar leans on the flavor wheel. Wedge heat sums the
- * flavor profiles (0-10 per wedge) of owned bottles; the user's tasting-note
- * flavor tags add leaf heat and warm their parent wedge, so pours on tried
- * bottles count too. Both maps are normalized to their own max — heat is
- * relative ("where does MY bar lean"), never an absolute score.
+ * Aggregate where a user's whiskey leans on the flavor wheel. Wedge heat sums
+ * the flavor profiles (0-10 per wedge) of the in-scope bottles; the user's
+ * tasting-note flavor tags add leaf heat and warm their parent wedge. Both maps
+ * are normalized to their own max — heat is relative ("where does this shelf
+ * lean"), never an absolute score.
+ *
+ * `scope` chooses the shelf: bottles you own, bottles you have only tried, or
+ * everything you have tasted. It bounds both halves of the calculation, so the
+ * wheel always describes exactly the rows the caller is showing beside it.
  *
  * Two things keep the wheel's inner and outer rings telling the same story:
  * note tags are rolled up through `rollUpToWedges` so a pour lands on the same
@@ -303,10 +322,12 @@ export async function getBarFlavorHeat(
   db: DB,
   userId: string,
   source: FlavorHeatSource = "combined",
+  scope: FlavorHeatScope = "all",
 ): Promise<BarFlavorHeat> {
   const validWedges = new Set<string>(WEDGE_IDS);
   const wedgeTotals: Record<string, number> = {};
   const leafTotals: Record<string, number> = {};
+  const inScope = inArray(schema.userBottles.relationship, SCOPE_RELATIONSHIPS[scope]);
 
   const addTags = (flavorTags: Record<string, number> | null) => {
     if (!flavorTags) return;
@@ -321,31 +342,29 @@ export async function getBarFlavorHeat(
     }
   };
 
-  if (source === "combined" || source === "personal" || source === "producer") {
-    const owned = await db
-      .select({
-        flavorProfile: schema.bottles.flavorProfile,
-        producerFlavorTags: schema.bottles.producerFlavorTags,
-        producerFlavorSourceUrl: schema.bottles.producerFlavorSourceUrl,
-        producerFlavorSourceLabel: schema.bottles.producerFlavorSourceLabel,
-      })
-      .from(schema.userBottles)
-      .innerJoin(schema.bottles, eq(schema.userBottles.bottleId, schema.bottles.id))
-      .where(and(eq(schema.userBottles.userId, userId), eq(schema.userBottles.relationship, "own")));
+  const shelf = await db
+    .select({
+      flavorProfile: schema.bottles.flavorProfile,
+      producerFlavorTags: schema.bottles.producerFlavorTags,
+      producerFlavorSourceUrl: schema.bottles.producerFlavorSourceUrl,
+      producerFlavorSourceLabel: schema.bottles.producerFlavorSourceLabel,
+    })
+    .from(schema.userBottles)
+    .innerJoin(schema.bottles, eq(schema.userBottles.bottleId, schema.bottles.id))
+    .where(and(eq(schema.userBottles.userId, userId), inScope));
 
-    for (const row of owned) {
-      // Catalog wedge profiles fill My Bar even before personal descriptors are
-      // logged. They are estimates, not producer claims, so never use them in
-      // the Producer Notes source.
-      if (source !== "producer" && row.flavorProfile) {
-        for (const [wedgeId, score] of Object.entries(row.flavorProfile)) {
-          if (!validWedges.has(wedgeId) || typeof score !== "number") continue;
-          wedgeTotals[wedgeId] = (wedgeTotals[wedgeId] ?? 0) + Math.max(0, score);
-        }
+  for (const row of shelf) {
+    // Catalog wedge profiles fill the wheel even before personal descriptors
+    // are logged. They are estimates, not producer claims, so never use them in
+    // the Producer Notes source.
+    if (source !== "producer" && row.flavorProfile) {
+      for (const [wedgeId, score] of Object.entries(row.flavorProfile)) {
+        if (!validWedges.has(wedgeId) || typeof score !== "number") continue;
+        wedgeTotals[wedgeId] = (wedgeTotals[wedgeId] ?? 0) + Math.max(0, score);
       }
-      if (source === "producer" && hasPublishedProducerFlavorNotes(row)) {
-        addTags(row.producerFlavorTags);
-      }
+    }
+    if (source === "producer" && hasPublishedProducerFlavorNotes(row)) {
+      addTags(row.producerFlavorTags);
     }
   }
 
@@ -355,23 +374,21 @@ export async function getBarFlavorHeat(
       .from(schema.tastingNotes)
       .innerJoin(schema.pours, eq(schema.tastingNotes.pourId, schema.pours.id))
       .where(
-        source === "personal"
-          ? and(
-              eq(schema.pours.userId, userId),
-              exists(
-                db
-                  .select({ id: schema.userBottles.id })
-                  .from(schema.userBottles)
-                  .where(
-                    and(
-                      eq(schema.userBottles.userId, userId),
-                      eq(schema.userBottles.bottleId, schema.pours.bottleId),
-                      eq(schema.userBottles.relationship, "own"),
-                    ),
-                  ),
+        and(
+          eq(schema.pours.userId, userId),
+          exists(
+            db
+              .select({ id: schema.userBottles.id })
+              .from(schema.userBottles)
+              .where(
+                and(
+                  eq(schema.userBottles.userId, userId),
+                  eq(schema.userBottles.bottleId, schema.pours.bottleId),
+                  inScope,
+                ),
               ),
-            )
-          : eq(schema.pours.userId, userId),
+          ),
+        ),
       );
     for (const note of notes) addTags(note.flavorTags);
   }
