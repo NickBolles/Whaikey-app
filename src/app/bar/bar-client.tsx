@@ -472,7 +472,7 @@ function FlavorMapSection({
             role="tab"
             aria-selected={source === s.key}
             onClick={() => onSourceChange(s.key)}
-            className={`chip inline-flex min-h-9 items-center gap-1.5 px-3 text-xs font-medium ${
+            className={`chip inline-flex min-h-11 items-center gap-1.5 px-3 text-xs font-medium ${
               source === s.key ? "chip-active" : "text-muted hover:text-foreground"
             }`}
           >
@@ -489,7 +489,7 @@ function FlavorMapSection({
               role="tab"
               aria-selected={scope === s.key}
               onClick={() => onScopeChange(s.key)}
-              className={`chip inline-flex min-h-9 items-center px-3 text-xs font-medium ${
+              className={`chip inline-flex min-h-11 items-center px-3 text-xs font-medium ${
                 scope === s.key ? "chip-active" : "text-muted hover:text-foreground"
               }`}
             >
@@ -540,7 +540,7 @@ function FlavorMapSection({
                     {leafLabel(id) ?? id} ×
                   </button>
                 ))}
-                <button onClick={onClearFlavors} className="min-h-9 px-2 text-xs text-muted hover:text-foreground underline-offset-2 hover:underline">
+                <button onClick={onClearFlavors} className="min-h-11 px-2 text-xs text-muted hover:text-foreground underline-offset-2 hover:underline">
                   Clear
                 </button>
               </div>
