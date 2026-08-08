@@ -4,6 +4,7 @@ import {
   cosineSimilarity,
   inferPriceBand,
   palateHeat,
+  palateWheelHeat,
   priceInBand,
   recencyDecay,
   tasteMatchPercent,
@@ -195,6 +196,46 @@ describe("palateHeat", () => {
 
   it("works at leaf granularity too", () => {
     expect(palateHeat({ campfire: 2, vanilla: 1 })).toEqual({ campfire: 1, vanilla: 0.5 });
+  });
+});
+
+describe("palateWheelHeat", () => {
+  const profile = (vector: Record<string, number>, leaves: Record<string, number>, sampleSize = 3) =>
+    ({ vector, leaves, sampleSize });
+
+  it("floors a family at its hottest descriptor, like the bar heat map does", () => {
+    // Sweet dominates the wedge vector, so peaty normalizes low — but campfire
+    // is the only leaf and normalizes to 1. Without reconciliation the wheel
+    // would paint a blazing leaf inside a nearly cold family.
+    const heat = palateWheelHeat(profile({ sweet: 10, peaty: 1 }, { campfire: 2 }));
+    expect(heat.leaves).toEqual({ campfire: 1 });
+    expect(heat.wedges.peaty).toBe(1);
+    expect(heat.wedges.sweet).toBe(1);
+  });
+
+  it("keeps a family hotter than its descriptors unchanged", () => {
+    const heat = palateWheelHeat(profile({ peaty: 10 }, { campfire: 10, brine: 1 }));
+    expect(heat.wedges.peaty).toBe(1);
+    expect(heat.leaves.brine).toBeCloseTo(0.1, 6);
+  });
+
+  it("surfaces a liked descriptor whose family cancelled to nothing", () => {
+    // campfire liked, brine disliked, both Peaty: the wedge nets to zero.
+    const heat = palateWheelHeat(profile({ peaty: 0 }, { campfire: 2, brine: -2 }));
+    expect(heat.leaves).toEqual({ campfire: 1 });
+    expect(heat.wedges.peaty).toBe(1);
+  });
+
+  it("carries sampleSize and top wedges through", () => {
+    const heat = palateWheelHeat(profile({ peaty: 4, sweet: 2 }, {}, 7));
+    expect(heat.sampleSize).toBe(7);
+    expect(heat.topWedgeIds).toEqual(["peaty", "sweet"]);
+  });
+
+  it("is empty for a palate with no positive signal", () => {
+    const heat = palateWheelHeat(profile({ sweet: -1 }, {}, 1));
+    expect(heat.wedges).toEqual({});
+    expect(heat.leaves).toEqual({});
   });
 });
 

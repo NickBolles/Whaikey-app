@@ -19,7 +19,7 @@
  * so it can be unit-tested and run from either the server or (via serialized
  * data) the client.
  */
-import { WEDGE_IDS, isValidLeaf, rollUpToWedges } from "@/lib/flavor-wheel";
+import { WEDGE_IDS, floorWedgesAtLeaves, isValidLeaf, rollUpToWedges } from "@/lib/flavor-wheel";
 
 /** Rating midpoint on the 0.5–5 scale; pours above this read as "liked". */
 export const NEUTRAL_RATING = 3;
@@ -174,6 +174,31 @@ export function palateHeat(vector: PalateVector): Record<string, number> {
     if (value > 0) out[id] = Math.round((value / max) * 100) / 100;
   }
   return out;
+}
+
+/** The palate rendered as flavor-wheel heat, ready to hand to the Bar's wheel. */
+export interface PalateWheelHeat {
+  wedges: Record<string, number>;
+  leaves: Record<string, number>;
+  topWedgeIds: string[];
+  sampleSize: number;
+}
+
+/**
+ * Turn a computed palate into wheel heat. The palate is one more way to light
+ * the Bar's wheel rather than a chart of its own, so it owes that wheel the
+ * same ring reconciliation `getBarFlavorHeat` performs: wedges and leaves
+ * normalize against different maxima, and a family is never colder than its
+ * own hottest descriptor.
+ */
+export function palateWheelHeat(profile: PalateProfileResult): PalateWheelHeat {
+  const leaves = palateHeat(profile.leaves);
+  return {
+    wedges: floorWedgesAtLeaves(palateHeat(profile.vector), leaves),
+    leaves,
+    topWedgeIds: topWedges(profile.vector, 3),
+    sampleSize: profile.sampleSize,
+  };
 }
 
 /** The wedge ids a user most prefers, strongest first, positive weights only. */

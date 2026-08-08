@@ -223,4 +223,21 @@ describe("BarClient palate on the unified wheel", () => {
     expect(screen.getByText("Your palate is still a blank page")).toBeInTheDocument();
     expect(screen.queryByTestId("bar-flavor-wheel")).not.toBeInTheDocument();
   });
+
+  it("still draws when a descriptor is liked but its family cancelled out", () => {
+    // A loved campfire pour and a hated brine one both land in Peaty, so the
+    // wedge nets to zero while campfire stays positive. That is a preference we
+    // know about, not a blank page.
+    const cancelled: PalateHeat = {
+      wedges: {},
+      leaves: { campfire: 1 },
+      topWedgeIds: [],
+      sampleSize: 2,
+    };
+    render(<BarClient initialRows={[]} flavorHeat={heatMatrix()} palate={cancelled} />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "My palate" }));
+    expect(screen.queryByText("Your palate is still a blank page")).not.toBeInTheDocument();
+    expect(screen.getByTestId("bar-flavor-wheel")).toBeInTheDocument();
+  });
 });

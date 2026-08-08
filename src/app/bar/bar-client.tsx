@@ -201,7 +201,12 @@ export function BarClient({
       wedges: palate.wedges,
       leaves: palate.leaves,
       topWedgeIds: palate.topWedgeIds,
-      hasHeat: palate.sampleSize > 0 && Object.keys(palate.wedges).length > 0,
+      // Either ring is enough to draw. Liked and disliked descriptors in one
+      // family can cancel at wedge level while a descriptor stays positive —
+      // reporting that as a blank page would hide a preference we do know.
+      hasHeat:
+        palate.sampleSize > 0 &&
+        (Object.keys(palate.wedges).length > 0 || Object.keys(palate.leaves).length > 0),
     }),
     [palate],
   );

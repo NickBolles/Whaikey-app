@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   FLAVOR_WHEEL,
   WEDGE_IDS,
+  floorWedgesAtLeaves,
   isValidLeaf,
   leafLabel,
   matchLeafIds,
@@ -42,6 +43,38 @@ describe("flavor wheel taxonomy", () => {
 
   it("ignores unknown leaves in rollup", () => {
     expect(rollUpToWedges({ bogus: 3 })).toEqual({});
+  });
+});
+
+describe("floorWedgesAtLeaves", () => {
+  it("raises a cold family to its hottest leaf", () => {
+    // The contradiction this exists to prevent: a blazing leaf drawn inside a
+    // barely-lit wedge, because the two rings normalize to different maxima.
+    expect(floorWedgesAtLeaves({ peaty: 0.1, sweet: 1 }, { campfire: 1 })).toEqual({
+      peaty: 1,
+      sweet: 1,
+    });
+  });
+
+  it("adds a wedge that had no heat of its own", () => {
+    expect(floorWedgesAtLeaves({}, { campfire: 0.6 })).toEqual({ peaty: 0.6 });
+  });
+
+  it("leaves a family already hotter than its leaves alone", () => {
+    expect(floorWedgesAtLeaves({ peaty: 1 }, { campfire: 0.3 })).toEqual({ peaty: 1 });
+  });
+
+  it("floors at the hottest leaf when a family has several", () => {
+    expect(floorWedgesAtLeaves({ peaty: 0.1 }, { campfire: 0.4, brine: 0.9 })).toEqual({
+      peaty: 0.9,
+    });
+  });
+
+  it("ignores leaves outside the taxonomy and does not mutate its inputs", () => {
+    const wedges = { peaty: 0.2 };
+    const leaves = { "not-a-leaf": 1 };
+    expect(floorWedgesAtLeaves(wedges, leaves)).toEqual({ peaty: 0.2 });
+    expect(wedges).toEqual({ peaty: 0.2 });
   });
 });
 
