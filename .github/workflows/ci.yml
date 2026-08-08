@@ -28,6 +28,9 @@ jobs:
       - run: pnpm lint
       - run: pnpm test
       - run: pnpm build
+      # Validates capacitor.config.ts and the bundled offline shell. Needs no
+      # Xcode, Android SDK, or network (docs/NATIVE_APP.md §5).
+      - run: pnpm native:check
         env:
           BETTER_AUTH_SECRET: ci-secret
 

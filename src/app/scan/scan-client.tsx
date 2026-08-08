@@ -20,6 +20,14 @@ import { RELATIONSHIPS, type Relationship } from "@/db/schema";
 import { isValidUpc, normalizeUpc } from "@/lib/upc";
 import type { BottleSearchResult } from "@/lib/ai/tools";
 import { CategoryChip } from "@/components/category-chip";
+import { haptic } from "@/lib/native/haptics";
+import { isNativeApp } from "@/lib/native/platform";
+import {
+  isNativeTorchAvailable,
+  setNativeTorch,
+  startNativeScan,
+  type NativeScanSession,
+} from "@/lib/native/barcode";
 import {
   BRIGHTNESS_MIN,
   captureWarning,
@@ -39,6 +47,13 @@ import {
  * bottle is back on the shelf. Dual-mode camera: the barcode loop runs
  * continuously and a shutter button captures a framed label photo (confirmed
  * on-device before anything is uploaded) for AI identification.
+ *
+ * Two scanning engines sit behind one UI (docs/NATIVE_APP.md §3.1): inside the
+ * native shell, MLKit renders the camera behind the WebView and pushes barcodes
+ * up through the plugin; on the web we fall back to the `BarcodeDetector` loop
+ * over a `<video>` element. The web engine is Chromium-only — WKWebView has no
+ * `BarcodeDetector` at all — so the native engine is what makes scanning work on
+ * iPhone. The queue, review sheet, and label-capture flows are shared.
  */
 
 interface UpcMatch extends BottleSearchResult {
@@ -126,6 +141,12 @@ function newId(): string {
 export function ScanClient() {
   const [cameraState, setCameraState] = useState<"starting" | "on" | "unavailable">("starting");
   const [cameraFacing, setCameraFacing] = useState<"environment" | "user">("environment");
+  /**
+   * Which engine drives the camera. Starts "pending" rather than probing during
+   * render so the first client render matches the server's, then resolves to
+   * "native" or "web" in the effect below.
+   */
+  const [scanEngine, setScanEngine] = useState<"pending" | "native" | "web">("pending");
   const [relationship, setRelationship] = useState<Relationship>("own");
   const [items, setItems] = useState<QueueItem[]>([]);
   const [reviewId, setReviewId] = useState<string | null>(null);
@@ -162,6 +183,10 @@ export function ScanClient() {
   const pausedRef = useRef(false);
   const relationshipRef = useRef(relationship);
   const itemsRef = useRef(items);
+  const scanEngineRef = useRef(scanEngine);
+  useEffect(() => {
+    scanEngineRef.current = scanEngine;
+  }, [scanEngine]);
   useEffect(() => {
     // Pause detection only while a modal owns the screen — background
     // resolution never blocks the next scan.
@@ -208,10 +233,11 @@ export function ScanClient() {
           },
         });
         setReviewId((cur) => (cur === itemId ? null : cur));
-        navigator.vibrate?.(60);
+        haptic("success");
         showToast(updated ? `${bottle.name} — shelf updated` : `Added ${bottle.name}`);
       } catch {
         patchItem(itemId, { status: "failed", subtitle: "Couldn't save — tap to retry." });
+        haptic("warning");
         showToast("Couldn't save that one", "warn");
       }
     },
@@ -316,6 +342,7 @@ export function ScanClient() {
       }
       setManualError(null);
       if (itemsRef.current.some((it) => it.upc === code && it.status !== "failed")) {
+        haptic("warning");
         showToast("Already scanned this session", "warn");
         return true;
       }
@@ -331,11 +358,30 @@ export function ScanClient() {
         added: null,
       };
       setItems((prev) => [item, ...prev]);
-      navigator.vibrate?.(30);
+      haptic("lock");
       void processUpcItem(item.id, code);
       return true;
     },
     [processUpcItem, showToast],
+  );
+
+  /**
+   * Repeat-window gate shared by both engines. MLKit reports every barcode in
+   * view many times a second, so without this the queue fills with duplicates of
+   * whatever bottle is being held up. Returns false when the code was swallowed.
+   */
+  const acceptCode = useCallback(
+    (raw: string): boolean => {
+      const code = normalizeUpc(raw);
+      if (code) {
+        const now = Date.now();
+        const last = lastCodeRef.current;
+        if (last && last.code === code && now - last.at < REPEAT_MS) return false;
+        lastCodeRef.current = { code, at: now };
+      }
+      return enqueueCode(raw);
+    },
+    [enqueueCode],
   );
 
   /** Enqueue a confirmed label capture (or re-resolve an existing item with it). */
@@ -383,9 +429,30 @@ export function ScanClient() {
     }
   }, []);
 
-  /** Toggle the rear camera's hardware torch when the browser exposes it. */
+  /**
+   * Toggle the rear camera's hardware torch. Under MLKit the camera belongs to
+   * the plugin, so the torch is driven through it; on the web it's a constraint
+   * on the `getUserMedia` track.
+   */
   const toggleTorch = useCallback(async () => {
     if (torchChangingRef.current) return;
+
+    if (scanEngineRef.current === "native") {
+      const next = !torchOnRef.current;
+      torchChangingRef.current = true;
+      setTorchChanging(true);
+      try {
+        const reached = await setNativeTorch(next);
+        torchOnRef.current = reached;
+        setTorchOn(reached);
+        if (next && !reached) setTorchUnavailable(true);
+      } finally {
+        torchChangingRef.current = false;
+        setTorchChanging(false);
+      }
+      return;
+    }
+
     const track = streamRef.current?.getVideoTracks()[0] as TorchTrack | undefined;
     if (!track?.applyConstraints) return;
     const next = !torchOnRef.current;
@@ -417,8 +484,61 @@ export function ScanClient() {
     lockTimerRef.current = setTimeout(() => setLockBox(null), 900);
   }, []);
 
-  // Camera + barcode detection loop with live on-device guidance.
+  /**
+   * Native engine: MLKit owns the camera and renders it behind the WebView, so
+   * there is no `<video>` and no detection loop — barcodes arrive as events.
+   * Falling through to `setScanEngine("web")` covers the web, a device that
+   * can't scan natively, and a denied camera permission.
+   */
   useEffect(() => {
+    let cancelled = false;
+    let session: NativeScanSession | null = null;
+
+    (async () => {
+      if (!isNativeApp()) {
+        // Resolved here rather than in the effect body so the web path doesn't
+        // set state synchronously during the effect (react-hooks/set-state-in-effect).
+        if (!cancelled) setScanEngine("web");
+        return;
+      }
+      const started = await startNativeScan({
+        facing: cameraFacing === "environment" ? "back" : "front",
+        onBarcode: (raw) => {
+          // A modal owns the screen — the plugin keeps streaming regardless.
+          if (pausedRef.current) return;
+          if (acceptCode(raw)) setGuidance({ kind: "ok", message: "Got it" });
+        },
+      });
+      if (cancelled) {
+        await started?.stop();
+        return;
+      }
+      if (!started) {
+        setScanEngine("web");
+        return;
+      }
+      session = started;
+      setScanEngine("native");
+      setCameraState("on");
+      setGuidance(null);
+      const torch = await isNativeTorchAvailable();
+      torchSupportedRef.current = torch;
+      setTorchSupported(torch);
+      setTorchReportedUnsupported(!torch);
+    })();
+
+    return () => {
+      cancelled = true;
+      void session?.stop();
+      torchOnRef.current = false;
+      setTorchOn(false);
+    };
+  }, [cameraFacing, acceptCode]);
+
+  // Web engine: getUserMedia + BarcodeDetector loop with live on-device guidance.
+  useEffect(() => {
+    if (scanEngine !== "web") return;
+
     let cancelled = false;
     let interval: ReturnType<typeof setInterval> | null = null;
     let tick = 0;
@@ -480,12 +600,8 @@ export function ScanClient() {
                 });
                 return;
               }
-              const now = Date.now();
-              const last = lastCodeRef.current;
-              if (last && last.code === code && now - last.at < REPEAT_MS) return;
-              lastCodeRef.current = { code, at: now };
+              if (!acceptCode(code)) return;
               setGuidance({ kind: "ok", message: `Got it · ${code}` });
-              enqueueCode(code);
               return;
             }
             // No barcode this frame: every other tick, analyze the frame
@@ -533,11 +649,19 @@ export function ScanClient() {
       setTorchOn(false);
       setTorchChanging(false);
     };
-  }, [cameraFacing, enqueueCode, flashLockBox, sampleFrameStats]);
+  }, [scanEngine, cameraFacing, acceptCode, flashLockBox, sampleFrameStats, toggleTorch]);
 
   /** Shutter: grab the current frame for on-device framing confirmation. */
   const captureFrame = useCallback(
     (forItemId: string | null) => {
+      if (scanEngineRef.current === "native") {
+        // MLKit owns the camera and exposes no still capture, so hand off to the
+        // OS camera. Phase 2 replaces this with @capacitor/camera for a full-res
+        // shot without leaving the scan session (docs/NATIVE_APP.md §3.1).
+        fileForItemRef.current = forItemId;
+        fileRef.current?.click();
+        return;
+      }
       const video = videoRef.current;
       if (!video || video.readyState < 2) return;
       const scale = Math.min(1, CAPTURE_MAX_PX / Math.max(video.videoWidth, video.videoHeight));
@@ -641,8 +765,14 @@ export function ScanClient() {
 
       {/* Viewfinder */}
       {cameraState !== "unavailable" && (
-        <div className="card relative overflow-hidden">
-          <video ref={videoRef} playsInline muted className="w-full aspect-[4/3] object-cover" />
+        <div className={`card relative overflow-hidden ${scanEngine === "native" ? "card-viewfinder" : ""}`}>
+          {scanEngine === "native" ? (
+            // MLKit renders the camera behind the WebView, so this reserves the
+            // viewfinder's space and lets it show through (.card-viewfinder).
+            <div className="w-full aspect-[4/3]" />
+          ) : (
+            <video ref={videoRef} playsInline muted className="w-full aspect-[4/3] object-cover" />
+          )}
           <div aria-hidden className="absolute inset-0 pointer-events-none flex items-center justify-center">
             <div className="w-3/4 h-1/3 rounded-2xl border-2 border-accent/70 shadow-[0_0_24px_rgba(232,161,60,0.25)]" />
           </div>
