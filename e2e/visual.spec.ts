@@ -143,6 +143,15 @@ test.describe("signed in (demo collector)", () => {
     await expect(map).toHaveScreenshot(shot("bar-flavor-map"));
   });
 
+  test("my bar: palate on the same wheel", async ({ page }) => {
+    await page.goto("/bar");
+    const map = page.getByRole("region", { name: /flavor map/i });
+    await page.getByRole("tab", { name: "My palate" }).click();
+    await expect(page.getByText("You lean toward")).toBeVisible();
+    await settle(page);
+    await expect(map).toHaveScreenshot(shot("bar-palate-map"));
+  });
+
   test("tried tab: flavor map scoped to what you've tasted", async ({ page }) => {
     await page.goto("/bar");
     await page.getByRole("tab", { name: "Tried" }).click();
