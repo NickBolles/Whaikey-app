@@ -4,6 +4,15 @@ The feel: **a well-lit whiskey lounge, not a dashboard.** Clean and sleek, warm 
 
 ## Type
 
+> **Fonts are pinned, deliberately.** They are self-hosted from version-locked
+> `@fontsource-variable/*` packages via `next/font/local` (src/app/layout.tsx), not
+> fetched with `next/font/google`. Google serves whatever revision is current on the
+> day of the build, so a font update silently re-wraps every line of type and breaks
+> the baselines below with no code change behind it — which is exactly what happened
+> in July 2026. Changing the type is now a lockfile bump: a reviewable diff that ships
+> new baselines alongside it, like any other design change.
+
+
 - **Display: Fraunces** (`--font-display`, class `font-display`) — headings, big numerals, brand wordmark. Optical sizing on; use weight 600 for headings, 500 for numerals.
 - **Body: Geist Sans** — everything else.
 - Section labels: 11px, uppercase, `tracking-[0.14em]`, `text-muted`.
