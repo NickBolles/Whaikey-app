@@ -122,10 +122,21 @@ test.describe("signed in (demo collector)", () => {
   // its own, where the heat map is judged on its own pixels.
   test("my bar: flavor map", async ({ page }) => {
     await page.goto("/bar");
-    const map = page.getByRole("region", { name: /bar flavor map/i });
+    const map = page.getByRole("region", { name: /flavor map/i });
     await expect(page.getByTestId("bar-flavor-wheel")).toBeVisible();
     await settle(page);
     await expect(map).toHaveScreenshot(shot("bar-flavor-map"));
+  });
+
+  test("tried tab: flavor map scoped to what you've tasted", async ({ page }) => {
+    await page.goto("/bar");
+    await page.getByRole("tab", { name: "Tried" }).click();
+    await expect(page.getByRole("tab", { name: "Only tasted" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("bar-tried"), { fullPage: true });
   });
 
   test("wishlist tab", async ({ page }) => {
@@ -161,10 +172,13 @@ test.describe("signed in (demo collector)", () => {
     await page.goto("/pour");
     await settle(page);
     await page.getByText(/Eagle Rare 10/i).first().click();
-    // Expand the optional tasting-notes section to reveal freeform + voice
-    // capture (the AI-assisted note-capture surface).
-    await page.getByRole("button", { name: /Tasting notes/i }).click();
+    // Note capture is above the fold now, so no disclosure to open: it is the
+    // first thing offered after picking a bottle.
     await expect(page.getByRole("button", { name: /Auto-fill|Extract/i })).toBeVisible();
+    // Typed text drives the on-device flavor pass, which is the part of this
+    // surface that renders without any network call.
+    await page.getByLabel("Say what you taste").fill("Loads of vanilla and oak, long finish");
+    await expect(page.getByLabel("Flavors heard in your note")).toBeVisible();
     await settle(page);
     await expect(page).toHaveScreenshot(shot("pour-note-capture"), { fullPage: true });
   });

@@ -76,6 +76,25 @@ describe("extractTastingNote", () => {
     });
   });
 
+  it("sends the taxonomy as a system prompt and only the note as the user turn", async () => {
+    const fake = makeFakeAnthropic([textResponse(JSON.stringify({ flavorTags: {} }))]);
+    await extractTastingNote("just vanilla", fake.client);
+
+    const params = fake.create.mock.calls[0][0] as {
+      system: Array<{ text: string }>;
+      messages: Array<{ content: string }>;
+      max_tokens: number;
+    };
+    // The invariant that makes the prefix cacheable: everything constant lives
+    // in `system`, and the per-call user turn carries nothing but the note.
+    expect(params.system[0].text).toContain("Flavor taxonomy");
+    expect(params.messages).toHaveLength(1);
+    expect(params.messages[0].content).toBe("Tasting note:\njust vanilla");
+    expect(params.messages[0].content).not.toContain("Flavor taxonomy");
+    // Output tokens dominate latency; the ceiling stays near what the schema needs.
+    expect(params.max_tokens).toBeLessThanOrEqual(600);
+  });
+
   it("handles JSON embedded in prose", async () => {
     const fake = makeFakeAnthropic([
       textResponse('Here is the extraction: {"nose": "honey", "flavorTags": {"honey": 2}} Hope that helps!'),

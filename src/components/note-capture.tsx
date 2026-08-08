@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Mic, MicOff, Sparkles } from "lucide-react";
-import { FLAVOR_WHEEL, leafLabel, wedgeForLeaf } from "@/lib/flavor-wheel";
+import { FLAVOR_WHEEL, leafLabel, matchLeafIds, wedgeForLeaf } from "@/lib/flavor-wheel";
 
 /**
  * Mirror of the server-side ExtractedTastingNote shape (src/lib/ai/extract.ts).
@@ -31,6 +31,11 @@ export interface NoteCaptureProps {
    * a runtime 503 degrades gracefully to the same note.
    */
   aiConfigured?: boolean;
+  /** Field label. Defaults to the secondary "Anything else" framing. */
+  label?: string;
+  placeholder?: string;
+  /** One quiet line under the controls explaining what auto-fill will do. */
+  hint?: string;
 }
 
 // --- Minimal Web Speech API typings (not in lib.dom for all targets) ---------
@@ -96,6 +101,9 @@ export function NoteCapture({
   onFreeformChange,
   onApplyExtraction,
   aiConfigured,
+  label = "Anything else",
+  placeholder = "Free-form thoughts — type or use the mic…",
+  hint,
 }: NoteCaptureProps) {
   // Capability gate. useSyncExternalStore keeps SSR (false) and client renders
   // consistent without a hydration mismatch. Capabilities don't change, so the
@@ -216,6 +224,22 @@ export function NoteCapture({
     setResult(null);
   };
 
+  // Flavors named outright in the note, matched on-device as the user types or
+  // dictates. This is the whole point of the local pass: the common note is
+  // already tagged before the model is even asked, so waiting is optional.
+  const heardLeafIds = useMemo(() => matchLeafIds(freeform), [freeform]);
+  const applyHeard = () => {
+    onApplyExtraction({
+      nose: null,
+      palate: null,
+      finish: null,
+      // Intensity 2 ("present"): the text named the flavor but not how loudly.
+      flavorTags: Object.fromEntries(heardLeafIds.map((id) => [id, 2])),
+      suggestedRating: null,
+      servingStyle: null,
+    });
+  };
+
   const flavorEntries = result
     ? Object.entries(result.flavorTags).filter(([leafId]) => leafLabel(leafId))
     : [];
@@ -223,12 +247,12 @@ export function NoteCapture({
   return (
     <div className="flex flex-col gap-3">
       <label className="flex flex-col gap-1.5">
-        <span className="section-label">Anything else</span>
+        <span className="section-label">{label}</span>
         <textarea
           value={freeform}
           onChange={(e) => onFreeformChange(e.target.value)}
           rows={3}
-          placeholder="Free-form thoughts — type or use the mic…"
+          placeholder={placeholder}
           className="rounded-xl bg-surface border border-border-subtle p-3 text-sm placeholder:text-muted focus:outline-none focus:border-accent focus-visible:ring-2 focus-visible:ring-accent/60 resize-y"
         />
       </label>
@@ -279,6 +303,33 @@ export function NoteCapture({
       </span>
 
       {micHint && <p className="text-xs text-muted px-1">{micHint}</p>}
+
+      {heardLeafIds.length > 0 && !result && (
+        <div className="flex flex-col gap-2" aria-label="Flavors heard in your note">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-muted">Heard so far</span>
+            {heardLeafIds.map((leafId) => (
+              <span key={leafId} className="chip inline-flex items-center gap-1.5 px-3 py-1.5 text-xs">
+                <span
+                  className="inline-block h-2 w-2 rounded-full"
+                  style={{ backgroundColor: leafColor(leafId) }}
+                  aria-hidden
+                />
+                {leafLabel(leafId)}
+              </span>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={applyHeard}
+            className="btn-secondary self-start px-4 py-2 text-xs font-medium"
+          >
+            Add {heardLeafIds.length === 1 ? "this flavor" : "these flavors"}
+          </button>
+        </div>
+      )}
+
+      {hint && !aiOff && !result && <p className="text-xs text-muted px-1">{hint}</p>}
 
       {aiOff && (
         <p className="card-flat text-sm text-muted p-3">

@@ -4,7 +4,12 @@ import { ScanClient } from "./scan-client";
 
 export const dynamic = "force-dynamic";
 
-export default async function ScanPage() {
+export default async function ScanPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ then?: string }>;
+}) {
+  const { then } = await searchParams;
   const user = await getSessionUser();
   if (!user) {
     return (
@@ -23,5 +28,7 @@ export default async function ScanPage() {
     );
   }
 
-  return <ScanClient />;
+  // ?then=pour means the user came here from the pour flow to identify what
+  // they're drinking, so logging the pour becomes the primary action.
+  return <ScanClient forPour={then === "pour"} />;
 }

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
 import { createTestBottle, createTestUser, setupTestDb, uid } from "@/test/helpers";
@@ -57,8 +57,30 @@ describe("logPour", () => {
     expect(pour.bottleId).toBe(bottleId);
     expect(pour.rating).toBe(4.5);
     expect(pour.amountMl).toBe(45); // default pour
-    expect(pour.userBottleId).toBeNull();
     expect(note).toBeNull();
+  });
+
+  it("shelves an unfiled bottle as tried so the pour is never orphaned", async () => {
+    const { pour } = await logPour(db, userId, { bottleId });
+
+    const shelved = await db.query.userBottles.findFirst({
+      where: and(eq(schema.userBottles.userId, userId), eq(schema.userBottles.bottleId, bottleId)),
+    });
+    expect(shelved).toBeDefined();
+    expect(shelved?.relationship).toBe("tried");
+    expect(pour.userBottleId).toBe(shelved?.id);
+  });
+
+  it("leaves an existing relationship alone rather than demoting it to tried", async () => {
+    const ub = await createUserBottle(db, userId, bottleId, { status: "open", fillLevel: 100 });
+    await logPour(db, userId, { bottleId });
+
+    const rows = await db.query.userBottles.findMany({
+      where: and(eq(schema.userBottles.userId, userId), eq(schema.userBottles.bottleId, bottleId)),
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].id).toBe(ub.id);
+    expect(rows[0].relationship).toBe("own");
   });
 
   it("links the user's bottle and decrements fill on an open bottle (45ml: 100 -> 95)", async () => {
@@ -106,11 +128,13 @@ describe("logPour", () => {
       fillLevel: 100,
     });
     const { pour } = await logPour(db, userId, { bottleId });
-    expect(pour.userBottleId).toBeNull();
+    // The pour shelves a row for THIS user; the other user's row is untouched.
+    expect(pour.userBottleId).not.toBe(otherUb.id);
     const untouched = await db.query.userBottles.findFirst({
       where: eq(schema.userBottles.id, otherUb.id),
     });
     expect(untouched?.fillLevel).toBe(100);
+    expect(untouched?.relationship).toBe("own");
   });
 
   it("inserts a tasting note with flavor tags, extractedBy user", async () => {

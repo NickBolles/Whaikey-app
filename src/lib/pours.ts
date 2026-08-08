@@ -85,11 +85,11 @@ function noteHasContent(note: NonNullable<PourInput["note"]>): boolean {
 
 /**
  * Log a pour for a user. Validates input (throws ZodError on bad shape /
- * flavor tags), throws BottleNotFoundError for unknown bottles. If the user
- * has a userBottles row for the bottle the pour is linked to it, and when
- * that row is an "open" bottle with a fill level, the fill is decremented
- * ~3% per 30ml poured (floored at 0). An optional tasting note is stored
- * 1:1 with the pour.
+ * flavor tags), throws BottleNotFoundError for unknown bottles. The pour is
+ * linked to the user's shelf row for that bottle, creating a "tried" row when
+ * none exists, and when that row is an "open" bottle with a fill level, the
+ * fill is decremented ~3% per 30ml poured (floored at 0). An optional tasting
+ * note is stored 1:1 with the pour.
  */
 export async function logPour(db: DB, userId: string, input: PourInput): Promise<LoggedPour> {
   const parsed = pourInputSchema.parse(input);
@@ -101,9 +101,24 @@ export async function logPour(db: DB, userId: string, input: PourInput): Promise
 
   const amountMl = parsed.amountMl ?? DEFAULT_POUR_ML;
   const { pour, note } = await db.transaction(async (tx) => {
-    const userBottle = await tx.query.userBottles.findFirst({
+    let userBottle = await tx.query.userBottles.findFirst({
       where: and(eq(schema.userBottles.userId, userId), eq(schema.userBottles.bottleId, parsed.bottleId)),
     });
+    // Pouring something is proof you tried it. Without a shelf row the bottle
+    // is invisible to the Tried tab and to every flavor map, so record the
+    // weakest relationship that is unambiguously true. Existing rows are left
+    // alone — this never promotes or demotes a bottle you already filed.
+    if (!userBottle) {
+      [userBottle] = await tx
+        .insert(schema.userBottles)
+        .values({
+          id: crypto.randomUUID(),
+          userId,
+          bottleId: parsed.bottleId,
+          relationship: "tried",
+        })
+        .returning();
+    }
     const [pour] = await tx
       .insert(schema.pours)
       .values({

@@ -1,11 +1,25 @@
 import Link from "next/link";
+import type { DB } from "@/db";
 import { getDb } from "@/db";
 import { getSessionUser } from "@/lib/session";
-import { getBarFlavorHeat, listUserBottles } from "@/lib/bar";
+import { FLAVOR_HEAT_SCOPES, getBarFlavorHeat, listUserBottles } from "@/lib/bar";
 import { getUserPalate } from "@/lib/palate-store";
-import { BarClient } from "./bar-client";
+import { BarClient, type FlavorHeatMatrix } from "./bar-client";
 
 export const dynamic = "force-dynamic";
+
+/** Heat for every (source, scope) pair the Bar's two toggles can select. */
+async function loadFlavorHeat(db: DB, userId: string): Promise<FlavorHeatMatrix> {
+  const entries = await Promise.all(
+    FLAVOR_HEAT_SCOPES.flatMap((scope) =>
+      (["personal", "producer"] as const).map(async (source) => {
+        const heat = await getBarFlavorHeat(db, userId, source, scope);
+        return [`${source}:${scope}`, heat] as const;
+      }),
+    ),
+  );
+  return Object.fromEntries(entries) as FlavorHeatMatrix;
+}
 
 export default async function BarPage() {
   const user = await getSessionUser();
@@ -27,19 +41,13 @@ export default async function BarPage() {
   }
 
   const db = getDb();
-  const [rows, personalFlavorHeat, producerFlavorHeat, palate] = await Promise.all([
+  // Every (source, scope) pair up front: the wheel's two toggles then switch
+  // instantly on the client instead of round-tripping for each combination.
+  const [rows, flavorHeat, palate] = await Promise.all([
     listUserBottles(db, user.id),
-    getBarFlavorHeat(db, user.id, "personal"),
-    getBarFlavorHeat(db, user.id, "producer"),
+    loadFlavorHeat(db, user.id),
     getUserPalate(db, user.id),
   ]);
-  return (
-    <BarClient
-      initialRows={rows}
-      personalFlavorHeat={personalFlavorHeat}
-      producerFlavorHeat={producerFlavorHeat}
-      palate={palate}
-    />
-  );
+  return <BarClient initialRows={rows} flavorHeat={flavorHeat} palate={palate} />;
 
 }

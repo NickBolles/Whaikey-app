@@ -150,6 +150,49 @@ export function isValidLeaf(leafId: string): boolean {
 }
 
 /**
+ * Search phrases per leaf: the display label (split on "/" so "Raisin / fig"
+ * matches either word) plus the id read as words, which supplies useful
+ * synonyms — id "grassy" catches a note that never says "fresh cut grass".
+ */
+const leafPhrases = new Map<string, string[]>();
+for (const wedge of FLAVOR_WHEEL) {
+  for (const leaf of wedge.leaves) {
+    const phrases = new Set<string>();
+    for (const part of [...leaf.label.split("/"), leaf.id.replace(/-/g, " ")]) {
+      const normalized = part.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+      if (normalized) phrases.add(normalized);
+    }
+    leafPhrases.set(leaf.id, [...phrases]);
+  }
+}
+
+/**
+ * Leaf ids literally named in a piece of text, in wheel order.
+ *
+ * A deliberately dumb, synchronous first pass over a tasting note: most notes
+ * ("loads of vanilla and charred oak") name their flavors outright, so the UI
+ * can show and offer those tags immediately instead of waiting on the model.
+ * It is a floor, not a replacement — AI extraction still catches paraphrase,
+ * intensity, and structure. Matching is word-boundary on a normalized string
+ * with a tolerated plural/adjectival suffix, so "oaky", "raisins" and "toasted"
+ * hit while "peatland" does not become "peat".
+ */
+const SUFFIXES = ["", "s", "es", "y", "d", "ed"];
+
+export function matchLeafIds(text: string): string[] {
+  const haystack = ` ${text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()} `;
+  if (haystack.trim().length === 0) return [];
+  const found: string[] = [];
+  for (const [leafId, phrases] of leafPhrases) {
+    const hit = phrases.some((phrase) =>
+      SUFFIXES.some((suffix) => haystack.includes(` ${phrase}${suffix} `)),
+    );
+    if (hit) found.push(leafId);
+  }
+  return found;
+}
+
+/**
  * Roll leaf-level tags ({leafId: intensity 1-3}) up to wedge-level scores
  * (0-10 scale), for radar displays and the palate model.
  */
