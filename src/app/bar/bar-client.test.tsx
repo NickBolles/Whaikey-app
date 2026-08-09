@@ -161,8 +161,10 @@ describe("BarClient flavor map lens", () => {
   });
 });
 
-describe("BarClient flavor map scope", () => {
-  it("swaps the wheel to the scope's heat and clears the active filter", () => {
+describe("BarClient collection bar", () => {
+  const openFilters = () => fireEvent.click(screen.getByRole("button", { name: /Filters/ }));
+
+  it("swaps the wheel to the new collection's heat and clears the active filter", () => {
     render(
       <BarClient
         initialRows={[]}
@@ -172,16 +174,16 @@ describe("BarClient flavor map scope", () => {
       />,
     );
 
-    // My Bar opens on the owned scope, which is sweet-led here.
+    // My bar opens on the owned shelf, which is sweet-led here.
     fireEvent.click(screen.getAllByRole("button", { name: "Filter by Vanilla" })[0]);
     expect(screen.getByLabelText("Active flavor filters")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("tab", { name: "Tried" }));
+    fireEvent.click(screen.getByRole("tab", { name: /Tried/ }));
     expect(screen.queryByLabelText("Active flavor filters")).not.toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "Filter by Oak" }).length).toBeGreaterThan(0);
   });
 
-  it("gives the Tried tab a flavor map that filters tastings you don't own", () => {
+  it("gives Tried a flavor map that filters tastings you don't own", () => {
     const rows = [
       bottleRow("owned-row", "Owned Sweet Bottle", "own", { flavorProfile: { sweet: 8 } }),
       bottleRow("oak-row", "Tried Oak Bottle", "tried", { flavorProfile: { woody: 8 } }),
@@ -197,7 +199,7 @@ describe("BarClient flavor map scope", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("tab", { name: "Tried" }));
+    fireEvent.click(screen.getByRole("tab", { name: /Tried/ }));
     expect(screen.getByText("Tried Oak Bottle")).toBeInTheDocument();
     expect(screen.getByText("Tried Fruity Bottle")).toBeInTheDocument();
 
@@ -210,30 +212,138 @@ describe("BarClient flavor map scope", () => {
     expect(screen.getByText("Showing 1 of 2 tastings")).toBeInTheDocument();
   });
 
-  it("keeps an explicit Everything scope across tab changes", () => {
-    render(
-      <BarClient
-        initialRows={[]}
-        flavorHeat={heatMatrix({ "personal:all": oakHeat })}
-        calibration={calibrationMatrix()}
-        palate={palate}
-      />,
-    );
+  it("puts Everything and Wishlist in the panel, not the bar", () => {
+    const rows = [
+      bottleRow("owned-row", "Owned Bottle", "own", {}),
+      bottleRow("tried-row", "Tried Bottle", "tried", {}),
+    ];
+    render(<BarClient initialRows={rows} flavorHeat={heatMatrix()}
+        calibration={calibrationMatrix()} palate={palate} />);
 
-    fireEvent.click(screen.getByRole("tab", { name: "Everything" }));
-    fireEvent.click(screen.getByRole("tab", { name: "Tried" }));
-    expect(screen.getByRole("tab", { name: "Everything" })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
+    expect(screen.queryByRole("tab", { name: /Everything/ })).not.toBeInTheDocument();
+
+    openFilters();
+    fireEvent.click(screen.getByRole("radio", { name: /Everything/ }));
+    expect(screen.getByText("Owned Bottle")).toBeInTheDocument();
+    expect(screen.getByText("Tried Bottle")).toBeInTheDocument();
+
+    // Neither quick slot may claim to be selected once the panel moves off them.
+    for (const name of [/My bar/, /Tried/]) {
+      expect(screen.getByRole("tab", { name })).toHaveAttribute("aria-selected", "false");
+    }
   });
 
   it("shows no flavor map on the wishlist, which is untasted by definition", () => {
     render(<BarClient initialRows={[]} flavorHeat={heatMatrix()}
         calibration={calibrationMatrix()} palate={palate} />);
 
-    fireEvent.click(screen.getByRole("tab", { name: "Wishlist" }));
+    openFilters();
+    fireEvent.click(screen.getByRole("radio", { name: /Wishlist/ }));
     expect(screen.queryByLabelText("Flavor map")).not.toBeInTheDocument();
+  });
+});
+
+describe("BarClient filter panel", () => {
+  const openFilters = () => fireEvent.click(screen.getByRole("button", { name: /Filters/ }));
+
+  const shelf = () => [
+    bottleRow("open-cheap", "Open Cheap Bourbon", "own", { category: "bourbon" }, {}),
+    bottleRow("sealed-dear", "Sealed Dear Scotch", "own", { category: "scotch-single-malt" }, {}),
+    bottleRow("open-dear", "Open Dear Scotch", "own", { category: "scotch-single-malt" }, {}),
+  ];
+
+  function renderShelf() {
+    const rows = shelf();
+    rows[0] = { ...rows[0], status: "open", purchasePrice: 30 } as Row;
+    rows[1] = { ...rows[1], status: "sealed", purchasePrice: 120 } as Row;
+    rows[2] = { ...rows[2], status: "open", purchasePrice: 120 } as Row;
+    render(<BarClient initialRows={rows} flavorHeat={heatMatrix()}
+        calibration={calibrationMatrix()} palate={palate} />);
+  }
+
+  it("ORs options inside a group and ANDs across groups", () => {
+    renderShelf();
+    openFilters();
+
+    // Bottle: Open — two of the three.
+    fireEvent.click(screen.getByRole("checkbox", { name: "Open" }));
+    expect(screen.getByText("Open Cheap Bourbon")).toBeInTheDocument();
+    expect(screen.getByText("Open Dear Scotch")).toBeInTheDocument();
+    expect(screen.queryByText("Sealed Dear Scotch")).not.toBeInTheDocument();
+
+    // AND a second group: open *and* over $100 leaves exactly one.
+    fireEvent.click(screen.getByRole("checkbox", { name: "Over $100" }));
+    expect(screen.getByText("Open Dear Scotch")).toBeInTheDocument();
+    expect(screen.queryByText("Open Cheap Bourbon")).not.toBeInTheDocument();
+
+    // OR within the price group widens it again.
+    fireEvent.click(screen.getByRole("checkbox", { name: "Under $50" }));
+    expect(screen.getByText("Open Cheap Bourbon")).toBeInTheDocument();
+    expect(screen.getByText("Open Dear Scotch")).toBeInTheDocument();
+  });
+
+  it("counts what is active and takes it off again from the token", () => {
+    renderShelf();
+    openFilters();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Open" }));
+
+    expect(screen.getByRole("button", { name: /Filters/ })).toHaveTextContent("1");
+    fireEvent.click(screen.getByRole("button", { name: "Remove Open filter" }));
+    expect(screen.getByText("Sealed Dear Scotch")).toBeInTheDocument();
+  });
+
+  it("drops a wheel selection into the same token row as the rest", () => {
+    renderShelf();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Filter by Vanilla" })[0]);
+    expect(
+      screen.getByRole("button", { name: "Remove Vanilla filter" }),
+    ).toBeInTheDocument();
+  });
+
+  it("drops checks that the new collection has no control for", () => {
+    const rows = [
+      { ...bottleRow("open-row", "Open Bottle", "own", {}), status: "open" } as Row,
+      bottleRow("tried-row", "Tried Bottle", "tried", {}),
+    ];
+    render(<BarClient initialRows={rows} flavorHeat={heatMatrix()}
+        calibration={calibrationMatrix()} palate={palate} />);
+
+    openFilters();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Open" }));
+    expect(screen.getByRole("button", { name: /Filters/ })).toHaveTextContent("1");
+
+    // Tried bottles have no fill state, so "Open" has no control there — and a
+    // filter with no visible control would empty the list from nowhere.
+    fireEvent.click(screen.getByRole("tab", { name: /Tried/ }));
+    expect(screen.getByText("Tried Bottle")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Filters/ })).not.toHaveTextContent("1");
+  });
+
+  it("offers the calibration filters only where published notes exist", () => {
+    render(<BarClient initialRows={[bottleRow("plain", "Plain Bottle", "own", {})]}
+        flavorHeat={heatMatrix()} calibration={calibrationMatrix()} palate={palate} />);
+    openFilters();
+    expect(screen.queryByRole("checkbox", { name: /blind spot/i })).not.toBeInTheDocument();
+
+    cleanup();
+
+    const published = bottleRow(
+      "published",
+      "Published Bottle",
+      "own",
+      {
+        producerFlavorTags: { clove: 2 },
+        producerFlavorSourceUrl: "https://example.com/notes",
+        producerFlavorSourceLabel: "Distillery tasting notes",
+      },
+      { cinnamon: 2 },
+    );
+    render(<BarClient initialRows={[published]} flavorHeat={heatMatrix()}
+        calibration={calibrationMatrix()} palate={palate} />);
+    openFilters();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Has a blind spot" }));
+    expect(screen.getByText("Published Bottle")).toBeInTheDocument();
   });
 });
 
@@ -249,19 +359,6 @@ describe("BarClient palate as a weighting of Mine", () => {
     expect(screen.getAllByRole("button", { name: "Filter by Campfire smoke" }).length).toBeGreaterThan(0);
     expect(screen.getByText("You lean toward")).toBeInTheDocument();
     expect(screen.getByLabelText("Palate leanings")).toHaveTextContent("Peaty / Smoky");
-  });
-
-  it("hides the shelf scope, which does not apply to a drinker", () => {
-    render(<BarClient initialRows={[]} flavorHeat={heatMatrix()}
-        calibration={calibrationMatrix()} palate={peatyPalate} />);
-
-    expect(screen.getByRole("tab", { name: "On my shelf" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Weight by rating" }));
-    expect(screen.queryByRole("tab", { name: "On my shelf" })).not.toBeInTheDocument();
-
-    // Switching back restores it.
-    fireEvent.click(screen.getByRole("button", { name: "Weight by rating" }));
-    expect(screen.getByRole("tab", { name: "On my shelf" })).toBeInTheDocument();
   });
 
   it("filters the shelf by a flavor tapped on the palate", () => {
@@ -441,7 +538,7 @@ describe("BarClient compare lens", () => {
     expect(screen.getByLabelText("Calibration summary")).toBeInTheDocument();
 
     // The tried shelf has no published notes, so Compare cannot describe it.
-    fireEvent.click(screen.getByRole("tab", { name: "Only tasted" }));
+    fireEvent.click(screen.getByRole("tab", { name: /Tried/ }));
     expect(screen.queryByLabelText("Calibration summary")).not.toBeInTheDocument();
   });
 });
