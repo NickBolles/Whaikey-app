@@ -1,12 +1,15 @@
 import type { ReactNode } from "react";
 import { FLAVOR_WHEEL, leafLabel, wedgeForLeaf } from "@/lib/flavor-wheel";
-import { arcPath, bandLabelTransform, inkOn, labelTransform, leafShade, pressableKeys, shortLabel, warmify } from "@/components/wheel-geometry";
+import { arcPath, bandLabelTransform, inkOn, labelTransform, leafShade, polar, pressableKeys, shortLabel, warmify } from "@/components/wheel-geometry";
 
 export type FlavorSelection = {
   id: string;
   label: string;
   leafIds: string[];
 };
+
+/** How one descriptor reads once your notes are set against the label's. */
+export type CalibrationMark = "shared" | "blind" | "signature";
 
 export interface BarFlavorWheelProps {
   wedgeHeat: Record<string, number>;
@@ -15,6 +18,13 @@ export interface BarFlavorWheelProps {
   subCaption?: string;
   selectedIds: string[];
   onToggle: (selection: FlavorSelection) => void;
+  /**
+   * Compare mode. The fill keeps carrying one quantity (the label's claim) and
+   * agreement rides in a second channel, so the heat map stays readable as a
+   * heat map. Each bucket gets a distinct shape as well as a colour, which
+   * keeps the encoding alive in greyscale and for colour-blind readers.
+   */
+  marks?: Record<string, CalibrationMark>;
 }
 
 const SIZE = 340;
@@ -22,6 +32,21 @@ const C = SIZE / 2;
 const INNER = [48, 79] as const;
 const MIDDLE = [83, 112] as const;
 const OUTER = [116, 162] as const;
+/** Inside the descriptor band's outer third, clear of the labels at its centre. */
+const MARK_RADIUS = 154;
+
+const MARK_COLOR: Record<CalibrationMark, string> = {
+  shared: "var(--taste-shared)",
+  blind: "var(--taste-blind)",
+  signature: "var(--taste-signature)",
+};
+
+/** The mark is a shape and a colour; this is the same fact for everyone else. */
+const MARK_NOTE: Record<CalibrationMark, string> = {
+  shared: "shared with the label",
+  blind: "blind spot",
+  signature: "yours alone",
+};
 
 const GROUPS: Record<string, Array<{ id: string; label: string; leaves: string[] }>> = {
   fruity: [
@@ -84,10 +109,11 @@ function selected(selection: FlavorSelection, selectedIds: string[]): boolean {
  * every segment sends canonical leaf ids back to the Bar filter, so personal and
  * published modes always use the same taxonomy.
  */
-export function BarFlavorWheel({ wedgeHeat, leafHeat, caption, subCaption, selectedIds, onToggle }: BarFlavorWheelProps) {
+export function BarFlavorWheel({ wedgeHeat, leafHeat, caption, subCaption, selectedIds, onToggle, marks }: BarFlavorWheelProps) {
   const wedgeSpan = 360 / FLAVOR_WHEEL.length;
   const segments: ReactNode[] = [];
   const labels: ReactNode[] = [];
+  const markNodes: ReactNode[] = [];
 
   FLAVOR_WHEEL.forEach((wedge, wedgeIndex) => {
     const start = wedgeIndex * wedgeSpan;
@@ -144,8 +170,37 @@ export function BarFlavorWheel({ wedgeHeat, leafHeat, caption, subCaption, selec
       const shade = leafShade(color, leafIndex, leaves.length);
       const opacity = 0.12 + descriptorHeat * 0.8;
       segments.push(
-        <WheelSegment key={`leaf-${leaf.id}`} selection={leafSelection} active={selected(leafSelection, selectedIds)} pressed={selectionState(leafSelection, selectedIds)} fill={shade} opacity={opacity} d={arcPath(C, OUTER[0], OUTER[1], leafStart, leafStart + leafSpan, Math.min(0.75, leafSpan / 8))} onToggle={onToggle} />,
+        <WheelSegment key={`leaf-${leaf.id}`} selection={leafSelection} active={selected(leafSelection, selectedIds)} pressed={selectionState(leafSelection, selectedIds)} fill={shade} opacity={opacity} d={arcPath(C, OUTER[0], OUTER[1], leafStart, leafStart + leafSpan, Math.min(0.75, leafSpan / 8))} onToggle={onToggle} note={marks?.[leaf.id] ? MARK_NOTE[marks[leaf.id]] : undefined} />,
       );
+      const mark = marks?.[leaf.id];
+      if (mark) {
+        const { x, y } = polar(C, MARK_RADIUS, leafMid);
+        const color = MARK_COLOR[mark];
+        markNodes.push(
+          mark === "signature" ? (
+            // A diamond, not a dot: shape carries the bucket too, so the wheel
+            // still reads without colour.
+            <path
+              key={`mark-${leaf.id}`}
+              d={`M${x} ${y - 3.4}L${x + 3.4} ${y}L${x} ${y + 3.4}L${x - 3.4} ${y}Z`}
+              fill={color}
+              stroke="var(--background)"
+              strokeWidth={0.9}
+            />
+          ) : (
+            <circle
+              key={`mark-${leaf.id}`}
+              cx={x}
+              cy={y}
+              r={mark === "shared" ? 3 : 2.7}
+              fill={mark === "shared" ? color : "var(--background)"}
+              stroke={mark === "shared" ? "var(--background)" : color}
+              strokeWidth={mark === "shared" ? 0.9 : 1.5}
+            />
+          ),
+        );
+      }
+
       if (descriptorHeat >= 0.5 || selected(leafSelection, selectedIds)) {
         const leafText = bandLabelTransform(C, OUTER[0], OUTER[1], leafMid, shortLabel(leaf.label), 7);
         labels.push(
@@ -165,6 +220,9 @@ export function BarFlavorWheel({ wedgeHeat, leafHeat, caption, subCaption, selec
     <div className="flex w-full flex-col items-center gap-3" data-testid="bar-flavor-wheel">
       <svg viewBox={`0 0 ${SIZE} ${SIZE}`} className="w-full max-w-[360px] select-none" role="group" aria-label={`${caption} flavor wheel`}>
         {segments}
+        <g pointerEvents="none" data-testid="bar-flavor-wheel-marks">
+          {markNodes}
+        </g>
         <circle cx={C} cy={C} r={INNER[0] - 2} fill="var(--surface-raised)" stroke="var(--border)" />
         {labels}
         <text x={C} y={C - (subCaption ? 5 : 0)} textAnchor="middle" dominantBaseline="central" fontSize={14} fontWeight={600} fill="var(--foreground)" pointerEvents="none">
@@ -191,13 +249,14 @@ export function BarFlavorWheel({ wedgeHeat, leafHeat, caption, subCaption, selec
   );
 }
 
-function WheelSegment({ selection, active, pressed, fill, opacity, d, onToggle }: { selection: FlavorSelection; active: boolean; pressed: SelectionState; fill: string; opacity: number; d: string; onToggle: (selection: FlavorSelection) => void }) {
+function WheelSegment({ selection, active, pressed, fill, opacity, d, onToggle, note }: { selection: FlavorSelection; active: boolean; pressed: SelectionState; fill: string; opacity: number; d: string; onToggle: (selection: FlavorSelection) => void; note?: string }) {
   const toggle = () => onToggle(selection);
+  const label = note ? `${selection.label}, ${note}` : selection.label;
   return (
     <g
       role="button"
       tabIndex={0}
-      aria-label={`Filter by ${selection.label}`}
+      aria-label={`Filter by ${label}`}
       aria-pressed={pressed === "mixed" ? "mixed" : pressed === "all"}
       className="cursor-pointer focus-visible:outline-none focus-visible:[&>path]:stroke-[var(--accent)] focus-visible:[&>path]:[stroke-width:3]"
       onClick={toggle}
@@ -211,7 +270,7 @@ function WheelSegment({ selection, active, pressed, fill, opacity, d, onToggle }
         strokeWidth={active ? 2 : 0.65}
         className="transition-[stroke,stroke-width] duration-150 focus-visible:stroke-[var(--accent)] focus-visible:[stroke-width:3]"
       >
-        <title>{selection.label}</title>
+        <title>{label}</title>
       </path>
     </g>
   );

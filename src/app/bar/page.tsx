@@ -2,10 +2,15 @@ import Link from "next/link";
 import type { DB } from "@/db";
 import { getDb } from "@/db";
 import { getSessionUser } from "@/lib/session";
-import { FLAVOR_HEAT_SCOPES, getBarFlavorHeat, listUserBottles } from "@/lib/bar";
+import {
+  FLAVOR_HEAT_SCOPES,
+  getBarFlavorHeat,
+  getFlavorCalibration,
+  listUserBottles,
+} from "@/lib/bar";
 import { getUserPalate } from "@/lib/palate-store";
 import { palateWheelHeat } from "@/lib/palate";
-import { BarClient, type FlavorHeatMatrix } from "./bar-client";
+import { BarClient, type CalibrationMatrix, type FlavorHeatMatrix } from "./bar-client";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +25,14 @@ async function loadFlavorHeat(db: DB, userId: string): Promise<FlavorHeatMatrix>
     ),
   );
   return Object.fromEntries(entries) as FlavorHeatMatrix;
+}
+
+/** Your notes against the label's, per shelf, so Compare switches instantly too. */
+async function loadCalibration(db: DB, userId: string): Promise<CalibrationMatrix> {
+  const entries = await Promise.all(
+    FLAVOR_HEAT_SCOPES.map(async (scope) => [scope, await getFlavorCalibration(db, userId, scope)] as const),
+  );
+  return Object.fromEntries(entries) as CalibrationMatrix;
 }
 
 export default async function BarPage() {
@@ -44,9 +57,10 @@ export default async function BarPage() {
   const db = getDb();
   // Every (source, scope) pair up front: the wheel's two toggles then switch
   // instantly on the client instead of round-tripping for each combination.
-  const [rows, flavorHeat, palate] = await Promise.all([
+  const [rows, flavorHeat, calibration, palate] = await Promise.all([
     listUserBottles(db, user.id),
     loadFlavorHeat(db, user.id),
+    loadCalibration(db, user.id),
     getUserPalate(db, user.id),
   ]);
 
@@ -56,6 +70,7 @@ export default async function BarPage() {
     <BarClient
       initialRows={rows}
       flavorHeat={flavorHeat}
+      calibration={calibration}
       palate={palateWheelHeat(palate)}
     />
   );

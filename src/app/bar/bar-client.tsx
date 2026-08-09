@@ -2,15 +2,20 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { BookOpen, GlassWater, Heart, Plus, UserRound, type LucideIcon } from "lucide-react";
+import { GlassWater, Plus } from "lucide-react";
 import {
   hasPublishedProducerFlavorNotes,
   type BarFlavorHeat,
   type BarRow,
+  type FlavorCalibration,
   type FlavorHeatScope,
 } from "@/lib/bar";
-import { FLAVOR_WHEEL, leafLabel } from "@/lib/flavor-wheel";
-import { BarFlavorWheel, type FlavorSelection } from "@/components/bar-flavor-wheel";
+import { FLAVOR_WHEEL, leafLabel, wedgeForLeaf } from "@/lib/flavor-wheel";
+import {
+  BarFlavorWheel,
+  type CalibrationMark,
+  type FlavorSelection,
+} from "@/components/bar-flavor-wheel";
 import { FillGauge } from "@/components/fill-gauge";
 import { FlavorHeatLegend } from "@/components/flavor-wheel";
 import { RecommendationRail } from "@/components/recommendation-rail";
@@ -24,10 +29,19 @@ export type Row = Omit<BarRow, "createdAt" | "updatedAt" | "purchaseDate"> & {
 };
 
 type Tab = "bar" | "wishlist" | "tried";
-type FlavorSource = "personal" | "producer" | "palate";
+
+/**
+ * Whose palate paints the wheel. "Mine" and the old "My palate" were always the
+ * same evidence counted two ways — your tags, raw or weighted by rating — so
+ * that pair is a switch inside Mine rather than a mode of its own.
+ */
+type Lens = "mine" | "label" | "compare";
 
 /** Heat for every (source, scope) pair, keyed `${source}:${scope}`. */
 export type FlavorHeatMatrix = Record<string, BarFlavorHeat>;
+
+/** Your notes against the label's, per shelf scope. */
+export type CalibrationMatrix = Record<FlavorHeatScope, FlavorCalibration>;
 
 /** The user's taste fingerprint, already reduced to wheel heat by the server. */
 export interface PalateHeat {
@@ -37,11 +51,17 @@ export interface PalateHeat {
   sampleSize: number;
 }
 
-const SOURCES: { key: FlavorSource; label: string; icon: LucideIcon; caption: string }[] = [
-  { key: "personal", label: "My notes", icon: UserRound, caption: "My notes" },
-  { key: "producer", label: "Producer", icon: BookOpen, caption: "Producer notes" },
-  { key: "palate", label: "My palate", icon: Heart, caption: "My palate" },
+const LENSES: { key: Lens; label: string; caption: string }[] = [
+  { key: "mine", label: "Mine", caption: "My notes" },
+  { key: "label", label: "Label", caption: "The label" },
+  { key: "compare", label: "Compare", caption: "Mine vs label" },
 ];
+
+const BUCKET_COPY: Record<CalibrationMark, { label: string; className: string }> = {
+  shared: { label: "Shared", className: "text-taste-shared" },
+  blind: { label: "Blind spot", className: "text-taste-blind" },
+  signature: { label: "Yours alone", className: "text-taste-signature" },
+};
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "bar", label: "My Bar" },
@@ -83,18 +103,31 @@ function statusChipClass(status: string | null): string {
 
 const EMPTY_HEAT: BarFlavorHeat = { wedges: {}, leaves: {}, topWedgeIds: [], hasHeat: false };
 
+const EMPTY_CALIBRATION: FlavorCalibration = {
+  leaves: {},
+  publishedNoteBottles: 0,
+  comparedBottles: 0,
+  agreement: 0,
+  blindSpotIds: [],
+  signatureIds: [],
+  hasComparison: false,
+};
+
 export function BarClient({
   initialRows,
   flavorHeat,
+  calibration,
   palate,
 }: {
   initialRows: Row[];
   flavorHeat: FlavorHeatMatrix;
+  calibration: CalibrationMatrix;
   palate: PalateHeat;
 }) {
   const [rows, setRows] = useState<Row[]>(initialRows);
   const [tab, setTab] = useState<Tab>("bar");
-  const [flavorSource, setFlavorSource] = useState<FlavorSource>("personal");
+  const [lens, setLens] = useState<Lens>("mine");
+  const [weightByRating, setWeightByRating] = useState(false);
   const [flavorScope, setFlavorScope] = useState<FlavorHeatScope>("own");
   const [selectedFlavorIds, setSelectedFlavorIds] = useState<string[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -210,10 +243,27 @@ export function BarClient({
     }),
     [palate],
   );
+  const activeCalibration = calibration[flavorScope] ?? EMPTY_CALIBRATION;
+  // Label and Compare are only offered where published notes exist, so neither
+  // can become a permanently empty control the way "Producer" was.
+  const hasPublishedNotes = activeCalibration.publishedNoteBottles > 0;
+  const canCompare = activeCalibration.hasComparison;
+  const effectiveLens: Lens =
+    (lens === "label" && !hasPublishedNotes) || (lens === "compare" && !canCompare) ? "mine" : lens;
+  // Compare paints the label's claim and lets agreement ride in the marks, so
+  // its fill is the producer heat.
   const activeFlavorHeat =
-    flavorSource === "palate"
-      ? palateHeatMap
-      : flavorHeat[`${flavorSource}:${flavorScope}`] ?? EMPTY_HEAT;
+    effectiveLens === "mine"
+      ? weightByRating
+        ? palateHeatMap
+        : flavorHeat[`personal:${flavorScope}`] ?? EMPTY_HEAT
+      : flavorHeat[`producer:${flavorScope}`] ?? EMPTY_HEAT;
+  const marks = useMemo(() => {
+    if (effectiveLens !== "compare") return undefined;
+    const out: Record<string, CalibrationMark> = {};
+    for (const cal of Object.values(activeCalibration.leaves)) out[cal.leafId] = cal.bucket;
+    return out;
+  }, [effectiveLens, activeCalibration]);
   const selectedProfileFamilies = useMemo(
     () =>
       FLAVOR_WHEEL.filter((wedge) => wedge.leaves.every((leaf) => selectedFlavorIds.includes(leaf.id))).map(
@@ -226,10 +276,11 @@ export function BarClient({
   const flavorFilterable = tab !== "wishlist";
   const filteredRows = useMemo(() => {
     if (!flavorFilterable || selectedFlavorIds.length === 0) return activeRows;
-    // The palate is built from the user's own notes, so tapping a flavor on it
-    // filters against the same evidence "My notes" does — "show me what I have
-    // that tastes like what I like".
-    const fromOwnNotes = flavorSource !== "producer";
+    // Mine filters on your own tags — including when weighted by rating, since
+    // the palate is built from those same notes ("what do I own that tastes
+    // like what I like"). Label and Compare both ask about the label's claim,
+    // so tapping a blind spot lists the bottles whose notes name it.
+    const fromOwnNotes = effectiveLens === "mine";
     return activeRows.filter((row) => {
       const tags = fromOwnNotes
         ? row.personalFlavorTags
@@ -241,10 +292,10 @@ export function BarClient({
         selectedProfileFamilies.some((wedgeId) => (row.bottle.flavorProfile?.[wedgeId] ?? 0) > 0);
       return profileMatches || selectedFlavorIds.some((leafId) => (tags[leafId] ?? 0) > 0);
     });
-  }, [activeRows, flavorFilterable, flavorSource, selectedFlavorIds, selectedProfileFamilies]);
+  }, [activeRows, flavorFilterable, effectiveLens, selectedFlavorIds, selectedProfileFamilies]);
 
-  function changeFlavorSource(source: FlavorSource) {
-    setFlavorSource(source);
+  function changeLens(next: Lens) {
+    setLens(next);
     setSelectedFlavorIds([]);
   }
 
@@ -318,9 +369,16 @@ export function BarClient({
       {flavorFilterable && (
         <FlavorMapSection
           heat={activeFlavorHeat}
-          source={flavorSource}
+          lens={effectiveLens}
+          weightByRating={weightByRating}
+          onWeightChange={setWeightByRating}
+          hasPublishedNotes={hasPublishedNotes}
+          canCompare={canCompare}
+          calibration={activeCalibration}
+          marks={marks}
+          rows={activeRows}
           scope={flavorScope}
-          onSourceChange={changeFlavorSource}
+          onLensChange={changeLens}
           onScopeChange={changeFlavorScope}
           selectedFlavorIds={selectedFlavorIds}
           onToggleFlavor={toggleFlavor}
@@ -422,17 +480,26 @@ export function BarClient({
 }
 
 /**
- * One wheel, three ways to light it. "My notes" and "Producer notes" describe a
- * shelf and take a scope (owned / tried / everything); "My palate" describes
- * the drinker and ignores scope. Putting the palate on this geometry is the
- * point: it used to be a separate octagon radar sitting below, so the same 8
- * wedges were drawn twice on one screen in two different visual languages.
+ * One wheel, one control deciding whose palate lights it. The lens lives on the
+ * wheel's own card rather than in the page header, because it changes the
+ * picture and not the list — the three loose chip rows above it never said so.
+ *
+ * Label and Compare are hidden until the bottles in view actually carry
+ * published notes: an always-visible control that shows every user an empty
+ * state is worse than no control.
  */
 function FlavorMapSection({
   heat,
-  source,
+  lens,
+  weightByRating,
+  onWeightChange,
+  hasPublishedNotes,
+  canCompare,
+  calibration,
+  marks,
+  rows,
   scope,
-  onSourceChange,
+  onLensChange,
   onScopeChange,
   selectedFlavorIds,
   onToggleFlavor,
@@ -443,9 +510,16 @@ function FlavorMapSection({
   topWedgeIds,
 }: {
   heat: BarFlavorHeat;
-  source: FlavorSource;
+  lens: Lens;
+  weightByRating: boolean;
+  onWeightChange: (weighted: boolean) => void;
+  hasPublishedNotes: boolean;
+  canCompare: boolean;
+  calibration: FlavorCalibration;
+  marks: Record<string, CalibrationMark> | undefined;
+  rows: Row[];
   scope: FlavorHeatScope;
-  onSourceChange: (source: FlavorSource) => void;
+  onLensChange: (lens: Lens) => void;
   onScopeChange: (scope: FlavorHeatScope) => void;
   selectedFlavorIds: string[];
   onToggleFlavor: (selection: FlavorSelection) => void;
@@ -456,56 +530,92 @@ function FlavorMapSection({
   topWedgeIds: string[];
 }) {
   const scopeMeta = SCOPES.find((s) => s.key === scope) ?? SCOPES[0];
-  const sourceMeta = SOURCES.find((s) => s.key === source) ?? SOURCES[0];
-  const isPalate = source === "palate";
+  const lensMeta = LENSES.find((l) => l.key === lens) ?? LENSES[0];
+  const isPalate = lens === "mine" && weightByRating;
+  const isCompare = lens === "compare";
   const leaning = isPalate
     ? topWedgeIds.map((id) => FLAVOR_WHEEL.find((w) => w.id === id)?.label ?? id)
     : [];
+  const availableLenses = LENSES.filter(
+    (l) => l.key === "mine" || (l.key === "label" && hasPublishedNotes) || (l.key === "compare" && canCompare),
+  );
+  // One descriptor at a time gets the detail treatment: the panel answers
+  // "what did I say instead", which only makes sense about a single flavor.
+  const focusedLeafId = selectedFlavorIds.length === 1 ? selectedFlavorIds[0] : null;
+
   return (
     <section aria-label="Flavor map">
-      <h2 className="section-label">Flavor map</h2>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="section-label">Flavor map</h2>
+        {availableLenses.length > 1 && (
+          <div
+            role="tablist"
+            aria-label="Flavor map lens"
+            className="inline-flex rounded-full border border-border-subtle bg-background p-1 gap-0.5"
+          >
+            {availableLenses.map((l) => (
+              <button
+                key={l.key}
+                role="tab"
+                aria-selected={lens === l.key}
+                onClick={() => onLensChange(l.key)}
+                className={`inline-flex min-h-9 items-center rounded-full px-3 text-xs font-medium transition-colors ${
+                  lens === l.key ? "chip-active" : "text-muted hover:text-foreground"
+                }`}
+              >
+                {l.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
 
-      <div role="tablist" aria-label="Flavor map source" className="mt-3 flex flex-wrap gap-2">
-        {SOURCES.map((s) => (
+      {/* Weighted by rating the wheel describes the drinker, not a shelf, so
+          the scope it would filter no longer applies. */}
+      {!isPalate && (
+      <div role="tablist" aria-label="Flavor map scope" className="mt-2 flex flex-wrap gap-2">
+        {SCOPES.map((s) => (
           <button
             key={s.key}
             role="tab"
-            aria-selected={source === s.key}
-            onClick={() => onSourceChange(s.key)}
-            className={`chip inline-flex min-h-11 items-center gap-1.5 px-3 text-xs font-medium ${
-              source === s.key ? "chip-active" : "text-muted hover:text-foreground"
+            aria-selected={scope === s.key}
+            onClick={() => onScopeChange(s.key)}
+            className={`chip inline-flex min-h-11 items-center px-3 text-xs font-medium ${
+              scope === s.key ? "chip-active" : "text-muted hover:text-foreground"
             }`}
           >
-            <s.icon size={14} strokeWidth={1.8} aria-hidden /> {s.label}
+            {s.label}
           </button>
         ))}
       </div>
-
-      {!isPalate && (
-        <div role="tablist" aria-label="Flavor map scope" className="mt-2 flex flex-wrap gap-2">
-          {SCOPES.map((s) => (
-            <button
-              key={s.key}
-              role="tab"
-              aria-selected={scope === s.key}
-              onClick={() => onScopeChange(s.key)}
-              className={`chip inline-flex min-h-11 items-center px-3 text-xs font-medium ${
-                scope === s.key ? "chip-active" : "text-muted hover:text-foreground"
-              }`}
-            >
-              {s.label}
-            </button>
-          ))}
-        </div>
       )}
 
       {/* Full width, under the toggles: squeezed beside them it wrapped to a
           four-line column on a phone. */}
       <p className="mt-2 mb-3 text-xs text-muted">
-        {isPalate
-          ? "Where your ratings lean, weighted by how recently you poured; tagged notes refine its details."
-          : `The wheel maps ${scopeMeta.blurb}; tagged notes refine its details.`}
+        {isCompare
+          ? "Your tagged notes read against the published ones. The label is one opinion, not an answer key."
+          : isPalate
+            ? "Where your ratings lean, weighted by how recently you poured; tagged notes refine its details."
+            : lens === "label"
+              ? `What the distilleries claim about ${scopeMeta.blurb}.`
+              : `The wheel maps ${scopeMeta.blurb}; tagged notes refine its details.`}
       </p>
+
+      {/* Outside the card on purpose: with no tagged notes yet the card falls
+          back to an empty state, and the drinker still needs a way to reach the
+          rating-weighted view that may well have signal. */}
+      {lens === "mine" && (
+        <button
+          onClick={() => onWeightChange(!weightByRating)}
+          aria-pressed={weightByRating}
+          className={`chip mb-3 inline-flex min-h-9 items-center px-3 text-[11px] font-medium ${
+            weightByRating ? "chip-active" : "hover:text-foreground"
+          }`}
+        >
+          Weight by rating
+        </button>
+      )}
 
       {heat.hasHeat ? (
         <div className="card p-4 flex flex-col items-center gap-3">
@@ -523,15 +633,17 @@ function FlavorMapSection({
               </ul>
             </div>
           )}
+          {isCompare && <CalibrationSummary calibration={calibration} />}
           <BarFlavorWheel
             wedgeHeat={heat.wedges}
             leafHeat={heat.leaves}
-            caption={sourceMeta.caption}
-            subCaption="family · group · flavor"
+            caption={lensMeta.caption}
+            subCaption={isCompare ? `${calibration.comparedBottles} compared` : "family · group · flavor"}
             selectedIds={selectedFlavorIds}
             onToggle={onToggleFlavor}
+            marks={marks}
           />
-          <FlavorHeatLegend leafHeat={heat.leaves} />
+          {isCompare ? <CalibrationLegend /> : <FlavorHeatLegend leafHeat={heat.leaves} />}
           {selectedFlavorIds.length > 0 && (
             <>
               <div className="flex w-full flex-wrap items-center justify-center gap-2" aria-label="Active flavor filters">
@@ -549,6 +661,9 @@ function FlavorMapSection({
               </p>
             </>
           )}
+          {isCompare && focusedLeafId && (
+            <DescriptorCalibration leafId={focusedLeafId} calibration={calibration} rows={rows} />
+          )}
         </div>
       ) : (
         <div className="card p-6 text-center flex flex-col items-center gap-2">
@@ -556,12 +671,14 @@ function FlavorMapSection({
           <p className="font-display text-base font-semibold">
             {isPalate
               ? "Your palate is still a blank page"
-              : `No ${source === "personal" ? "personal" : "producer"} flavor notes yet`}
+              : lens === "mine"
+                ? "No personal flavor notes yet"
+                : "No published flavor notes yet"}
           </p>
           <p className="text-sm text-muted max-w-[30ch] leading-relaxed">
             {isPalate
               ? "Rate a few pours and your flavor fingerprint appears here."
-              : source === "personal"
+              : lens === "mine"
                 ? `Log a pour and tag what you taste to map ${scopeMeta.blurb}.`
                 : "Published bottle notes appear here as the catalog and scanner are enriched."}
           </p>
@@ -569,6 +686,167 @@ function FlavorMapSection({
       )}
     </section>
   );
+}
+
+/** The one-line answer, above the wheel: caught, missed, and yours alone. */
+function CalibrationSummary({ calibration }: { calibration: FlavorCalibration }) {
+  const stats = [
+    {
+      value: `${Math.round(calibration.agreement * 100)}%`,
+      label: "label notes caught",
+      className: "text-taste-shared",
+    },
+    {
+      value: String(calibration.blindSpotIds.length),
+      label: "blind spots",
+      className: "text-taste-blind",
+    },
+    {
+      value: String(calibration.signatureIds.length),
+      label: "yours alone",
+      className: "text-taste-signature",
+    },
+  ];
+  return (
+    <div className="grid w-full grid-cols-3 gap-2" aria-label="Calibration summary">
+      {stats.map((s) => (
+        <div key={s.label} className="card-flat flex flex-col justify-between p-2.5">
+          <div className={`stat-number text-lg leading-none ${s.className}`}>{s.value}</div>
+          <div className="mt-1.5 text-[10px] text-muted">{s.label}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function CalibrationLegend() {
+  const items: Array<{ mark: CalibrationMark; text: string }> = [
+    { mark: "shared", text: "you both call it" },
+    { mark: "blind", text: "the label does, you don’t" },
+    { mark: "signature", text: "you do, the label doesn’t" },
+  ];
+  return (
+    <ul className="flex w-full flex-col gap-1.5 text-[11px] text-muted" aria-label="Calibration legend">
+      {items.map(({ mark, text }) => (
+        <li key={mark} className="flex items-center gap-2">
+          <span
+            aria-hidden
+            className="h-2.5 w-2.5 shrink-0"
+            style={{
+              background: mark === "blind" ? "transparent" : `var(--taste-${mark})`,
+              border: mark === "blind" ? "1.5px solid var(--taste-blind)" : undefined,
+              borderRadius: mark === "signature" ? 2 : 999,
+              transform: mark === "signature" ? "rotate(45deg)" : undefined,
+            }}
+          />
+          <span className="text-foreground">{BUCKET_COPY[mark].label}</span> — {text}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/**
+ * "What did I say instead?" — the reason this feature is worth building. For a
+ * missed descriptor it shows, bottle by bottle, what the label said next to
+ * what you wrote in the same family, and names the substitution outright.
+ */
+function DescriptorCalibration({
+  leafId,
+  calibration,
+  rows,
+}: {
+  leafId: string;
+  calibration: FlavorCalibration;
+  rows: Row[];
+}) {
+  const cal = calibration.leaves[leafId];
+  const label = leafLabel(leafId) ?? leafId;
+  const wedge = wedgeForLeaf(leafId);
+  const bottles = rows.filter(
+    (row) =>
+      hasPublishedProducerFlavorNotes(row.bottle) &&
+      ((row.bottle.producerFlavorTags?.[leafId] ?? 0) > 0 || (row.personalFlavorTags[leafId] ?? 0) > 0),
+  );
+  if (!cal || bottles.length === 0) return null;
+
+  const substitute = cal.substitutes[0];
+  const bucket = BUCKET_COPY[cal.bucket];
+  const line =
+    cal.bucket === "blind"
+      ? substitute
+        ? `The label names ${label} on ${bottleCount(cal.labelBottles)} and you caught it ${cal.sharedBottles === 0 ? "none" : cal.sharedBottles} of those times. On ${substitute.bottles} of them you wrote ${leafLabel(substitute.leafId) ?? substitute.leafId} instead.`
+        : `The label names ${label} on ${bottleCount(cal.labelBottles)}; you tagged it ${cal.sharedBottles}×.`
+      : cal.bucket === "shared"
+        ? `You and the label both call it on ${cal.sharedBottles} of ${bottleCount(cal.labelBottles)}.`
+        : `You tag ${label} on ${bottleCount(cal.yourBottles)}. No label on your shelf mentions it — this one is yours.`;
+
+  return (
+    <div className="w-full rounded-xl border border-border-subtle bg-surface overflow-hidden">
+      <div className="p-3 border-b border-border-subtle">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-medium text-sm">{label}</span>
+          <span className={`chip px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] ${bucket.className}`}>
+            {bucket.label}
+          </span>
+        </div>
+        <p className="mt-1.5 text-[11px] text-muted leading-relaxed">{line}</p>
+      </div>
+      <ul>
+        {bottles.map((row) => {
+          const published = row.bottle.producerFlavorTags ?? {};
+          const familyOf = (tags: Record<string, number>) =>
+            Object.keys(tags).filter((id) => wedgeForLeaf(id) === wedge);
+          return (
+            <li key={row.id} className="p-3 border-t border-border-subtle first:border-t-0">
+              <div className="text-[13px] font-medium">{row.bottle.name}</div>
+              <TagLine
+                who="Label"
+                ids={familyOf(published)}
+                toneFor={(id) => ((row.personalFlavorTags[id] ?? 0) > 0 ? "shared" : "blind")}
+              />
+              <TagLine
+                who="You"
+                ids={familyOf(row.personalFlavorTags)}
+                toneFor={(id) => ((published[id] ?? 0) > 0 ? "shared" : "signature")}
+              />
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+function TagLine({
+  who,
+  ids,
+  toneFor,
+}: {
+  who: string;
+  ids: string[];
+  toneFor: (id: string) => CalibrationMark;
+}) {
+  return (
+    <div className="mt-1.5 flex items-start gap-2">
+      <span className="w-9 shrink-0 pt-1 text-[9px] uppercase tracking-[0.08em] text-muted">{who}</span>
+      <span className="flex flex-wrap gap-1.5">
+        {ids.length === 0 ? (
+          <span className="chip px-2 py-0.5 text-[10px]">—</span>
+        ) : (
+          ids.map((id) => (
+            <span key={id} className={`chip px-2 py-0.5 text-[10px] ${BUCKET_COPY[toneFor(id)].className}`}>
+              {leafLabel(id) ?? id}
+            </span>
+          ))
+        )}
+      </span>
+    </div>
+  );
+}
+
+function bottleCount(n: number): string {
+  return `${n} bottle${n === 1 ? "" : "s"}`;
 }
 
 function StatCard({ value, label }: { value: string; label: string }) {
