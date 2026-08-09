@@ -75,6 +75,9 @@ export async function seedDatabase(db: DB): Promise<SeedResult> {
           avgPrice: b.avgPrice,
           description: b.description,
           flavorProfile: b.flavorProfile,
+          producerFlavorTags: b.producerFlavorTags ?? null,
+          producerFlavorSourceUrl: b.producerFlavorSourceUrl ?? null,
+          producerFlavorSourceLabel: b.producerFlavorSourceLabel ?? null,
           status: "verified" as const,
         })),
       )
@@ -93,6 +96,9 @@ export async function seedDatabase(db: DB): Promise<SeedResult> {
           avgPrice: sql`excluded.avg_price`,
           description: sql`excluded.description`,
           flavorProfile: sql`excluded.flavor_profile`,
+          producerFlavorTags: sql`excluded.producer_flavor_tags`,
+          producerFlavorSourceUrl: sql`excluded.producer_flavor_source_url`,
+          producerFlavorSourceLabel: sql`excluded.producer_flavor_source_label`,
           status: sql`excluded.status`,
         },
       });

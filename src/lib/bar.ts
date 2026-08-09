@@ -415,6 +415,200 @@ export async function getBarFlavorHeat(
 }
 
 // ---------------------------------------------------------------------------
+// Flavor calibration (your notes measured against the published ones)
+// ---------------------------------------------------------------------------
+
+/**
+ * Which bucket a descriptor falls into once your notes are lined up against
+ * the label's. Deliberately not a right/wrong scale: a published tasting note
+ * is one opinion, written once by someone selling the bottle.
+ */
+export type CalibrationBucket = "shared" | "blind" | "signature";
+
+/** A descriptor is a blind spot below this hit rate against published notes. */
+const SHARED_HIT_RATE = 0.6;
+
+export interface LeafCalibration {
+  leafId: string;
+  /** In-scope bottles whose published notes name this descriptor. */
+  labelBottles: number;
+  /** In-scope bottles where your own tasting notes name it. */
+  yourBottles: number;
+  /** In-scope bottles where both do. */
+  sharedBottles: number;
+  bucket: CalibrationBucket;
+  /**
+   * What you wrote instead: descriptors in the same wedge that you tagged on
+   * bottles whose label named this one and the label itself did not. Ranked by
+   * how often, so "you call clove cinnamon" falls out of the data.
+   */
+  substitutes: Array<{ leafId: string; bottles: number }>;
+}
+
+export interface FlavorCalibration {
+  leaves: Record<string, LeafCalibration>;
+  /** In-scope bottles carrying published notes, whether or not you've tagged them. */
+  publishedNoteBottles: number;
+  /** In-scope bottles with published notes AND notes of your own. */
+  comparedBottles: number;
+  /** Share of published descriptor mentions you also named, 0-1. */
+  agreement: number;
+  /** Blind spots, most-missed first. */
+  blindSpotIds: string[];
+  /** Descriptors only you name, most-used first. */
+  signatureIds: string[];
+  /** False until there is at least one bottle to compare, so the UI can hide. */
+  hasComparison: boolean;
+}
+
+const EMPTY_CALIBRATION: FlavorCalibration = {
+  leaves: {},
+  publishedNoteBottles: 0,
+  comparedBottles: 0,
+  agreement: 0,
+  blindSpotIds: [],
+  signatureIds: [],
+  hasComparison: false,
+};
+
+/**
+ * Line the user's own descriptors up against the published ones, per bottle,
+ * for every in-scope bottle that carries both.
+ *
+ * Only bottles with *attributed* published notes count — the same rule the
+ * producer flavor map uses — because an unsourced claim is not something to
+ * measure a palate against. Bottles you own but have never tagged still count
+ * toward `publishedNoteBottles` (they are what the UI offers to compare next)
+ * but contribute nothing to agreement.
+ */
+export async function getFlavorCalibration(
+  db: DB,
+  userId: string,
+  scope: FlavorHeatScope = "all",
+): Promise<FlavorCalibration> {
+  const rows = await db
+    .select({
+      bottleId: schema.bottles.id,
+      producerFlavorTags: schema.bottles.producerFlavorTags,
+      producerFlavorSourceUrl: schema.bottles.producerFlavorSourceUrl,
+      producerFlavorSourceLabel: schema.bottles.producerFlavorSourceLabel,
+    })
+    .from(schema.userBottles)
+    .innerJoin(schema.bottles, eq(schema.userBottles.bottleId, schema.bottles.id))
+    .where(
+      and(
+        eq(schema.userBottles.userId, userId),
+        inArray(schema.userBottles.relationship, SCOPE_RELATIONSHIPS[scope]),
+      ),
+    );
+
+  const published = new Map<string, Set<string>>();
+  for (const row of rows) {
+    if (!hasPublishedProducerFlavorNotes(row)) continue;
+    const leaves = new Set<string>();
+    for (const [leafId, intensity] of Object.entries(row.producerFlavorTags ?? {})) {
+      if (wedgeForLeaf(leafId) && typeof intensity === "number" && intensity > 0) leaves.add(leafId);
+    }
+    if (leaves.size > 0) published.set(row.bottleId, leaves);
+  }
+  if (published.size === 0) return EMPTY_CALIBRATION;
+
+  const notes = await db
+    .select({ bottleId: schema.pours.bottleId, flavorTags: schema.tastingNotes.flavorTags })
+    .from(schema.tastingNotes)
+    .innerJoin(schema.pours, eq(schema.tastingNotes.pourId, schema.pours.id))
+    .where(eq(schema.pours.userId, userId));
+
+  // Your notes, unioned per bottle: tagging cherry on one pour and oak on the
+  // next means you have named both on that bottle.
+  const yours = new Map<string, Set<string>>();
+  for (const note of notes) {
+    if (!published.has(note.bottleId)) continue;
+    const leaves = yours.get(note.bottleId) ?? new Set<string>();
+    for (const [leafId, intensity] of Object.entries(note.flavorTags ?? {})) {
+      if (wedgeForLeaf(leafId) && typeof intensity === "number" && intensity > 0) leaves.add(leafId);
+    }
+    if (leaves.size > 0) yours.set(note.bottleId, leaves);
+  }
+  if (yours.size === 0) {
+    return { ...EMPTY_CALIBRATION, publishedNoteBottles: published.size };
+  }
+
+  const leaves: Record<string, LeafCalibration> = {};
+  const entry = (leafId: string): LeafCalibration =>
+    (leaves[leafId] ??= {
+      leafId,
+      labelBottles: 0,
+      yourBottles: 0,
+      sharedBottles: 0,
+      bucket: "signature",
+      substitutes: [],
+    });
+  const substituteTally = new Map<string, Map<string, number>>();
+
+  for (const [bottleId, labelLeaves] of published) {
+    const yourLeaves = yours.get(bottleId);
+    if (!yourLeaves) continue;
+
+    for (const leafId of labelLeaves) {
+      const cal = entry(leafId);
+      cal.labelBottles += 1;
+      if (yourLeaves.has(leafId)) {
+        cal.sharedBottles += 1;
+        continue;
+      }
+      // Missed on this bottle: whatever you did write in the same family is a
+      // candidate for what you call it instead.
+      const wedge = wedgeForLeaf(leafId);
+      const tally = substituteTally.get(leafId) ?? new Map<string, number>();
+      for (const yourLeaf of yourLeaves) {
+        if (wedgeForLeaf(yourLeaf) !== wedge || labelLeaves.has(yourLeaf)) continue;
+        tally.set(yourLeaf, (tally.get(yourLeaf) ?? 0) + 1);
+      }
+      if (tally.size > 0) substituteTally.set(leafId, tally);
+    }
+
+    for (const leafId of yourLeaves) entry(leafId).yourBottles += 1;
+  }
+
+  let labelMentions = 0;
+  let sharedMentions = 0;
+  for (const cal of Object.values(leaves)) {
+    labelMentions += cal.labelBottles;
+    sharedMentions += cal.sharedBottles;
+    cal.bucket =
+      cal.labelBottles === 0
+        ? "signature"
+        : cal.sharedBottles / cal.labelBottles >= SHARED_HIT_RATE
+          ? "shared"
+          : "blind";
+    cal.substitutes = [...(substituteTally.get(cal.leafId) ?? new Map())]
+      .map(([leafId, bottles]) => ({ leafId, bottles }))
+      .sort((a, b) => b.bottles - a.bottles || a.leafId.localeCompare(b.leafId));
+  }
+
+  const missed = (cal: LeafCalibration) => cal.labelBottles - cal.sharedBottles;
+  const blindSpotIds = Object.values(leaves)
+    .filter((cal) => cal.bucket === "blind")
+    .sort((a, b) => missed(b) - missed(a) || a.leafId.localeCompare(b.leafId))
+    .map((cal) => cal.leafId);
+  const signatureIds = Object.values(leaves)
+    .filter((cal) => cal.bucket === "signature")
+    .sort((a, b) => b.yourBottles - a.yourBottles || a.leafId.localeCompare(b.leafId))
+    .map((cal) => cal.leafId);
+
+  return {
+    leaves,
+    publishedNoteBottles: published.size,
+    comparedBottles: yours.size,
+    agreement: labelMentions === 0 ? 0 : sharedMentions / labelMentions,
+    blindSpotIds,
+    signatureIds,
+    hasComparison: true,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Spend by month (last 12 months, UTC buckets, zero-filled)
 // ---------------------------------------------------------------------------
 

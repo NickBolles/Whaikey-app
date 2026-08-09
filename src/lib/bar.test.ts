@@ -3,7 +3,14 @@ import type { DB } from "@/db";
 import * as schema from "@/db/schema";
 import { createTestBottle, createTestUser, setupTestDb, uid } from "@/test/helpers";
 import { wedgeForLeaf } from "@/lib/flavor-wheel";
-import { getBarFlavorHeat, getBarStats, getSpendByMonth, listUserBottles, monthKey } from "./bar";
+import {
+  getBarFlavorHeat,
+  getBarStats,
+  getFlavorCalibration,
+  getSpendByMonth,
+  listUserBottles,
+  monthKey,
+} from "./bar";
 
 async function seedUserBottle(
   db: DB,
@@ -524,5 +531,181 @@ describe("getBarFlavorHeat", () => {
       });
       expect((await getBarFlavorHeat(db, user.id, "producer", "tried")).leaves).toEqual({ oak: 1 });
     });
+  });
+});
+
+describe("getFlavorCalibration", () => {
+  let db: DB;
+  beforeEach(async () => {
+    db = await setupTestDb();
+  });
+
+  /** A bottle carrying attributed published notes, plus the user's own tags. */
+  async function comparedBottle(
+    userId: string,
+    producerFlavorTags: Record<string, number>,
+    yourTags: Record<string, number> | null,
+    relationship: "own" | "tried" = "own",
+    published = true,
+  ) {
+    const bottle = await createTestBottle(db, {
+      flavorProfile: null,
+      producerFlavorTags,
+      // Without attribution a claim is not publishable, so the whole bottle
+      // drops out of the comparison.
+      producerFlavorSourceUrl: published ? "https://example.com/notes" : null,
+      producerFlavorSourceLabel: published ? "Producer tasting notes" : null,
+    });
+    await seedUserBottle(db, { userId, bottleId: bottle.id, relationship });
+    if (yourTags) {
+      const [pour] = await db
+        .insert(schema.pours)
+        .values({ id: uid("pour"), userId, bottleId: bottle.id })
+        .returning();
+      await db
+        .insert(schema.tastingNotes)
+        .values({ id: uid("note"), pourId: pour.id, flavorTags: yourTags });
+    }
+    return bottle;
+  }
+
+  it("has nothing to compare before the catalog carries published notes", async () => {
+    const user = await createTestUser(db);
+    await comparedBottle(user.id, {}, { vanilla: 3 });
+
+    const cal = await getFlavorCalibration(db, user.id);
+    expect(cal.hasComparison).toBe(false);
+    expect(cal.publishedNoteBottles).toBe(0);
+  });
+
+  it("counts unattributed producer tags as unpublished", async () => {
+    const user = await createTestUser(db);
+    await comparedBottle(user.id, { clove: 2 }, { cinnamon: 2 }, "own", false);
+
+    const cal = await getFlavorCalibration(db, user.id);
+    expect(cal.hasComparison).toBe(false);
+  });
+
+  it("reports published bottles you have not tasted without claiming a comparison", async () => {
+    const user = await createTestUser(db);
+    await comparedBottle(user.id, { vanilla: 3, oak: 2 }, null);
+
+    const cal = await getFlavorCalibration(db, user.id);
+    expect(cal.publishedNoteBottles).toBe(1);
+    expect(cal.comparedBottles).toBe(0);
+    expect(cal.hasComparison).toBe(false);
+  });
+
+  it("sorts each descriptor into shared, blind spot, or signature", async () => {
+    const user = await createTestUser(db);
+    // Agree on vanilla both times; never catch the clove; find cherry alone.
+    await comparedBottle(user.id, { vanilla: 3, clove: 2 }, { vanilla: 3, cherry: 2 });
+    await comparedBottle(user.id, { vanilla: 2, clove: 1 }, { vanilla: 2 });
+
+    const cal = await getFlavorCalibration(db, user.id);
+    expect(cal.leaves.vanilla).toMatchObject({
+      labelBottles: 2,
+      sharedBottles: 2,
+      bucket: "shared",
+    });
+    expect(cal.leaves.clove).toMatchObject({
+      labelBottles: 2,
+      sharedBottles: 0,
+      bucket: "blind",
+    });
+    expect(cal.leaves.cherry).toMatchObject({
+      labelBottles: 0,
+      yourBottles: 1,
+      bucket: "signature",
+    });
+    expect(cal.blindSpotIds).toEqual(["clove"]);
+    expect(cal.signatureIds).toEqual(["cherry"]);
+    // Four published mentions, two of them named by the drinker too.
+    expect(cal.agreement).toBeCloseTo(0.5);
+  });
+
+  it("names what you wrote instead, ranked, within the same family", async () => {
+    const user = await createTestUser(db);
+    // The label says clove; this drinker reaches for cinnamon twice and
+    // black pepper once. Oak is a different family and must not be offered.
+    await comparedBottle(user.id, { clove: 2 }, { cinnamon: 2, oak: 2 });
+    await comparedBottle(user.id, { clove: 2 }, { cinnamon: 1 });
+    await comparedBottle(user.id, { clove: 1 }, { "black-pepper": 2 });
+
+    const cal = await getFlavorCalibration(db, user.id);
+    expect(cal.leaves.clove.substitutes).toEqual([
+      { leafId: "cinnamon", bottles: 2 },
+      { leafId: "black-pepper", bottles: 1 },
+    ]);
+  });
+
+  it("does not count a descriptor the label also named as a substitute", async () => {
+    const user = await createTestUser(db);
+    // Both clove and cinnamon are on the label; catching cinnamon is agreement,
+    // not a stand-in for the clove that was missed.
+    await comparedBottle(user.id, { clove: 2, cinnamon: 2 }, { cinnamon: 2 });
+
+    const cal = await getFlavorCalibration(db, user.id);
+    expect(cal.leaves.clove.substitutes).toEqual([]);
+    expect(cal.leaves.cinnamon.bucket).toBe("shared");
+  });
+
+  it("unions your tags across pours: two sittings describe one bottle", async () => {
+    const user = await createTestUser(db);
+    const bottle = await createTestBottle(db, {
+      flavorProfile: null,
+      producerFlavorTags: { vanilla: 2, oak: 2 },
+      producerFlavorSourceUrl: "https://example.com/notes",
+      producerFlavorSourceLabel: "Producer tasting notes",
+    });
+    await seedUserBottle(db, { userId: user.id, bottleId: bottle.id, relationship: "own" });
+    const sittings: Array<Record<string, number>> = [{ vanilla: 3 }, { oak: 2 }];
+    for (const tags of sittings) {
+      const [pour] = await db
+        .insert(schema.pours)
+        .values({ id: uid("pour"), userId: user.id, bottleId: bottle.id })
+        .returning();
+      await db
+        .insert(schema.tastingNotes)
+        .values({ id: uid("note"), pourId: pour.id, flavorTags: tags });
+    }
+
+    const cal = await getFlavorCalibration(db, user.id);
+    expect(cal.agreement).toBe(1);
+    expect(cal.leaves.oak.bucket).toBe("shared");
+  });
+
+  it("scopes to the shelf being shown", async () => {
+    const user = await createTestUser(db);
+    await comparedBottle(user.id, { clove: 2 }, { cinnamon: 2 }, "tried");
+
+    expect((await getFlavorCalibration(db, user.id, "own")).hasComparison).toBe(false);
+    expect((await getFlavorCalibration(db, user.id, "tried")).hasComparison).toBe(true);
+    expect((await getFlavorCalibration(db, user.id, "all")).hasComparison).toBe(true);
+  });
+
+  it("ignores another user's notes on the same bottle", async () => {
+    const user = await createTestUser(db);
+    const other = await createTestUser(db);
+    const bottle = await comparedBottle(user.id, { clove: 2 }, null);
+
+    const [pour] = await db
+      .insert(schema.pours)
+      .values({ id: uid("pour"), userId: other.id, bottleId: bottle.id })
+      .returning();
+    await db
+      .insert(schema.tastingNotes)
+      .values({ id: uid("note"), pourId: pour.id, flavorTags: { clove: 3 } });
+
+    expect((await getFlavorCalibration(db, user.id)).hasComparison).toBe(false);
+  });
+
+  it("ignores leaf ids outside the shared taxonomy", async () => {
+    const user = await createTestUser(db);
+    await comparedBottle(user.id, { vanilla: 2, "not-a-leaf": 3 }, { vanilla: 2, nonsense: 1 });
+
+    const cal = await getFlavorCalibration(db, user.id);
+    expect(Object.keys(cal.leaves)).toEqual(["vanilla"]);
+    expect(cal.agreement).toBe(1);
   });
 });
