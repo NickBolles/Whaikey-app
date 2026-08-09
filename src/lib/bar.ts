@@ -449,6 +449,12 @@ export interface LeafCalibration {
    * signature rule in getFlavorCalibration.
    */
   labelBottles: number;
+  /**
+   * In-scope bottles whose published notes name it, tasted or not. Wider than
+   * labelBottles on purpose: whether a label anywhere claims a descriptor is a
+   * different question from whether you could have agreed with one.
+   */
+  shelfLabelBottles: number;
   /** In-scope bottles where your own tasting notes name it. */
   yourBottles: number;
   /** In-scope bottles where both do. */
@@ -556,6 +562,7 @@ export async function getFlavorCalibration(
     (leaves[leafId] ??= {
       leafId,
       labelBottles: 0,
+      shelfLabelBottles: 0,
       yourBottles: 0,
       sharedBottles: 0,
       bucket: "signature",
@@ -566,9 +573,11 @@ export async function getFlavorCalibration(
   // Every descriptor any in-scope published label names, whether or not you
   // have tasted that bottle. Only the hit rate is comparison-scoped; "yours
   // alone" is a claim about the whole shelf, and the panel says as much.
-  const labelledAnywhere = new Set<string>();
+  const shelfLabelCounts = new Map<string, number>();
   for (const labelLeaves of published.values()) {
-    for (const leafId of labelLeaves) labelledAnywhere.add(leafId);
+    for (const leafId of labelLeaves) {
+      shelfLabelCounts.set(leafId, (shelfLabelCounts.get(leafId) ?? 0) + 1);
+    }
   }
 
   for (const [bottleId, labelLeaves] of published) {
@@ -601,12 +610,13 @@ export async function getFlavorCalibration(
   for (const cal of Object.values(leaves)) {
     labelMentions += cal.labelBottles;
     sharedMentions += cal.sharedBottles;
+    cal.shelfLabelBottles = shelfLabelCounts.get(cal.leafId) ?? 0;
     cal.bucket =
       cal.labelBottles === 0
         ? // No compared bottle's label names it. That is only *yours* if no
           // label on the shelf does; otherwise a label claims it somewhere you
           // have not confirmed, which is a blind spot rather than a signature.
-          labelledAnywhere.has(cal.leafId)
+          cal.shelfLabelBottles > 0
           ? "blind"
           : "signature"
         : cal.sharedBottles / cal.labelBottles >= SHARED_HIT_RATE

@@ -419,6 +419,7 @@ describe("BarClient compare lens", () => {
       vanilla: {
         leafId: "vanilla",
         labelBottles: 2,
+        shelfLabelBottles: 2,
         yourBottles: 2,
         sharedBottles: 2,
         bucket: "shared" as const,
@@ -427,6 +428,7 @@ describe("BarClient compare lens", () => {
       clove: {
         leafId: "clove",
         labelBottles: 2,
+        shelfLabelBottles: 2,
         yourBottles: 0,
         sharedBottles: 0,
         bucket: "blind" as const,
@@ -435,6 +437,7 @@ describe("BarClient compare lens", () => {
       cinnamon: {
         leafId: "cinnamon",
         labelBottles: 0,
+        shelfLabelBottles: 0,
         yourBottles: 2,
         sharedBottles: 0,
         bucket: "signature" as const,
@@ -586,6 +589,7 @@ describe("BarClient filter correctness", () => {
         clove: {
           leafId: "clove",
           labelBottles: 2,
+          shelfLabelBottles: 2,
           yourBottles: 1,
           sharedBottles: 1,
           bucket: "blind" as const,
@@ -688,6 +692,7 @@ describe("BarClient lens across collections", () => {
       vanilla: {
         leafId: "vanilla",
         labelBottles: 1,
+        shelfLabelBottles: 1,
         yourBottles: 1,
         sharedBottles: 1,
         bucket: "shared" as const,
@@ -778,6 +783,7 @@ describe("BarClient filter/summary agreement", () => {
         cinnamon: {
           leafId: "cinnamon",
           labelBottles: 1,
+          shelfLabelBottles: 1,
           yourBottles: 1,
           sharedBottles: 0,
           bucket: "blind" as const,
@@ -786,6 +792,7 @@ describe("BarClient filter/summary agreement", () => {
         vanilla: {
           leafId: "vanilla",
           labelBottles: 1,
+          shelfLabelBottles: 1,
           yourBottles: 1,
           sharedBottles: 1,
           bucket: "shared" as const,
@@ -821,6 +828,7 @@ describe("BarClient filter/summary agreement", () => {
         chocolate: {
           leafId: "chocolate",
           labelBottles: 0,
+          shelfLabelBottles: 0,
           yourBottles: 1,
           sharedBottles: 0,
           bucket: "signature" as const,
@@ -866,5 +874,66 @@ describe("BarClient keeps server-derived data honest", () => {
     // shelf, so dropping the row locally is not enough.
     await waitFor(() => expect(refresh).toHaveBeenCalled());
     vi.unstubAllGlobals();
+  });
+});
+
+describe("BarClient descriptor detail copy", () => {
+  it("explains a blind spot that only an unpoured label names", () => {
+    // Cinnamon is blind because a label names it — on a bottle never poured.
+    // Quoting the comparison count here would read "on 0 bottles", which
+    // contradicts the very reason it is blind.
+    const rows = [
+      bottleRow(
+        "unpoured",
+        "Unpoured Bottle",
+        "own",
+        {
+          producerFlavorTags: { cinnamon: 2 },
+          producerFlavorSourceUrl: "https://example.com/notes",
+          producerFlavorSourceLabel: "Distillery tasting notes",
+        },
+        {},
+      ),
+    ];
+    const cinnamonOnlyOnAnUnpouredLabel = {
+      ...noCalibration,
+      leaves: {
+        cinnamon: {
+          leafId: "cinnamon",
+          labelBottles: 0,
+          shelfLabelBottles: 1,
+          yourBottles: 1,
+          sharedBottles: 0,
+          bucket: "blind" as const,
+          substitutes: [],
+        },
+      },
+      publishedNoteBottles: 2,
+      comparedBottles: 1,
+      blindSpotIds: ["cinnamon"],
+      hasComparison: true,
+    };
+
+    render(
+      <BarClient
+        initialRows={rows}
+        flavorHeat={heatMatrix({
+          "producer:own": {
+            wedges: { spicy: 1 },
+            leaves: { cinnamon: 1 },
+            topWedgeIds: ["spicy"],
+            hasHeat: true,
+          },
+        })}
+        calibration={calibrationMatrix({ own: cinnamonOnlyOnAnUnpouredLabel })}
+        palate={palate}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: "Compare" }));
+    fireEvent.click(screen.getByRole("button", { name: /Filter by Cinnamon/ }));
+
+    expect(screen.getByText(/haven’t poured yet/)).toBeInTheDocument();
+    expect(screen.queryByText(/on 0 bottles/)).not.toBeInTheDocument();
   });
 });

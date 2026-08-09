@@ -1008,9 +1008,14 @@ function DescriptorCalibration({
   const bucket = BUCKET_COPY[cal.bucket];
   const line =
     cal.bucket === "blind"
-      ? substitute
-        ? `The label names ${label} on ${bottleCount(cal.labelBottles)} and you caught it ${cal.sharedBottles === 0 ? "none" : cal.sharedBottles} of those times. On ${substitute.bottles} of them you wrote ${leafLabel(substitute.leafId) ?? substitute.leafId} instead.`
-        : `The label names ${label} on ${bottleCount(cal.labelBottles)}; you tagged it ${cal.sharedBottles}×.`
+      ? cal.labelBottles === 0
+        ? // Blind because a label names it, but only on a bottle you have not
+          // poured — so there is no hit rate to report, and quoting the
+          // comparison count here would read as "on 0 bottles".
+          `${label} is on the label of ${bottleCount(cal.shelfLabelBottles)} you haven’t poured yet, so there’s nothing to compare against — but you do reach for it elsewhere.`
+        : substitute
+          ? `The label names ${label} on ${bottleCount(cal.labelBottles)} and you caught it ${cal.sharedBottles === 0 ? "none" : cal.sharedBottles} of those times. On ${substitute.bottles} of them you wrote ${leafLabel(substitute.leafId) ?? substitute.leafId} instead.`
+          : `The label names ${label} on ${bottleCount(cal.labelBottles)}; you tagged it ${cal.sharedBottles}×.`
       : cal.bucket === "shared"
         ? `You and the label both call it on ${cal.sharedBottles} of ${bottleCount(cal.labelBottles)}.`
         : `You tag ${label} on ${bottleCount(cal.yourBottles)}. No label on your shelf mentions it — this one is yours.`;

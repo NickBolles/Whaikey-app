@@ -685,6 +685,10 @@ describe("getFlavorCalibration", () => {
     const cal = await getFlavorCalibration(db, user.id);
     expect(cal.leaves.cinnamon.bucket).not.toBe("signature");
     expect(cal.signatureIds).not.toContain("cinnamon");
+    // The shelf-wide count is what makes the classification explicable: the
+    // panel has to be able to say which bottle's label names it.
+    expect(cal.leaves.cinnamon.shelfLabelBottles).toBe(1);
+    expect(cal.leaves.cinnamon.labelBottles).toBe(0);
     // The hit rate stays comparison-scoped: the untasted bottle is not
     // something you could have agreed with, so it must not drag agreement down.
     expect(cal.agreement).toBe(1);
