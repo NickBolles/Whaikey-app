@@ -11,16 +11,28 @@ import {
   GlassWater,
   GraduationCap,
   ChevronRight,
+  Settings,
   Star,
 } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
-function Wordmark() {
+function Wordmark({ showSettings = false }: { showSettings?: boolean }) {
   return (
-    <div className="flex items-center gap-2 text-muted">
-      <span aria-hidden className="text-base leading-none">🥃</span>
-      <span className="font-display text-sm tracking-wide">Whaikey</span>
+    <div className="flex items-center justify-between gap-2 text-muted">
+      <div className="flex items-center gap-2">
+        <span aria-hidden className="text-base leading-none">🥃</span>
+        <span className="font-display text-sm tracking-wide">Whaikey</span>
+      </div>
+      {showSettings && (
+        <Link
+          href="/settings"
+          aria-label="Settings"
+          className="tap-target rounded-xl p-1 hover:text-foreground"
+        >
+          <Settings size={18} strokeWidth={1.8} aria-hidden />
+        </Link>
+      )}
     </div>
   );
 }
@@ -88,7 +100,7 @@ export default async function HomePage() {
 
   return (
     <div className="px-4 pt-5 flex flex-col gap-7">
-      <Wordmark />
+      <Wordmark showSettings />
 
       <header>
         <h1 className="font-display text-[2rem] leading-tight font-semibold">Welcome back, {firstName}</h1>

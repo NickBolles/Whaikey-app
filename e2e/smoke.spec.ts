@@ -200,3 +200,74 @@ test.describe("whiskey school", () => {
     await expect(page.getByText("Butterscotch")).toBeVisible();
   });
 });
+
+test.describe("notification settings", () => {
+  test.use({ storageState: { cookies: [], origins: [] } });
+
+  test.beforeEach(async ({ context, baseURL }) => {
+    await signIn(context, baseURL!);
+  });
+
+  test("leads with what is wrong and how to fix it", async ({ page }) => {
+    await page.goto("/settings/notifications");
+
+    // One seeded device has a revoked subscription, so the banner must open
+    // with that failure rather than making the user infer it from the toggles.
+    const status = page.getByRole("region", { name: "Notification status" });
+    await expect(status).toContainText(/isn't receiving notifications/i);
+    await expect(status).toContainText(/Safari on iPad — Disconnected/);
+    await expect(status).toContainText(/turn notifications on again/i);
+  });
+
+  test("shows each device's own quiet hours, not one account-wide answer", async ({ page }) => {
+    await page.goto("/settings/notifications");
+
+    const phone = page.locator("#device-demo-device-phone");
+    await expect(phone.getByRole("radio", { name: "Custom" })).toHaveAttribute("aria-checked", "true");
+    // Exact: the time-zone <select> fuzzy-matches "End" through zone names
+    // like America/Argentina/Mendoza.
+    await expect(phone.getByLabel("Start", { exact: true })).toHaveValue("21:30");
+    await expect(phone.getByLabel("End", { exact: true })).toHaveValue("07:00");
+    await expect(phone.getByLabel("Time zone", { exact: true })).toHaveValue("America/Denver");
+
+    // Same account, same moment, a device that opted out entirely.
+    const desktop = page.locator("#device-demo-device-desktop");
+    await expect(desktop.getByRole("radio", { name: "Always allow" })).toHaveAttribute("aria-checked", "true");
+    await expect(desktop.getByText(/at any hour/i)).toBeVisible();
+  });
+
+  test("a per-device quiet window survives a reload", async ({ page }) => {
+    await page.goto("/settings/notifications");
+    const desktop = page.locator("#device-demo-device-desktop");
+
+    await desktop.getByRole("radio", { name: "Custom" }).click();
+    const start = desktop.getByLabel("Start", { exact: true });
+    // Generous: this is the first hit on the device PATCH route, so under
+    // `next dev` it pays for compiling the route handler before responding.
+    await expect(start).toBeVisible({ timeout: 20_000 });
+    await start.fill("23:15");
+    await expect(start).toHaveValue("23:15");
+
+    await page.reload();
+    await expect(
+      page.locator("#device-demo-device-desktop").getByLabel("Start", { exact: true }),
+    ).toHaveValue("23:15");
+  });
+
+  test("the activity log distinguishes a hold from a failure", async ({ page }) => {
+    await page.goto("/settings/notifications");
+    const log = page.getByRole("region", { name: "Recent activity" });
+
+    await expect(log.getByText("Held — quiet hours")).toBeVisible();
+    await expect(log.getByText("Failed")).toBeVisible();
+    await expect(log.getByText("Delivered")).toBeVisible();
+  });
+
+  test("settings are reachable from the home screen", async ({ page }) => {
+    await page.goto("/");
+    await page.getByRole("link", { name: "Settings" }).click();
+    await expect(page).toHaveURL(/\/settings$/);
+    await page.getByRole("link", { name: /Notifications/ }).click();
+    await expect(page.getByRole("heading", { name: "Notifications", level: 1 })).toBeVisible();
+  });
+});

@@ -91,6 +91,27 @@ export async function createTestBottle(
   return row;
 }
 
+export async function createTestDevice(
+  db: DB,
+  userId: string,
+  overrides: Partial<schema.NewPushDevice> = {},
+): Promise<schema.PushDevice> {
+  const [row] = await db
+    .insert(schema.pushDevices)
+    .values({
+      id: overrides.id ?? uid("device"),
+      userId,
+      token: overrides.token ?? uid("token"),
+      platform: overrides.platform ?? "web",
+      p256dh: overrides.p256dh ?? "test-p256dh",
+      authSecret: overrides.authSecret ?? "test-auth",
+      label: overrides.label ?? "Test device",
+      ...overrides,
+    })
+    .returning();
+  return row;
+}
+
 /**
  * Mock the auth seam so route handlers see `user` as signed in.
  * Usage (top of test file):

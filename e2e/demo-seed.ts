@@ -216,3 +216,110 @@ export async function seedDemoUser(db: DB): Promise<void> {
     },
   ]);
 }
+
+/**
+ * Notification fixtures: three devices in deliberately different states, so the
+ * settings screen renders the healthy path, a per-device custom quiet window,
+ * and a broken registration at once. Fixed ids and timestamps keep it stable.
+ */
+export async function seedDemoNotifications(db: DB): Promise<void> {
+  await db.insert(schema.notificationPreferences).values({
+    userId: DEMO_USER_ID,
+    categories: { catalog_verification: true },
+    quietHoursEnabled: true,
+    quietStart: "22:00",
+    quietEnd: "08:00",
+    timeZone: "America/Denver",
+    createdAt: D("2026-07-01T12:00:00Z"),
+    updatedAt: D("2026-07-01T12:00:00Z"),
+  });
+
+  await db.insert(schema.pushDevices).values([
+    {
+      id: "demo-device-phone",
+      userId: DEMO_USER_ID,
+      token: "demo-apns-token",
+      platform: "ios",
+      label: "Jordan's iPhone",
+      quietHoursMode: "custom",
+      quietStart: "21:30",
+      quietEnd: "07:00",
+      timeZone: "America/Denver",
+      lastSeenAt: D("2026-08-08T18:00:00Z"),
+      lastSuccessAt: D("2026-08-08T18:00:00Z"),
+      createdAt: D("2026-03-02T12:00:00Z"),
+      updatedAt: D("2026-08-08T18:00:00Z"),
+    },
+    {
+      id: "demo-device-desktop",
+      userId: DEMO_USER_ID,
+      token: "https://push.example.com/sub/demo-desktop",
+      platform: "web",
+      p256dh: "demo-p256dh",
+      authSecret: "demo-auth",
+      label: "Chrome on macOS",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Chrome/120 Safari/537.36",
+      categoryOverrides: { tasting_invite: false },
+      quietHoursMode: "off",
+      lastSeenAt: D("2026-08-09T09:00:00Z"),
+      lastSuccessAt: D("2026-08-09T09:00:00Z"),
+      createdAt: D("2026-05-11T12:00:00Z"),
+      updatedAt: D("2026-08-09T09:00:00Z"),
+    },
+    {
+      id: "demo-device-old-tablet",
+      userId: DEMO_USER_ID,
+      token: "https://push.example.com/sub/demo-tablet",
+      platform: "web",
+      p256dh: "demo-p256dh-2",
+      authSecret: "demo-auth-2",
+      label: "Safari on iPad",
+      lastSeenAt: D("2026-07-20T10:00:00Z"),
+      lastSuccessAt: D("2026-07-20T10:00:00Z"),
+      lastFailureAt: D("2026-08-07T11:00:00Z"),
+      lastFailureReason: "Subscription expired or was revoked",
+      consecutiveFailures: 3,
+      revokedAt: D("2026-08-07T11:00:00Z"),
+      createdAt: D("2026-02-04T12:00:00Z"),
+      updatedAt: D("2026-08-07T11:00:00Z"),
+    },
+  ]);
+
+  await db.insert(schema.notificationDeliveries).values([
+    {
+      id: "demo-delivery-1",
+      userId: DEMO_USER_ID,
+      deviceId: "demo-device-desktop",
+      deviceLabel: "Chrome on macOS",
+      devicePlatform: "web",
+      category: "price_alert",
+      title: "Lagavulin 16 dropped to $89",
+      status: "delivered",
+      createdAt: D("2026-08-09T09:00:00Z"),
+    },
+    {
+      id: "demo-delivery-2",
+      userId: DEMO_USER_ID,
+      deviceId: "demo-device-phone",
+      deviceLabel: "Jordan's iPhone",
+      devicePlatform: "ios",
+      category: "price_alert",
+      title: "Lagavulin 16 dropped to $89",
+      status: "suppressed_quiet_hours",
+      detail: "Quiet hours (9:30 PM – 7 AM, set on this device)",
+      createdAt: D("2026-08-09T08:30:00Z"),
+    },
+    {
+      id: "demo-delivery-3",
+      userId: DEMO_USER_ID,
+      deviceId: "demo-device-old-tablet",
+      deviceLabel: "Safari on iPad",
+      devicePlatform: "web",
+      category: "price_alert",
+      title: "Lagavulin 16 dropped to $89",
+      status: "failed",
+      detail: "Subscription expired or was revoked",
+      createdAt: D("2026-08-07T11:00:00Z"),
+    },
+  ]);
+}

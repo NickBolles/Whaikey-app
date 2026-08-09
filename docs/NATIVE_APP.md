@@ -252,6 +252,35 @@ Everything the native shell unlocks, mapped to the product. Ordered by value.
 | **Siri Shortcuts / App Intents** | custom native | "Hey Siri, log a pour of Lagavulin 16." |
 | **Local notifications** | `@capacitor/local-notifications` | Blind-tasting reveal timer (PLAN.md §2.8). |
 
+#### Notification delivery and settings
+
+One pipeline serves the app and the web, because everything above the transport
+— categories, quiet hours, per-device settings, health — is identical for both.
+`push_devices` holds APNs/FCM tokens and W3C Push subscriptions side by side
+(`platform` is `ios | android | web`); `src/lib/notifications/` owns the rules and
+`src/lib/notifications/sender.ts` is the only place that knows a transport, behind
+a `getPushSender()` / `setPushSenderForTests()` seam like the AI client's.
+
+Sending goes through `sendNotification()`, which resolves settings in three layers
+— category default → account → device — and writes a `notification_deliveries` row
+for **every** attempt including the ones it suppresses. That log is the feature:
+without it a quiet-hours hold, a muted device, a switched-off category and a dead
+subscription all present to the user as the same silence.
+
+Quiet hours are per device by design. Each row carries its own window *and its own
+IANA zone*, so a desktop in Denver and a phone in Lisbon resolve "22:00"
+differently at the same instant — with `inherit` (follow the account), `off`
+(always allow) and `custom` as the three modes. Critical categories (account and
+security) bypass quiet hours; a test send does not, because a test that ignored
+the setting would prove the wrong thing.
+
+`/settings/notifications` reads all of this and leads with a verdict rather than a
+toggle grid: which devices are failing and what to do about each. Missing server
+credentials are reported as a first-class state — an unset VAPID or FCM key shows
+as "Server not configured" naming the variables, instead of a feature that looks
+enabled and silently sends nothing. Keys live in `.env.example` under
+**Notifications**.
+
 ### 3.3 Depth (Phase 4–5)
 
 | Capability | Use |
@@ -295,10 +324,12 @@ still need real credentials and hardware.
 
 ### Phase 3 — Offline + engagement ✅ (partly implemented)
 Done: offline pour queue with durable storage, ordered flush on reconnect and resume,
-and a visible "saved on your phone" state; push registration + token storage endpoint.
-Remaining: sending the first notification types (needs FCM/APNs credentials), a
-share-a-note-card surface, app shortcuts, and an idempotency key on `/api/pours` so a
-flush whose response is lost cannot double-log.
+and a visible "saved on your phone" state; push registration + token storage endpoint;
+the full delivery pipeline and its settings surface (§3.3).
+Remaining: the individual notification *triggers* (a price watcher, a tasting-invite
+hook, the Wrapped job) now that there is something to call; real FCM credentials in
+production; a share-a-note-card surface, app shortcuts, and an idempotency key on
+`/api/pours` so a flush whose response is lost cannot double-log.
 **Exit:** log a pour in airplane mode, reconnect, see it sync.
 
 ### Phase 4 — Store launch (CI ready, credentials pending)

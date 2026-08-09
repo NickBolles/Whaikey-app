@@ -13,7 +13,7 @@
 import { createDb } from "../src/db/index";
 import { migrateDb } from "../src/db/migrate";
 import { seedDatabase } from "../src/db/seed/index";
-import { seedDemoUser } from "./demo-seed";
+import { seedDemoNotifications, seedDemoUser } from "./demo-seed";
 
 async function main() {
   const dbDir = process.env.PW_DB_PATH ?? "data/e2e.db";
@@ -21,6 +21,7 @@ async function main() {
   await migrateDb(db, dbDir);
   await seedDatabase(db);
   await seedDemoUser(db);
+  await seedDemoNotifications(db);
 }
 
 main()

@@ -602,10 +602,43 @@ export const nativeAuthCodes = pgTable(
   (t) => [index("native_auth_codes_expires_idx").on(t.expiresAt)],
 );
 
+// ---------------------------------------------------------------------------
+// Notifications
+// ---------------------------------------------------------------------------
+
 /**
- * Push notification registrations. One row per device install; the same user can
- * have several, and a token can migrate between users on a shared device, so
- * `token` is unique on its own and re-registration reassigns it.
+ * Where a registration can deliver. `web` rows are W3C Push subscriptions
+ * (endpoint + ECDH key material); `ios`/`android` rows are APNs/FCM tokens.
+ * They differ enough in transport that the sender branches on this, but they
+ * share one table because everything *above* the transport — quiet hours,
+ * category routing, health, the settings screen — is identical for all three.
+ */
+export const DEVICE_PLATFORMS = ["ios", "android", "web"] as const;
+export type DevicePlatform = (typeof DEVICE_PLATFORMS)[number];
+
+/**
+ * How a device answers the quiet-hours question. `inherit` follows the account
+ * default (the case for most devices); `custom` carries its own window, which
+ * is the whole point of per-device settings — a phone on the nightstand and a
+ * desktop that is off at 18:00 want different answers; `off` means this device
+ * takes notifications around the clock.
+ */
+export const QUIET_HOURS_MODES = ["inherit", "off", "custom"] as const;
+export type QuietHoursMode = (typeof QUIET_HOURS_MODES)[number];
+
+/**
+ * Push registrations — one row per device install or browser subscription.
+ *
+ * A registration identifies a device, not a person, so it can legitimately move
+ * between users (a shared phone, or someone signing out and a friend signing
+ * in). `token` is therefore unique on its own and re-registering reassigns it.
+ * For web rows `token` holds the subscription endpoint URL, which the Push API
+ * already guarantees to be unique per subscription.
+ *
+ * The health columns exist because "my notifications stopped working" is
+ * otherwise unanswerable: a push service reports failure at send time, hours
+ * after the user last looked at the app, so the outcome has to be *recorded* on
+ * the row for the settings screen to have anything to show.
  */
 export const pushDevices = pgTable(
   "push_devices",
@@ -614,16 +647,121 @@ export const pushDevices = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
+    /** Native APNs/FCM token, or the web push subscription endpoint URL. */
     token: text("token").notNull().unique(),
-    platform: text("platform").$type<"ios" | "android">().notNull(),
+    platform: text("platform").$type<DevicePlatform>().notNull(),
+
+    /** Web push only: the subscription's ECDH public key and auth secret. */
+    p256dh: text("p256dh"),
+    authSecret: text("auth_secret"),
+
+    /** User-facing name. Auto-filled on registration, editable in settings. */
+    label: text("label"),
+    /** Raw UA string, kept only to auto-label and to disambiguate two Chromes. */
+    userAgent: text("user_agent"),
+
+    /** Per-device master switch. Off means nothing is sent here, ever. */
+    enabled: boolean("enabled").default(true).notNull(),
+    /** Per-device category overrides; absent keys inherit the account default. */
+    categoryOverrides: jsonb("category_overrides").$type<Record<string, boolean>>(),
+
+    quietHoursMode: text("quiet_hours_mode").$type<QuietHoursMode>().default("inherit").notNull(),
+    /** "HH:MM" local wall-clock, only meaningful when mode is `custom`. */
+    quietStart: text("quiet_start"),
+    quietEnd: text("quiet_end"),
+    /** IANA zone the quiet window is read in — the device's own, not the account's. */
+    timeZone: text("time_zone"),
+
+    /** Last time the device checked in (app open / subscription refresh). */
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true, mode: "date" }),
+    lastSuccessAt: timestamp("last_success_at", { withTimezone: true, mode: "date" }),
+    lastFailureAt: timestamp("last_failure_at", { withTimezone: true, mode: "date" }),
+    lastFailureReason: text("last_failure_reason"),
+    /** Reset on success. Drives the "this device is failing" health state. */
+    consecutiveFailures: integer("consecutive_failures").default(0).notNull(),
+    /**
+     * Set when the push service tells us the registration is gone (404/410) or
+     * the user revoked permission. Distinct from `enabled: false`, which is the
+     * user's choice — this one is the device being unreachable through no
+     * decision of theirs, and it needs a different fix in the UI.
+     */
+    revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "date" }),
+
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [index("push_devices_user_idx").on(t.userId)],
 );
 
+/**
+ * Account-level notification defaults: the answer for every device that has not
+ * been given its own. One row per user, created lazily on first read.
+ */
+export const notificationPreferences = pgTable("notification_preferences", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => user.id, { onDelete: "cascade" }),
+  /** Category id → on/off. Absent keys fall back to the category's own default. */
+  categories: jsonb("categories").$type<Record<string, boolean>>().default({}).notNull(),
+  quietHoursEnabled: boolean("quiet_hours_enabled").default(false).notNull(),
+  /** "HH:MM" local wall-clock in `timeZone`. */
+  quietStart: text("quiet_start").default("22:00").notNull(),
+  quietEnd: text("quiet_end").default("08:00").notNull(),
+  timeZone: text("time_zone").default("UTC").notNull(),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+
+/**
+ * What happened to every send attempt, including the ones that never left the
+ * building.
+ *
+ * Suppressions are logged as loudly as failures on purpose. "I turned quiet
+ * hours on three weeks ago and forgot" looks exactly like a broken push
+ * pipeline from the user's side, and the only thing that tells the two apart is
+ * a record saying the message was held rather than lost.
+ */
+export const DELIVERY_STATUSES = [
+  "delivered",
+  "failed",
+  "suppressed_quiet_hours",
+  "suppressed_category",
+  "suppressed_device",
+  "no_devices",
+  "not_configured",
+] as const;
+export type DeliveryStatus = (typeof DELIVERY_STATUSES)[number];
+
+export const notificationDeliveries = pgTable(
+  "notification_deliveries",
+  {
+    id: id(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    /** Null once the device is removed — the history outlives the registration. */
+    deviceId: text("device_id").references(() => pushDevices.id, { onDelete: "set null" }),
+    /** Snapshot, so a removed device still reads as something in the log. */
+    deviceLabel: text("device_label"),
+    devicePlatform: text("device_platform").$type<DevicePlatform>(),
+    category: text("category").notNull(),
+    title: text("title").notNull(),
+    status: text("status").$type<DeliveryStatus>().notNull(),
+    /** Provider error, or the reason a suppression applied. */
+    detail: text("detail"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("notification_deliveries_user_idx").on(t.userId, t.createdAt),
+    index("notification_deliveries_device_idx").on(t.deviceId),
+  ],
+);
+
 export type NativeAuthCode = typeof nativeAuthCodes.$inferSelect;
 export type PushDevice = typeof pushDevices.$inferSelect;
+export type NewPushDevice = typeof pushDevices.$inferInsert;
+export type NotificationPreference = typeof notificationPreferences.$inferSelect;
+export type NotificationDelivery = typeof notificationDeliveries.$inferSelect;
 
 export type VerificationRun = typeof catalogVerificationRuns.$inferSelect;
 export type NewVerificationRun = typeof catalogVerificationRuns.$inferInsert;

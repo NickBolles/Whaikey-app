@@ -52,6 +52,14 @@ export default defineConfig({
       NEXT_PUBLIC_OAUTH_CONFIGURED: "false",
       // Keep scan-miss behavior deterministic: never call external UPC APIs.
       WHAIKEY_UPC_LOOKUP: "off",
+      // Placeholder push credentials. Nothing is ever sent in e2e, but without
+      // them every device reports "Server not configured" — which is correct
+      // behaviour and would mask the seeded device states the tests are about.
+      NEXT_PUBLIC_VAPID_PUBLIC_KEY: "e2e-vapid-public-key",
+      WEB_PUSH_VAPID_PRIVATE_KEY: "e2e-vapid-private-key",
+      FCM_PROJECT_ID: "e2e-project",
+      FCM_CLIENT_EMAIL: "e2e@example.com",
+      FCM_PRIVATE_KEY: "e2e-private-key",
     },
     timeout: 120_000,
   },
