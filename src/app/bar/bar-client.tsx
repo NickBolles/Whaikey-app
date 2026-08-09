@@ -120,6 +120,27 @@ interface FilterGroup {
 const published = (row: Row) => hasPublishedProducerFlavorNotes(row.bottle);
 
 /**
+ * Is this descriptor one the drinker misses?
+ *
+ * Where the comparison has an opinion, defer to it: the Compare summary and
+ * this filter appear on the same screen, so they must not disagree about what
+ * counts as a blind spot. A descriptor caught on one of two bottles is still a
+ * blind spot by the calibration's hit-rate rule, even though it has been
+ * tagged at some point. Only for descriptors the comparison has never seen —
+ * on bottles carrying published notes you haven't tasted — does it fall back to
+ * "you have never once reached for this".
+ */
+function blindLeafTest(
+  calibration: FlavorCalibration,
+  everTagged: Set<string>,
+): (leafId: string) => boolean {
+  return (leafId) => {
+    const cal = calibration.leaves[leafId];
+    return cal ? cal.bucket === "blind" : !everTagged.has(leafId);
+  };
+}
+
+/**
  * The filter vocabulary for the bottles currently in view. Groups that cannot
  * apply are left out rather than shown as controls that silently empty the
  * list: bottle state and price paid describe a bottle you own, and the
@@ -128,7 +149,11 @@ const published = (row: Row) => hasPublishedProducerFlavorNotes(row.bottle);
  * Options are OR within a group and AND across groups — the rule every filter
  * panel already teaches.
  */
-function buildFilterGroups(rows: Row[], collection: Collection): FilterGroup[] {
+function buildFilterGroups(
+  rows: Row[],
+  collection: Collection,
+  isBlindLeaf: (leafId: string) => boolean,
+): FilterGroup[] {
   const groups: FilterGroup[] = [];
   const ownedInView = collection === "own" || collection === "all";
 
@@ -154,8 +179,6 @@ function buildFilterGroups(rows: Row[], collection: Collection): FilterGroup[] {
     ],
   });
 
-  // A descriptor you have never once reached for, anywhere on your shelf.
-  const everTagged = new Set(rows.flatMap((r) => Object.keys(r.personalFlavorTags)));
   if (rows.some(published)) {
     groups.push({
       id: "calibration",
@@ -165,8 +188,7 @@ function buildFilterGroups(rows: Row[], collection: Collection): FilterGroup[] {
           id: "blind",
           label: "Has a blind spot",
           test: (r) =>
-            published(r) &&
-            Object.keys(r.bottle.producerFlavorTags ?? {}).some((id) => !everTagged.has(id)),
+            published(r) && Object.keys(r.bottle.producerFlavorTags ?? {}).some(isBlindLeaf),
         },
         {
           id: "signature",
@@ -368,9 +390,20 @@ export function BarClient({
             : [...ownRows, ...triedRows],
     [collection, ownRows, triedRows, wishlistRows],
   );
+  // Spans the whole shelf, not the collection in view: "never tagged" has to
+  // mean never, or switching collections would change what counts as one.
+  const everTagged = useMemo(
+    () => new Set(rows.flatMap((r) => Object.keys(r.personalFlavorTags))),
+    [rows],
+  );
   const filterGroups = useMemo(
-    () => buildFilterGroups(collectionRows, collection),
-    [collectionRows, collection],
+    () =>
+      buildFilterGroups(
+        collectionRows,
+        collection,
+        blindLeafTest(calibration[scopeFor(collection)] ?? EMPTY_CALIBRATION, everTagged),
+      ),
+    [collectionRows, collection, calibration, everTagged],
   );
   // Checks that survive a collection change but no longer have a control would
   // filter the list from somewhere the user cannot see, so they are dropped.
@@ -458,8 +491,30 @@ export function BarClient({
     setSelectedFlavorIds([]);
   }
 
+  function rowsForCollection(next: Collection): Row[] {
+    if (next === "own") return ownRows;
+    if (next === "tried") return triedRows;
+    if (next === "wishlist") return wishlistRows;
+    return [...ownRows, ...triedRows];
+  }
+
   function changeCollection(next: Collection) {
     setCollection(next);
+    setSelectedFlavorIds([]);
+    // Drop the checks the new collection has no control for, rather than only
+    // hiding them: a filter that disappears from the bar and then resurrects
+    // when you come back is worse than one that was never dropped.
+    const nextGroups = buildFilterGroups(
+      rowsForCollection(next),
+      next,
+      blindLeafTest(calibration[scopeFor(next)] ?? EMPTY_CALIBRATION, everTagged),
+    );
+    const available = new Set(nextGroups.flatMap((g) => g.options.map((o) => o.id)));
+    setChecks((current) => current.filter((id) => available.has(id)));
+  }
+
+  function clearFilters() {
+    setChecks([]);
     setSelectedFlavorIds([]);
   }
 
@@ -504,10 +559,7 @@ export function BarClient({
         onToggleCheck={toggleCheck}
         flavorIds={selectedFlavorIds}
         onRemoveFlavor={(id) => setSelectedFlavorIds((ids) => ids.filter((f) => f !== id))}
-        onClear={() => {
-          setChecks([]);
-          setSelectedFlavorIds([]);
-        }}
+        onClear={clearFilters}
         shownCount={filteredRows.length}
         totalCount={collectionRows.length}
       />
@@ -558,7 +610,13 @@ export function BarClient({
       )}
 
       {filteredRows.length === 0 ? (
-        <EmptyState collection={collection} />
+        // A shelf with bottles on it is never "waiting" — if nothing shows, the
+        // filters are too narrow, and the way out is to widen them.
+        collectionRows.length > 0 ? (
+          <NoMatches onClear={clearFilters} />
+        ) : (
+          <EmptyState collection={collection} />
+        )
       ) : (
         <ul className="flex flex-col gap-2.5">
           {filteredRows.map((row) => (
@@ -1189,6 +1247,23 @@ function CheckRow({
       </span>
       {label}
     </button>
+  );
+}
+
+function NoMatches({ onClear }: { onClear: () => void }) {
+  return (
+    <div className="card p-8 text-center flex flex-col items-center gap-3">
+      <div aria-hidden className="text-4xl">
+        🔍
+      </div>
+      <p className="font-display text-lg font-semibold">Nothing matches</p>
+      <p className="text-sm text-muted max-w-[26ch] leading-relaxed">
+        There are bottles here — these filters are just too narrow for them.
+      </p>
+      <button onClick={onClear} className="btn-secondary px-5 py-2.5 text-sm font-medium mt-1">
+        Clear filters
+      </button>
+    </div>
   );
 }
 

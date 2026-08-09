@@ -542,3 +542,128 @@ describe("BarClient compare lens", () => {
     expect(screen.queryByLabelText("Calibration summary")).not.toBeInTheDocument();
   });
 });
+
+describe("BarClient filter correctness", () => {
+  const openFilters = () => fireEvent.click(screen.getByRole("button", { name: /Filters/ }));
+
+  const publishedRow = (
+    id: string,
+    name: string,
+    producer: Record<string, number>,
+    mine: Record<string, number>,
+  ) =>
+    bottleRow(
+      id,
+      name,
+      "own",
+      {
+        producerFlavorTags: producer,
+        producerFlavorSourceUrl: "https://example.com/notes",
+        producerFlavorSourceLabel: "Distillery tasting notes",
+      },
+      mine,
+    );
+
+  it("calls a descriptor a blind spot wherever the comparison does", () => {
+    // Two labels say clove; this drinker caught it once. A 50% hit rate is a
+    // blind spot to getFlavorCalibration, so the filter has to agree — testing
+    // "never tagged anywhere" would drop both bottles and contradict the
+    // Compare summary sitting directly above it.
+    const rows = [
+      publishedRow("caught", "Caught Clove", { clove: 2 }, { clove: 2 }),
+      publishedRow("missed", "Missed Clove", { clove: 2 }, { cinnamon: 2 }),
+    ];
+    const cloveIsBlind = {
+      ...noCalibration,
+      leaves: {
+        clove: {
+          leafId: "clove",
+          labelBottles: 2,
+          yourBottles: 1,
+          sharedBottles: 1,
+          bucket: "blind" as const,
+          substitutes: [{ leafId: "cinnamon", bottles: 1 }],
+        },
+      },
+      publishedNoteBottles: 2,
+      comparedBottles: 2,
+      agreement: 0.5,
+      blindSpotIds: ["clove"],
+      hasComparison: true,
+    };
+
+    render(
+      <BarClient
+        initialRows={rows}
+        flavorHeat={heatMatrix()}
+        calibration={calibrationMatrix({ own: cloveIsBlind })}
+        palate={palate}
+      />,
+    );
+
+    openFilters();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Has a blind spot" }));
+    expect(screen.getByText("Caught Clove")).toBeInTheDocument();
+    expect(screen.getByText("Missed Clove")).toBeInTheDocument();
+  });
+
+  it("still catches a descriptor the comparison has never seen", () => {
+    // An owned bottle whose label names something never tagged anywhere: no
+    // comparison covers it, so the fallback has to surface it.
+    const rows = [publishedRow("untasted", "Untasted Bottle", { nutmeg: 2 }, {})];
+    render(<BarClient initialRows={rows} flavorHeat={heatMatrix()}
+        calibration={calibrationMatrix()} palate={palate} />);
+
+    openFilters();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Has a blind spot" }));
+    expect(screen.getByText("Untasted Bottle")).toBeInTheDocument();
+  });
+
+  it("does not resurrect a check dropped by a collection change", () => {
+    const rows = [
+      { ...bottleRow("open-row", "Open Bottle", "own", {}), status: "open" } as Row,
+      { ...bottleRow("sealed-row", "Sealed Bottle", "own", {}), status: "sealed" } as Row,
+      bottleRow("tried-row", "Tried Bottle", "tried", {}),
+    ];
+    render(<BarClient initialRows={rows} flavorHeat={heatMatrix()}
+        calibration={calibrationMatrix()} palate={palate} />);
+
+    openFilters();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Open" }));
+    expect(screen.queryByText("Sealed Bottle")).not.toBeInTheDocument();
+
+    // Tried bottles have no fill state, so "Open" has no control there.
+    fireEvent.click(screen.getByRole("tab", { name: /Tried/ }));
+    fireEvent.click(screen.getByRole("tab", { name: /My bar/ }));
+
+    // Coming back must not reinstate a filter the UI said was gone.
+    expect(screen.getByText("Sealed Bottle")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Filters/ })).not.toHaveTextContent("1");
+  });
+
+  it("says the filters are too narrow rather than that the shelf is empty", () => {
+    const rows = [
+      { ...bottleRow("sealed-row", "Sealed Bottle", "own", {}), status: "sealed" } as Row,
+    ];
+    render(<BarClient initialRows={rows} flavorHeat={heatMatrix()}
+        calibration={calibrationMatrix()} palate={palate} />);
+
+    openFilters();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Open" }));
+
+    expect(screen.getByText("Nothing matches")).toBeInTheDocument();
+    // "Your shelf is waiting" would be a lie: there is a bottle on it.
+    expect(screen.queryByText("Your shelf is waiting")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(screen.getByText("Sealed Bottle")).toBeInTheDocument();
+  });
+
+  it("still shows the empty-shelf state when the collection really is empty", () => {
+    render(<BarClient initialRows={[]} flavorHeat={heatMatrix()}
+        calibration={calibrationMatrix()} palate={palate} />);
+
+    expect(screen.getByText("Your shelf is waiting")).toBeInTheDocument();
+    expect(screen.queryByText("Nothing matches")).not.toBeInTheDocument();
+  });
+});
