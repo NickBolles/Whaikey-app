@@ -143,6 +143,8 @@ export function hasPublishedProducerFlavorNotes(bottle: Pick<BarRowBottle, "prod
 export type BarRow = schema.UserBottle & {
   bottle: BarRowBottle;
   personalFlavorTags: Record<string, number>;
+  /** Mean rating across this user's pours of the bottle; null if never rated. */
+  personalRating: number | null;
 };
 
 export async function listUserBottles(
@@ -190,9 +192,18 @@ export async function listUserBottles(
     personalTagsByBottle.set(row.bottleId, tags);
   }
 
+  const ratings = await db
+    .select({ bottleId: schema.pours.bottleId, avg: sql<number>`avg(${schema.pours.rating})` })
+    .from(schema.pours)
+    .where(and(eq(schema.pours.userId, userId), isNotNull(schema.pours.rating)))
+    .groupBy(schema.pours.bottleId);
+  // avg() comes back as a numeric string on Postgres and a number on PGlite.
+  const ratingByBottle = new Map(ratings.map((r) => [r.bottleId, Number(r.avg)]));
+
   return rows.map((r) => ({
     ...r.ub,
     personalFlavorTags: personalTagsByBottle.get(r.bottleId) ?? {},
+    personalRating: ratingByBottle.get(r.bottleId) ?? null,
     bottle: {
       id: r.bottleId,
       name: r.bottleName,

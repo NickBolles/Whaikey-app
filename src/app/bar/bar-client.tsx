@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { GlassWater, Plus } from "lucide-react";
+import { Check, ChevronDown, GlassWater, Plus, SlidersHorizontal } from "lucide-react";
 import {
   hasPublishedProducerFlavorNotes,
   type BarFlavorHeat,
@@ -28,7 +28,12 @@ export type Row = Omit<BarRow, "createdAt" | "updatedAt" | "purchaseDate"> & {
   purchaseDate: Date | string | null;
 };
 
-type Tab = "bar" | "wishlist" | "tried";
+/**
+ * Which bottles are in view. This used to be two controls — a section tab and a
+ * flavor-map scope — that selected the same rows under different names, with a
+ * hidden rule resetting one when the other changed.
+ */
+type Collection = "own" | "tried" | "wishlist" | "all";
 
 /**
  * Whose palate paints the wheel. "Mine" and the old "My palate" were always the
@@ -63,28 +68,152 @@ const BUCKET_COPY: Record<CalibrationMark, { label: string; className: string }>
   signature: { label: "Yours alone", className: "text-taste-signature" },
 };
 
-const TABS: { key: Tab; label: string }[] = [
-  { key: "bar", label: "My Bar" },
-  { key: "wishlist", label: "Wishlist" },
+const COLLECTIONS: { key: Collection; label: string }[] = [
+  { key: "own", label: "My bar" },
   { key: "tried", label: "Tried" },
+  { key: "wishlist", label: "Wishlist" },
+  { key: "all", label: "Everything" },
 ];
 
-// Labels stay distinct from the section tabs above them: two rows of chips
-// reading "Tried" would be ambiguous on screen and to a screen reader.
-const SCOPES: { key: FlavorHeatScope; label: string; blurb: string }[] = [
-  { key: "own", label: "On my shelf", blurb: "the bottles you own" },
-  { key: "tried", label: "Only tasted", blurb: "bottles you’ve tasted but don’t own" },
-  { key: "all", label: "Everything", blurb: "every bottle you’ve owned or tasted" },
-];
+/** The two that earn a permanent slot; the rest live in the panel. */
+const QUICK_COLLECTIONS: Collection[] = ["own", "tried"];
 
-/** The scope a tab opens on: each tab starts by describing its own rows. */
-const DEFAULT_SCOPE_FOR_TAB: Record<Tab, FlavorHeatScope> = {
-  bar: "own",
-  tried: "tried",
-  wishlist: "own",
+/** What the wheel is describing, in the sentence under it. */
+const SCOPE_BLURB: Record<FlavorHeatScope, string> = {
+  own: "the bottles you own",
+  tried: "bottles you’ve tasted but don’t own",
+  all: "every bottle you’ve owned or tasted",
+};
+
+/** Wishlist bottles are untasted, so no flavor map describes them. */
+function scopeFor(collection: Collection): FlavorHeatScope {
+  return collection === "all" ? "all" : collection === "tried" ? "tried" : "own";
+}
+
+const CATEGORY_LABELS: Record<string, string> = {
+  bourbon: "Bourbon",
+  rye: "Rye",
+  "american-single-malt": "American single malt",
+  "american-other": "American other",
+  "scotch-single-malt": "Single malt scotch",
+  "scotch-blended": "Blended scotch",
+  irish: "Irish",
+  japanese: "Japanese",
+  canadian: "Canadian",
+  world: "World",
 };
 
 const FILL_STEPS = [100, 75, 50, 25, 10];
+
+interface FilterOption {
+  id: string;
+  label: string;
+  test: (row: Row) => boolean;
+}
+
+interface FilterGroup {
+  id: string;
+  label: string;
+  options: FilterOption[];
+}
+
+const published = (row: Row) => hasPublishedProducerFlavorNotes(row.bottle);
+
+/**
+ * The filter vocabulary for the bottles currently in view. Groups that cannot
+ * apply are left out rather than shown as controls that silently empty the
+ * list: bottle state and price paid describe a bottle you own, and the
+ * calibration group needs published notes to compare against.
+ *
+ * Options are OR within a group and AND across groups — the rule every filter
+ * panel already teaches.
+ */
+function buildFilterGroups(rows: Row[], collection: Collection): FilterGroup[] {
+  const groups: FilterGroup[] = [];
+  const ownedInView = collection === "own" || collection === "all";
+
+  if (ownedInView) {
+    groups.push({
+      id: "bottle",
+      label: "Bottle",
+      options: [
+        { id: "open", label: "Open", test: (r) => r.status === "open" },
+        { id: "sealed", label: "Sealed", test: (r) => r.status === "sealed" },
+        { id: "low", label: "Running low", test: (r) => r.status === "open" && (r.fillLevel ?? 100) < 25 },
+      ],
+    });
+  }
+
+  groups.push({
+    id: "notes",
+    label: "My notes",
+    options: [
+      { id: "noted", label: "Tasted & noted", test: (r) => Object.keys(r.personalFlavorTags).length > 0 },
+      { id: "unnoted", label: "No notes yet", test: (r) => Object.keys(r.personalFlavorTags).length === 0 },
+      { id: "rated4", label: "Rated 4★ and up", test: (r) => (r.personalRating ?? 0) >= 4 },
+    ],
+  });
+
+  // A descriptor you have never once reached for, anywhere on your shelf.
+  const everTagged = new Set(rows.flatMap((r) => Object.keys(r.personalFlavorTags)));
+  if (rows.some(published)) {
+    groups.push({
+      id: "calibration",
+      label: "Against the label",
+      options: [
+        {
+          id: "blind",
+          label: "Has a blind spot",
+          test: (r) =>
+            published(r) &&
+            Object.keys(r.bottle.producerFlavorTags ?? {}).some((id) => !everTagged.has(id)),
+        },
+        {
+          id: "signature",
+          label: "Has a note of your own",
+          test: (r) =>
+            published(r) &&
+            Object.keys(r.personalFlavorTags).some(
+              (id) => (r.bottle.producerFlavorTags?.[id] ?? 0) === 0,
+            ),
+        },
+      ],
+    });
+  }
+
+  // Only the styles actually on the shelf: a fixed list of ten categories would
+  // be mostly dead options for every real collection.
+  const categories = [...new Set(rows.map((r) => r.bottle.category))].sort();
+  if (categories.length > 1) {
+    groups.push({
+      id: "style",
+      label: "Style",
+      options: categories.map((category) => ({
+        id: `style:${category}`,
+        label: CATEGORY_LABELS[category] ?? category,
+        test: (r: Row) => r.bottle.category === category,
+      })),
+    });
+  }
+
+  if (ownedInView) {
+    groups.push({
+      id: "price",
+      label: "Price paid",
+      options: [
+        { id: "under50", label: "Under $50", test: (r) => r.purchasePrice != null && r.purchasePrice < 50 },
+        {
+          id: "mid",
+          label: "$50–100",
+          test: (r) => r.purchasePrice != null && r.purchasePrice >= 50 && r.purchasePrice <= 100,
+        },
+        { id: "over100", label: "Over $100", test: (r) => (r.purchasePrice ?? 0) > 100 },
+      ],
+    });
+  }
+
+  return groups;
+}
 
 function money(n: number): string {
   return `$${Math.round(n).toLocaleString()}`;
@@ -125,13 +254,14 @@ export function BarClient({
   palate: PalateHeat;
 }) {
   const [rows, setRows] = useState<Row[]>(initialRows);
-  const [tab, setTab] = useState<Tab>("bar");
+  const [collection, setCollection] = useState<Collection>("own");
+  const [checks, setChecks] = useState<string[]>([]);
   const [lens, setLens] = useState<Lens>("mine");
   const [weightByRating, setWeightByRating] = useState(false);
-  const [flavorScope, setFlavorScope] = useState<FlavorHeatScope>("own");
   const [selectedFlavorIds, setSelectedFlavorIds] = useState<string[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const flavorScope = scopeFor(collection);
 
   const ownRows = useMemo(() => rows.filter((r) => r.relationship === "own"), [rows]);
   const wishlistRows = useMemo(() => rows.filter((r) => r.relationship === "wishlist"), [rows]);
@@ -224,10 +354,39 @@ export function BarClient({
           : r,
       ),
     );
-    setTab("bar");
+    setCollection("own");
   }
 
-  const activeRows = tab === "bar" ? ownRows : tab === "wishlist" ? wishlistRows : triedRows;
+  const collectionRows = useMemo(
+    () =>
+      collection === "own"
+        ? ownRows
+        : collection === "tried"
+          ? triedRows
+          : collection === "wishlist"
+            ? wishlistRows
+            : [...ownRows, ...triedRows],
+    [collection, ownRows, triedRows, wishlistRows],
+  );
+  const filterGroups = useMemo(
+    () => buildFilterGroups(collectionRows, collection),
+    [collectionRows, collection],
+  );
+  // Checks that survive a collection change but no longer have a control would
+  // filter the list from somewhere the user cannot see, so they are dropped.
+  const activeChecks = useMemo(() => {
+    const available = new Set(filterGroups.flatMap((g) => g.options.map((o) => o.id)));
+    return checks.filter((id) => available.has(id));
+  }, [checks, filterGroups]);
+  const activeRows = useMemo(() => {
+    if (activeChecks.length === 0) return collectionRows;
+    return collectionRows.filter((row) =>
+      filterGroups.every((group) => {
+        const on = group.options.filter((o) => activeChecks.includes(o.id));
+        return on.length === 0 || on.some((o) => o.test(row));
+      }),
+    );
+  }, [collectionRows, filterGroups, activeChecks]);
   // The palate describes the drinker, not a shelf, so it ignores scope entirely.
   const palateHeatMap: BarFlavorHeat = useMemo(
     () => ({
@@ -273,7 +432,7 @@ export function BarClient({
   );
   // Wishlist bottles are untasted, so no flavor map describes them and their
   // list is never filtered by one.
-  const flavorFilterable = tab !== "wishlist";
+  const flavorFilterable = collection !== "wishlist";
   const filteredRows = useMemo(() => {
     if (!flavorFilterable || selectedFlavorIds.length === 0) return activeRows;
     // Mine filters on your own tags — including when weighted by rating, since
@@ -299,19 +458,15 @@ export function BarClient({
     setSelectedFlavorIds([]);
   }
 
-  function changeFlavorScope(scope: FlavorHeatScope) {
-    setFlavorScope(scope);
+  function changeCollection(next: Collection) {
+    setCollection(next);
     setSelectedFlavorIds([]);
   }
 
-  // Each tab opens describing its own shelf; an explicit scope choice is only
-  // reset by moving to a tab whose rows it no longer matches.
-  function changeTab(next: Tab) {
-    setTab(next);
-    setFlavorScope((current) =>
-      current === "all" ? current : DEFAULT_SCOPE_FOR_TAB[next],
+  function toggleCheck(id: string) {
+    setChecks((current) =>
+      current.includes(id) ? current.filter((c) => c !== id) : [...current, id],
     );
-    setSelectedFlavorIds([]);
   }
 
   function toggleFlavor(selection: FlavorSelection) {
@@ -335,21 +490,27 @@ export function BarClient({
         </Link>
       </header>
 
-      <div role="tablist" aria-label="Bar sections" className="flex gap-2">
-        {TABS.map((t) => (
-          <button
-            key={t.key}
-            role="tab"
-            aria-selected={tab === t.key}
-            onClick={() => changeTab(t.key)}
-            className={`chip inline-flex items-center min-h-11 px-4 text-sm font-medium ${
-              tab === t.key ? "chip-active" : "hover:text-foreground"
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      <FilterBar
+        collection={collection}
+        onCollectionChange={changeCollection}
+        counts={{
+          own: ownRows.length,
+          tried: triedRows.length,
+          wishlist: wishlistRows.length,
+          all: ownRows.length + triedRows.length,
+        }}
+        groups={filterGroups}
+        checks={activeChecks}
+        onToggleCheck={toggleCheck}
+        flavorIds={selectedFlavorIds}
+        onRemoveFlavor={(id) => setSelectedFlavorIds((ids) => ids.filter((f) => f !== id))}
+        onClear={() => {
+          setChecks([]);
+          setSelectedFlavorIds([]);
+        }}
+        shownCount={filteredRows.length}
+        totalCount={collectionRows.length}
+      />
 
       {error && (
         <div className="rounded-xl border border-danger/40 bg-danger/10 text-danger text-sm p-3">
@@ -357,7 +518,7 @@ export function BarClient({
         </div>
       )}
 
-      {tab === "bar" && (
+      {collection === "own" && (
         <section aria-label="Bar stats" className="grid grid-cols-4 gap-2">
           <StatCard value={String(stats.bottleCount)} label="bottles" />
           <StatCard value={String(stats.openCount)} label="open" />
@@ -379,18 +540,17 @@ export function BarClient({
           rows={activeRows}
           scope={flavorScope}
           onLensChange={changeLens}
-          onScopeChange={changeFlavorScope}
           selectedFlavorIds={selectedFlavorIds}
           onToggleFlavor={toggleFlavor}
           onClearFlavors={() => setSelectedFlavorIds([])}
           shownCount={filteredRows.length}
           totalCount={activeRows.length}
-          rowNoun={tab === "bar" ? "bottles" : "tastings"}
+          rowNoun={collection === "tried" ? "tastings" : "bottles"}
           topWedgeIds={palate.topWedgeIds}
         />
       )}
 
-      {tab === "bar" && (
+      {collection === "own" && (
         <>
           <RecommendationRail mode="tonight" title="What to pour tonight" />
           <RecommendationRail mode="discovery" title="For your palate" />
@@ -398,12 +558,12 @@ export function BarClient({
       )}
 
       {filteredRows.length === 0 ? (
-        <EmptyState tab={tab} />
+        <EmptyState collection={collection} />
       ) : (
         <ul className="flex flex-col gap-2.5">
           {filteredRows.map((row) => (
             <li key={row.id} className="card-flat overflow-hidden">
-              {tab === "bar" ? (
+              {row.relationship === "own" ? (
                 <>
                   <button
                     className="w-full flex items-center gap-3.5 p-4 text-left hover:bg-surface-raised transition-colors"
@@ -450,7 +610,7 @@ export function BarClient({
                       {row.bottle.distilleryName ?? row.bottle.category}
                     </span>
                   </span>
-                  {tab === "wishlist" ? (
+                  {row.relationship === "wishlist" ? (
                     <span className="flex flex-col items-end gap-1.5 shrink-0">
                       {row.bottle.avgPrice != null && (
                         <span className="text-muted text-sm">
@@ -500,7 +660,6 @@ function FlavorMapSection({
   rows,
   scope,
   onLensChange,
-  onScopeChange,
   selectedFlavorIds,
   onToggleFlavor,
   onClearFlavors,
@@ -520,7 +679,6 @@ function FlavorMapSection({
   rows: Row[];
   scope: FlavorHeatScope;
   onLensChange: (lens: Lens) => void;
-  onScopeChange: (scope: FlavorHeatScope) => void;
   selectedFlavorIds: string[];
   onToggleFlavor: (selection: FlavorSelection) => void;
   onClearFlavors: () => void;
@@ -529,7 +687,7 @@ function FlavorMapSection({
   rowNoun: string;
   topWedgeIds: string[];
 }) {
-  const scopeMeta = SCOPES.find((s) => s.key === scope) ?? SCOPES[0];
+  const scopeBlurb = SCOPE_BLURB[scope];
   const lensMeta = LENSES.find((l) => l.key === lens) ?? LENSES[0];
   const isPalate = lens === "mine" && weightByRating;
   const isCompare = lens === "compare";
@@ -570,26 +728,6 @@ function FlavorMapSection({
         )}
       </div>
 
-      {/* Weighted by rating the wheel describes the drinker, not a shelf, so
-          the scope it would filter no longer applies. */}
-      {!isPalate && (
-      <div role="tablist" aria-label="Flavor map scope" className="mt-2 flex flex-wrap gap-2">
-        {SCOPES.map((s) => (
-          <button
-            key={s.key}
-            role="tab"
-            aria-selected={scope === s.key}
-            onClick={() => onScopeChange(s.key)}
-            className={`chip inline-flex min-h-11 items-center px-3 text-xs font-medium ${
-              scope === s.key ? "chip-active" : "text-muted hover:text-foreground"
-            }`}
-          >
-            {s.label}
-          </button>
-        ))}
-      </div>
-      )}
-
       {/* Full width, under the toggles: squeezed beside them it wrapped to a
           four-line column on a phone. */}
       <p className="mt-2 mb-3 text-xs text-muted">
@@ -598,8 +736,8 @@ function FlavorMapSection({
           : isPalate
             ? "Where your ratings lean, weighted by how recently you poured; tagged notes refine its details."
             : lens === "label"
-              ? `What the distilleries claim about ${scopeMeta.blurb}.`
-              : `The wheel maps ${scopeMeta.blurb}; tagged notes refine its details.`}
+              ? `What the distilleries claim about ${scopeBlurb}.`
+              : `The wheel maps ${scopeBlurb}; tagged notes refine its details.`}
       </p>
 
       {/* Outside the card on purpose: with no tagged notes yet the card falls
@@ -679,7 +817,7 @@ function FlavorMapSection({
             {isPalate
               ? "Rate a few pours and your flavor fingerprint appears here."
               : lens === "mine"
-                ? `Log a pour and tag what you taste to map ${scopeMeta.blurb}.`
+                ? `Log a pour and tag what you taste to map ${scopeBlurb}.`
                 : "Published bottle notes appear here as the catalog and scanner are enriched."}
           </p>
         </div>
@@ -858,21 +996,223 @@ function StatCard({ value, label }: { value: string; label: string }) {
   );
 }
 
-function EmptyState({ tab }: { tab: Tab }) {
+/**
+ * One 40px row: the two collections that matter as a segment, and a single
+ * expand carrying everything else with a count. Whatever is active shows as
+ * removable tokens on a second line that only exists when it has something on
+ * it — including flavors tapped on the wheel, which used to be a parallel
+ * filter system with its own clear button buried under the chart.
+ */
+function FilterBar({
+  collection,
+  onCollectionChange,
+  counts,
+  groups,
+  checks,
+  onToggleCheck,
+  flavorIds,
+  onRemoveFlavor,
+  onClear,
+  shownCount,
+  totalCount,
+}: {
+  collection: Collection;
+  onCollectionChange: (next: Collection) => void;
+  counts: Record<Collection, number>;
+  groups: FilterGroup[];
+  checks: string[];
+  onToggleCheck: (id: string) => void;
+  flavorIds: string[];
+  onRemoveFlavor: (id: string) => void;
+  onClear: () => void;
+  shownCount: number;
+  totalCount: number;
+}) {
+  const [open, setOpen] = useState(false);
+  const activeCount = checks.length + flavorIds.length;
+  const labelOf = (id: string) =>
+    groups.flatMap((g) => g.options).find((o) => o.id === id)?.label ?? id;
+  const isQuick = QUICK_COLLECTIONS.includes(collection);
+  const collectionLabel = COLLECTIONS.find((c) => c.key === collection)?.label ?? collection;
+
+  return (
+    <div className="rounded-2xl border border-border-subtle bg-surface">
+      <div className="flex items-center justify-between gap-2 p-1.5">
+        <div role="tablist" aria-label="Collection" className="inline-flex rounded-full bg-background p-0.5 gap-0.5">
+          {QUICK_COLLECTIONS.map((key) => (
+            <button
+              key={key}
+              role="tab"
+              // A collection chosen in the panel leaves neither slot selected
+              // rather than showing the wrong one as active.
+              aria-selected={collection === key}
+              onClick={() => onCollectionChange(key)}
+              className={`inline-flex min-h-10 items-center rounded-full px-3.5 text-[13px] font-medium transition-colors ${
+                collection === key ? "chip-active" : "text-muted hover:text-foreground"
+              }`}
+            >
+              {COLLECTIONS.find((c) => c.key === key)?.label}
+              <span className="ml-1.5 text-[10.5px] opacity-60 tabular-nums">{counts[key]}</span>
+            </button>
+          ))}
+        </div>
+        <button
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          aria-controls="bar-filter-panel"
+          className={`inline-flex min-h-10 items-center gap-1.5 rounded-full px-3 text-xs transition-colors ${
+            open ? "text-accent" : "text-muted hover:text-foreground"
+          }`}
+        >
+          <SlidersHorizontal size={15} strokeWidth={1.8} aria-hidden /> Filters
+          {activeCount > 0 && (
+            <span className="rounded-full bg-accent/15 px-1.5 text-[10.5px] text-accent tabular-nums">
+              {activeCount}
+            </span>
+          )}
+          <ChevronDown size={14} strokeWidth={1.8} aria-hidden className={`transition-transform ${open ? "rotate-180" : ""}`} />
+        </button>
+      </div>
+
+      {(activeCount > 0 || !isQuick) && (
+        <div className="flex items-center gap-1.5 overflow-x-auto px-2 pb-2" aria-label="Active filters">
+          {!isQuick && (
+            <button
+              onClick={() => onCollectionChange("own")}
+              aria-label={`Remove ${collectionLabel} filter`}
+              className="chip inline-flex shrink-0 items-center gap-1.5 px-2.5 py-1 text-[11px] text-foreground"
+            >
+              {collectionLabel} <span aria-hidden className="text-muted">×</span>
+            </button>
+          )}
+          {checks.map((id) => (
+            <button
+              key={id}
+              onClick={() => onToggleCheck(id)}
+              aria-label={`Remove ${labelOf(id)} filter`}
+              className="chip inline-flex shrink-0 items-center gap-1.5 px-2.5 py-1 text-[11px] text-foreground"
+            >
+              {labelOf(id)} <span aria-hidden className="text-muted">×</span>
+            </button>
+          ))}
+          {flavorIds.map((id) => (
+            <button
+              key={id}
+              onClick={() => onRemoveFlavor(id)}
+              aria-label={`Remove ${leafLabel(id) ?? id} filter`}
+              className="chip chip-active inline-flex shrink-0 items-center gap-1.5 px-2.5 py-1 text-[11px]"
+            >
+              {leafLabel(id) ?? id} <span aria-hidden>×</span>
+            </button>
+          ))}
+          {activeCount > 0 && (
+            <button
+              onClick={onClear}
+              className="shrink-0 px-2 py-1 text-[11px] text-muted underline-offset-2 hover:text-foreground hover:underline"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+      )}
+
+      {open && (
+        <div id="bar-filter-panel" className="max-h-[22rem] overflow-y-auto border-t border-border-subtle p-3">
+          <div className="mb-3">
+            <div className="section-label" id="filter-group-collection">Collection</div>
+            <div role="radiogroup" aria-labelledby="filter-group-collection" className="mt-1 grid grid-cols-2 gap-x-3">
+              {COLLECTIONS.map((c) => (
+                <CheckRow
+                  key={c.key}
+                  role="radio"
+                  checked={collection === c.key}
+                  label={`${c.label} (${counts[c.key]})`}
+                  onToggle={() => onCollectionChange(c.key)}
+                />
+              ))}
+            </div>
+          </div>
+          {groups.map((group) => (
+            <div key={group.id} className="mb-3">
+              <div className="section-label" id={`filter-group-${group.id}`}>{group.label}</div>
+              <div role="group" aria-labelledby={`filter-group-${group.id}`} className="mt-1 grid grid-cols-2 gap-x-3">
+                {group.options.map((option) => (
+                  <CheckRow
+                    key={option.id}
+                    role="checkbox"
+                    checked={checks.includes(option.id)}
+                    label={option.label}
+                    onToggle={() => onToggleCheck(option.id)}
+                  />
+                ))}
+              </div>
+            </div>
+          ))}
+          <p className="border-t border-border-subtle pt-2.5 text-[11px] text-muted">
+            Showing <span className="stat-number text-foreground">{shownCount}</span> of{" "}
+            <span className="stat-number text-foreground">{totalCount}</span>
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The whole row is the target, so a 16px box still clears 44px of touch. */
+function CheckRow({
+  role,
+  checked,
+  label,
+  onToggle,
+}: {
+  role: "radio" | "checkbox";
+  checked: boolean;
+  label: string;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      role={role}
+      aria-checked={checked}
+      onClick={onToggle}
+      className={`flex min-h-11 items-center gap-2.5 text-left text-[13px] ${
+        checked ? "text-accent" : "hover:text-foreground"
+      }`}
+    >
+      <span
+        aria-hidden
+        className={`grid size-4 shrink-0 place-items-center border transition-colors ${
+          role === "radio" ? "rounded-full" : "rounded"
+        } ${checked ? "border-accent bg-accent" : "border-border-subtle bg-background"}`}
+      >
+        {checked && <Check size={10} strokeWidth={4} className="text-background" aria-hidden />}
+      </span>
+      {label}
+    </button>
+  );
+}
+
+function EmptyState({ collection }: { collection: Collection }) {
   const copy =
-    tab === "bar"
+    collection === "own"
       ? {
           title: "Your shelf is waiting",
           line: "Find a bottle you love and add it to your bar.",
           action: "Find a bottle",
         }
-      : tab === "wishlist"
+      : collection === "wishlist"
         ? {
             title: "Nothing wished for yet",
             line: "Save bottles you're hunting and track their going price.",
             action: "Browse bottles",
           }
-        : {
+        : collection === "all"
+          ? {
+              title: "Nothing here yet",
+              line: "Bottles you own and bottles you’ve only tasted both land here.",
+              action: "Find a bottle",
+            }
+          : {
             title: "No tastings logged",
             line: "Bottles you've tried — at a bar, a friend's, a festival — live here.",
             action: "Find a bottle",
@@ -884,7 +1224,7 @@ function EmptyState({ tab }: { tab: Tab }) {
       </div>
       <p className="font-display text-lg font-semibold">{copy.title}</p>
       <p className="text-sm text-muted max-w-[26ch] leading-relaxed">{copy.line}</p>
-      {tab === "bar" ? (
+      {collection === "own" ? (
         <>
           <Link href="/scan" className="btn-primary px-5 py-2.5 text-sm font-medium mt-1">
             Scan your bottles

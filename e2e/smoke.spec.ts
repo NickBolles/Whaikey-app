@@ -100,7 +100,7 @@ test.describe("signed-in scan flow", () => {
     await expect(page.getByRole("heading", { name: "Poured." })).toBeVisible();
 
     await page.goto("/bar");
-    await page.getByRole("tab", { name: "Tried" }).click();
+    await page.getByRole("tab", { name: /Tried/ }).click();
     await expect(page.getByText(/Glenfarclas 105/i).first()).toBeVisible();
   });
 
