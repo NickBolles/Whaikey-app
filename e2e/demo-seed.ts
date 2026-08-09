@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import type { DB } from "../src/db/index";
 import * as schema from "../src/db/schema";
 import { DEMO_SESSION_TOKEN, DEMO_USER_ID, SCAN_SESSION_TOKEN, SCAN_USER_ID } from "./fixtures";
@@ -111,6 +112,31 @@ export async function seedDemoUser(db: DB): Promise<void> {
     ...extra,
   });
 
+  // Published notes for the bottles Jordan has tasted, so the flavor map's
+  // Label and Compare lenses have something to draw. These are FIXTURE data on
+  // an example.com source, not real distillery claims — the catalog itself
+  // carries producer notes only from the enrichment pipeline, which cites a
+  // real page. Attribution is required for a claim to count as published, so
+  // all three columns are set together.
+  const producerNotes: Array<[string, Record<string, number>]> = [
+    ["eagle-rare-10", { vanilla: 3, toffee: 2, "orange-peel": 2, oak: 2, leather: 1 }],
+    ["lagavulin-16", { peat: 3, campfire: 3, medicinal: 2, raisin: 2, brine: 1 }],
+    ["blantons-original", { honey: 2, citrus: 2, clove: 2, oak: 2, vanilla: 2 }],
+    ["redbreast-12", { raisin: 2, nutmeg: 2, honey: 2, malt: 2, cherry: 1 }],
+    ["ardbeg-10", { peat: 3, campfire: 2, citrus: 2, tar: 1 }],
+  ];
+  for (const [bottleId, tags] of producerNotes) {
+    await db
+      .update(schema.bottles)
+      .set({
+        producerFlavorTags: tags,
+        producerFlavorSourceUrl: `https://example.com/tasting-notes/${bottleId}`,
+        producerFlavorSourceLabel: "Distillery tasting notes",
+        producerFlavorRetrievedAt: D("2026-06-01T12:00:00Z"),
+      })
+      .where(eq(schema.bottles.id, bottleId));
+  }
+
   await db.insert(schema.pours).values([
     pour("demo-pour-1", "eagle-rare-10", 4.5, "2026-07-14T20:30:00Z", { userBottleId: "demo-ub-1" }),
     pour("demo-pour-2", "lagavulin-16", 5, "2026-07-12T21:00:00Z", {
@@ -119,6 +145,9 @@ export async function seedDemoUser(db: DB): Promise<void> {
     }),
     pour("demo-pour-3", "ardbeg-10", 3.5, "2026-07-12T19:45:00Z"),
     pour("demo-pour-4", "redbreast-12", 4, "2026-07-05T18:15:00Z", { userBottleId: "demo-ub-4" }),
+    pour("demo-pour-5", "blantons-original", 4, "2026-06-28T20:10:00Z", {
+      userBottleId: "demo-ub-3",
+    }),
   ]);
 
   await db.insert(schema.tastingNotes).values([
@@ -141,6 +170,28 @@ export async function seedDemoUser(db: DB): Promise<void> {
       flavorTags: { campfire: 3, brine: 2, raisin: 2, chocolate: 1, medicinal: 1 },
       extractedBy: "user",
       createdAt: D("2026-07-12T21:05:00Z"),
+    },
+    // Jordan reaches for cinnamon where these two labels say clove and nutmeg —
+    // the substitution the Compare lens is built to surface.
+    {
+      id: "demo-note-3",
+      pourId: "demo-pour-4",
+      nose: "Sherried fruit and a warm bakery note.",
+      palate: "Raisin, honey, cinnamon, ripe cherry.",
+      finish: "Long and rounded, gently spiced.",
+      flavorTags: { raisin: 2, honey: 2, cinnamon: 1, cherry: 2 },
+      extractedBy: "user",
+      createdAt: D("2026-07-05T18:20:00Z"),
+    },
+    {
+      id: "demo-note-4",
+      pourId: "demo-pour-5",
+      nose: "Honey and soft vanilla.",
+      palate: "Vanilla, cinnamon, light oak.",
+      finish: "Short, sweet, a little dusty.",
+      flavorTags: { honey: 2, vanilla: 2, cinnamon: 2, oak: 1 },
+      extractedBy: "user",
+      createdAt: D("2026-06-28T20:15:00Z"),
     },
   ]);
 

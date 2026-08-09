@@ -34,6 +34,16 @@ export interface SeedBottle {
   avgPrice: number;
   description: string;
   flavorProfile: Record<WedgeId, number>;
+  /**
+   * Published producer descriptors, keyed by canonical leaf id (1-3). Only ever
+   * populated from a real, citable source — the enrichment pipeline fills these
+   * alongside the two attribution fields below, and all three are required
+   * together (see hasPublishedProducerFlavorNotes). Never hand-author a claim
+   * here without the source it came from.
+   */
+  producerFlavorTags?: Record<string, number>;
+  producerFlavorSourceUrl?: string;
+  producerFlavorSourceLabel?: string;
   aliases?: string[];
 }
 
