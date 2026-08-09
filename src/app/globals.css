@@ -11,6 +11,12 @@
   --accent-deep: #b96f1e;
   --danger: #e05d5d;
   --success: #7d8a5c;
+  /* Calibration buckets: your notes read against published ones. Three
+     categories, never a grade — a red/green pass-fail would be the wrong
+     frame for tasting, so these sit apart from --danger/--success. */
+  --taste-shared: #9db463;
+  --taste-blind: #69a3bd;
+  --taste-signature: #bb8ad0;
 }
 
 @theme inline {
@@ -24,6 +30,9 @@
   --color-accent-deep: var(--accent-deep);
   --color-danger: var(--danger);
   --color-success: var(--success);
+  --color-taste-shared: var(--taste-shared);
+  --color-taste-blind: var(--taste-blind);
+  --color-taste-signature: var(--taste-signature);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
   --font-display: var(--font-fraunces);

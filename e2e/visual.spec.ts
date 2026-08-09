@@ -146,10 +146,31 @@ test.describe("signed in (demo collector)", () => {
   test("my bar: palate on the same wheel", async ({ page }) => {
     await page.goto("/bar");
     const map = page.getByRole("region", { name: /flavor map/i });
-    await page.getByRole("tab", { name: "My palate" }).click();
+    await page.getByRole("button", { name: "Weight by rating" }).click();
     await expect(page.getByText("You lean toward")).toBeVisible();
     await settle(page);
     await expect(map).toHaveScreenshot(shot("bar-palate-map"));
+  });
+
+  test("my bar: your notes against the label", async ({ page }) => {
+    await page.goto("/bar");
+    const map = page.getByRole("region", { name: /flavor map/i });
+    await page.getByRole("tab", { name: "Compare" }).click();
+    await expect(page.getByLabel("Calibration summary")).toBeVisible();
+    await settle(page);
+    await expect(map).toHaveScreenshot(shot("bar-compare-map"));
+  });
+
+  // The payoff: a descriptor the label names and this drinker never does,
+  // with what they wrote in its place.
+  test("my bar: a blind spot, drilled into", async ({ page }) => {
+    await page.goto("/bar");
+    const map = page.getByRole("region", { name: /flavor map/i });
+    await page.getByRole("tab", { name: "Compare" }).click();
+    await page.getByRole("button", { name: /Filter by Clove/ }).click();
+    await expect(page.getByText(/instead/i).first()).toBeVisible();
+    await settle(page);
+    await expect(map).toHaveScreenshot(shot("bar-compare-blind-spot"));
   });
 
   test("tried tab: flavor map scoped to what you've tasted", async ({ page }) => {
