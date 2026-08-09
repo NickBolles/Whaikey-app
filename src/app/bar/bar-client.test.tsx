@@ -667,3 +667,70 @@ describe("BarClient filter correctness", () => {
     expect(screen.queryByText("Nothing matches")).not.toBeInTheDocument();
   });
 });
+
+describe("BarClient lens across collections", () => {
+  const labelHeat = {
+    wedges: { sweet: 1 },
+    leaves: { vanilla: 1 },
+    topWedgeIds: ["sweet"],
+    hasHeat: true,
+  };
+  const comparable = {
+    ...noCalibration,
+    leaves: {
+      vanilla: {
+        leafId: "vanilla",
+        labelBottles: 1,
+        yourBottles: 1,
+        sharedBottles: 1,
+        bucket: "shared" as const,
+        substitutes: [],
+      },
+    },
+    publishedNoteBottles: 1,
+    comparedBottles: 1,
+    agreement: 1,
+    hasComparison: true,
+  };
+
+  it("does not resurrect a lens the shelf you left could not support", () => {
+    render(
+      <BarClient
+        initialRows={[]}
+        flavorHeat={heatMatrix({ "producer:own": labelHeat })}
+        calibration={calibrationMatrix({ own: comparable })}
+        palate={palate}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: "Compare" }));
+    expect(screen.getByRole("tab", { name: "Compare" })).toHaveAttribute("aria-selected", "true");
+
+    // Tried has no published notes, so Compare is not offered there and the
+    // control shows Mine as selected.
+    fireEvent.click(screen.getByRole("tab", { name: /Tried/ }));
+    expect(screen.queryByRole("tab", { name: "Compare" })).not.toBeInTheDocument();
+
+    // Coming back must not contradict what that screen said was selected.
+    fireEvent.click(screen.getByRole("tab", { name: /My bar/ }));
+    expect(screen.getByRole("tab", { name: "Compare" })).toHaveAttribute("aria-selected", "false");
+    expect(screen.getByRole("tab", { name: "Mine" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("keeps a lens the new collection can still support", () => {
+    render(
+      <BarClient
+        initialRows={[]}
+        flavorHeat={heatMatrix({ "producer:own": labelHeat, "producer:all": labelHeat })}
+        calibration={calibrationMatrix({ own: comparable, all: comparable })}
+        palate={palate}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: "Compare" }));
+    fireEvent.click(screen.getByRole("button", { name: /Filters/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /Everything/ }));
+
+    expect(screen.getByRole("tab", { name: "Compare" })).toHaveAttribute("aria-selected", "true");
+  });
+});

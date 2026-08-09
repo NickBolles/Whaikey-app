@@ -52,7 +52,7 @@ The feel: **a well-lit whiskey lounge, not a dashboard.** Clean and sleek, warm 
 5. Icons: lucide, `size={18}` inline / `size={20}` nav, `strokeWidth={1.8}`; amber only when the element is active/accent.
 6. Empty states: an emoji or icon, one serif line, one muted line, one clear action.
 7. Text never touches an edge — SVG labels included (radar/wheel need internal padding).
-8. Touch targets ≥ 44px. Focus states: `focus-visible:ring-2 ring-accent/60` (offset on dark).
+8. Touch targets ≥ 44px. Where a control is deliberately compact — the Bar's filter bar, the wheel's lens — add `.tap-target` instead of raising its height: it grows the hit area to 44px and leaves the layout alone. Focus states: `focus-visible:ring-2 ring-accent/60` (offset on dark).
 9. Motion: 150–200ms color/opacity transitions only. Respect reduced motion.
 10. The bottom nav is `sticky` (in flow), never `fixed` — full-page screenshots must stay honest.
 

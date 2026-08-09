@@ -56,6 +56,13 @@ export interface PalateHeat {
   sampleSize: number;
 }
 
+/** Mine always works; the other two need something published to draw. */
+function lensAvailable(lens: Lens, calibration: FlavorCalibration): boolean {
+  if (lens === "label") return calibration.publishedNoteBottles > 0;
+  if (lens === "compare") return calibration.hasComparison;
+  return true;
+}
+
 const LENSES: { key: Lens; label: string; caption: string }[] = [
   { key: "mine", label: "Mine", caption: "My notes" },
   { key: "label", label: "Label", caption: "The label" },
@@ -440,8 +447,9 @@ export function BarClient({
   // can become a permanently empty control the way "Producer" was.
   const hasPublishedNotes = activeCalibration.publishedNoteBottles > 0;
   const canCompare = activeCalibration.hasComparison;
-  const effectiveLens: Lens =
-    (lens === "label" && !hasPublishedNotes) || (lens === "compare" && !canCompare) ? "mine" : lens;
+  // changeCollection normalizes the stored lens; this stays as the guard for
+  // the paths that change the row set without a collection change.
+  const effectiveLens: Lens = lensAvailable(lens, activeCalibration) ? lens : "mine";
   // Compare paints the label's claim and lets agreement ride in the marks, so
   // its fill is the producer heat.
   const activeFlavorHeat =
@@ -511,6 +519,12 @@ export function BarClient({
     );
     const available = new Set(nextGroups.flatMap((g) => g.options.map((o) => o.id)));
     setChecks((current) => current.filter((id) => available.has(id)));
+    // Same reasoning as the segment clearing both slots for a panel-chosen
+    // collection: while the lens sits on a shelf that cannot support it, the
+    // control marks Mine as selected, and a stored "compare" would make that
+    // aria-selected a lie the moment you came back.
+    const nextCalibration = calibration[scopeFor(next)] ?? EMPTY_CALIBRATION;
+    setLens((current) => (lensAvailable(current, nextCalibration) ? current : "mine"));
   }
 
   function clearFilters() {
@@ -775,7 +789,7 @@ function FlavorMapSection({
                 role="tab"
                 aria-selected={lens === l.key}
                 onClick={() => onLensChange(l.key)}
-                className={`inline-flex min-h-9 items-center rounded-full px-3 text-xs font-medium transition-colors ${
+                className={`tap-target inline-flex min-h-9 items-center rounded-full px-3 text-xs font-medium transition-colors ${
                   lens === l.key ? "chip-active" : "text-muted hover:text-foreground"
                 }`}
               >
@@ -805,7 +819,7 @@ function FlavorMapSection({
         <button
           onClick={() => onWeightChange(!weightByRating)}
           aria-pressed={weightByRating}
-          className={`chip mb-3 inline-flex min-h-9 items-center px-3 text-[11px] font-medium ${
+          className={`chip tap-target mb-3 inline-flex min-h-9 items-center px-3 text-[11px] font-medium ${
             weightByRating ? "chip-active" : "hover:text-foreground"
           }`}
         >
@@ -1105,7 +1119,7 @@ function FilterBar({
               // rather than showing the wrong one as active.
               aria-selected={collection === key}
               onClick={() => onCollectionChange(key)}
-              className={`inline-flex min-h-10 items-center rounded-full px-3.5 text-[13px] font-medium transition-colors ${
+              className={`tap-target inline-flex min-h-10 items-center rounded-full px-3.5 text-[13px] font-medium transition-colors ${
                 collection === key ? "chip-active" : "text-muted hover:text-foreground"
               }`}
             >
@@ -1118,7 +1132,7 @@ function FilterBar({
           onClick={() => setOpen((o) => !o)}
           aria-expanded={open}
           aria-controls="bar-filter-panel"
-          className={`inline-flex min-h-10 items-center gap-1.5 rounded-full px-3 text-xs transition-colors ${
+          className={`tap-target inline-flex min-h-10 items-center gap-1.5 rounded-full px-3 text-xs transition-colors ${
             open ? "text-accent" : "text-muted hover:text-foreground"
           }`}
         >
