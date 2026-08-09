@@ -29,6 +29,9 @@ The feel: **a well-lit whiskey lounge, not a dashboard.** Clean and sleek, warm 
 | `--muted` #a3927a | secondary text |
 | `--accent` #e8a13c → `--accent-deep` #b96f1e | brass/amber; gradients via `.btn-primary`, `.text-gradient-amber` |
 | `--danger`, `--success` | sparingly |
+| `--taste-shared` #9db463 · `--taste-blind` #69a3bd · `--taste-signature` #bb8ad0 | the three calibration buckets on the Compare wheel — olive/slate/plum |
+
+**Calibration colour is not a grade.** When the flavor map compares your notes to the label's, the three buckets are *shared* (you both call it), *blind spot* (the label does, you don't) and *yours alone* (you do, the label doesn't). Deliberately not red/green: a published tasting note is one opinion written by someone selling the bottle, so this is calibration against a reference point, never accuracy against an answer key. Each bucket also carries a distinct **shape** (filled dot / hollow ring / diamond) so the encoding survives colour-blindness and greyscale.
 
 ## Recipes (defined in globals.css — use these, don't improvise)
 
@@ -49,7 +52,7 @@ The feel: **a well-lit whiskey lounge, not a dashboard.** Clean and sleek, warm 
 5. Icons: lucide, `size={18}` inline / `size={20}` nav, `strokeWidth={1.8}`; amber only when the element is active/accent.
 6. Empty states: an emoji or icon, one serif line, one muted line, one clear action.
 7. Text never touches an edge — SVG labels included (radar/wheel need internal padding).
-8. Touch targets ≥ 44px. Focus states: `focus-visible:ring-2 ring-accent/60` (offset on dark).
+8. Touch targets ≥ 44px. Where a control is deliberately compact — the Bar's filter bar, the wheel's lens — add `.tap-target` instead of raising its height: it grows the hit area to 44px and leaves the layout alone. Focus states: `focus-visible:ring-2 ring-accent/60` (offset on dark).
 9. Motion: 150–200ms color/opacity transitions only. Respect reduced motion.
 10. The bottom nav is `sticky` (in flow), never `fixed` — full-page screenshots must stay honest.
 

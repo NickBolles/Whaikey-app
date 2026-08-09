@@ -146,16 +146,37 @@ test.describe("signed in (demo collector)", () => {
   test("my bar: palate on the same wheel", async ({ page }) => {
     await page.goto("/bar");
     const map = page.getByRole("region", { name: /flavor map/i });
-    await page.getByRole("tab", { name: "My palate" }).click();
+    await page.getByRole("button", { name: "Weight by rating" }).click();
     await expect(page.getByText("You lean toward")).toBeVisible();
     await settle(page);
     await expect(map).toHaveScreenshot(shot("bar-palate-map"));
   });
 
-  test("tried tab: flavor map scoped to what you've tasted", async ({ page }) => {
+  test("my bar: your notes against the label", async ({ page }) => {
     await page.goto("/bar");
-    await page.getByRole("tab", { name: "Tried" }).click();
-    await expect(page.getByRole("tab", { name: "Only tasted" })).toHaveAttribute(
+    const map = page.getByRole("region", { name: /flavor map/i });
+    await page.getByRole("tab", { name: "Compare" }).click();
+    await expect(page.getByLabel("Calibration summary")).toBeVisible();
+    await settle(page);
+    await expect(map).toHaveScreenshot(shot("bar-compare-map"));
+  });
+
+  // The payoff: a descriptor the label names and this drinker never does,
+  // with what they wrote in its place.
+  test("my bar: a blind spot, drilled into", async ({ page }) => {
+    await page.goto("/bar");
+    const map = page.getByRole("region", { name: /flavor map/i });
+    await page.getByRole("tab", { name: "Compare" }).click();
+    await page.getByRole("button", { name: /Filter by Clove/ }).click();
+    await expect(page.getByText(/instead/i).first()).toBeVisible();
+    await settle(page);
+    await expect(map).toHaveScreenshot(shot("bar-compare-blind-spot"));
+  });
+
+  test("tried: one control now picks the shelf and scopes the wheel", async ({ page }) => {
+    await page.goto("/bar");
+    await page.getByRole("tab", { name: /Tried/ }).click();
+    await expect(page.getByRole("tab", { name: /Tried/ })).toHaveAttribute(
       "aria-selected",
       "true",
     );
@@ -163,12 +184,23 @@ test.describe("signed in (demo collector)", () => {
     await expect(page).toHaveScreenshot(shot("bar-tried"), { fullPage: true });
   });
 
-  test("wishlist tab", async ({ page }) => {
+  test("wishlist, chosen from the filter panel", async ({ page }) => {
     await page.goto("/bar");
-    await page.getByRole("tab", { name: /wishlist/i }).click();
+    await page.getByRole("button", { name: /Filters/ }).click();
+    await page.getByRole("radio", { name: /Wishlist/ }).click();
     await expect(page.getByText(/Yamazaki/i).first()).toBeVisible();
     await settle(page);
     await expect(page).toHaveScreenshot(shot("bar-wishlist"), { fullPage: true });
+  });
+
+  test("the filter panel, open", async ({ page }) => {
+    await page.goto("/bar");
+    await page.getByRole("button", { name: /Filters/ }).click();
+    await page.getByRole("checkbox", { name: "Open" }).click();
+    await expect(page.getByRole("button", { name: "Remove Open filter" })).toBeVisible();
+    await settle(page);
+    await expect(page.getByLabel("Active filters")).toBeVisible();
+    await expect(page).toHaveScreenshot(shot("bar-filter-panel"), { fullPage: true });
   });
 
   test("bottle detail with shelf state", async ({ page }) => {
