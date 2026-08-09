@@ -1171,7 +1171,10 @@ function FilterBar({
       </div>
 
       {(activeCount > 0 || !isQuick) && (
-        <div className="flex items-center gap-1.5 overflow-x-auto px-2 pb-2" aria-label="Active filters">
+        // py-2.5 is load-bearing, not spacing: overflow-x-auto forces the other
+        // axis to clip too, so without room for the full 44px the tap targets
+        // below would be trimmed back to the height of the chips.
+        <div className="flex items-center gap-1.5 overflow-x-auto px-2 py-2.5" aria-label="Active filters">
           {!isQuick && (
             <button
               onClick={() => onCollectionChange("own")}

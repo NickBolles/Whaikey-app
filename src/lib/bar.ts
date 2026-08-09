@@ -441,7 +441,13 @@ const SHARED_HIT_RATE = 0.6;
 
 export interface LeafCalibration {
   leafId: string;
-  /** In-scope bottles whose published notes name this descriptor. */
+  /**
+   * Compared bottles whose published notes name this descriptor. Comparison-
+   * scoped on purpose: you can only agree with a label on a bottle you have
+   * actually tasted, so the hit rate must not be diluted by bottles you have
+   * not. Whether *any* label names it is a separate question — see the
+   * signature rule in getFlavorCalibration.
+   */
   labelBottles: number;
   /** In-scope bottles where your own tasting notes name it. */
   yourBottles: number;
@@ -557,6 +563,14 @@ export async function getFlavorCalibration(
     });
   const substituteTally = new Map<string, Map<string, number>>();
 
+  // Every descriptor any in-scope published label names, whether or not you
+  // have tasted that bottle. Only the hit rate is comparison-scoped; "yours
+  // alone" is a claim about the whole shelf, and the panel says as much.
+  const labelledAnywhere = new Set<string>();
+  for (const labelLeaves of published.values()) {
+    for (const leafId of labelLeaves) labelledAnywhere.add(leafId);
+  }
+
   for (const [bottleId, labelLeaves] of published) {
     const yourLeaves = yours.get(bottleId);
     if (!yourLeaves) continue;
@@ -589,7 +603,12 @@ export async function getFlavorCalibration(
     sharedMentions += cal.sharedBottles;
     cal.bucket =
       cal.labelBottles === 0
-        ? "signature"
+        ? // No compared bottle's label names it. That is only *yours* if no
+          // label on the shelf does; otherwise a label claims it somewhere you
+          // have not confirmed, which is a blind spot rather than a signature.
+          labelledAnywhere.has(cal.leafId)
+          ? "blind"
+          : "signature"
         : cal.sharedBottles / cal.labelBottles >= SHARED_HIT_RATE
           ? "shared"
           : "blind";

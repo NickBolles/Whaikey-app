@@ -675,6 +675,31 @@ describe("getFlavorCalibration", () => {
     expect(cal.leaves.oak.bucket).toBe("shared");
   });
 
+  it("won't call a descriptor yours alone when an untasted label names it", async () => {
+    const user = await createTestUser(db);
+    // A published bottle you own but have never poured: it contributes no
+    // agreement, but its label still counts as a label on your shelf.
+    await comparedBottle(user.id, { cinnamon: 2 }, null);
+    await comparedBottle(user.id, { vanilla: 2 }, { vanilla: 2, cinnamon: 2 });
+
+    const cal = await getFlavorCalibration(db, user.id);
+    expect(cal.leaves.cinnamon.bucket).not.toBe("signature");
+    expect(cal.signatureIds).not.toContain("cinnamon");
+    // The hit rate stays comparison-scoped: the untasted bottle is not
+    // something you could have agreed with, so it must not drag agreement down.
+    expect(cal.agreement).toBe(1);
+  });
+
+  it("still calls it yours alone when no label on the shelf names it", async () => {
+    const user = await createTestUser(db);
+    await comparedBottle(user.id, { vanilla: 2 }, null);
+    await comparedBottle(user.id, { vanilla: 2 }, { vanilla: 2, chocolate: 2 });
+
+    const cal = await getFlavorCalibration(db, user.id);
+    expect(cal.leaves.chocolate.bucket).toBe("signature");
+    expect(cal.signatureIds).toContain("chocolate");
+  });
+
   it("scopes to the shelf being shown", async () => {
     const user = await createTestUser(db);
     await comparedBottle(user.id, { clove: 2 }, { cinnamon: 2 }, "tried");
