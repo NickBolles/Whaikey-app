@@ -65,6 +65,8 @@ PLAYWRIGHT_CHROMIUM_PATH=/opt/pw-browsers/chromium-1194/chrome-linux/chrome \
 
 Then **open the PNG under `e2e/__screenshots__/visual-mobile/` and look at it.** Iterate until it matches this doc. CI fails on unreviewed drift; intentional changes ship new baselines in the same commit.
 
+**A baseline must not depend on when it was rendered.** The signed-in suite pins both the timezone (`test.use({ timezoneId: "UTC" })`) and the clock (`page.clock.setFixedTime`) in its `beforeEach`, because time-of-day copy — the Bar's "tonight" rail is the one we have — swaps between strings that wrap to different heights. Left unpinned, a shot passes or fails on the hour CI happened to run at: `bar-filter-panel` was generated at 22:30 UTC, went green on the PR that evening, and turned `main` red the next morning when the copy became two lines. Anything else you add that reads the clock, a locale, or a random seed belongs behind the same kind of pin.
+
 **Local renders are for review only — CI renders are the source of truth.** Font rasterization differs by environment, so a baseline rendered here (dev container / laptop) will not match a GitHub runner. The committed baselines are CI-canonical: they are generated inside the same `mcr.microsoft.com/playwright:<version>` container that CI uses. So the workflow is:
 
 1. `pnpm e2e:update` locally and eyeball the PNGs to confirm the design change looks right.

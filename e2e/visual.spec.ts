@@ -107,8 +107,14 @@ test.describe("signed in (demo collector)", () => {
   // renders the same time-dependent copy rather than a spurious diff.
   test.use({ timezoneId: "UTC" });
 
-  test.beforeEach(async ({ context, baseURL }) => {
+  test.beforeEach(async ({ context, baseURL, page }) => {
     await signIn(context, baseURL!);
+    // The "tonight" rail picks its heading and detail line from the current
+    // hour, and those strings wrap differently — enough to reflow a full-page
+    // /bar shot by 20px. Pinning per-test meant a new shot of that page could
+    // forget to, and pass or fail on the hour CI happened to run at; pin it
+    // for every signed-in shot instead so the baselines are about layout.
+    await page.clock.setFixedTime(new Date("2026-07-19T19:30:00Z"));
   });
 
   test("home dashboard", async ({ page }) => {
@@ -120,11 +126,6 @@ test.describe("signed in (demo collector)", () => {
   });
 
   test("my bar", async ({ page }) => {
-    // The "tonight" rail picks its heading and detail line from the current
-    // hour, and those two strings wrap differently — enough to reflow this
-    // full-page shot by ~20px. Pin the clock (with the UTC timezone set on the
-    // describe) so the baseline is about the layout, not the hour CI ran at.
-    await page.clock.setFixedTime(new Date("2026-07-19T19:30:00Z"));
     await page.goto("/bar");
     await expect(page.getByText(/Eagle Rare/i).first()).toBeVisible();
     await expect(page.getByRole("heading", { name: "Tonight’s pour" })).toBeVisible();
@@ -200,6 +201,9 @@ test.describe("signed in (demo collector)", () => {
     await expect(page.getByRole("button", { name: "Remove Open filter" })).toBeVisible();
     await settle(page);
     await expect(page.getByLabel("Active filters")).toBeVisible();
+    // Same guard as "my bar": if the pinned clock ever stops taking, this
+    // names the cause instead of leaving a 20px reflow to be read off a diff.
+    await expect(page.getByRole("heading", { name: "Tonight’s pour" })).toBeVisible();
     await expect(page).toHaveScreenshot(shot("bar-filter-panel"), { fullPage: true });
   });
 
