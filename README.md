@@ -118,6 +118,7 @@ Font rasterization differs across environments, so a baseline rendered on your l
 - **Iterating on UI locally:** run `pnpm e2e:update` and open the PNGs to review your change. These local renders are for review only — do not commit them as the source of truth.
 - **Updating the committed baselines:** run `pnpm e2e:update:ci` (needs Docker; it renders inside the CI Playwright container), review the regenerated PNGs, and commit them. Keep the image tag in `scripts/e2e-update-ci.sh` in sync with `@playwright/test` whenever you bump Playwright.
 - **No Docker?** Push a commit whose message contains `[update-baselines]` (or dispatch **Update visual baselines** from the Actions tab). The workflow renders inside the same container and commits the result back to your branch. It pushes with `GITHUB_TOKEN`, which does not retrigger CI, so push a follow-up commit afterwards to get a green check on the regenerated baselines — and still open the PNGs and review them, exactly as you would locally.
+- **"Baselines already up to date" when you know they changed?** `pnpm e2e:update` runs `--update-snapshots` in its default `changed` mode, which leaves a snapshot alone whenever the new render still matches within `maxDiffPixelRatio`. A small but real change — a line of copy, a recoloured chip — is therefore *green and not rewritten*, and the baseline keeps depicting something the app no longer draws. `git rm` the specific PNGs and push again: missing snapshots are always written.
 
 ## Status
 
