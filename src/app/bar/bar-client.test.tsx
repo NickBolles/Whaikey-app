@@ -1,6 +1,10 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { vi } from "vitest";
+
+const refresh = vi.fn();
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }) }));
 import {
   BarClient,
   type CalibrationMatrix,
@@ -9,7 +13,10 @@ import {
   type Row,
 } from "./bar-client";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  refresh.mockClear();
+});
 
 const sweetHeat = {
   wedges: { sweet: 1 },
@@ -412,6 +419,7 @@ describe("BarClient compare lens", () => {
       vanilla: {
         leafId: "vanilla",
         labelBottles: 2,
+        shelfLabelBottles: 2,
         yourBottles: 2,
         sharedBottles: 2,
         bucket: "shared" as const,
@@ -420,6 +428,7 @@ describe("BarClient compare lens", () => {
       clove: {
         leafId: "clove",
         labelBottles: 2,
+        shelfLabelBottles: 2,
         yourBottles: 0,
         sharedBottles: 0,
         bucket: "blind" as const,
@@ -428,6 +437,7 @@ describe("BarClient compare lens", () => {
       cinnamon: {
         leafId: "cinnamon",
         labelBottles: 0,
+        shelfLabelBottles: 0,
         yourBottles: 2,
         sharedBottles: 0,
         bucket: "signature" as const,
@@ -579,6 +589,7 @@ describe("BarClient filter correctness", () => {
         clove: {
           leafId: "clove",
           labelBottles: 2,
+          shelfLabelBottles: 2,
           yourBottles: 1,
           sharedBottles: 1,
           bucket: "blind" as const,
@@ -681,6 +692,7 @@ describe("BarClient lens across collections", () => {
       vanilla: {
         leafId: "vanilla",
         labelBottles: 1,
+        shelfLabelBottles: 1,
         yourBottles: 1,
         sharedBottles: 1,
         bucket: "shared" as const,
@@ -732,5 +744,196 @@ describe("BarClient lens across collections", () => {
     fireEvent.click(screen.getByRole("radio", { name: /Everything/ }));
 
     expect(screen.getByRole("tab", { name: "Compare" })).toHaveAttribute("aria-selected", "true");
+  });
+});
+
+describe("BarClient filter/summary agreement", () => {
+  const openFilters = () => fireEvent.click(screen.getByRole("button", { name: /Filters/ }));
+
+  const publishedRow = (
+    id: string,
+    name: string,
+    producer: Record<string, number>,
+    mine: Record<string, number>,
+  ) =>
+    bottleRow(
+      id,
+      name,
+      "own",
+      {
+        producerFlavorTags: producer,
+        producerFlavorSourceUrl: "https://example.com/notes",
+        producerFlavorSourceLabel: "Distillery tasting notes",
+      },
+      mine,
+    );
+
+  it("won't call a descriptor yours alone when some label names it", () => {
+    // Bottle A's label says cinnamon; you tag cinnamon only on B. Across the
+    // shelf that is a *blind* spot — a label mention with no shared mention —
+    // so B must not come back as "a note of your own" while the wheel and the
+    // summary are calling cinnamon a blind spot.
+    const rows = [
+      publishedRow("a", "Labelled Cinnamon", { cinnamon: 2 }, { vanilla: 2 }),
+      publishedRow("b", "Yours Cinnamon", { vanilla: 2 }, { cinnamon: 2 }),
+    ];
+    const cinnamonIsBlind = {
+      ...noCalibration,
+      leaves: {
+        cinnamon: {
+          leafId: "cinnamon",
+          labelBottles: 1,
+          shelfLabelBottles: 1,
+          yourBottles: 1,
+          sharedBottles: 0,
+          bucket: "blind" as const,
+          substitutes: [],
+        },
+        vanilla: {
+          leafId: "vanilla",
+          labelBottles: 1,
+          shelfLabelBottles: 1,
+          yourBottles: 1,
+          sharedBottles: 1,
+          bucket: "shared" as const,
+          substitutes: [],
+        },
+      },
+      publishedNoteBottles: 2,
+      comparedBottles: 2,
+      agreement: 0.5,
+      blindSpotIds: ["cinnamon"],
+      hasComparison: true,
+    };
+
+    render(
+      <BarClient
+        initialRows={rows}
+        flavorHeat={heatMatrix()}
+        calibration={calibrationMatrix({ own: cinnamonIsBlind })}
+        palate={palate}
+      />,
+    );
+
+    openFilters();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Has a note of your own" }));
+    expect(screen.getByText("Nothing matches")).toBeInTheDocument();
+  });
+
+  it("returns the bottle whose descriptor no label anywhere names", () => {
+    const rows = [publishedRow("a", "Truly Yours", { vanilla: 2 }, { chocolate: 2 })];
+    const chocolateIsSignature = {
+      ...noCalibration,
+      leaves: {
+        chocolate: {
+          leafId: "chocolate",
+          labelBottles: 0,
+          shelfLabelBottles: 0,
+          yourBottles: 1,
+          sharedBottles: 0,
+          bucket: "signature" as const,
+          substitutes: [],
+        },
+      },
+      publishedNoteBottles: 1,
+      comparedBottles: 1,
+      signatureIds: ["chocolate"],
+      hasComparison: true,
+    };
+
+    render(
+      <BarClient
+        initialRows={rows}
+        flavorHeat={heatMatrix()}
+        calibration={calibrationMatrix({ own: chocolateIsSignature })}
+        palate={palate}
+      />,
+    );
+
+    openFilters();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Has a note of your own" }));
+    expect(screen.getByText("Truly Yours")).toBeInTheDocument();
+  });
+});
+
+describe("BarClient keeps server-derived data honest", () => {
+  it("refetches after removing a bottle, so Compare stops counting it", async () => {
+    const rows = [
+      { ...bottleRow("gone", "Doomed Bottle", "own", {}), status: "open" } as Row,
+    ];
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<BarClient initialRows={rows} flavorHeat={heatMatrix()}
+        calibration={calibrationMatrix()} palate={palate} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Doomed Bottle/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+
+    // The flavor heat and calibration are computed server-side over the whole
+    // shelf, so dropping the row locally is not enough.
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    vi.unstubAllGlobals();
+  });
+});
+
+describe("BarClient descriptor detail copy", () => {
+  it("explains a blind spot that only an unpoured label names", () => {
+    // Cinnamon is blind because a label names it — on a bottle never poured.
+    // Quoting the comparison count here would read "on 0 bottles", which
+    // contradicts the very reason it is blind.
+    const rows = [
+      bottleRow(
+        "unpoured",
+        "Unpoured Bottle",
+        "own",
+        {
+          producerFlavorTags: { cinnamon: 2 },
+          producerFlavorSourceUrl: "https://example.com/notes",
+          producerFlavorSourceLabel: "Distillery tasting notes",
+        },
+        {},
+      ),
+    ];
+    const cinnamonOnlyOnAnUnpouredLabel = {
+      ...noCalibration,
+      leaves: {
+        cinnamon: {
+          leafId: "cinnamon",
+          labelBottles: 0,
+          shelfLabelBottles: 1,
+          yourBottles: 1,
+          sharedBottles: 0,
+          bucket: "blind" as const,
+          substitutes: [],
+        },
+      },
+      publishedNoteBottles: 2,
+      comparedBottles: 1,
+      blindSpotIds: ["cinnamon"],
+      hasComparison: true,
+    };
+
+    render(
+      <BarClient
+        initialRows={rows}
+        flavorHeat={heatMatrix({
+          "producer:own": {
+            wedges: { spicy: 1 },
+            leaves: { cinnamon: 1 },
+            topWedgeIds: ["spicy"],
+            hasHeat: true,
+          },
+        })}
+        calibration={calibrationMatrix({ own: cinnamonOnlyOnAnUnpouredLabel })}
+        palate={palate}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: "Compare" }));
+    fireEvent.click(screen.getByRole("button", { name: /Filter by Cinnamon/ }));
+
+    expect(screen.getByText(/haven’t poured yet/)).toBeInTheDocument();
+    expect(screen.queryByText(/on 0 bottles/)).not.toBeInTheDocument();
   });
 });

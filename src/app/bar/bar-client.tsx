@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Check, ChevronDown, GlassWater, Plus, SlidersHorizontal } from "lucide-react";
 import {
   hasPublishedProducerFlavorNotes,
@@ -127,23 +128,31 @@ interface FilterGroup {
 const published = (row: Row) => hasPublishedProducerFlavorNotes(row.bottle);
 
 /**
- * Is this descriptor one the drinker misses?
+ * Which bucket a descriptor falls into, for the filters that ask about one.
  *
- * Where the comparison has an opinion, defer to it: the Compare summary and
- * this filter appear on the same screen, so they must not disagree about what
- * counts as a blind spot. A descriptor caught on one of two bottles is still a
- * blind spot by the calibration's hit-rate rule, even though it has been
- * tagged at some point. Only for descriptors the comparison has never seen —
- * on bottles carrying published notes you haven't tasted — does it fall back to
- * "you have never once reached for this".
+ * Where the comparison has an opinion, defer to it: the Compare summary, the
+ * wheel's marks and these filters all appear on the same screen, so they must
+ * not disagree about what counts as a blind spot or as yours alone. Two cases
+ * this gets right that a per-bottle test does not:
+ *
+ *   - a descriptor caught on one of two bottles is still a blind spot by the
+ *     hit-rate rule, even though it has been tagged at some point;
+ *   - a descriptor *some* label names is never "yours alone", even on a bottle
+ *     whose own label happens to omit it.
+ *
+ * Only for descriptors the comparison has never seen — on bottles carrying
+ * published notes you have not tasted — does the blind test fall back to "you
+ * have never once reached for this". Nothing is yours alone under that
+ * fallback: naming it is what would make it yours, and you have not.
  */
-function blindLeafTest(
+function bucketTest(
   calibration: FlavorCalibration,
   everTagged: Set<string>,
-): (leafId: string) => boolean {
-  return (leafId) => {
+): (leafId: string, bucket: CalibrationMark) => boolean {
+  return (leafId, bucket) => {
     const cal = calibration.leaves[leafId];
-    return cal ? cal.bucket === "blind" : !everTagged.has(leafId);
+    if (cal) return cal.bucket === bucket;
+    return bucket === "blind" && !everTagged.has(leafId);
   };
 }
 
@@ -159,7 +168,7 @@ function blindLeafTest(
 function buildFilterGroups(
   rows: Row[],
   collection: Collection,
-  isBlindLeaf: (leafId: string) => boolean,
+  isBucket: (leafId: string, bucket: CalibrationMark) => boolean,
 ): FilterGroup[] {
   const groups: FilterGroup[] = [];
   const ownedInView = collection === "own" || collection === "all";
@@ -195,16 +204,15 @@ function buildFilterGroups(
           id: "blind",
           label: "Has a blind spot",
           test: (r) =>
-            published(r) && Object.keys(r.bottle.producerFlavorTags ?? {}).some(isBlindLeaf),
+            published(r) &&
+            Object.keys(r.bottle.producerFlavorTags ?? {}).some((id) => isBucket(id, "blind")),
         },
         {
           id: "signature",
           label: "Has a note of your own",
           test: (r) =>
             published(r) &&
-            Object.keys(r.personalFlavorTags).some(
-              (id) => (r.bottle.producerFlavorTags?.[id] ?? 0) === 0,
-            ),
+            Object.keys(r.personalFlavorTags).some((id) => isBucket(id, "signature")),
         },
       ],
     });
@@ -282,6 +290,7 @@ export function BarClient({
   calibration: CalibrationMatrix;
   palate: PalateHeat;
 }) {
+  const router = useRouter();
   const [rows, setRows] = useState<Row[]>(initialRows);
   const [collection, setCollection] = useState<Collection>("own");
   const [checks, setChecks] = useState<string[]>([]);
@@ -313,6 +322,18 @@ export function BarClient({
   function fail(message: string) {
     setError(message);
     setTimeout(() => setError(null), 4000);
+  }
+
+  /**
+   * The flavor heat and the calibration are computed server-side over the whole
+   * shelf, so the optimistic row update alone leaves them describing a bottle
+   * that is no longer there — Compare would keep offering itself, and keep
+   * counting, after its last compared bottle was removed. Only the mutations
+   * that change which bottles are on the shelf need this; fill level and price
+   * do not move either one.
+   */
+  function refreshDerived() {
+    router.refresh();
   }
 
   async function patchRow(id: string, patch: Record<string, unknown>) {
@@ -354,7 +375,9 @@ export function BarClient({
     if (!res?.ok) {
       setRows(prev);
       fail("Remove failed — try again.");
+      return;
     }
+    refreshDerived();
   }
 
   async function moveToBar(row: Row) {
@@ -384,6 +407,7 @@ export function BarClient({
       ),
     );
     setCollection("own");
+    refreshDerived();
   }
 
   const collectionRows = useMemo(
@@ -408,7 +432,7 @@ export function BarClient({
       buildFilterGroups(
         collectionRows,
         collection,
-        blindLeafTest(calibration[scopeFor(collection)] ?? EMPTY_CALIBRATION, everTagged),
+        bucketTest(calibration[scopeFor(collection)] ?? EMPTY_CALIBRATION, everTagged),
       ),
     [collectionRows, collection, calibration, everTagged],
   );
@@ -515,7 +539,7 @@ export function BarClient({
     const nextGroups = buildFilterGroups(
       rowsForCollection(next),
       next,
-      blindLeafTest(calibration[scopeFor(next)] ?? EMPTY_CALIBRATION, everTagged),
+      bucketTest(calibration[scopeFor(next)] ?? EMPTY_CALIBRATION, everTagged),
     );
     const available = new Set(nextGroups.flatMap((g) => g.options.map((o) => o.id)));
     setChecks((current) => current.filter((id) => available.has(id)));
@@ -984,9 +1008,14 @@ function DescriptorCalibration({
   const bucket = BUCKET_COPY[cal.bucket];
   const line =
     cal.bucket === "blind"
-      ? substitute
-        ? `The label names ${label} on ${bottleCount(cal.labelBottles)} and you caught it ${cal.sharedBottles === 0 ? "none" : cal.sharedBottles} of those times. On ${substitute.bottles} of them you wrote ${leafLabel(substitute.leafId) ?? substitute.leafId} instead.`
-        : `The label names ${label} on ${bottleCount(cal.labelBottles)}; you tagged it ${cal.sharedBottles}×.`
+      ? cal.labelBottles === 0
+        ? // Blind because a label names it, but only on a bottle you have not
+          // poured — so there is no hit rate to report, and quoting the
+          // comparison count here would read as "on 0 bottles".
+          `${label} is on the label of ${bottleCount(cal.shelfLabelBottles)} you haven’t poured yet, so there’s nothing to compare against — but you do reach for it elsewhere.`
+        : substitute
+          ? `The label names ${label} on ${bottleCount(cal.labelBottles)} and you caught it ${cal.sharedBottles === 0 ? "none" : cal.sharedBottles} of those times. On ${substitute.bottles} of them you wrote ${leafLabel(substitute.leafId) ?? substitute.leafId} instead.`
+          : `The label names ${label} on ${bottleCount(cal.labelBottles)}; you tagged it ${cal.sharedBottles}×.`
       : cal.bucket === "shared"
         ? `You and the label both call it on ${cal.sharedBottles} of ${bottleCount(cal.labelBottles)}.`
         : `You tag ${label} on ${bottleCount(cal.yourBottles)}. No label on your shelf mentions it — this one is yours.`;
@@ -1147,12 +1176,15 @@ function FilterBar({
       </div>
 
       {(activeCount > 0 || !isQuick) && (
-        <div className="flex items-center gap-1.5 overflow-x-auto px-2 pb-2" aria-label="Active filters">
+        // py-2.5 is load-bearing, not spacing: overflow-x-auto forces the other
+        // axis to clip too, so without room for the full 44px the tap targets
+        // below would be trimmed back to the height of the chips.
+        <div className="flex items-center gap-1.5 overflow-x-auto px-2 py-2.5" aria-label="Active filters">
           {!isQuick && (
             <button
               onClick={() => onCollectionChange("own")}
               aria-label={`Remove ${collectionLabel} filter`}
-              className="chip inline-flex shrink-0 items-center gap-1.5 px-2.5 py-1 text-[11px] text-foreground"
+              className="chip tap-target inline-flex shrink-0 items-center gap-1.5 px-2.5 py-1 text-[11px] text-foreground"
             >
               {collectionLabel} <span aria-hidden className="text-muted">×</span>
             </button>
@@ -1162,7 +1194,7 @@ function FilterBar({
               key={id}
               onClick={() => onToggleCheck(id)}
               aria-label={`Remove ${labelOf(id)} filter`}
-              className="chip inline-flex shrink-0 items-center gap-1.5 px-2.5 py-1 text-[11px] text-foreground"
+              className="chip tap-target inline-flex shrink-0 items-center gap-1.5 px-2.5 py-1 text-[11px] text-foreground"
             >
               {labelOf(id)} <span aria-hidden className="text-muted">×</span>
             </button>
@@ -1172,7 +1204,7 @@ function FilterBar({
               key={id}
               onClick={() => onRemoveFlavor(id)}
               aria-label={`Remove ${leafLabel(id) ?? id} filter`}
-              className="chip chip-active inline-flex shrink-0 items-center gap-1.5 px-2.5 py-1 text-[11px]"
+              className="chip chip-active tap-target inline-flex shrink-0 items-center gap-1.5 px-2.5 py-1 text-[11px]"
             >
               {leafLabel(id) ?? id} <span aria-hidden>×</span>
             </button>
@@ -1180,7 +1212,7 @@ function FilterBar({
           {activeCount > 0 && (
             <button
               onClick={onClear}
-              className="shrink-0 px-2 py-1 text-[11px] text-muted underline-offset-2 hover:text-foreground hover:underline"
+              className="tap-target shrink-0 px-2 py-1 text-[11px] text-muted underline-offset-2 hover:text-foreground hover:underline"
             >
               Clear
             </button>
