@@ -277,6 +277,28 @@ export const tastingNotes = pgTable("tasting_notes", {
   createdAt: createdAt(),
 });
 
+/**
+ * An opt-in, bearer-style public link for exactly one personal pour and its
+ * note. Pours remain private unless their owner creates this row; deleting a
+ * pour automatically revokes its link.
+ */
+export const pourShares = pgTable(
+  "pour_shares",
+  {
+    id: id(),
+    pourId: text("pour_id")
+      .notNull()
+      .unique()
+      .references(() => pours.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    code: text("code").notNull().unique(),
+    createdAt: createdAt(),
+  },
+  (t) => [index("pour_shares_user_idx").on(t.userId)],
+);
+
 export const pairings = pgTable(
   "pairings",
   {
