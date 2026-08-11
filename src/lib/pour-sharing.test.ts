@@ -27,7 +27,7 @@ describe("pour sharing", () => {
       extractedBy: "user",
     });
 
-    const first = await createPourShare(db, owner.id, pour.id);
+    const first = await createPourShare(db, owner.id, pour.id, { locationLabel: "Back porch" });
     const second = await createPourShare(db, owner.id, pour.id);
     if (!first || !second) throw new Error("Owner's pour should be shareable");
     expect(first.code).toMatch(/^[A-Za-z0-9_-]{10,}$/);
@@ -38,6 +38,7 @@ describe("pour sharing", () => {
       code: first.code,
       ownerName: "Avery",
       bottleName: "Golden Oak",
+      locationLabel: "Back porch",
       pour: { rating: 4.5, amountMl: 45 },
       note: { nose: "Orange peel", palate: "Toasted oak", freeform: "A quiet nightcap." },
     });

@@ -188,6 +188,7 @@ export default async function BottleDetailPage({
               </p>
               <div className="flex flex-col gap-2">
                 <Link href={`/pour?bottleId=${bottle.id}`} className="btn-primary flex items-center justify-center px-4 py-3 text-sm font-medium">Log a pour</Link>
+                <Link href={`/history?bottleId=${bottle.id}`} className="btn-secondary flex min-h-11 items-center justify-center px-4 text-sm font-medium">View your pours for this bottle</Link>
                 <ShelfActions bottleId={bottle.id} current={userBottle?.relationship ?? null} />
               </div>
             </>

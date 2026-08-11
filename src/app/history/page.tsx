@@ -6,7 +6,11 @@ import { HistoryTimeline, type TimelinePour } from "./history-timeline";
 
 export const dynamic = "force-dynamic";
 
-export default async function HistoryPage() {
+export default async function HistoryPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ bottleId?: string | string[] }>;
+}) {
   const user = await getSessionUser();
   if (!user) {
     return (
@@ -25,7 +29,10 @@ export default async function HistoryPage() {
     );
   }
 
-  const pours = await listPours(getDb(), user.id, { limit: 100 });
+  const { bottleId: bottleIdParam } = await searchParams;
+  const bottleId = Array.isArray(bottleIdParam) ? bottleIdParam[0] : bottleIdParam;
+  const pours = await listPours(getDb(), user.id, { bottleId, limit: 100 });
+  const filteredBottleName = bottleId && pours[0]?.bottleName;
 
   if (pours.length === 0) {
     return (
@@ -71,7 +78,7 @@ export default async function HistoryPage() {
         <div>
           <h1 className="font-display text-[2rem] leading-tight font-semibold">Tasting journal</h1>
           <p className="text-muted text-sm mt-1">
-            {pours.length} pour{pours.length === 1 ? "" : "s"} logged
+            {filteredBottleName ? `${filteredBottleName} · ` : ""}{pours.length} pour{pours.length === 1 ? "" : "s"} logged
           </p>
         </div>
         <Link
