@@ -1,6 +1,11 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render, screen } from "@testing-library/react";
+
+vi.mock("@/components/pour-share-button", () => ({
+  PourShareButton: ({ bottleName }: { bottleName: string }) => <button type="button">Share {bottleName}</button>,
+}));
+
 import { HistoryTimeline, type TimelinePour } from "./history-timeline";
 
 afterEach(cleanup);
@@ -47,6 +52,11 @@ describe("HistoryTimeline", () => {
     // Two same-day pours collapse into a single day <section>.
     const sections = screen.getAllByRole("region");
     expect(sections).toHaveLength(1);
+  });
+
+  it("renders a share action for each private journal entry", () => {
+    render(<HistoryTimeline pours={[pour({ bottleName: "Shareable Rye" })]} />);
+    expect(screen.getByRole("button", { name: "Share Shareable Rye" })).toBeInTheDocument();
   });
 
   it("formats the pour time using Intl (viewer timezone), not a raw ISO string", async () => {

@@ -3,6 +3,7 @@
 import { useMemo, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { Star } from "lucide-react";
+import { PourShareButton } from "@/components/pour-share-button";
 import { FLAVOR_WHEEL, leafLabel, wedgeForLeaf } from "@/lib/flavor-wheel";
 
 /** Serialized pour crossing the server→client boundary (timestamp as ISO). */
@@ -104,6 +105,8 @@ function PourRow({ pour }: { pour: TimelinePour }) {
           )}
         </ul>
       )}
+
+      <PourShareButton pourId={pour.id} bottleName={pour.bottleName} />
     </li>
   );
 }
