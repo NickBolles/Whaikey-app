@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Star } from "lucide-react";
+import { FlavorWheel } from "@/components/flavor-wheel";
+import { rollUpToWedges } from "@/lib/flavor-wheel";
 import { getDb } from "@/db";
 import { getPublicPourShare } from "@/lib/pour-sharing";
 
@@ -31,6 +33,8 @@ export default async function SharedPourPage({ params }: Props) {
   const share = await getPublicPourShare(getDb(), code);
   if (!share) notFound();
   const noteParts = [["Nose", share.note.nose], ["Palate", share.note.palate], ["Finish", share.note.finish]].filter((part): part is [string, string] => Boolean(part[1]));
+  const leafHeat = Object.fromEntries(Object.entries(share.note.flavorTags ?? {}).map(([id, intensity]) => [id, intensity / 3]));
+  const wedgeHeat = Object.fromEntries(Object.entries(rollUpToWedges(share.note.flavorTags ?? {})).map(([id, intensity]) => [id, intensity / 10]));
 
   return (
     <div className="mx-auto flex max-w-lg flex-col gap-6 px-4 py-12">
@@ -44,7 +48,14 @@ export default async function SharedPourPage({ params }: Props) {
           {share.pour.rating != null && <span className="flex items-center gap-1 text-accent"><Star size={15} fill="currentColor" aria-hidden /> {share.pour.rating.toFixed(1)}</span>}
           {share.pour.servingStyle && <span className="capitalize">{share.pour.servingStyle}</span>}
           {share.pour.amountMl != null && <span>{share.pour.amountMl} ml</span>}
+          {share.locationLabel && <span>at {share.locationLabel}</span>}
         </div>
+        {Object.keys(leafHeat).length > 0 && (
+          <section className="flex flex-col items-center gap-2">
+            <h2 className="section-label self-start">Tasting wheel</h2>
+            <FlavorWheel wedgeHeat={wedgeHeat} leafHeat={leafHeat} caption="Flavor notes" subCaption="from this pour" />
+          </section>
+        )}
         {noteParts.map(([label, value]) => <section key={label}><h2 className="section-label mb-1">{label}</h2><p className="text-foreground/90">{value}</p></section>)}
         {share.note.freeform && <blockquote className="border-l-2 border-accent/70 pl-4 font-display text-lg italic text-foreground/90">{share.note.freeform}</blockquote>}
         {noteParts.length === 0 && !share.note.freeform && <p className="text-muted">A moment from {share.ownerName}&apos;s tasting journal.</p>}

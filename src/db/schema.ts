@@ -294,6 +294,8 @@ export const pourShares = pgTable(
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
     code: text("code").notNull().unique(),
+    /** An opt-in share-only place label; never inferred from a device location. */
+    locationLabel: text("location_label"),
     createdAt: createdAt(),
   },
   (t) => [index("pour_shares_user_idx").on(t.userId)],

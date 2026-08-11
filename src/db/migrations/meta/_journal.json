@@ -71,6 +71,13 @@
       "when": 1786474726072,
       "tag": "0009_married_bloodstrike",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1786476293318,
+      "tag": "0010_chilly_landau",
+      "breakpoints": true
     }
   ]
 }

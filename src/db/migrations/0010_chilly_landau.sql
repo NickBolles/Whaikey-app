@@ -1,0 +1,1 @@
+ALTER TABLE "pour_shares" ADD COLUMN "location_label" text;
