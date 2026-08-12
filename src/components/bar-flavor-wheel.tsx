@@ -1,5 +1,8 @@
-import type { ReactNode } from "react";
+"use client";
+
+import { useRef, type MouseEvent, type ReactNode, type PointerEvent } from "react";
 import { FLAVOR_WHEEL, leafLabel, wedgeForLeaf } from "@/lib/flavor-wheel";
+import { WHEEL_HOLD_MS, shouldStartWheelGesture, wheelIndex, wheelPointFromClient, wheelPointFromPointer } from "@/components/wheel-gesture";
 import { arcPath, bandLabelTransform, inkOn, labelTransform, leafShade, polar, pressableKeys, shortLabel, warmify } from "@/components/wheel-geometry";
 
 export type FlavorSelection = {
@@ -110,6 +113,11 @@ function selected(selection: FlavorSelection, selectedIds: string[]): boolean {
  * published modes always use the same taxonomy.
  */
 export function BarFlavorWheel({ wedgeHeat, leafHeat, caption, subCaption, selectedIds, onToggle, marks }: BarFlavorWheelProps) {
+  const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const gestureActive = useRef(false);
+  const activePointerId = useRef<number | null>(null);
+  const gestureLeafId = useRef<string | null>(null);
+  const suppressClick = useRef(false);
   const wedgeSpan = 360 / FLAVOR_WHEEL.length;
   const segments: ReactNode[] = [];
   const labels: ReactNode[] = [];
@@ -216,9 +224,84 @@ export function BarFlavorWheel({ wedgeHeat, leafHeat, caption, subCaption, selec
     .filter((leaf) => (leafHeat[leaf.id] ?? 0) > 0 || selectedIds.includes(leaf.id))
     .map((leaf) => ({ id: leaf.id, label: leaf.label, leafIds: [leaf.id] }));
 
+  const clearGesture = () => {
+    if (holdTimer.current) clearTimeout(holdTimer.current);
+    holdTimer.current = null;
+    gestureActive.current = false;
+    activePointerId.current = null;
+    gestureLeafId.current = null;
+  };
+
+  const updateGesture = (event: PointerEvent<SVGSVGElement>) => {
+    const point = wheelPointFromPointer(event, SIZE);
+    const wedgeIndex = wheelIndex(point.angle, FLAVOR_WHEEL.length);
+    const wedge = FLAVOR_WHEEL[wedgeIndex];
+    if (point.radius < OUTER[0]) {
+      gestureLeafId.current = null;
+      return;
+    }
+    const localAngle = (point.angle - wedgeIndex * wedgeSpan + 360) % 360;
+    const leaf = wedge.leaves[wheelIndex(localAngle, wedge.leaves.length)];
+    gestureLeafId.current = leaf.id;
+  };
+
+  const startGesture = (event: PointerEvent<SVGSVGElement>) => {
+    if (!shouldStartWheelGesture(event) || activePointerId.current !== null) return;
+    const target = event.currentTarget;
+    const { clientX, clientY, pointerId } = event;
+    activePointerId.current = pointerId;
+    target.setPointerCapture?.(pointerId);
+    holdTimer.current = setTimeout(() => {
+      gestureActive.current = true;
+      const point = wheelPointFromClient(target, clientX, clientY, SIZE);
+      const wedgeIndex = wheelIndex(point.angle, FLAVOR_WHEEL.length);
+      const wedge = FLAVOR_WHEEL[wedgeIndex];
+      const localAngle = (point.angle - wedgeIndex * wedgeSpan + 360) % 360;
+      gestureLeafId.current = point.radius < OUTER[0] ? null : wedge.leaves[wheelIndex(localAngle, wedge.leaves.length)].id;
+    }, WHEEL_HOLD_MS);
+  };
+
+  const commitGesture = (event: PointerEvent<SVGSVGElement>) => {
+    if (activePointerId.current !== event.pointerId) return;
+    if (gestureActive.current) updateGesture(event);
+    const leafId = gestureLeafId.current;
+    if (gestureActive.current && leafId) {
+      const leaf = FLAVOR_WHEEL.flatMap((wedge) => wedge.leaves).find((item) => item.id === leafId);
+      if (leaf) onToggle({ id: leaf.id, label: leaf.label, leafIds: [leaf.id] });
+      suppressClick.current = true;
+      setTimeout(() => {
+        suppressClick.current = false;
+      }, 400);
+    }
+    clearGesture();
+  };
+
+  const interceptGestureClick = (event: MouseEvent<SVGSVGElement>) => {
+    if (!suppressClick.current) return;
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
   return (
     <div className="flex w-full flex-col items-center gap-3" data-testid="bar-flavor-wheel">
-      <svg viewBox={`0 0 ${SIZE} ${SIZE}`} className="w-full max-w-[360px] select-none" role="group" aria-label={`${caption} flavor wheel`}>
+      <svg
+        viewBox={`0 0 ${SIZE} ${SIZE}`}
+        className="w-full max-w-[360px] select-none touch-none"
+        role="group"
+        aria-label={`${caption} flavor wheel`}
+        onPointerDown={startGesture}
+        onPointerMove={(event) => {
+          if (gestureActive.current && activePointerId.current === event.pointerId) updateGesture(event);
+        }}
+        onPointerUp={commitGesture}
+        onPointerCancel={(event) => {
+          if (activePointerId.current === event.pointerId) clearGesture();
+        }}
+        onPointerLeave={(event) => {
+          if (activePointerId.current === event.pointerId) clearGesture();
+        }}
+        onClickCapture={interceptGestureClick}
+      >
         {segments}
         <g pointerEvents="none" data-testid="bar-flavor-wheel-marks">
           {markNodes}

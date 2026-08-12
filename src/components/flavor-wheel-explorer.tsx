@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState, type PointerEvent } from "react";
 import { FLAVOR_WHEEL } from "@/lib/flavor-wheel";
+import { WHEEL_HOLD_MS, shouldStartWheelGesture, wheelIndex, wheelPointFromClient, wheelPointFromPointer } from "@/components/wheel-gesture";
 import { WEDGE_NOTES } from "@/lib/education";
 import {
   SERIF,
@@ -28,17 +29,82 @@ const LABEL_R = (R_IN + R_OUT) / 2;
  */
 export function FlavorWheelExplorer() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const gestureActive = useRef(false);
+  const activePointerId = useRef<number | null>(null);
+  const suppressClick = useRef(false);
   const selected = FLAVOR_WHEEL.find((w) => w.id === selectedId) ?? null;
   const note = selected ? WEDGE_NOTES[selected.id] : null;
   const span = 360 / FLAVOR_WHEEL.length;
+
+  const clearGesture = () => {
+    if (holdTimer.current) clearTimeout(holdTimer.current);
+    holdTimer.current = null;
+    gestureActive.current = false;
+    activePointerId.current = null;
+  };
+
+  const selectAtPointer = (event: PointerEvent<SVGSVGElement>) => {
+    const point = wheelPointFromPointer(event, SIZE);
+    setSelectedId(FLAVOR_WHEEL[wheelIndex(point.angle, FLAVOR_WHEEL.length)].id);
+  };
+
+  const startGesture = (event: PointerEvent<SVGSVGElement>) => {
+    if (!shouldStartWheelGesture(event) || activePointerId.current !== null) return;
+    const target = event.currentTarget;
+    const { clientX, clientY, pointerId } = event;
+    activePointerId.current = pointerId;
+    target.setPointerCapture?.(pointerId);
+    holdTimer.current = setTimeout(() => {
+      gestureActive.current = true;
+      const point = wheelPointFromClient(target, clientX, clientY, SIZE);
+      setSelectedId(FLAVOR_WHEEL[wheelIndex(point.angle, FLAVOR_WHEEL.length)].id);
+    }, WHEEL_HOLD_MS);
+  };
+
+  const moveGesture = (event: PointerEvent<SVGSVGElement>) => {
+    if (!gestureActive.current || activePointerId.current !== event.pointerId) return;
+    selectAtPointer(event);
+  };
+
+  const finishGesture = (event: PointerEvent<SVGSVGElement>) => {
+    if (activePointerId.current !== event.pointerId) return;
+    if (gestureActive.current) {
+      selectAtPointer(event);
+      suppressClick.current = true;
+      setTimeout(() => {
+        suppressClick.current = false;
+      }, 400);
+    }
+    clearGesture();
+  };
+
+  const handleWedgeClick = (wedgeId: string) => {
+    if (suppressClick.current) return;
+    setSelectedId((cur) => (cur === wedgeId ? null : wedgeId));
+  };
 
   return (
     <div className="flex flex-col gap-4">
       <svg
         viewBox={`0 0 ${SIZE} ${SIZE}`}
-        className="w-full max-w-[360px] self-center select-none touch-manipulation"
+        className="w-full max-w-[360px] self-center select-none touch-none"
         role="application"
         aria-label="Flavor wheel explorer"
+        onPointerDown={startGesture}
+        onPointerMove={moveGesture}
+        onPointerUp={finishGesture}
+        onPointerCancel={(event) => {
+          if (activePointerId.current === event.pointerId) clearGesture();
+        }}
+        onPointerLeave={(event) => {
+          if (activePointerId.current === event.pointerId) clearGesture();
+        }}
+        onClickCapture={(event) => {
+          if (!suppressClick.current) return;
+          event.preventDefault();
+          event.stopPropagation();
+        }}
       >
         {FLAVOR_WHEEL.map((wedge, i) => {
           const start = i * span;
@@ -55,7 +121,7 @@ export function FlavorWheelExplorer() {
               tabIndex={0}
               aria-label={wedge.label}
               aria-pressed={isSelected}
-              onClick={() => setSelectedId((cur) => (cur === wedge.id ? null : wedge.id))}
+              onClick={() => handleWedgeClick(wedge.id)}
               onKeyDown={pressableKeys(() =>
                 setSelectedId((cur) => (cur === wedge.id ? null : wedge.id)),
               )}

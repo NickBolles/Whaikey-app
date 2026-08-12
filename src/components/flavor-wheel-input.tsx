@@ -1,7 +1,14 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState, type PointerEvent } from "react";
 import { FLAVOR_WHEEL } from "@/lib/flavor-wheel";
+import {
+  WHEEL_HOLD_MS,
+  intensityForRadius,
+  shouldStartWheelGesture,
+  wheelIndex,
+  wheelPointFromPointer,
+} from "@/components/wheel-gesture";
 import {
   SERIF,
   arcPath,
@@ -33,11 +40,21 @@ const LEAF_LABEL_R = (R_LEAF_IN + R_LEAF_OUT) / 2;
  * The Whaikey flavor wheel. Inner ring: the 8 core wedges. Tap a wedge and
  * its leaf descriptors fan out across the full outer ring (big targets).
  * Tap a leaf to cycle its intensity 0 -> 1 -> 2 -> 3 -> 0; intensity shows as
- * opacity, radial growth, and a numeric badge. Selected tags render as
- * removable chips below the wheel. Controlled: {value, onChange}.
+ * opacity, radial growth, and a numeric badge. On touch, hold a family, drag
+ * out to a descriptor, then release: farther outward means more presence.
+ * Selected tags render as removable chips below the wheel. Controlled: {value, onChange}.
  */
 export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
   const [selectedWedgeId, setSelectedWedgeId] = useState<string | null>(null);
+  const [gestureLeafId, setGestureLeafId] = useState<string | null>(null);
+  const gestureLeafIdRef = useRef<string | null>(null);
+  const [gestureIntensity, setGestureIntensity] = useState<1 | 2 | 3>(1);
+  const gestureIntensityRef = useRef<1 | 2 | 3>(1);
+  const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const activeGesture = useRef(false);
+  const activePointerId = useRef<number | null>(null);
+  const gestureWedgeId = useRef<string | null>(null);
+  const suppressClick = useRef(false);
   const selectedWedge = FLAVOR_WHEEL.find((w) => w.id === selectedWedgeId) ?? null;
 
   const wedgeCounts = useMemo(() => {
@@ -85,15 +102,107 @@ export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
     setSelectedWedgeId((cur) => (cur === wedgeId ? null : wedgeId));
   };
 
+  const clearGesture = () => {
+    if (holdTimer.current) clearTimeout(holdTimer.current);
+    holdTimer.current = null;
+    activeGesture.current = false;
+    activePointerId.current = null;
+    gestureWedgeId.current = null;
+    gestureLeafIdRef.current = null;
+    setGestureLeafId(null);
+  };
+
+  const updateGestureLeaf = (event: PointerEvent<SVGSVGElement>, wedgeId: string) => {
+    const wedge = FLAVOR_WHEEL.find((item) => item.id === wedgeId);
+    if (!wedge) return;
+    const point = wheelPointFromPointer(event, SIZE);
+    if (point.radius < R_LEAF_IN) {
+      gestureLeafIdRef.current = null;
+      setGestureLeafId(null);
+      return;
+    }
+    const leaf = wedge.leaves[wheelIndex(point.angle, wedge.leaves.length)];
+    const intensity = intensityForRadius(point.radius);
+    gestureLeafIdRef.current = leaf.id;
+    gestureIntensityRef.current = intensity;
+    setGestureLeafId(leaf.id);
+    setGestureIntensity(intensity);
+  };
+
+  const updateGestureAt = (event: PointerEvent<SVGSVGElement>) => {
+    const point = wheelPointFromPointer(event, SIZE);
+    if (point.radius < R_LEAF_IN) {
+      const wedge = FLAVOR_WHEEL[wheelIndex(point.angle, FLAVOR_WHEEL.length)];
+      gestureWedgeId.current = wedge.id;
+      setSelectedWedgeId(wedge.id);
+      gestureLeafIdRef.current = null;
+      setGestureLeafId(null);
+      return;
+    }
+    const wedgeId = gestureWedgeId.current;
+    if (wedgeId) updateGestureLeaf(event, wedgeId);
+  };
+
+  const startGesture = (event: PointerEvent<SVGSVGElement>) => {
+    if (!shouldStartWheelGesture(event) || activePointerId.current !== null) return;
+    const point = wheelPointFromPointer(event, SIZE);
+    const wedge = FLAVOR_WHEEL[wheelIndex(point.angle, FLAVOR_WHEEL.length)];
+    activePointerId.current = event.pointerId;
+    gestureWedgeId.current = wedge.id;
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    holdTimer.current = setTimeout(() => {
+      activeGesture.current = true;
+      setSelectedWedgeId(wedge.id);
+    }, WHEEL_HOLD_MS);
+  };
+
+  const moveGesture = (event: PointerEvent<SVGSVGElement>) => {
+    if (!activeGesture.current || activePointerId.current !== event.pointerId) return;
+    updateGestureAt(event);
+  };
+
+  const commitGesture = (event: PointerEvent<SVGSVGElement>) => {
+    if (activePointerId.current !== event.pointerId) return;
+    if (activeGesture.current) updateGestureAt(event);
+    const leafId = gestureLeafIdRef.current;
+    if (activeGesture.current && leafId) {
+      onChange({ ...value, [leafId]: gestureIntensityRef.current });
+      suppressClick.current = true;
+      setTimeout(() => {
+        suppressClick.current = false;
+      }, 400);
+    }
+    clearGesture();
+  };
+
+  const handleWedgeClick = (wedgeId: string) => {
+    if (suppressClick.current) return;
+    toggleWedge(wedgeId);
+  };
+
+  const handleLeafClick = (leafId: string) => {
+    if (suppressClick.current) return;
+    cycleLeaf(leafId);
+  };
+
   const wedgeSpan = 360 / FLAVOR_WHEEL.length;
 
   return (
     <div className="flex flex-col items-center gap-3">
       <svg
         viewBox={`0 0 ${SIZE} ${SIZE}`}
-        className="w-full max-w-[360px] select-none touch-manipulation"
+        className="w-full max-w-[360px] select-none touch-none"
         role="application"
         aria-label="Flavor wheel"
+        onPointerDown={startGesture}
+        onPointerMove={moveGesture}
+        onPointerUp={commitGesture}
+        onPointerCancel={(event) => {
+          if (activePointerId.current === event.pointerId) clearGesture();
+        }}
+        onPointerLeave={(event) => {
+          if (activePointerId.current === event.pointerId) clearGesture();
+        }}
       >
         {/* Inner ring: the 8 wedges */}
         {FLAVOR_WHEEL.map((wedge, i) => {
@@ -113,7 +222,7 @@ export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
               tabIndex={0}
               aria-label={wedge.label}
               aria-pressed={isSelected}
-              onClick={() => toggleWedge(wedge.id)}
+              onClick={() => handleWedgeClick(wedge.id)}
               onKeyDown={pressableKeys(() => toggleWedge(wedge.id))}
               className="cursor-pointer focus:outline-none"
             >
@@ -165,7 +274,9 @@ export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
             const end = start + span;
             const mid = start + span / 2;
             const intensity = value[leaf.id] ?? 0;
-            const rOut = R_LEAF_OUT + intensity * 4;
+            const isGestureLeaf = leaf.id === gestureLeafId;
+            const displayedIntensity = isGestureLeaf ? gestureIntensity : intensity;
+            const rOut = R_LEAF_OUT + displayedIntensity * 4;
             const badge = polar(C, rOut - 9, mid);
             // Graded family shade so each subsection is its own color band.
             const color = leafShade(warmify(selectedWedge.color), i, selectedWedge.leaves.length);
@@ -174,32 +285,32 @@ export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
                 key={leaf.id}
                 role="button"
                 tabIndex={0}
-                aria-label={intensity > 0 ? `${leaf.label}, intensity ${intensity}` : leaf.label}
-                aria-pressed={intensity > 0}
-                onClick={() => cycleLeaf(leaf.id)}
+                aria-label={displayedIntensity > 0 ? `${leaf.label}, intensity ${displayedIntensity}` : leaf.label}
+                aria-pressed={displayedIntensity > 0}
+                onClick={() => handleLeafClick(leaf.id)}
                 onKeyDown={pressableKeys(() => cycleLeaf(leaf.id))}
                 className="cursor-pointer focus:outline-none"
               >
                 <path
                   d={arcPath(C, R_LEAF_IN, rOut, start, end, Math.min(1.2, span / 10))}
                   fill={color}
-                  fillOpacity={intensity === 0 ? 0.26 : 0.42 + 0.19 * intensity}
-                  stroke={intensity > 0 ? "var(--foreground)" : "var(--border)"}
-                  strokeOpacity={intensity > 0 ? 0.55 : 1}
-                  strokeWidth={intensity > 0 ? 1 : 0.75}
+                  fillOpacity={displayedIntensity === 0 ? 0.26 : 0.42 + 0.19 * displayedIntensity}
+                  stroke={displayedIntensity > 0 ? "var(--foreground)" : "var(--border)"}
+                  strokeOpacity={displayedIntensity > 0 ? 0.55 : 1}
+                  strokeWidth={displayedIntensity > 0 ? 1 : 0.75}
                 />
                 <text
                   transform={labelTransform(C, LEAF_LABEL_R, mid)}
                   textAnchor="middle"
                   dominantBaseline="central"
                   fontSize={9}
-                  fontWeight={intensity > 0 ? 700 : 500}
+                  fontWeight={displayedIntensity > 0 ? 700 : 500}
                   fill="var(--foreground)"
                   pointerEvents="none"
                 >
                   {shortLabel(leaf.label)}
                 </text>
-                {intensity > 0 && (
+                {displayedIntensity > 0 && (
                   <g pointerEvents="none">
                     <circle cx={badge.x} cy={badge.y} r={7} fill="var(--background)" />
                     <text
@@ -211,7 +322,7 @@ export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
                       fontWeight={700}
                       fill={color}
                     >
-                      {intensity}
+                      {displayedIntensity}
                     </text>
                   </g>
                 )}
@@ -256,6 +367,12 @@ export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
           </text>
         )}
       </svg>
+
+      {selectedWedge && (
+        <p className="max-w-[32ch] text-center text-xs leading-relaxed text-muted">
+          Hold a family, sweep to a flavor, then release to save it. Drag farther out for more presence.
+        </p>
+      )}
 
       {chips.length > 0 && (
         <ul className="flex flex-wrap justify-center gap-2" aria-label="Selected flavors">

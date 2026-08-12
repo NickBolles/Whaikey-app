@@ -65,6 +65,58 @@ describe("FlavorWheelInput", () => {
     expect(onChange).toHaveBeenCalledWith({ honey: 1 });
   });
 
+  it("saves the held, outward drag intensity when the touch is released", () => {
+    vi.useFakeTimers();
+    const onChange = vi.fn();
+    const { container } = render(<FlavorWheelInput value={{}} onChange={onChange} />);
+    const wheel = container.querySelector("svg")!;
+    vi.spyOn(wheel, "getBoundingClientRect").mockReturnValue({
+      bottom: 340,
+      height: 340,
+      left: 0,
+      right: 340,
+      top: 0,
+      width: 340,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    // Hold Sweet (lower-right), then drag out to its first descriptor at 3×.
+    fireEvent.pointerDown(wheel, { pointerType: "touch", pointerId: 1, clientX: 270, clientY: 270 });
+    vi.advanceTimersByTime(220);
+    fireEvent.pointerMove(wheel, { pointerType: "touch", pointerId: 1, clientX: 280, clientY: 280 });
+    fireEvent.pointerUp(wheel, { pointerType: "touch", pointerId: 1, clientX: 280, clientY: 280 });
+
+    expect(onChange).toHaveBeenCalledWith({ honey: 3 });
+    vi.useRealTimers();
+  });
+
+  it("uses the release position when a touch moves directly outward", () => {
+    vi.useFakeTimers();
+    const onChange = vi.fn();
+    const { container } = render(<FlavorWheelInput value={{}} onChange={onChange} />);
+    const wheel = container.querySelector("svg")!;
+    vi.spyOn(wheel, "getBoundingClientRect").mockReturnValue({
+      bottom: 340,
+      height: 340,
+      left: 0,
+      right: 340,
+      top: 0,
+      width: 340,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.pointerDown(wheel, { pointerType: "touch", pointerId: 1, clientX: 270, clientY: 270 });
+    vi.advanceTimersByTime(220);
+    fireEvent.pointerUp(wheel, { pointerType: "touch", pointerId: 1, clientX: 280, clientY: 280 });
+
+    expect(onChange).toHaveBeenCalledWith({ honey: 3 });
+    vi.useRealTimers();
+  });
+
   it("renders chips for selected tags and removes on tap", () => {
     render(<Harness initial={{ vanilla: 2, "green-apple": 1 }} />);
     const vanillaChip = screen.getByRole("button", { name: "Remove Vanilla" });
