@@ -1,0 +1,714 @@
+import { eq } from "drizzle-orm";
+import { beforeEach, describe, expect, it } from "vitest";
+import type { DB } from "@/db";
+import * as schema from "@/db/schema";
+import { createTestBottle, createTestUser, setupTestDb, uid } from "@/test/helpers";
+import {
+  COMMENT_EDIT_WINDOW_MS,
+  HandleTakenError,
+  InvalidHandleError,
+  addComment,
+  approveFollow,
+  areFriends,
+  blockUser,
+  canViewPour,
+  cheerPour,
+  createProfile,
+  createReport,
+  denyFollow,
+  editComment,
+  followByHandle,
+  getFriendFeed,
+  getFriendNotesForBottle,
+  getOwnProfile,
+  getPalateCard,
+  getProfileView,
+  getSocialNote,
+  getSocialPrefs,
+  isBlockedEither,
+  isReservedHandle,
+  isValidHandle,
+  listBlocked,
+  listComments,
+  listFollowRequests,
+  listFollowers,
+  listFollowing,
+  makeEverythingPrivate,
+  normalizeHandle,
+  removeFollower,
+  softDeleteComment,
+  uncheerPour,
+  unblockUser,
+  unfollow,
+  updateProfile,
+  updateSocialPrefs,
+  type SocialNote,
+} from "@/lib/social";
+import type { PourVisibility } from "@/db/schema";
+
+// Test setup helper: claim a handle, then apply arbitrary profile-row
+// overrides directly (bypassing updateProfile, whose patch surface is
+// intentionally narrower than every column — e.g. it never sets
+// socialEnabled, which only createProfile/makeEverythingPrivate touch).
+async function claim(
+  db: DB,
+  user: schema.User,
+  handle: string,
+  overrides: Partial<typeof schema.userProfiles.$inferInsert> = {},
+) {
+  await createProfile(db, user, handle);
+  if (Object.keys(overrides).length === 0) return getOwnProfile(db, user.id);
+  await db.update(schema.userProfiles).set(overrides).where(eq(schema.userProfiles.userId, user.id));
+  return getOwnProfile(db, user.id);
+}
+
+async function insertPour(
+  db: DB,
+  userId: string,
+  bottleId: string,
+  overrides: Partial<typeof schema.pours.$inferInsert> = {},
+) {
+  const [row] = await db
+    .insert(schema.pours)
+    .values({ id: uid("pour"), userId, bottleId, ...overrides })
+    .returning();
+  return row;
+}
+
+async function insertNote(db: DB, pourId: string, overrides: Partial<typeof schema.tastingNotes.$inferInsert> = {}) {
+  const [row] = await db
+    .insert(schema.tastingNotes)
+    .values({ id: uid("note"), pourId, extractedBy: "user", ...overrides })
+    .returning();
+  return row;
+}
+
+describe("handles", () => {
+  it("normalizes, validates, and reserves", () => {
+    expect(normalizeHandle("  Dram_Wanderer  ")).toBe("dram_wanderer");
+    expect(isValidHandle("dram_wanderer")).toBe(true);
+    expect(isValidHandle("ab")).toBe(false); // too short
+    expect(isValidHandle("a".repeat(21))).toBe(false); // too long
+    expect(isValidHandle("Has-Dash")).toBe(false); // uppercase/dash not allowed
+    expect(isReservedHandle("ADMIN")).toBe(true);
+    expect(isReservedHandle("macallan")).toBe(true);
+    expect(isReservedHandle("dram_wanderer")).toBe(false);
+  });
+});
+
+describe("profiles", () => {
+  let db: DB;
+  beforeEach(async () => {
+    db = await setupTestDb();
+  });
+
+  it("creates a profile with defaults from the user, rejects invalid/reserved handles, and enforces uniqueness", async () => {
+    const user = await createTestUser(db, { name: "Avery" });
+    const profile = await createProfile(
+      db,
+      { id: user.id, name: user.name, image: "https://img/avery.png" },
+      "  Avery_Drams  ",
+    );
+    expect(profile).toMatchObject({
+      userId: user.id,
+      handle: "avery_drams",
+      displayName: "Avery",
+      avatarUrl: "https://img/avery.png",
+      isPublic: false,
+      discoverable: true,
+      socialEnabled: true,
+    });
+
+    await expect(createProfile(db, await createTestUser(db), "ab")).rejects.toBeInstanceOf(InvalidHandleError);
+    await expect(createProfile(db, await createTestUser(db), "macallan")).rejects.toBeInstanceOf(InvalidHandleError);
+
+    const stranger = await createTestUser(db);
+    await expect(createProfile(db, stranger, "Avery_Drams")).rejects.toBeInstanceOf(HandleTakenError);
+  });
+
+  it("updates only provided fields", async () => {
+    const user = await createTestUser(db, { name: "Nick" });
+    await createProfile(db, user, "nick_tastes");
+    const updated = await updateProfile(db, user.id, { bio: "Peat forever", isPublic: true });
+    expect(updated).toMatchObject({ bio: "Peat forever", isPublic: true, displayName: "Nick" });
+    expect(await updateProfile(db, "nope", { bio: "x" })).toBeNull();
+  });
+});
+
+describe("follow graph", () => {
+  let db: DB;
+  beforeEach(async () => {
+    db = await setupTestDb();
+  });
+
+  it("follows a public profile as accepted and a private one as pending, and is idempotent", async () => {
+    const a = await createTestUser(db);
+    const publicUser = await createTestUser(db);
+    const privateUser = await createTestUser(db);
+    await claim(db, a, "a_taster");
+    await claim(db, publicUser, "pub_taster", { isPublic: true });
+    await claim(db, privateUser, "priv_taster", { isPublic: false });
+
+    const toPublic = await followByHandle(db, a.id, "pub_taster");
+    expect(toPublic).toEqual({ state: "accepted" });
+    const again = await followByHandle(db, a.id, "pub_taster");
+    expect(again).toEqual({ state: "accepted" });
+
+    const toPrivate = await followByHandle(db, a.id, "priv_taster");
+    expect(toPrivate).toEqual({ state: "pending" });
+  });
+
+  it("returns null for missing/self/blocked/socialEnabled=false targets, indistinguishably", async () => {
+    const a = await createTestUser(db);
+    await claim(db, a, "a_taster");
+    expect(await followByHandle(db, a.id, "nobody")).toBeNull();
+    expect(await followByHandle(db, a.id, "a_taster")).toBeNull(); // self
+
+    const disabled = await createTestUser(db);
+    await claim(db, disabled, "off_taster", { socialEnabled: false });
+    expect(await followByHandle(db, a.id, "off_taster")).toBeNull();
+
+    const blocker = await createTestUser(db);
+    await claim(db, blocker, "blocker_taster", { isPublic: true });
+    await blockUser(db, blocker.id, a.id);
+    expect(await followByHandle(db, a.id, "blocker_taster")).toBeNull();
+  });
+
+  it("approve/deny/unfollow/removeFollower and listing", async () => {
+    const a = await createTestUser(db);
+    const b = await createTestUser(db);
+    const c = await createTestUser(db);
+    await claim(db, a, "a_taster");
+    await claim(db, b, "b_taster", { isPublic: false });
+    await claim(db, c, "c_taster", { isPublic: true });
+
+    await followByHandle(db, a.id, "b_taster");
+    expect(await listFollowRequests(db, b.id)).toHaveLength(1);
+
+    expect(await approveFollow(db, b.id, a.id)).toBe(true);
+    expect(await listFollowRequests(db, b.id)).toHaveLength(0);
+    expect(await listFollowers(db, b.id)).toHaveLength(1);
+    expect(await listFollowing(db, a.id)).toEqual([expect.objectContaining({ userId: b.id, state: "accepted" })]);
+
+    expect(await removeFollower(db, b.id, a.id)).toBe(true);
+    expect(await listFollowers(db, b.id)).toHaveLength(0);
+
+    await followByHandle(db, a.id, "b_taster");
+    expect(await denyFollow(db, b.id, a.id)).toBe(true);
+    expect(await listFollowRequests(db, b.id)).toHaveLength(0);
+
+    await followByHandle(db, a.id, "c_taster");
+    expect(await unfollow(db, a.id, c.id)).toBe(true);
+    expect(await listFollowing(db, a.id)).toHaveLength(0);
+  });
+
+  it("areFriends requires a mutual accepted follow", async () => {
+    const a = await createTestUser(db);
+    const b = await createTestUser(db);
+    await claim(db, a, "a_taster", { isPublic: true });
+    await claim(db, b, "b_taster", { isPublic: true });
+
+    await followByHandle(db, a.id, "b_taster");
+    expect(await areFriends(db, a.id, b.id)).toBe(false);
+
+    await followByHandle(db, b.id, "a_taster");
+    expect(await areFriends(db, a.id, b.id)).toBe(true);
+    expect(await areFriends(db, a.id, a.id)).toBe(false);
+  });
+});
+
+describe("blocks", () => {
+  let db: DB;
+  beforeEach(async () => {
+    db = await setupTestDb();
+  });
+
+  it("severs existing follows in both directions and is idempotent", async () => {
+    const a = await createTestUser(db);
+    const b = await createTestUser(db);
+    await claim(db, a, "a_taster", { isPublic: true });
+    await claim(db, b, "b_taster", { isPublic: true });
+    await followByHandle(db, a.id, "b_taster");
+    await followByHandle(db, b.id, "a_taster");
+    expect(await areFriends(db, a.id, b.id)).toBe(true);
+
+    await blockUser(db, a.id, b.id);
+    await blockUser(db, a.id, b.id); // idempotent
+    expect(await areFriends(db, a.id, b.id)).toBe(false);
+    expect(await isBlockedEither(db, a.id, b.id)).toBe(true);
+    expect(await isBlockedEither(db, b.id, a.id)).toBe(true);
+    expect(await listBlocked(db, a.id)).toEqual([expect.objectContaining({ userId: b.id })]);
+
+    // followByHandle is null in both directions once blocked
+    expect(await followByHandle(db, a.id, "b_taster")).toBeNull();
+    expect(await followByHandle(db, b.id, "a_taster")).toBeNull();
+
+    expect(await unblockUser(db, a.id, b.id)).toBe(true);
+    expect(await isBlockedEither(db, a.id, b.id)).toBe(false);
+  });
+});
+
+const TIERS: PourVisibility[] = ["private", "friends", "followers", "public"];
+
+describe("visibility matrix (canViewPour / getSocialNote)", () => {
+  let db: DB;
+  let owner: schema.User;
+  let friend: schema.User;
+  let follower: schema.User;
+  let stranger: schema.User;
+  let blocked: schema.User;
+  let bottleId: string;
+
+  beforeEach(async () => {
+    db = await setupTestDb();
+    owner = await createTestUser(db);
+    friend = await createTestUser(db);
+    follower = await createTestUser(db);
+    stranger = await createTestUser(db);
+    blocked = await createTestUser(db);
+    const bottle = await createTestBottle(db);
+    bottleId = bottle.id;
+
+    await claim(db, owner, "owner_t", { isPublic: true });
+    await claim(db, friend, "friend_t", { isPublic: true });
+    await claim(db, follower, "follower_t", { isPublic: true });
+    await claim(db, stranger, "stranger_t", { isPublic: true });
+    await claim(db, blocked, "blocked_t", { isPublic: true });
+
+    // friend: mutual accepted follow with owner
+    await followByHandle(db, owner.id, "friend_t");
+    await followByHandle(db, friend.id, "owner_t");
+    // follower: follows owner, owner does not follow back
+    await followByHandle(db, follower.id, "owner_t");
+    // blocked: owner blocks them
+    await blockUser(db, owner.id, blocked.id);
+  });
+
+  it.each(TIERS)("visibility=%s", async (visibility) => {
+    const pour = await insertPour(db, owner.id, bottleId, { visibility, rating: 4 });
+    await insertNote(db, pour.id, { freeform: "tasting note", flavorTags: { vanilla: 2 } });
+
+    const expected: Record<string, boolean> = {
+      owner: true,
+      friend: visibility === "friends" || visibility === "followers" || visibility === "public",
+      follower: visibility === "followers" || visibility === "public",
+      stranger: visibility === "public",
+      blocked: false,
+      signedOut: false,
+    };
+
+    expect(await canViewPour(db, owner.id, pour.id)).toBe(expected.owner);
+    expect(await canViewPour(db, friend.id, pour.id)).toBe(expected.friend);
+    expect(await canViewPour(db, follower.id, pour.id)).toBe(expected.follower);
+    expect(await canViewPour(db, stranger.id, pour.id)).toBe(expected.stranger);
+    expect(await canViewPour(db, blocked.id, pour.id)).toBe(expected.blocked);
+    expect(await canViewPour(db, null, pour.id)).toBe(expected.signedOut);
+
+    for (const [viewerId, ok] of [
+      [owner.id, expected.owner],
+      [friend.id, expected.friend],
+      [follower.id, expected.follower],
+      [stranger.id, expected.stranger],
+      [blocked.id, expected.blocked],
+      [null, expected.signedOut],
+    ] as const) {
+      const note = await getSocialNote(db, viewerId, pour.id);
+      expect(note !== null).toBe(ok);
+    }
+  });
+
+  it("hides everything cross-user when the author has socialEnabled=false", async () => {
+    await updateProfile(db, owner.id, {}); // no-op sanity
+    await db.update(schema.userProfiles).set({ socialEnabled: false }).where(eq(schema.userProfiles.userId, owner.id));
+    const pour = await insertPour(db, owner.id, bottleId, { visibility: "public", rating: 5 });
+    expect(await canViewPour(db, friend.id, pour.id)).toBe(false);
+    expect(await canViewPour(db, stranger.id, pour.id)).toBe(false);
+    // Owner still sees their own row.
+    expect(await canViewPour(db, owner.id, pour.id)).toBe(true);
+  });
+});
+
+describe("makeEverythingPrivate", () => {
+  let db: DB;
+  beforeEach(async () => {
+    db = await setupTestDb();
+  });
+
+  it("flips pours, shares, profile, and prefs to private without deleting anything", async () => {
+    const owner = await createTestUser(db);
+    await claim(db, owner, "owner_t", { isPublic: true, discoverable: true });
+    await updateSocialPrefs(db, owner.id, { defaultPourVisibility: "public", allowComments: true });
+    const bottle = await createTestBottle(db);
+    const pour = await insertPour(db, owner.id, bottle.id, { visibility: "public", rating: 4 });
+    const [share] = await db
+      .insert(schema.pourShares)
+      .values({ id: uid("share"), pourId: pour.id, userId: owner.id, code: uid("code") })
+      .returning();
+
+    await makeEverythingPrivate(db, owner.id);
+
+    const reloadedPour = await db.query.pours.findFirst({ where: (p, { eq }) => eq(p.id, pour.id) });
+    expect(reloadedPour?.visibility).toBe("private");
+    const reloadedShare = await db.query.pourShares.findFirst({ where: (s, { eq }) => eq(s.id, share.id) });
+    expect(reloadedShare?.revokedAt).not.toBeNull();
+    const profile = await getOwnProfile(db, owner.id);
+    expect(profile).toMatchObject({ socialEnabled: false, isPublic: false, discoverable: false });
+    const prefs = await getSocialPrefs(db, owner.id);
+    expect(prefs.defaultPourVisibility).toBe("private");
+
+    // Nothing deleted.
+    expect(reloadedPour).not.toBeNull();
+    expect(reloadedShare).not.toBeNull();
+    expect(profile).not.toBeNull();
+  });
+});
+
+describe("getFriendFeed", () => {
+  let db: DB;
+  beforeEach(async () => {
+    db = await setupTestDb();
+  });
+
+  it("shows only followees' visible pours with a note or rating, newest first, with counts and viewerTags", async () => {
+    const viewer = await createTestUser(db);
+    const friendUser = await createTestUser(db);
+    const strangerUser = await createTestUser(db);
+    const blockedUser = await createTestUser(db);
+    await claim(db, viewer, "viewer_t", { isPublic: true });
+    await claim(db, friendUser, "friend_t", { isPublic: true });
+    await claim(db, strangerUser, "stranger_t", { isPublic: true });
+    await claim(db, blockedUser, "blocked_t", { isPublic: true });
+
+    await followByHandle(db, viewer.id, "friend_t");
+    await followByHandle(db, viewer.id, "blocked_t");
+    await blockUser(db, viewer.id, blockedUser.id);
+    // not following stranger
+
+    const bottle = await createTestBottle(db);
+    // Viewer's own note on the bottle, for viewerTags union.
+    const viewerPour = await insertPour(db, viewer.id, bottle.id, { visibility: "private" });
+    await insertNote(db, viewerPour.id, { flavorTags: { vanilla: 2, oak: 1 } });
+    await db
+      .insert(schema.userBottles)
+      .values({ id: uid("ub"), userId: viewer.id, bottleId: bottle.id, relationship: "tried" });
+
+    const older = await insertPour(db, friendUser.id, bottle.id, {
+      visibility: "public",
+      rating: 4,
+      createdAt: new Date("2026-01-01T00:00:00Z"),
+    });
+    await insertNote(db, older.id, { freeform: "first note", flavorTags: { vanilla: 3 } });
+
+    const newer = await insertPour(db, friendUser.id, bottle.id, {
+      visibility: "public",
+      rating: 4.5,
+      createdAt: new Date("2026-02-01T00:00:00Z"),
+    });
+    await insertNote(db, newer.id, { freeform: "second note", flavorTags: { oak: 3 } });
+
+    // No note and no rating -> excluded.
+    await insertPour(db, friendUser.id, bottle.id, { visibility: "public" });
+    // Private -> excluded even though visible content exists.
+    const privatePour = await insertPour(db, friendUser.id, bottle.id, { visibility: "private", rating: 5 });
+    await insertNote(db, privatePour.id, { freeform: "hidden" });
+    // Stranger not followed -> excluded regardless of visibility.
+    const strangerPour = await insertPour(db, strangerUser.id, bottle.id, { visibility: "public", rating: 3 });
+    await insertNote(db, strangerPour.id, { freeform: "stranger note" });
+    // Blocked followee -> excluded.
+    const blockedPour = await insertPour(db, blockedUser.id, bottle.id, { visibility: "public", rating: 2 });
+    await insertNote(db, blockedPour.id, { freeform: "blocked note" });
+
+    await cheerPour(db, viewer.id, newer.id);
+    await addComment(db, friendUser.id, newer.id, "nice pour");
+
+    const feed = await getFriendFeed(db, viewer.id);
+    expect(feed.map((f) => f.pourId)).toEqual([newer.id, older.id]);
+
+    const newerItem = feed[0];
+    expect(newerItem.cheersCount).toBe(1);
+    expect(newerItem.viewerCheered).toBe(true);
+    expect(newerItem.commentCount).toBe(1);
+    expect(newerItem.viewerTags).toEqual({ vanilla: 2, oak: 1 });
+    expect(newerItem.viewerBottleRelationship).toBe("tried");
+    expect(newerItem.viewerTriedBottle).toBe(true);
+
+    const olderItem = feed[1];
+    expect(olderItem.cheersCount).toBe(0);
+    expect(olderItem.viewerCheered).toBe(false);
+  });
+
+  it("returns [] with no followees", async () => {
+    const viewer = await createTestUser(db);
+    expect(await getFriendFeed(db, viewer.id)).toEqual([]);
+  });
+});
+
+describe("getFriendNotesForBottle", () => {
+  let db: DB;
+  beforeEach(async () => {
+    db = await setupTestDb();
+  });
+
+  it("returns one entry per followee, their latest note, visibility+block enforced", async () => {
+    const viewer = await createTestUser(db);
+    const friendUser = await createTestUser(db);
+    await claim(db, viewer, "viewer_t", { isPublic: true });
+    await claim(db, friendUser, "friend_t", { isPublic: true });
+    await followByHandle(db, viewer.id, "friend_t");
+
+    const bottle = await createTestBottle(db);
+    await insertPour(db, friendUser.id, bottle.id, {
+      visibility: "public",
+      rating: 3,
+      createdAt: new Date("2026-01-01T00:00:00Z"),
+    });
+    const latest = await insertPour(db, friendUser.id, bottle.id, {
+      visibility: "public",
+      rating: 4.5,
+      createdAt: new Date("2026-02-01T00:00:00Z"),
+    });
+
+    const notes = await getFriendNotesForBottle(db, viewer.id, bottle.id);
+    expect(notes).toHaveLength(1);
+    expect(notes[0].pourId).toBe(latest.id);
+    expect(notes[0].author.userId).toBe(friendUser.id);
+  });
+});
+
+describe("cheers", () => {
+  let db: DB;
+  beforeEach(async () => {
+    db = await setupTestDb();
+  });
+
+  it("is idempotent and returns null when the pour isn't visible", async () => {
+    const owner = await createTestUser(db);
+    const stranger = await createTestUser(db);
+    await claim(db, owner, "owner_t");
+    const bottle = await createTestBottle(db);
+    const pour = await insertPour(db, owner.id, bottle.id, { visibility: "private", rating: 4 });
+
+    expect(await cheerPour(db, stranger.id, pour.id)).toBeNull();
+
+    expect(await cheerPour(db, owner.id, pour.id)).toEqual({ cheersCount: 1 });
+    expect(await cheerPour(db, owner.id, pour.id)).toEqual({ cheersCount: 1 }); // idempotent
+    expect(await uncheerPour(db, owner.id, pour.id)).toEqual({ cheersCount: 0 });
+    expect(await uncheerPour(db, owner.id, pour.id)).toEqual({ cheersCount: 0 }); // idempotent
+  });
+});
+
+describe("comments", () => {
+  let db: DB;
+  let owner: schema.User;
+  let commenter: schema.User;
+  let pourId: string;
+
+  beforeEach(async () => {
+    db = await setupTestDb();
+    owner = await createTestUser(db);
+    commenter = await createTestUser(db);
+    await claim(db, owner, "owner_t", { isPublic: true });
+    await claim(db, commenter, "commenter_t", { isPublic: true });
+    await followByHandle(db, commenter.id, "owner_t");
+    const bottle = await createTestBottle(db);
+    const pour = await insertPour(db, owner.id, bottle.id, { visibility: "public", rating: 4 });
+    pourId = pour.id;
+  });
+
+  it("adds, lists (oldest first), edits within the window, and rejects a reply to a deleted parent", async () => {
+    const c1 = await addComment(db, commenter.id, pourId, "  How did you get smoke out of this?  ");
+    expect(c1).not.toBeNull();
+    expect(c1?.body).toBe("How did you get smoke out of this?"); // trimmed
+    const c2 = await addComment(db, owner.id, pourId, "Char level on the barrel, I think");
+
+    const listed = await listComments(db, owner.id, pourId);
+    expect(listed?.map((c) => c.id)).toEqual([c1!.id, c2!.id]);
+    expect(listed?.[0].canEdit).toBe(false); // viewer is owner, not the comment's author
+    expect(listed?.[0].canDelete).toBe(true); // owner may delete anyone's comment on their pour
+
+    const edited = await editComment(db, commenter.id, c1!.id, "edited: char + smoke");
+    expect(edited?.body).toBe("edited: char + smoke");
+    expect(edited?.editedAt).not.toBeNull();
+
+    // c2 belongs to the pour owner; the other commenter is neither its author nor the pour owner.
+    expect(await softDeleteComment(db, commenter.id, c2!.id)).toBe(false);
+  });
+
+  it("owner can soft-delete any comment on their pour; tombstone blanks body/author", async () => {
+    const c1 = await addComment(db, commenter.id, pourId, "hello");
+    expect(await softDeleteComment(db, owner.id, c1!.id)).toBe(true);
+    const listed = await listComments(db, commenter.id, pourId);
+    expect(listed?.[0]).toMatchObject({ deleted: true, body: null, author: null, canEdit: false, canDelete: false });
+  });
+
+  it("respects the edit window", async () => {
+    const c1 = await addComment(db, commenter.id, pourId, "hello");
+    await db
+      .update(schema.comments)
+      .set({ createdAt: new Date(Date.now() - COMMENT_EDIT_WINDOW_MS - 1000) })
+      .where(eq(schema.comments.id, c1!.id));
+    expect(await editComment(db, commenter.id, c1!.id, "too late")).toBeNull();
+    const listed = await listComments(db, commenter.id, pourId);
+    expect(listed?.[0].canEdit).toBe(false);
+  });
+
+  it("rejects addComment when the pour owner has allowComments=false", async () => {
+    await updateSocialPrefs(db, owner.id, { allowComments: false });
+    expect(await addComment(db, commenter.id, pourId, "hello")).toBeNull();
+  });
+
+  it("rejects a reply whose parent is missing, foreign, or deleted", async () => {
+    expect(await addComment(db, commenter.id, pourId, "reply", "not-a-real-id")).toBeNull();
+    const c1 = await addComment(db, commenter.id, pourId, "top level");
+    await softDeleteComment(db, commenter.id, c1!.id);
+    expect(await addComment(db, owner.id, pourId, "reply to deleted", c1!.id)).toBeNull();
+  });
+
+  it("drops comments from a blocked author but keeps orphaned replies rendering", async () => {
+    const c1 = await addComment(db, commenter.id, pourId, "top level");
+    const c2 = await addComment(db, owner.id, pourId, "a reply", c1!.id);
+    await blockUser(db, owner.id, commenter.id);
+
+    const listed = await listComments(db, owner.id, pourId);
+    expect(listed?.map((c) => c.id)).toEqual([c2!.id]);
+    expect(listed?.[0].parentId).toBe(c1!.id); // orphaned, but still renders
+  });
+
+  it("createReport records a report", async () => {
+    const c1 = await addComment(db, commenter.id, pourId, "spam-ish");
+    await expect(
+      createReport(db, owner.id, { subjectType: "comment", subjectId: c1!.id, reason: "spam" }),
+    ).resolves.toBeUndefined();
+    const rows = await db.select().from(schema.reports);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ subjectType: "comment", subjectId: c1!.id, reporterId: owner.id, reason: "spam" });
+  });
+});
+
+describe("getPalateCard / getProfileView", () => {
+  let db: DB;
+  beforeEach(async () => {
+    db = await setupTestDb();
+  });
+
+  it("getPalateCard is null-heat with zero sample size, and reports bounded region/style sets", async () => {
+    const user = await createTestUser(db);
+    const empty = await getPalateCard(db, user.id);
+    expect(empty.wheelHeat).toBeNull();
+    expect(empty.regionsCovered).toEqual([]);
+
+    const bottle = await createTestBottle(db, { region: "Speyside", category: "scotch-single-malt" });
+    const pour = await insertPour(db, user.id, bottle.id, { rating: 4.5 });
+    await insertNote(db, pour.id, { flavorTags: { vanilla: 3, honey: 2 } });
+    await db
+      .insert(schema.userBottles)
+      .values({ id: uid("ub"), userId: user.id, bottleId: bottle.id, relationship: "tried" });
+
+    const card = await getPalateCard(db, user.id);
+    expect(card.wheelHeat).not.toBeNull();
+    expect(card.regionsCovered).toEqual(["Speyside"]);
+    expect(card.stylesCovered).toEqual(["scotch-single-malt"]);
+    expect(card.signatureLeafIds.length).toBeGreaterThan(0);
+  });
+
+  it("getProfileView returns identity + viewerState, full palate/notes for a viewable profile", async () => {
+    const owner = await createTestUser(db, { name: "Sarah" });
+    await claim(db, owner, "sarah_t", { isPublic: true, bio: "Peat and salt" });
+    const bottle = await createTestBottle(db);
+    const pour = await insertPour(db, owner.id, bottle.id, { visibility: "public", rating: 4.5 });
+    await insertNote(db, pour.id, { freeform: "campfire", flavorTags: { peat: 3 } });
+
+    const viewer = await createTestUser(db);
+    const view = await getProfileView(db, viewer.id, "sarah_t");
+    expect(view?.profile.handle).toBe("sarah_t");
+    expect(view?.viewerState).toEqual({ isSelf: false, followState: null, followsYou: false, blocked: false });
+    expect(view?.recentNotes).toHaveLength(1);
+    expect((view?.recentNotes[0] as SocialNote).pourId).toBe(pour.id);
+  });
+
+  it("returns identity-only with empty palate/notes for a private profile viewed by a non-follower", async () => {
+    const owner = await createTestUser(db);
+    await claim(db, owner, "private_t", { isPublic: false });
+    const bottle = await createTestBottle(db);
+    const pour = await insertPour(db, owner.id, bottle.id, { visibility: "public", rating: 4 });
+    await insertNote(db, pour.id, { freeform: "hello" });
+
+    const viewer = await createTestUser(db);
+    const view = await getProfileView(db, viewer.id, "private_t");
+    expect(view?.profile.handle).toBe("private_t");
+    expect(view?.palate).toEqual({ wheelHeat: null, signatureLeafIds: [], regionsCovered: [], stylesCovered: [] });
+    expect(view?.recentNotes).toEqual([]);
+  });
+
+  it("signed-out viewer gets identity-only even for a public profile", async () => {
+    const owner = await createTestUser(db);
+    await claim(db, owner, "public_t", { isPublic: true });
+    const bottle = await createTestBottle(db);
+    const pour = await insertPour(db, owner.id, bottle.id, { visibility: "public", rating: 4 });
+    await insertNote(db, pour.id, { freeform: "hello" });
+
+    const view = await getProfileView(db, null, "public_t");
+    expect(view?.recentNotes).toEqual([]);
+    expect(view?.palate.wheelHeat).toBeNull();
+  });
+
+  it("returns null for a missing handle or a socially-disabled/blocked profile", async () => {
+    expect(await getProfileView(db, null, "nobody")).toBeNull();
+
+    const owner = await createTestUser(db);
+    await claim(db, owner, "off_t", { socialEnabled: false });
+    expect(await getProfileView(db, null, "off_t")).toBeNull();
+
+    const viewer = await createTestUser(db);
+    const blockedOwner = await createTestUser(db);
+    await claim(db, blockedOwner, "blocked_owner_t", { isPublic: true });
+    await blockUser(db, blockedOwner.id, viewer.id);
+    expect(await getProfileView(db, viewer.id, "blocked_owner_t")).toBeNull();
+  });
+});
+
+describe("money/volume guard", () => {
+  let db: DB;
+  beforeEach(async () => {
+    db = await setupTestDb();
+  });
+
+  it("never serializes purchasePrice, estValue, or amountMl on any cross-user shape", async () => {
+    const owner = await createTestUser(db);
+    const viewer = await createTestUser(db);
+    await claim(db, owner, "owner_t", { isPublic: true });
+    await claim(db, viewer, "viewer_t", { isPublic: true });
+    await followByHandle(db, viewer.id, "owner_t");
+
+    const bottle = await createTestBottle(db);
+    const [ub] = await db
+      .insert(schema.userBottles)
+      .values({
+        id: uid("ub"),
+        userId: owner.id,
+        bottleId: bottle.id,
+        relationship: "own",
+        purchasePrice: 199.99,
+        estValue: 250,
+      })
+      .returning();
+    const pour = await insertPour(db, owner.id, bottle.id, {
+      visibility: "public",
+      rating: 4,
+      amountMl: 45,
+      userBottleId: ub.id,
+    });
+    await insertNote(db, pour.id, { freeform: "note" });
+
+    const note = await getSocialNote(db, viewer.id, pour.id);
+    const feed = await getFriendFeed(db, viewer.id);
+    const view = await getProfileView(db, viewer.id, "owner_t");
+
+    for (const serialized of [JSON.stringify(note), JSON.stringify(feed), JSON.stringify(view)]) {
+      expect(serialized).not.toMatch(/purchasePrice/i);
+      expect(serialized).not.toMatch(/estValue/i);
+      expect(serialized).not.toMatch(/amountMl/i);
+      expect(serialized).not.toContain("199.99");
+    }
+  });
+});
