@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("./platform", () => ({ loadPlugin: vi.fn(async () => null) }));
 import { haptic } from "./haptics";
 
 /** `haptic` is fire-and-forget, so the fallback lands a microtask later. */
@@ -21,13 +23,24 @@ describe("haptic on web", () => {
   it("falls back to navigator.vibrate with a per-moment pattern", async () => {
     const vibrate = stubVibrate();
 
-    haptic("tap");
+    haptic("category");
+    haptic("intensity-1");
+    haptic("intensity-2");
+    haptic("intensity-3");
     haptic("lock");
     haptic("success");
     haptic("warning");
     await flush();
 
-    expect(vibrate.mock.calls.map(([pattern]) => pattern)).toEqual([12, 30, 60, [40, 60, 40]]);
+    expect(vibrate.mock.calls.map(([pattern]) => pattern)).toEqual([
+      8,
+      18,
+      32,
+      [42, 35, 42],
+      30,
+      60,
+      [40, 60, 40],
+    ]);
   });
 
   it("does nothing where vibration is unsupported", async () => {
@@ -44,7 +57,7 @@ describe("haptic on web", () => {
       },
       configurable: true,
     });
-    expect(() => haptic("tap")).not.toThrow();
+    expect(() => haptic("category")).not.toThrow();
     await flush();
   });
 });

@@ -37,6 +37,11 @@ const R_LEAF_IN = 116;
 const R_LEAF_OUT = 144; // grows +4 per intensity step, max 156
 const WEDGE_LABEL_R = (R_WEDGE_IN + R_WEDGE_OUT) / 2;
 const LEAF_LABEL_R = (R_LEAF_IN + R_LEAF_OUT) / 2;
+const INTENSITY_HAPTIC: Record<1 | 2 | 3, "intensity-1" | "intensity-2" | "intensity-3"> = {
+  1: "intensity-1",
+  2: "intensity-2",
+  3: "intensity-3",
+};
 
 /**
  * The Whaikey flavor wheel. Inner ring: the 8 core wedges. Tap a wedge and
@@ -58,6 +63,8 @@ export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
   const activationStart = useRef<{ clientX: number; clientY: number } | null>(null);
   const activePointerId = useRef<number | null>(null);
   const gestureWedgeId = useRef<string | null>(null);
+  const hapticCategoryId = useRef<string | null>(null);
+  const hapticIntensity = useRef<1 | 2 | 3 | null>(null);
   const suppressClick = useRef(false);
   const selectedWedge = FLAVOR_WHEEL.find((w) => w.id === selectedWedgeId) ?? null;
 
@@ -89,10 +96,13 @@ export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
   }, [value]);
 
   const cycleLeaf = (leafId: string) => {
-    const next = ((value[leafId] ?? 0) + 1) % 4;
+    const next = (((value[leafId] ?? 0) + 1) % 4) as 0 | 1 | 2 | 3;
     const nextValue = { ...value };
     if (next === 0) delete nextValue[leafId];
-    else nextValue[leafId] = next;
+    else {
+      nextValue[leafId] = next;
+      haptic(INTENSITY_HAPTIC[next]);
+    }
     onChange(nextValue);
   };
 
@@ -114,6 +124,8 @@ export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
     activationStart.current = null;
     activePointerId.current = null;
     gestureWedgeId.current = null;
+    hapticCategoryId.current = null;
+    hapticIntensity.current = null;
     gestureLeafIdRef.current = null;
     setGestureLeafId(null);
   };
@@ -129,6 +141,10 @@ export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
     }
     const leaf = wedge.leaves[wheelIndex(point.angle, wedge.leaves.length)];
     const intensity = intensityForRadius(point.radius);
+    if (intensity > (hapticIntensity.current ?? 0)) {
+      haptic(({ 1: "intensity-1", 2: "intensity-2", 3: "intensity-3" } as const)[intensity]);
+    }
+    hapticIntensity.current = intensity;
     gestureLeafIdRef.current = leaf.id;
     gestureIntensityRef.current = intensity;
     setGestureLeafId(leaf.id);
@@ -139,6 +155,8 @@ export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
     const point = wheelPointFromPointer(event, SIZE);
     if (point.radius < R_LEAF_IN) {
       const wedge = FLAVOR_WHEEL[wheelIndex(point.angle, FLAVOR_WHEEL.length)];
+      if (hapticCategoryId.current !== wedge.id) haptic("category");
+      hapticCategoryId.current = wedge.id;
       gestureWedgeId.current = wedge.id;
       setSelectedWedgeId(wedge.id);
       gestureLeafIdRef.current = null;
@@ -155,6 +173,8 @@ export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
     const wedge = FLAVOR_WHEEL[wheelIndex(point.angle, FLAVOR_WHEEL.length)];
     activePointerId.current = event.pointerId;
     activationStart.current = { clientX: event.clientX, clientY: event.clientY };
+    hapticCategoryId.current = wedge.id;
+    hapticIntensity.current = null;
     gestureWedgeId.current = wedge.id;
     holdTimer.current = setTimeout(() => {
       holdElapsed.current = true;

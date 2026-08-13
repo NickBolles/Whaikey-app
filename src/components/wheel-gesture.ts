@@ -1,8 +1,9 @@
 import type { PointerEvent as ReactPointerEvent } from "react";
 
-export const WHEEL_HOLD_MS = 220;
-/** A deliberate sideways nudge unlocks the wheel without stealing a vertical scroll. */
-export const WHEEL_ACTIVATION_DISTANCE = 12;
+/** Brief enough to feel direct, while a stationary hold and vertical move still scroll natively. */
+export const WHEEL_HOLD_MS = 140;
+/** A small but deliberate sideways nudge unlocks the wheel without stealing a vertical scroll. */
+export const WHEEL_ACTIVATION_DISTANCE = 8;
 
 export type WheelPoint = {
   angle: number;
