@@ -81,12 +81,17 @@ export default async function HistoryPage({
             {filteredBottleName ? `${filteredBottleName} · ` : ""}{pours.length} pour{pours.length === 1 ? "" : "s"} logged
           </p>
         </div>
-        <Link
-          href="/pour"
-          className="text-sm text-accent font-medium hover:brightness-110 transition-[filter] pb-0.5"
-        >
-          Log a pour
-        </Link>
+        <div className="flex flex-col items-end gap-1">
+          <Link
+            href="/pour"
+            className="text-sm text-accent font-medium hover:brightness-110 transition-[filter]"
+          >
+            Log a pour
+          </Link>
+          <Link href="/sharing" className="text-xs text-muted hover:text-foreground transition-colors">
+            Shared links
+          </Link>
+        </div>
       </header>
 
       <HistoryTimeline pours={timeline} />

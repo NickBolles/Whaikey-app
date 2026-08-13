@@ -1,10 +1,16 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import Link from "next/link";
+import { and, eq } from "drizzle-orm";
 import { Star } from "lucide-react";
 import { FlavorWheel } from "@/components/flavor-wheel";
+import { ShareComparison } from "@/components/share-comparison";
 import { rollUpToWedges } from "@/lib/flavor-wheel";
 import { getDb } from "@/db";
+import * as schema from "@/db/schema";
+import { getSessionUser } from "@/lib/session";
 import { getPublicPourShare } from "@/lib/pour-sharing";
+import { WishlistCta } from "./wishlist-cta";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +42,53 @@ export default async function SharedPourPage({ params }: Props) {
   const leafHeat = Object.fromEntries(Object.entries(share.note.flavorTags ?? {}).map(([id, intensity]) => [id, intensity / 3]));
   const wedgeHeat = Object.fromEntries(Object.entries(rollUpToWedges(share.note.flavorTags ?? {})).map(([id, intensity]) => [id, intensity / 10]));
 
+  // Viewer-private block: computed only for a signed-in viewer, never shown to
+  // (or stored for) the sharer, and never allowed to touch the card above.
+  let viewerBlock: React.ReactNode = null;
+  const viewer = await getSessionUser();
+  if (viewer) {
+    const db = getDb();
+    const isOwner = Boolean(
+      await db.query.pourShares.findFirst({
+        where: and(eq(schema.pourShares.code, code), eq(schema.pourShares.userId, viewer.id)),
+      }),
+    );
+
+    if (isOwner) {
+      viewerBlock = (
+        <p className="text-center text-sm text-muted">
+          This is your link ·{" "}
+          <Link href="/sharing" className="text-accent hover:brightness-110 transition-[filter]">
+            manage shared links
+          </Link>
+        </p>
+      );
+    } else {
+      const viewerNotes = await db
+        .select({ flavorTags: schema.tastingNotes.flavorTags })
+        .from(schema.tastingNotes)
+        .innerJoin(schema.pours, eq(schema.tastingNotes.pourId, schema.pours.id))
+        .where(and(eq(schema.pours.userId, viewer.id), eq(schema.pours.bottleId, share.bottleId)));
+
+      if (viewerNotes.length > 0) {
+        // Multiple pours of the same bottle: union the viewer's own tags,
+        // matching how getFlavorCalibration treats repeat pours.
+        const viewerFlavorTags: Record<string, number> = {};
+        for (const note of viewerNotes) {
+          for (const [leafId, intensity] of Object.entries(note.flavorTags ?? {})) {
+            viewerFlavorTags[leafId] = Math.max(viewerFlavorTags[leafId] ?? 0, intensity);
+          }
+        }
+        viewerBlock = <ShareComparison mine={viewerFlavorTags} theirs={share.note.flavorTags} />;
+      } else {
+        const existing = await db.query.userBottles.findFirst({
+          where: and(eq(schema.userBottles.userId, viewer.id), eq(schema.userBottles.bottleId, share.bottleId)),
+        });
+        viewerBlock = <WishlistCta bottleId={share.bottleId} initialRelationship={existing?.relationship ?? null} />;
+      }
+    }
+  }
+
   return (
     <div className="mx-auto flex max-w-lg flex-col gap-6 px-4 py-12">
       <header className="space-y-2">
@@ -61,6 +114,7 @@ export default async function SharedPourPage({ params }: Props) {
         {noteParts.length === 0 && !share.note.freeform && <p className="text-muted">A moment from {share.ownerName}&apos;s tasting journal.</p>}
       </article>
       <p className="text-center text-xs text-muted">Shared intentionally by its author · Whaikey</p>
+      {viewerBlock}
     </div>
   );
 }
