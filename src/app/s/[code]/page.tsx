@@ -5,11 +5,14 @@ import { and, eq } from "drizzle-orm";
 import { Star } from "lucide-react";
 import { FlavorWheel } from "@/components/flavor-wheel";
 import { ShareComparison } from "@/components/share-comparison";
+import { CheersButton } from "@/components/cheers-button";
+import { CommentThread, type SerializedComment } from "@/components/comment-thread";
 import { rollUpToWedges } from "@/lib/flavor-wheel";
 import { getDb } from "@/db";
 import * as schema from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
 import { getPublicPourShare } from "@/lib/pour-sharing";
+import { getSocialNote, getSocialPrefs, listComments } from "@/lib/social";
 import { WishlistCta } from "./wishlist-cta";
 
 export const dynamic = "force-dynamic";
@@ -45,14 +48,18 @@ export default async function SharedPourPage({ params }: Props) {
   // Viewer-private block: computed only for a signed-in viewer, never shown to
   // (or stored for) the sharer, and never allowed to touch the card above.
   let viewerBlock: React.ReactNode = null;
+  // The signed-in comment/cheers thread (docs/SOCIAL.md US-9/US-12) — only
+  // when the bearer link's pour also clears the ordinary canViewPour check
+  // for this viewer (getSocialNote non-null). A friends-visibility pour
+  // shared with a link-holding stranger still 404s on the comment/cheers
+  // APIs, so the thread never renders for them.
+  let discussionBlock: React.ReactNode = null;
   const viewer = await getSessionUser();
   if (viewer) {
     const db = getDb();
-    const isOwner = Boolean(
-      await db.query.pourShares.findFirst({
-        where: and(eq(schema.pourShares.code, code), eq(schema.pourShares.userId, viewer.id)),
-      }),
-    );
+    const shareRow = await db.query.pourShares.findFirst({ where: eq(schema.pourShares.code, code) });
+    const pourId = shareRow?.pourId ?? null;
+    const isOwner = shareRow?.userId === viewer.id;
 
     if (isOwner) {
       viewerBlock = (
@@ -64,6 +71,8 @@ export default async function SharedPourPage({ params }: Props) {
         </p>
       );
     } else {
+      const socialNote = pourId ? await getSocialNote(db, viewer.id, pourId) : null;
+
       const viewerNotes = await db
         .select({ flavorTags: schema.tastingNotes.flavorTags })
         .from(schema.tastingNotes)
@@ -79,12 +88,70 @@ export default async function SharedPourPage({ params }: Props) {
             viewerFlavorTags[leafId] = Math.max(viewerFlavorTags[leafId] ?? 0, intensity);
           }
         }
-        viewerBlock = <ShareComparison mine={viewerFlavorTags} theirs={share.note.flavorTags} />;
+        viewerBlock = (
+          <div className="flex flex-col gap-2">
+            <ShareComparison mine={viewerFlavorTags} theirs={share.note.flavorTags} />
+            {socialNote && pourId && (
+              <Link
+                href={`/notes/${pourId}`}
+                className="self-end text-sm text-accent transition-[filter] hover:brightness-110"
+              >
+                Open discussion →
+              </Link>
+            )}
+          </div>
+        );
       } else {
         const existing = await db.query.userBottles.findFirst({
           where: and(eq(schema.userBottles.userId, viewer.id), eq(schema.userBottles.bottleId, share.bottleId)),
         });
         viewerBlock = <WishlistCta bottleId={share.bottleId} initialRelationship={existing?.relationship ?? null} />;
+      }
+
+      if (socialNote && pourId) {
+        const [authorPrefs, rawComments] = await Promise.all([
+          getSocialPrefs(db, socialNote.author.userId),
+          listComments(db, viewer.id, pourId),
+        ]);
+        const comments: SerializedComment[] = (rawComments ?? []).map((comment) => ({
+          id: comment.id,
+          pourId: comment.pourId,
+          parentId: comment.parentId,
+          author: comment.author,
+          body: comment.body,
+          createdAt: comment.createdAt.toISOString(),
+          editedAt: comment.editedAt ? comment.editedAt.toISOString() : null,
+          deleted: comment.deleted,
+          canEdit: comment.canEdit,
+          canDelete: comment.canDelete,
+        }));
+        discussionBlock = (
+          <section className="flex flex-col gap-4">
+            <CheersButton pourId={pourId} initialCount={socialNote.cheersCount} initialCheered={socialNote.viewerCheered} />
+            <CommentThread
+              pourId={pourId}
+              initialComments={comments}
+              viewerSignedIn
+              viewerCanComment={authorPrefs.allowComments}
+              isOwner={false}
+              viewerUserId={viewer.id}
+            />
+          </section>
+        );
+      } else if (shareRow) {
+        const sharerProfile = await db.query.userProfiles.findFirst({
+          where: eq(schema.userProfiles.userId, shareRow.userId),
+        });
+        if (sharerProfile?.socialEnabled) {
+          discussionBlock = (
+            <p className="text-center text-sm text-muted">
+              Comparisons stay private to you.{" "}
+              <Link href={`/u/${sharerProfile.handle}`} className="text-accent transition-[filter] hover:brightness-110">
+                Follow @{sharerProfile.handle} to discuss.
+              </Link>
+            </p>
+          );
+        }
       }
     }
   }
@@ -115,6 +182,7 @@ export default async function SharedPourPage({ params }: Props) {
       </article>
       <p className="text-center text-xs text-muted">Shared intentionally by its author · Whaikey</p>
       {viewerBlock}
+      {discussionBlock}
     </div>
   );
 }

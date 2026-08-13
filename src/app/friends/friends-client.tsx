@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { AtSign, Check, ShieldOff, UserMinus, UserPlus, UserX, X } from "lucide-react";
 import { ProfileSummaryRow } from "@/components/profile-summary-row";
@@ -27,10 +27,19 @@ export function FriendsClient({ requests, following, followers, blocked }: Frien
 
   // Server refreshes (router.refresh() after a follow) re-send props; the
   // optimistic row state must follow them or the page shows stale lists.
-  useEffect(() => setRequestRows(requests), [requests]);
-  useEffect(() => setFollowingRows(following), [following]);
-  useEffect(() => setFollowerRows(followers), [followers]);
-  useEffect(() => setBlockedRows(blocked), [blocked]);
+  const [syncedProps, setSyncedProps] = useState({ requests, following, followers, blocked });
+  if (
+    syncedProps.requests !== requests ||
+    syncedProps.following !== following ||
+    syncedProps.followers !== followers ||
+    syncedProps.blocked !== blocked
+  ) {
+    setSyncedProps({ requests, following, followers, blocked });
+    setRequestRows(requests);
+    setFollowingRows(following);
+    setFollowerRows(followers);
+    setBlockedRows(blocked);
+  }
 
   async function run(userId: string, action: () => Promise<boolean>) {
     if (busyId) return;
