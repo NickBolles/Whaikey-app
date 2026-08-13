@@ -55,6 +55,18 @@ describe("FlavorWheelInput", () => {
     );
   });
 
+  it("adds progressively stronger haptics as a flavor rating cycles upward", () => {
+    render(<Harness />);
+    fireEvent.click(screen.getByRole("button", { name: "Sweet" }));
+    const vanilla = () => screen.getByRole("button", { name: /^Vanilla(?:, intensity \d)?$/ });
+
+    fireEvent.click(vanilla());
+    fireEvent.click(vanilla());
+    fireEvent.click(vanilla());
+
+    expect(haptic.mock.calls).toEqual([["intensity-1"], ["intensity-2"], ["intensity-3"]]);
+  });
+
   it("fires onChange with the updated tag map", () => {
     const onChange = vi.fn();
     render(<FlavorWheelInput value={{}} onChange={onChange} />);
@@ -90,12 +102,13 @@ describe("FlavorWheelInput", () => {
 
     // Hold Sweet (lower-right), then deliberately sweep sideways and outward to a descriptor at 3×.
     fireEvent.pointerDown(wheel, { pointerType: "touch", pointerId: 1, clientX: 270, clientY: 270 });
-    vi.advanceTimersByTime(220);
+    vi.advanceTimersByTime(140);
     fireEvent.pointerMove(wheel, { pointerType: "touch", pointerId: 1, clientX: 286, clientY: 274 });
     fireEvent.pointerUp(wheel, { pointerType: "touch", pointerId: 1, clientX: 286, clientY: 274 });
 
     expect(onChange).toHaveBeenCalledWith({ toffee: 3 });
     expect(haptic).toHaveBeenCalledWith("lock");
+    expect(haptic).toHaveBeenCalledWith("intensity-3");
     expect(haptic).toHaveBeenCalledWith("success");
     vi.useRealTimers();
   });
@@ -118,7 +131,7 @@ describe("FlavorWheelInput", () => {
     });
 
     fireEvent.pointerDown(wheel, { pointerType: "touch", pointerId: 1, clientX: 270, clientY: 270 });
-    vi.advanceTimersByTime(220);
+    vi.advanceTimersByTime(140);
     fireEvent.pointerUp(wheel, { pointerType: "touch", pointerId: 1, clientX: 270, clientY: 270 });
 
     expect(onChange).not.toHaveBeenCalled();
