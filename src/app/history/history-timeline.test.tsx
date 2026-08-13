@@ -19,6 +19,7 @@ function pour(over: Partial<TimelinePour> = {}): TimelinePour {
     servingStyle: over.servingStyle ?? "neat",
     amountMl: over.amountMl ?? 30,
     createdAt: over.createdAt ?? "2026-03-14T18:30:00.000Z",
+    visibility: over.visibility ?? "private",
     note: over.note ?? null,
   };
 }

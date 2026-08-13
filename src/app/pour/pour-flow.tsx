@@ -3,10 +3,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ChevronDown, ChevronUp, CloudOff, GlassWater, ScanLine, Search, Star } from "lucide-react";
-import { SERVING_STYLES, type ServingStyle } from "@/db/schema";
+import { SERVING_STYLES, type PourVisibility, type ServingStyle } from "@/db/schema";
 import { StarRating } from "@/components/star-rating";
 import { FlavorWheelInput } from "@/components/flavor-wheel-input";
 import { NoteCapture, type ExtractedTastingNote } from "@/components/note-capture";
+import { VisibilityChips } from "@/components/visibility-chips";
 import { enqueuePour } from "@/lib/native/offline-queue";
 
 export interface BottlePick {
@@ -213,6 +214,7 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
   const [finish, setFinish] = useState("");
   const [freeform, setFreeform] = useState("");
   const [flavorTags, setFlavorTags] = useState<Record<string, number>>({});
+  const [visibility, setVisibility] = useState<PourVisibility>("private");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [done, setDone] = useState<{
@@ -221,6 +223,21 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
     /** Saved locally because the network was gone; it syncs on reconnect. */
     queued: boolean;
   } | null>(null);
+
+  // US-6: the visibility selector defaults to the user's saved preference,
+  // never a new tap — a failed/401 fetch just leaves it at "Only me".
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/social/prefs")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { defaultPourVisibility?: PourVisibility } | null) => {
+        if (!cancelled && data?.defaultPourVisibility) setVisibility(data.defaultPourVisibility);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const reset = () => {
     setBottle(null);
@@ -285,6 +302,7 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
       servingStyle: servingStyle ?? undefined,
       amountMl,
       note: hasNote ? noteFields : undefined,
+      visibility,
     };
 
     try {
@@ -486,6 +504,11 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
                 <div className="flex flex-col gap-1.5">
                   <span className="section-label">Flavor wheel</span>
                   <FlavorWheelInput value={flavorTags} onChange={setFlavorTags} />
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <span className="section-label">Who can see this</span>
+                  <VisibilityChips value={visibility} onChange={setVisibility} idPrefix="pour-visibility" />
                 </div>
               </div>
             )}

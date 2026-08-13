@@ -4,6 +4,8 @@ import { useMemo, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { Star } from "lucide-react";
 import { PourShareButton } from "@/components/pour-share-button";
+import { VisibilityControl } from "@/components/visibility-control";
+import type { PourVisibility } from "@/db/schema";
 import { FLAVOR_WHEEL, leafLabel, wedgeForLeaf } from "@/lib/flavor-wheel";
 
 /** Serialized pour crossing the server→client boundary (timestamp as ISO). */
@@ -15,6 +17,7 @@ export interface TimelinePour {
   servingStyle: string | null;
   amountMl: number | null;
   createdAt: string;
+  visibility: PourVisibility;
   note: {
     nose: string | null;
     palate: string | null;
@@ -105,6 +108,8 @@ function PourRow({ pour }: { pour: TimelinePour }) {
           )}
         </ul>
       )}
+
+      <VisibilityControl pourId={pour.id} visibility={pour.visibility} />
 
       <PourShareButton pourId={pour.id} bottleName={pour.bottleName} />
     </li>
