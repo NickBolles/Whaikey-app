@@ -1,8 +1,11 @@
 import Link from "next/link";
+import { Link2 } from "lucide-react";
 import { getDb } from "@/db";
 import { getSessionUser } from "@/lib/session";
 import { listPourShares } from "@/lib/pour-sharing";
+import { getOwnProfile, getSocialPrefs } from "@/lib/social";
 import { SharedLinksList } from "./shared-links-list";
+import { PrivacyControls } from "./privacy-controls";
 
 export const dynamic = "force-dynamic";
 
@@ -25,43 +28,54 @@ export default async function SharingPage() {
     );
   }
 
-  const shares = await listPourShares(getDb(), user.id);
-
-  if (shares.length === 0) {
-    return (
-      <div className="flex min-h-[60dvh] flex-col items-center justify-center gap-5 px-6 text-center">
-        <div aria-hidden className="text-5xl drop-shadow-[0_0_24px_rgba(232,161,60,0.25)]">
-          🔗
-        </div>
-        <div>
-          <h1 className="font-display text-2xl font-semibold">No shared links yet</h1>
-          <p className="mt-2 max-w-sm text-muted">
-            Share a tasting note from your journal, and it&apos;ll show up here — revocable any time.
-          </p>
-        </div>
-        <Link href="/history" className="btn-primary px-8 py-3">
-          Go to your journal
-        </Link>
-      </div>
-    );
-  }
+  const db = getDb();
+  const [shares, profile, prefs] = await Promise.all([
+    listPourShares(db, user.id),
+    getOwnProfile(db, user.id),
+    getSocialPrefs(db, user.id),
+  ]);
 
   return (
-    <div className="mx-auto flex max-w-lg flex-col gap-6 px-4 pb-24 pt-8">
+    <div className="mx-auto flex max-w-lg flex-col gap-8 px-4 pb-24 pt-8">
       <header>
-        <h1 className="font-display text-[2rem] font-semibold leading-tight">Shared links</h1>
+        <h1 className="font-display text-[2rem] font-semibold leading-tight">Sharing</h1>
         <p className="mt-1 text-sm text-muted">
-          {shares.length} active link{shares.length === 1 ? "" : "s"} · bearer links, revoke any time
+          {shares.length > 0
+            ? `${shares.length} active link${shares.length === 1 ? "" : "s"} · bearer links, revoke any time`
+            : "Shared links and your privacy defaults, in one place."}
         </p>
       </header>
-      <SharedLinksList
-        shares={shares.map((s) => ({
-          code: s.code,
-          pourId: s.pourId,
-          bottleId: s.bottleId,
-          bottleName: s.bottleName,
-          createdAt: s.createdAt.toISOString(),
-        }))}
+
+      {shares.length === 0 ? (
+        <div className="card flex flex-col items-center gap-3 p-8 text-center">
+          <Link2 size={28} strokeWidth={1.8} className="text-muted" aria-hidden />
+          <div>
+            <p className="font-display text-lg font-semibold">No shared links yet</p>
+            <p className="mt-1 max-w-sm text-sm text-muted">
+              Share a tasting note from your journal, and it&apos;ll show up here — revocable any time.
+            </p>
+          </div>
+          <Link href="/history" className="btn-secondary px-6 py-2.5 text-sm">
+            Go to your journal
+          </Link>
+        </div>
+      ) : (
+        <SharedLinksList
+          shares={shares.map((s) => ({
+            code: s.code,
+            pourId: s.pourId,
+            bottleId: s.bottleId,
+            bottleName: s.bottleName,
+            createdAt: s.createdAt.toISOString(),
+          }))}
+        />
+      )}
+
+      <PrivacyControls
+        hasProfile={Boolean(profile)}
+        initialDefaultVisibility={prefs.defaultPourVisibility}
+        initialAllowComments={prefs.allowComments}
+        initialSocialEnabled={profile?.socialEnabled ?? false}
       />
     </div>
   );
