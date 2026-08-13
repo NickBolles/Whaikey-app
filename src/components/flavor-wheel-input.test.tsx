@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 const { haptic } = vi.hoisted(() => ({ haptic: vi.fn() }));
 vi.mock("@/lib/native/haptics", () => ({ haptic }));
@@ -102,14 +102,35 @@ describe("FlavorWheelInput", () => {
 
     // Hold Sweet (lower-right), then deliberately sweep sideways and outward to a descriptor at 3×.
     fireEvent.pointerDown(wheel, { pointerType: "touch", pointerId: 1, clientX: 270, clientY: 270 });
-    vi.advanceTimersByTime(140);
+    act(() => {
+      vi.advanceTimersByTime(140);
+    });
     fireEvent.pointerMove(wheel, { pointerType: "touch", pointerId: 1, clientX: 286, clientY: 274 });
     fireEvent.pointerUp(wheel, { pointerType: "touch", pointerId: 1, clientX: 286, clientY: 274 });
 
     expect(onChange).toHaveBeenCalledWith({ toffee: 3 });
     expect(haptic).toHaveBeenCalledWith("lock");
+    expect(haptic).toHaveBeenCalledWith("category");
     expect(haptic).toHaveBeenCalledWith("intensity-3");
     expect(haptic).toHaveBeenCalledWith("success");
+    vi.useRealTimers();
+  });
+
+  it("shows hold progress and a ready cue before a sweep is activated", () => {
+    vi.useFakeTimers();
+    const { container } = render(<FlavorWheelInput value={{}} onChange={vi.fn()} />);
+    const wheel = container.querySelector("svg")!;
+
+    fireEvent.pointerDown(wheel, { pointerType: "touch", pointerId: 1, clientX: 270, clientY: 270 });
+    expect(screen.getByText("hold to taste")).toBeInTheDocument();
+
+    act(() => {
+      vi.advanceTimersByTime(140);
+    });
+    expect(screen.getByText("sweep to taste")).toBeInTheDocument();
+
+    fireEvent.pointerUp(wheel, { pointerType: "touch", pointerId: 1, clientX: 270, clientY: 270 });
+    expect(screen.queryByText("sweep to taste")).not.toBeInTheDocument();
     vi.useRealTimers();
   });
 
@@ -131,7 +152,9 @@ describe("FlavorWheelInput", () => {
     });
 
     fireEvent.pointerDown(wheel, { pointerType: "touch", pointerId: 1, clientX: 270, clientY: 270 });
-    vi.advanceTimersByTime(140);
+    act(() => {
+      vi.advanceTimersByTime(140);
+    });
     fireEvent.pointerUp(wheel, { pointerType: "touch", pointerId: 1, clientX: 270, clientY: 270 });
 
     expect(onChange).not.toHaveBeenCalled();
