@@ -2,9 +2,15 @@
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+
+const { haptic } = vi.hoisted(() => ({ haptic: vi.fn() }));
+vi.mock("@/lib/native/haptics", () => ({ haptic }));
 import { FlavorWheelInput } from "@/components/flavor-wheel-input";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  haptic.mockClear();
+});
 
 function Harness({ initial = {} }: { initial?: Record<string, number> }) {
   const [value, setValue] = useState<Record<string, number>>(initial);
@@ -82,17 +88,19 @@ describe("FlavorWheelInput", () => {
       toJSON: () => ({}),
     });
 
-    // Hold Sweet (lower-right), then drag out to its first descriptor at 3×.
+    // Hold Sweet (lower-right), then deliberately sweep sideways and outward to a descriptor at 3×.
     fireEvent.pointerDown(wheel, { pointerType: "touch", pointerId: 1, clientX: 270, clientY: 270 });
     vi.advanceTimersByTime(220);
-    fireEvent.pointerMove(wheel, { pointerType: "touch", pointerId: 1, clientX: 280, clientY: 280 });
-    fireEvent.pointerUp(wheel, { pointerType: "touch", pointerId: 1, clientX: 280, clientY: 280 });
+    fireEvent.pointerMove(wheel, { pointerType: "touch", pointerId: 1, clientX: 286, clientY: 274 });
+    fireEvent.pointerUp(wheel, { pointerType: "touch", pointerId: 1, clientX: 286, clientY: 274 });
 
-    expect(onChange).toHaveBeenCalledWith({ honey: 3 });
+    expect(onChange).toHaveBeenCalledWith({ toffee: 3 });
+    expect(haptic).toHaveBeenCalledWith("lock");
+    expect(haptic).toHaveBeenCalledWith("success");
     vi.useRealTimers();
   });
 
-  it("uses the release position when a touch moves directly outward", () => {
+  it("leaves a stationary long press alone so the page can scroll", () => {
     vi.useFakeTimers();
     const onChange = vi.fn();
     const { container } = render(<FlavorWheelInput value={{}} onChange={onChange} />);
@@ -111,9 +119,9 @@ describe("FlavorWheelInput", () => {
 
     fireEvent.pointerDown(wheel, { pointerType: "touch", pointerId: 1, clientX: 270, clientY: 270 });
     vi.advanceTimersByTime(220);
-    fireEvent.pointerUp(wheel, { pointerType: "touch", pointerId: 1, clientX: 280, clientY: 280 });
+    fireEvent.pointerUp(wheel, { pointerType: "touch", pointerId: 1, clientX: 270, clientY: 270 });
 
-    expect(onChange).toHaveBeenCalledWith({ honey: 3 });
+    expect(onChange).not.toHaveBeenCalled();
     vi.useRealTimers();
   });
 

@@ -2,7 +2,8 @@
 
 import { useRef, type MouseEvent, type ReactNode, type PointerEvent } from "react";
 import { FLAVOR_WHEEL, leafLabel, wedgeForLeaf } from "@/lib/flavor-wheel";
-import { WHEEL_HOLD_MS, shouldStartWheelGesture, wheelIndex, wheelPointFromClient, wheelPointFromPointer } from "@/components/wheel-gesture";
+import { haptic } from "@/lib/native/haptics";
+import { WHEEL_HOLD_MS, shouldActivateWheelGesture, shouldStartWheelGesture, wheelIndex, wheelPointFromPointer } from "@/components/wheel-gesture";
 import { arcPath, bandLabelTransform, inkOn, labelTransform, leafShade, polar, pressableKeys, shortLabel, warmify } from "@/components/wheel-geometry";
 
 export type FlavorSelection = {
@@ -115,6 +116,8 @@ function selected(selection: FlavorSelection, selectedIds: string[]): boolean {
 export function BarFlavorWheel({ wedgeHeat, leafHeat, caption, subCaption, selectedIds, onToggle, marks }: BarFlavorWheelProps) {
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const gestureActive = useRef(false);
+  const holdElapsed = useRef(false);
+  const activationStart = useRef<{ clientX: number; clientY: number } | null>(null);
   const activePointerId = useRef<number | null>(null);
   const gestureLeafId = useRef<string | null>(null);
   const suppressClick = useRef(false);
@@ -228,6 +231,8 @@ export function BarFlavorWheel({ wedgeHeat, leafHeat, caption, subCaption, selec
     if (holdTimer.current) clearTimeout(holdTimer.current);
     holdTimer.current = null;
     gestureActive.current = false;
+    holdElapsed.current = false;
+    activationStart.current = null;
     activePointerId.current = null;
     gestureLeafId.current = null;
   };
@@ -247,18 +252,23 @@ export function BarFlavorWheel({ wedgeHeat, leafHeat, caption, subCaption, selec
 
   const startGesture = (event: PointerEvent<SVGSVGElement>) => {
     if (!shouldStartWheelGesture(event) || activePointerId.current !== null) return;
-    const target = event.currentTarget;
-    const { clientX, clientY, pointerId } = event;
-    activePointerId.current = pointerId;
-    target.setPointerCapture?.(pointerId);
+    activePointerId.current = event.pointerId;
+    activationStart.current = { clientX: event.clientX, clientY: event.clientY };
     holdTimer.current = setTimeout(() => {
-      gestureActive.current = true;
-      const point = wheelPointFromClient(target, clientX, clientY, SIZE);
-      const wedgeIndex = wheelIndex(point.angle, FLAVOR_WHEEL.length);
-      const wedge = FLAVOR_WHEEL[wedgeIndex];
-      const localAngle = (point.angle - wedgeIndex * wedgeSpan + 360) % 360;
-      gestureLeafId.current = point.radius < OUTER[0] ? null : wedge.leaves[wheelIndex(localAngle, wedge.leaves.length)].id;
+      holdElapsed.current = true;
     }, WHEEL_HOLD_MS);
+  };
+
+  const moveGesture = (event: PointerEvent<SVGSVGElement>) => {
+    if (activePointerId.current !== event.pointerId) return;
+    if (!gestureActive.current) {
+      const start = activationStart.current;
+      if (!holdElapsed.current || !start || !shouldActivateWheelGesture(start, event)) return;
+      gestureActive.current = true;
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+      haptic("lock");
+    }
+    updateGesture(event);
   };
 
   const commitGesture = (event: PointerEvent<SVGSVGElement>) => {
@@ -268,6 +278,7 @@ export function BarFlavorWheel({ wedgeHeat, leafHeat, caption, subCaption, selec
     if (gestureActive.current && leafId) {
       const leaf = FLAVOR_WHEEL.flatMap((wedge) => wedge.leaves).find((item) => item.id === leafId);
       if (leaf) onToggle({ id: leaf.id, label: leaf.label, leafIds: [leaf.id] });
+      haptic("success");
       suppressClick.current = true;
       setTimeout(() => {
         suppressClick.current = false;
@@ -286,13 +297,11 @@ export function BarFlavorWheel({ wedgeHeat, leafHeat, caption, subCaption, selec
     <div className="flex w-full flex-col items-center gap-3" data-testid="bar-flavor-wheel">
       <svg
         viewBox={`0 0 ${SIZE} ${SIZE}`}
-        className="w-full max-w-[360px] select-none touch-none"
+        className="w-full max-w-[360px] select-none touch-pan-y"
         role="group"
         aria-label={`${caption} flavor wheel`}
         onPointerDown={startGesture}
-        onPointerMove={(event) => {
-          if (gestureActive.current && activePointerId.current === event.pointerId) updateGesture(event);
-        }}
+        onPointerMove={moveGesture}
         onPointerUp={commitGesture}
         onPointerCancel={(event) => {
           if (activePointerId.current === event.pointerId) clearGesture();
