@@ -1,10 +1,12 @@
 "use client";
 
 import { useMemo, useRef, useState, type PointerEvent } from "react";
+import { haptic } from "@/lib/native/haptics";
 import { FLAVOR_WHEEL } from "@/lib/flavor-wheel";
 import {
   WHEEL_HOLD_MS,
   intensityForRadius,
+  shouldActivateWheelGesture,
   shouldStartWheelGesture,
   wheelIndex,
   wheelPointFromPointer,
@@ -52,6 +54,8 @@ export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
   const gestureIntensityRef = useRef<1 | 2 | 3>(1);
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const activeGesture = useRef(false);
+  const holdElapsed = useRef(false);
+  const activationStart = useRef<{ clientX: number; clientY: number } | null>(null);
   const activePointerId = useRef<number | null>(null);
   const gestureWedgeId = useRef<string | null>(null);
   const suppressClick = useRef(false);
@@ -106,6 +110,8 @@ export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
     if (holdTimer.current) clearTimeout(holdTimer.current);
     holdTimer.current = null;
     activeGesture.current = false;
+    holdElapsed.current = false;
+    activationStart.current = null;
     activePointerId.current = null;
     gestureWedgeId.current = null;
     gestureLeafIdRef.current = null;
@@ -148,16 +154,22 @@ export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
     const point = wheelPointFromPointer(event, SIZE);
     const wedge = FLAVOR_WHEEL[wheelIndex(point.angle, FLAVOR_WHEEL.length)];
     activePointerId.current = event.pointerId;
+    activationStart.current = { clientX: event.clientX, clientY: event.clientY };
     gestureWedgeId.current = wedge.id;
-    event.currentTarget.setPointerCapture?.(event.pointerId);
     holdTimer.current = setTimeout(() => {
-      activeGesture.current = true;
-      setSelectedWedgeId(wedge.id);
+      holdElapsed.current = true;
     }, WHEEL_HOLD_MS);
   };
 
   const moveGesture = (event: PointerEvent<SVGSVGElement>) => {
-    if (!activeGesture.current || activePointerId.current !== event.pointerId) return;
+    if (activePointerId.current !== event.pointerId) return;
+    if (!activeGesture.current) {
+      const start = activationStart.current;
+      if (!holdElapsed.current || !start || !shouldActivateWheelGesture(start, event)) return;
+      activeGesture.current = true;
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+      haptic("lock");
+    }
     updateGestureAt(event);
   };
 
@@ -167,6 +179,7 @@ export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
     const leafId = gestureLeafIdRef.current;
     if (activeGesture.current && leafId) {
       onChange({ ...value, [leafId]: gestureIntensityRef.current });
+      haptic("success");
       suppressClick.current = true;
       setTimeout(() => {
         suppressClick.current = false;
@@ -191,7 +204,7 @@ export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
     <div className="flex flex-col items-center gap-3">
       <svg
         viewBox={`0 0 ${SIZE} ${SIZE}`}
-        className="w-full max-w-[360px] select-none touch-none"
+        className="w-full max-w-[360px] select-none touch-pan-y"
         role="application"
         aria-label="Flavor wheel"
         onPointerDown={startGesture}

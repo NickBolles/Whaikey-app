@@ -2,7 +2,8 @@
 
 import { useRef, useState, type PointerEvent } from "react";
 import { FLAVOR_WHEEL } from "@/lib/flavor-wheel";
-import { WHEEL_HOLD_MS, shouldStartWheelGesture, wheelIndex, wheelPointFromClient, wheelPointFromPointer } from "@/components/wheel-gesture";
+import { haptic } from "@/lib/native/haptics";
+import { WHEEL_HOLD_MS, shouldActivateWheelGesture, shouldStartWheelGesture, wheelIndex, wheelPointFromPointer } from "@/components/wheel-gesture";
 import { WEDGE_NOTES } from "@/lib/education";
 import {
   SERIF,
@@ -31,6 +32,8 @@ export function FlavorWheelExplorer() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const gestureActive = useRef(false);
+  const holdElapsed = useRef(false);
+  const activationStart = useRef<{ clientX: number; clientY: number } | null>(null);
   const activePointerId = useRef<number | null>(null);
   const suppressClick = useRef(false);
   const selected = FLAVOR_WHEEL.find((w) => w.id === selectedId) ?? null;
@@ -41,6 +44,8 @@ export function FlavorWheelExplorer() {
     if (holdTimer.current) clearTimeout(holdTimer.current);
     holdTimer.current = null;
     gestureActive.current = false;
+    holdElapsed.current = false;
+    activationStart.current = null;
     activePointerId.current = null;
   };
 
@@ -51,19 +56,23 @@ export function FlavorWheelExplorer() {
 
   const startGesture = (event: PointerEvent<SVGSVGElement>) => {
     if (!shouldStartWheelGesture(event) || activePointerId.current !== null) return;
-    const target = event.currentTarget;
     const { clientX, clientY, pointerId } = event;
     activePointerId.current = pointerId;
-    target.setPointerCapture?.(pointerId);
+    activationStart.current = { clientX, clientY };
     holdTimer.current = setTimeout(() => {
-      gestureActive.current = true;
-      const point = wheelPointFromClient(target, clientX, clientY, SIZE);
-      setSelectedId(FLAVOR_WHEEL[wheelIndex(point.angle, FLAVOR_WHEEL.length)].id);
+      holdElapsed.current = true;
     }, WHEEL_HOLD_MS);
   };
 
   const moveGesture = (event: PointerEvent<SVGSVGElement>) => {
-    if (!gestureActive.current || activePointerId.current !== event.pointerId) return;
+    if (activePointerId.current !== event.pointerId) return;
+    if (!gestureActive.current) {
+      const start = activationStart.current;
+      if (!holdElapsed.current || !start || !shouldActivateWheelGesture(start, event)) return;
+      gestureActive.current = true;
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+      haptic("lock");
+    }
     selectAtPointer(event);
   };
 

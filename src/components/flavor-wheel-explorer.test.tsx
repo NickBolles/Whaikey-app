@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+
+const { haptic } = vi.hoisted(() => ({ haptic: vi.fn() }));
+vi.mock("@/lib/native/haptics", () => ({ haptic }));
 import { FlavorWheelExplorer } from "@/components/flavor-wheel-explorer";
 import { FLAVOR_WHEEL } from "@/lib/flavor-wheel";
 

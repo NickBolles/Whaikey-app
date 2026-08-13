@@ -1,6 +1,8 @@
 import type { PointerEvent as ReactPointerEvent } from "react";
 
 export const WHEEL_HOLD_MS = 220;
+/** A deliberate sideways nudge unlocks the wheel without stealing a vertical scroll. */
+export const WHEEL_ACTIVATION_DISTANCE = 12;
 
 export type WheelPoint = {
   angle: number;
@@ -44,6 +46,19 @@ export function intensityForRadius(radius: number): 1 | 2 | 3 {
   if (radius >= 152) return 3;
   if (radius >= 136) return 2;
   return 1;
+}
+
+/**
+ * A stationary long-press is reserved for normal browser behavior (including
+ * scrolling). The wheel only claims a touch after a deliberate sideways drag.
+ */
+export function shouldActivateWheelGesture(
+  start: Pick<ReactPointerEvent<SVGSVGElement>, "clientX" | "clientY">,
+  current: Pick<ReactPointerEvent<SVGSVGElement>, "clientX" | "clientY">,
+): boolean {
+  const horizontal = Math.abs(current.clientX - start.clientX);
+  const vertical = Math.abs(current.clientY - start.clientY);
+  return horizontal >= WHEEL_ACTIVATION_DISTANCE && horizontal > vertical;
 }
 
 export function shouldStartWheelGesture(

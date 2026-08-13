@@ -1,6 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+
+const { haptic } = vi.hoisted(() => ({ haptic: vi.fn() }));
+vi.mock("@/lib/native/haptics", () => ({ haptic }));
 import { BarFlavorWheel } from "./bar-flavor-wheel";
 
 afterEach(cleanup);
