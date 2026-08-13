@@ -208,13 +208,15 @@ My Bar is a **top-2 surface** (with scan/search-to-add) — not a list of rows w
 
 ## 9. Social & Community (Phase 4 / S1–S4)
 
-> **Design doc:** [SOCIAL.md](./SOCIAL.md) — thesis, privacy model, banned mechanics, data model, phasing, open questions. This section is the feature-map view of it.
+> **Design doc:** [SOCIAL.md](./SOCIAL.md) — thesis, user stories (§5), pages & flow (§6), privacy model, banned mechanics, data model, phasing, decisions, and the agent-ready S1 build spec (§16). This section is the feature-map view of it.
 
-> **User story:** *"I want my friends to see what I tried, what I tasted, and how it compared to the producer's notes — and I want to find whiskey through people whose palate I trust."*
+> **User story:** *"I want my friends to see what I tried, what I tasted, and how it compared to the producer's notes — and I want to find whiskey through people whose palate I trust."* (Broken into 17 testable stories in SOCIAL.md §5.)
 
 **The organizing idea:** the bottle is the segment. Strava makes comparison meaningful by having everyone run the same stretch of road; we have everyone taste the same bottle. What varies is the palate, not the performance — so the social layer can be engaging without ever ranking people by how much they drink.
 
-### 9.1 Identity & graph (S1)
+**Phasing (SOCIAL.md §13):** S1 share control + comparison-on-the-link (no graph, implementable now) → S2 friends & Same Dram → S3 conversation & groups → S4 community scale. Every phase ships a loop a user can feel; the sparse-overlap risk is tested by S1, the cheapest phase.
+
+### 9.1 Identity & graph (S2)
 
 | # | Feature | Pri | Notes |
 |---|---------|-----|-------|
@@ -223,13 +225,14 @@ My Bar is a **top-2 surface** (with scan/search-to-add) — not a list of rows w
 | 9.1.3 | Follow (asymmetric) with optional approval gate for private accounts | 🔵 | Mutual follow derives "friends", which gates the more intimate surfaces |
 | 9.1.4 | Visibility tiers on every object: **Only me** (default) → Friends → Followers → Link → Public | 🔵 | Per-pour flag + a user-settable default that ships as *Only me*. Never retroactive |
 | 9.1.5 | Block, mute, report | 🔵 | Day one, not a bolt-on; enforced on every read path in both directions |
-| 9.1.6 | Find people: exact handle, invite links, friends-of-friends with matching palates | 🔵 | No contact-book upload in S1 (SOCIAL.md §12 Q8) |
+| 9.1.6 | Find people: exact handle, invite links, friends-of-friends with matching palates | 🔵 | No contact-book upload through S2 (SOCIAL.md §14 D8) |
 
-### 9.2 Sharing what you tried (S1 — partly shipped)
+### 9.2 Sharing what you tried (S1 — partly shipped, build spec in SOCIAL.md §16)
 
 - **Shipped today:** one-tap share on any pour creates an opaque bearer link (`/s/[code]`) rendering the bottle, rating, serving style and note with an OG image; `noindex`; no prices, no inventory, no other pours.
-- **S1 additions:** revocation + a "links I've shared" management page (today a link can only be revoked by deleting the pour); identity behind the link (profile, not a bare name string); an "edited" marker when the underlying note changes.
-- **Shareable card types** beyond the single pour: palate card, Same Dram comparison, flight results, Wrapped. Each a non-indexed OG-imaged page.
+- **S1 additions:** revocation + a `/sharing` management page (today a link can only be revoked by deleting the pour); an "edited" marker when the underlying note changes; and **comparison on the link** — a signed-in viewer who has tasted the same bottle sees "you both got… / they got — you didn't / you got — they didn't," rendered only for the viewer; a viewer who hasn't gets a one-tap wishlist hook. This is the two-person Same Dram, shipped before any graph exists.
+- **S2:** identity behind the link (profile, not a bare name string).
+- **Shareable card types** beyond the single pour (S2+): palate card, Same Dram comparison, flight results, Wrapped. Each a non-indexed OG-imaged page.
 - Cards are the growth loop and need **no graph at all** — which is why they ship ahead of it.
 
 ### 9.3 Same Dram — you vs. the producer vs. your friends (S2, signature) 🔵
@@ -241,18 +244,20 @@ The bottle page's comparison view, and the direct answer to *"how did it compare
 - The `substitutes` mapping already computed by `getFlavorCalibration()` becomes person-to-person: *"where Sarah writes clove, you write cinnamon."*
 - **Never right/wrong.** A published tasting note is one opinion written once by someone selling the bottle; a friend's note is an opinion too. Calibration against reference points, never accuracy against an answer key.
 - No new model call and no new taxonomy — this is the payoff for `src/lib/flavor-wheel.ts` being a shared contract.
+- **De-risked in S1:** the two-person version ships on the share page first (§9.2), so overlap gets measured before profiles and follows are built around it.
 
-### 9.4 The comparison feed (S2) 🔵
+### 9.4 The comparison stream — a Home module, not a tab (S2) 🔵
 
 - Content is **the pour you already logged**, surfaced by a visibility flag. No separate composer, ever.
 - Every card carries a comparison hook: *"you tasted this too — you agreed on peat and brine, you got smoked-meat and he didn't"*, or when you haven't, the discovery version: *"3 friends' notes on this · 82% palate match."*
 - **Chronological**, with a light boost for bottles you own/wishlist/have tried. No engagement-optimised ranking — an algorithmically optimised drinking feed is a bad object to have built.
+- Lives as a **"From your friends" module on Home** — a sparse early graph (~4 friends ≈ 2 items/week) would make a dedicated tab feel dead. The tab bar doesn't change until a data tripwire says the content justifies it (SOCIAL.md §6.3).
 - Designed for the **sparse case first**: four friends produce ~2 items a week, and that must read as calm, not dead.
 
-### 9.5 Reactions, comments & notifications (S2) 🔵
+### 9.5 Reactions, comments & notifications (Cheers S2 · comments S3) 🔵
 
-- One-tap positive reaction ("Cheers" — naming open, SOCIAL.md §12 Q4). Positive-only; no dislike.
-- Threaded comments on a note: plain text, `@mentions`, edit window, soft delete, rate-limited, escaped on render.
+- One-tap positive reaction: **"Cheers"** (decided, SOCIAL.md §14 D4). Positive-only; no dislike. Ships with the graph in S2.
+- Threaded comments (S3, together with the report flow): plain text, `@mentions`, edit window, soft delete, rate-limited, escaped on render.
 - Counts live on the object, never aggregated into a person-level score or rank.
 - **Notification allow-list:** new follower, cheer/comment on your note, a friend tasted a bottle you've also tasted (batched, ≤1/day), club and flight events you opted into, someone logged a note from a sample you sent. **Banned:** anything mentioning pouring, any "you haven't logged since…", any progress-toward-reward nudge, any "friends drinking now" presence.
 
@@ -261,7 +266,7 @@ The bottle page's comparison view, and the direct answer to *"how did it compare
 | # | Feature | Pri | Notes |
 |---|---------|-----|-------|
 | 9.6.1 | Community ratings/notes aggregation (anonymous-by-default contribution) | 🔵 | Friends' ratings shown as a separate labelled row — never mixed into the public average |
-| 9.6.2 | **Community flavor consensus vs. the producer's claim** | 🔵 | *"The label says honey; 71% of drinkers say caramel."* Requires shared taxonomy + attributed producer notes — structurally hard for anyone else to copy |
+| 9.6.2 | **Community flavor consensus vs. the producer's claim** (S4 — needs volume) | 🔵 | *"The label says honey; 71% of drinkers say caramel."* Requires shared taxonomy + attributed producer notes — structurally hard for anyone else to copy |
 | 9.6.3 | "Others who tasted this" | 🔵 | Opt-in, capped, ordered by palate match — never by who drinks it most |
 | 9.6.4 | Crowdsourced local price/availability reports | ⚪ | Ranges and dates, never false precision |
 
@@ -278,13 +283,14 @@ The bottle page's comparison view, and the direct answer to *"how did it compare
 - Club feed, **shared shelf** (opt-in per bottle, prices stripped), club-only notes, and a **club palate wheel** — *"this club leans peaty and owns nothing floral."*
 - Aim at the group of 4, not the community of 4,000: small-group belonging is Strava's strongest retention mechanic (club members ~3.5× more likely to still be active at 12 months).
 
-### 9.9 Blind flights, together (S3) 🔵
+### 9.9 Blind flights, together (S3 — can lead the phase) 🔵
 
 Extends §4.5's blind mode into a multi-user session — the marquee group feature.
 
 - Host builds the flight from their bar or a shared pool; the app assigns blind letters; guests log ratings + wheel notes per slot from their own phones; host (or a timer) triggers the reveal.
 - Reveal screen: aggregate score per bottle, who guessed what, and a **group Same Dram** — the whole table's notes against the producer's.
 - Shareable results card; stored in club history.
+- Needs a host and guests, **not clubs** — no dependency on §9.8, so flights can ship first within S3. Hosting is free at any table size: every guest at the table is an install, so the flight night is the app's strongest acquisition loop (SOCIAL.md §10).
 - Deliberately better in person, which is the right thing for an alcohol app to optimise: shared, occasion-based drinking rather than solo daily logging.
 
 ### 9.10 Bottle shares & samples (S3) 🔵
@@ -303,7 +309,7 @@ Hard rules, enforced in review (SOCIAL.md §3.1) and grounded in the published c
 5. **Money never crosses a social boundary** — purchase price, collection value, spend and cost-per-pour are structurally absent from social projections. Privacy *and* safety: a public high-value collection is a burglary target.
 6. **Recovery-aware exit:** one tap makes everything private and switches social off entirely, with the private journal fully intact. Stepping back from drinking must never mean losing your notes.
 
-**Guardrail metric with teeth:** pours logged per active user per week must not rise materially after a social release. If it does, that feature is a defect regardless of its engagement numbers, and no further social ships until it's fixed.
+**Guardrail metric (smoke alarm, not circuit breaker):** pours logged per active user per week is watched, cohort-adjusted, across every social release. The enforcement is the mechanic bans above, applied in review; the metric verifies they worked. A sustained rise triggers investigation — logging isn't drinking, and better capture raises logged pours while drinking is flat — but if a genuine frequency rise traces to a specific social mechanic, that mechanic gets fixed or pulled, and "engagement is up" never excuses it (SOCIAL.md §12).
 
 ---
 
@@ -352,7 +358,7 @@ Inspired by Vivino's "Wine Adventures" (gamified guided tasting journeys, a Prem
 |---|---|
 | Performance | Cold start < 2 s; search results < 100 ms; pour log round-trip feels instant (optimistic UI) |
 | Offline | Pour logging, note-taking, and My Bar browsing work offline; queued sync with conflict resolution (last-write-wins per field) |
-| Privacy | Notes/inventory private by default; community contribution is opt-in and anonymized; full export (CSV/JSON, including social data) free forever; account deletion = hard delete with social rows cascading. Visibility is never raised retroactively, share links are enumerable and revocable, and money data never enters a social projection (§9.11, SOCIAL.md §6) |
+| Privacy | Notes/inventory private by default; community contribution is opt-in and anonymized; full export (CSV/JSON, including social data) free forever; account deletion = hard delete with social rows cascading. Visibility is never raised by the system (the owner may raise it explicitly), share links are enumerable and revocable, and money data never enters a social projection (§9.11, SOCIAL.md §8) |
 | Accessibility | VoiceOver/TalkBack on all core flows; wheel has a list-mode equivalent; dynamic type |
 | Trust & safety | Age gate; responsible-drinking resources; no engagement mechanics that reward consumption frequency |
 | Localization | v1 English; schema keeps display strings separable; metric/imperial pour sizes |
@@ -381,16 +387,16 @@ Bottle DB ──▶ Search ──▶ Bottle Detail ──▶ Own/Tried/Wishlist 
         │            Flavor wheel ──▶ Producer calibration ─┐
         │                  │                               │
         │                  ▼                               ▼
-        │          Share cards/links ──▶ Profiles + follow graph (S1)
+        │          Share links + link comparison (S1) ──▶ Profiles + follow graph (S2)
         │                                        │
         │                                        ▼
-        └──── Taste twins (S3) ◀──── Same Dram + comparison feed (S2)
+        └──── Taste twins (S3) ◀──── Same Dram + Home friends module (S2)
                                                  │
                                     ┌────────────┴────────────┐
                                     ▼                         ▼
-                              Clubs (S3) ──▶ Blind flights   Community layer (S4)
+                         Blind flights · Clubs (S3)    Community layer (S4)
 ```
 
-Two things to read off the social half: **share cards need no graph** (so they ship early and seed it), and **Same Dram is downstream of the flavor taxonomy plus producer calibration** — which is why a competitor with a feed but no shared descriptor space can't copy it.
+Two things to read off the social half: **share links and the two-person comparison need no graph** (so they ship first, seed the graph, and measure note overlap before anything else is built), and **Same Dram is downstream of the flavor taxonomy plus producer calibration** — which is why a competitor with a feed but no shared descriptor space can't copy it.
 
 The AI layer deliberately sits *on top of* a working manual core: every AI feature degrades gracefully to a manual equivalent (scan→search, voice notes→chips, recs→browse), so AI failures never block the core loop.
