@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
+import * as schema from "@/db/schema";
 import { requireUser, withErrorHandling } from "@/lib/session";
 import { blockUser, getOwnProfile, listBlocked } from "@/lib/social";
 
@@ -32,6 +34,14 @@ export async function POST(req: Request) {
     const profile = await getOwnProfile(db, user.id);
     if (!profile) {
       return NextResponse.json({ error: "profile_required" }, { status: 409 });
+    }
+
+    const target = await db.query.user.findFirst({
+      columns: { id: true },
+      where: eq(schema.user.id, parsed.data.userId),
+    });
+    if (!target) {
+      return NextResponse.json({ error: "not_found" }, { status: 404 });
     }
 
     await blockUser(db, user.id, parsed.data.userId);

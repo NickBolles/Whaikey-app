@@ -77,8 +77,11 @@ export async function createPourShare(
             .where(and(eq(schema.pourShares.id, existing.id), eq(schema.pourShares.userId, userId)))
             .returning({ code: schema.pourShares.code });
           if (updated[0]) return updated[0];
-        } catch {
-          // Extremely unlikely code collision; retry with a fresh one.
+        } catch (err) {
+          // Only a code-uniqueness collision earns a retry; anything else is a
+          // real database failure that must surface, not read as bad luck.
+          const message = err instanceof Error ? err.message : String(err);
+          if (!/unique|duplicate/i.test(message)) throw err;
         }
       }
       throw new Error("Unable to create a unique pour share link");

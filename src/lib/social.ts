@@ -581,19 +581,36 @@ export interface SocialNote {
   viewerCheered: boolean;
 }
 
-async function countCheers(db: DB, pourId: string): Promise<number> {
+/**
+ * Counts shown next to a thread must agree with the thread: contributions
+ * from users blocked either way w.r.t. the viewer are excluded, matching
+ * listComments' filtering (a mismatched count would reveal hidden activity).
+ */
+async function countCheers(db: DB, pourId: string, viewerId: string | null): Promise<number> {
+  const conditions = [eq(schema.reactions.pourId, pourId), eq(schema.reactions.kind, "cheers")];
+  if (viewerId) {
+    conditions.push(
+      sql`not exists (select 1 from blocks b where (b.blocker_id = ${viewerId} and b.blocked_id = ${schema.reactions.userId}) or (b.blocker_id = ${schema.reactions.userId} and b.blocked_id = ${viewerId}))`,
+    );
+  }
   const rows = await db
     .select({ n: sql<number>`count(*)` })
     .from(schema.reactions)
-    .where(and(eq(schema.reactions.pourId, pourId), eq(schema.reactions.kind, "cheers")));
+    .where(and(...conditions));
   return Number(rows[0]?.n ?? 0);
 }
 
-async function countComments(db: DB, pourId: string): Promise<number> {
+async function countComments(db: DB, pourId: string, viewerId: string | null): Promise<number> {
+  const conditions = [eq(schema.comments.pourId, pourId), isNull(schema.comments.deletedAt)];
+  if (viewerId) {
+    conditions.push(
+      sql`not exists (select 1 from blocks b where (b.blocker_id = ${viewerId} and b.blocked_id = ${schema.comments.userId}) or (b.blocker_id = ${schema.comments.userId} and b.blocked_id = ${viewerId}))`,
+    );
+  }
   const rows = await db
     .select({ n: sql<number>`count(*)` })
     .from(schema.comments)
-    .where(and(eq(schema.comments.pourId, pourId), isNull(schema.comments.deletedAt)));
+    .where(and(...conditions));
   return Number(rows[0]?.n ?? 0);
 }
 
@@ -626,8 +643,8 @@ async function toSocialNote(
   author: ProfileSummary,
 ): Promise<SocialNote> {
   const [cheersCount, commentCount, viewerCheered] = await Promise.all([
-    countCheers(db, row.pourId),
-    countComments(db, row.pourId),
+    countCheers(db, row.pourId, viewerId),
+    countComments(db, row.pourId, viewerId),
     viewerId ? hasCheered(db, viewerId, row.pourId) : Promise.resolve(false),
   ]);
   return {
@@ -1082,7 +1099,7 @@ export async function cheerPour(db: DB, userId: string, pourId: string): Promise
     .insert(schema.reactions)
     .values({ id: crypto.randomUUID(), pourId, userId, kind: "cheers" })
     .onConflictDoNothing();
-  return { cheersCount: await countCheers(db, pourId) };
+  return { cheersCount: await countCheers(db, pourId, userId) };
 }
 
 export async function uncheerPour(db: DB, userId: string, pourId: string): Promise<{ cheersCount: number } | null> {
@@ -1090,7 +1107,7 @@ export async function uncheerPour(db: DB, userId: string, pourId: string): Promi
   await db
     .delete(schema.reactions)
     .where(and(eq(schema.reactions.pourId, pourId), eq(schema.reactions.userId, userId), eq(schema.reactions.kind, "cheers")));
-  return { cheersCount: await countCheers(db, pourId) };
+  return { cheersCount: await countCheers(db, pourId, userId) };
 }
 
 // ---------------------------------------------------------------------------
@@ -1189,16 +1206,20 @@ export async function addComment(
   const ownerPrefs = await getSocialPrefs(db, ctx.authorId);
   if (!ownerPrefs.allowComments) return null;
 
-  if (parentId) {
+  let effectiveParentId = parentId ?? null;
+  if (effectiveParentId) {
     const parent = await db.query.comments.findFirst({
-      where: and(eq(schema.comments.id, parentId), eq(schema.comments.pourId, pourId)),
+      where: and(eq(schema.comments.id, effectiveParentId), eq(schema.comments.pourId, pourId)),
     });
     if (!parent || parent.deletedAt != null) return null;
+    // Threads are one level deep everywhere they render; a reply to a reply
+    // re-parents onto the top-level comment instead of nesting unreachably.
+    if (parent.parentId != null) effectiveParentId = parent.parentId;
   }
 
   const [row] = await db
     .insert(schema.comments)
-    .values({ id: crypto.randomUUID(), pourId, userId, parentId: parentId ?? null, body: trimmed })
+    .values({ id: crypto.randomUUID(), pourId, userId, parentId: effectiveParentId, body: trimmed })
     .returning();
 
   const author = await getOwnProfile(db, userId);

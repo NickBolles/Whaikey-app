@@ -47,7 +47,8 @@ function formatRelativeTime(iso: string): string {
 interface ComposerProps {
   placeholder: string;
   busy: boolean;
-  onSubmit: (body: string) => Promise<void>;
+  /** Resolves true when the post landed — only then is the draft cleared. */
+  onSubmit: (body: string) => Promise<boolean>;
   onCancel?: () => void;
   autoFocus?: boolean;
 }
@@ -61,8 +62,8 @@ function Composer({ placeholder, busy, onSubmit, onCancel, autoFocus }: Composer
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     if (!canSubmit) return;
-    await onSubmit(trimmed);
-    setValue("");
+    const posted = await onSubmit(trimmed);
+    if (posted) setValue("");
   }
 
   return (
@@ -127,7 +128,7 @@ interface CommentRowProps {
   reportedIds: Set<string>;
   errorId: string | null;
   onReplyToggle: (id: string) => void;
-  onReplySubmit: (parentId: string, body: string) => Promise<void>;
+  onReplySubmit: (parentId: string, body: string) => Promise<boolean>;
   onEditToggle: (id: string) => void;
   onEditSubmit: (id: string, body: string) => Promise<void>;
   onDeleteToggle: (id: string) => void;
@@ -355,8 +356,12 @@ export function CommentThread({ pourId, initialComments, viewerSignedIn, viewerC
   const [composerHint, setComposerHint] = useState<"profile_required" | "error" | null>(null);
   const [rootBusy, setRootBusy] = useState(false);
 
-  const topLevel = comments.filter((c) => !c.parentId);
-  const repliesFor = (id: string) => comments.filter((c) => c.parentId === id);
+  // A reply whose parent was dropped (e.g. its author is blocked w.r.t. the
+  // viewer) still belongs to a non-blocked user — surface it at top level
+  // rather than letting it vanish.
+  const presentIds = new Set(comments.map((c) => c.id));
+  const topLevel = comments.filter((c) => !c.parentId || !presentIds.has(c.parentId));
+  const repliesFor = (id: string) => comments.filter((c) => c.parentId === id && presentIds.has(c.parentId));
 
   async function postComment(body: string, parentId?: string): Promise<boolean> {
     setComposerHint(null);
@@ -386,12 +391,13 @@ export function CommentThread({ pourId, initialComments, viewerSignedIn, viewerC
   }
 
   async function handleRootSubmit(body: string) {
-    await postComment(body);
+    return postComment(body);
   }
 
   async function handleReplySubmit(parentId: string, body: string) {
     const ok = await postComment(body, parentId);
     if (ok) setReplyOpenId(null);
+    return ok;
   }
 
   async function handleEditSubmit(id: string, body: string) {
