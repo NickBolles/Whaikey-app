@@ -237,6 +237,16 @@ export const userBottles = pgTable(
 export const SERVING_STYLES = ["neat", "rocks", "splash", "cocktail", "highball"] as const;
 export type ServingStyle = (typeof SERVING_STYLES)[number];
 
+/**
+ * Per-pour social visibility (docs/SOCIAL.md §8). "private" is the immovable
+ * default; no system action ever raises the visibility of existing data —
+ * only the owner can, explicitly. "friends" = mutual follows; "followers" =
+ * anyone with an accepted follow; "public" = any signed-in viewer via social
+ * surfaces (share links remain a separate bearer-token mechanism).
+ */
+export const POUR_VISIBILITIES = ["private", "friends", "followers", "public"] as const;
+export type PourVisibility = (typeof POUR_VISIBILITIES)[number];
+
 export const pours = pgTable(
   "pours",
   {
@@ -253,6 +263,7 @@ export const pours = pgTable(
     servingStyle: text("serving_style").$type<ServingStyle>(),
     amountMl: integer("amount_ml"),
     context: jsonb("context").$type<{ setting?: string; companions?: string; glassware?: string }>(),
+    visibility: text("visibility").$type<PourVisibility>().notNull().default("private"),
     createdAt: createdAt(),
   },
   (t) => [index("pours_user_idx").on(t.userId), index("pours_bottle_idx").on(t.bottleId)],
@@ -296,9 +307,193 @@ export const pourShares = pgTable(
     code: text("code").notNull().unique(),
     /** An opt-in share-only place label; never inferred from a device location. */
     locationLabel: text("location_label"),
+    /**
+     * Revocation tombstone: a non-null value makes the code 404 immediately.
+     * Re-sharing the pour reuses this row with a FRESH code and clears it —
+     * a revoked code must never come back to life (docs/SOCIAL.md §16.2).
+     */
+    revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "date" }),
     createdAt: createdAt(),
   },
   (t) => [index("pour_shares_user_idx").on(t.userId)],
+);
+
+// ---------------------------------------------------------------------------
+// Social (docs/SOCIAL.md — binding). Read paths NEVER select money columns
+// (purchasePrice, estValue, msrp/avgPrice aggregates of a user's own shelf);
+// social reads go through explicit projections in src/lib/social.ts that pick
+// columns individually, mirroring getPublicPourShare().
+// ---------------------------------------------------------------------------
+
+/**
+ * Social identity, created lazily at the user's first social action — never at
+ * signup. The profile IS the palate card (docs/SOCIAL.md §7.1): social
+ * surfaces render palate data, never spend, value, or pour counts.
+ */
+export const userProfiles = pgTable("user_profiles", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => user.id, { onDelete: "cascade" }),
+  /** Lowercase [a-z0-9_]{3,20}; uniqueness is case-insensitive by normalizing on write. */
+  handle: text("handle").notNull().unique(),
+  displayName: text("display_name").notNull(),
+  avatarUrl: text("avatar_url"),
+  bio: text("bio"),
+  homeRegion: text("home_region"),
+  /** Public profiles are viewable by any signed-in user; private ones only by accepted followers (and always by their owner). */
+  isPublic: boolean("is_public").notNull().default(false),
+  /** When false the profile is reachable only by exact handle, never suggested. */
+  discoverable: boolean("discoverable").notNull().default(true),
+  /**
+   * The US-11 "step back" switch: false hides every social surface (profile,
+   * feed presence, friend notes) without deleting anything. Reversible.
+   */
+  socialEnabled: boolean("social_enabled").notNull().default(true),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+
+export const FOLLOW_STATES = ["pending", "accepted"] as const;
+export type FollowState = (typeof FOLLOW_STATES)[number];
+
+/**
+ * Asymmetric follow graph (docs/SOCIAL.md D1). Mutual accepted follows derive
+ * "friends"; follows of private profiles start as "pending" requests.
+ */
+export const follows = pgTable(
+  "follows",
+  {
+    id: id(),
+    followerId: text("follower_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    followeeId: text("followee_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    state: text("state").$type<FollowState>().notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("follows_follower_followee_uq").on(t.followerId, t.followeeId),
+    index("follows_followee_idx").on(t.followeeId),
+  ],
+);
+
+/**
+ * Checked on EVERY social read path, in both directions — blocked users are
+ * mutually invisible everywhere, immediately (docs/SOCIAL.md §11). Blocking
+ * also deletes any follow rows between the pair.
+ */
+export const blocks = pgTable(
+  "blocks",
+  {
+    id: id(),
+    blockerId: text("blocker_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    blockedId: text("blocked_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("blocks_blocker_blocked_uq").on(t.blockerId, t.blockedId),
+    index("blocks_blocked_idx").on(t.blockedId),
+  ],
+);
+
+/**
+ * Per-user social preferences. `defaultPourVisibility` seeds the pour sheet's
+ * selector and ships as "private" (docs/SOCIAL.md D2); changing it never
+ * touches existing pours.
+ */
+export const userSocialPrefs = pgTable("user_social_prefs", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => user.id, { onDelete: "cascade" }),
+  defaultPourVisibility: text("default_pour_visibility").$type<PourVisibility>().notNull().default("private"),
+  /** Whether others may comment on this user's visible notes. */
+  allowComments: boolean("allow_comments").notNull().default(true),
+  notifyPrefs: jsonb("notify_prefs").$type<Record<string, boolean>>(),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+
+export const REACTION_KINDS = ["cheers"] as const;
+export type ReactionKind = (typeof REACTION_KINDS)[number];
+
+/**
+ * One-tap positive-only reactions on a visible pour/note (docs/SOCIAL.md
+ * §7.5). Counts render on the object only — never aggregated into any
+ * person-level score, rank, or leaderboard (§3.3).
+ */
+export const reactions = pgTable(
+  "reactions",
+  {
+    id: id(),
+    pourId: text("pour_id")
+      .notNull()
+      .references(() => pours.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    kind: text("kind").$type<ReactionKind>().notNull().default("cheers"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("reactions_pour_user_kind_uq").on(t.pourId, t.userId, t.kind),
+    index("reactions_pour_idx").on(t.pourId),
+  ],
+);
+
+/**
+ * Threaded comments under a visible note (docs/SOCIAL.md US-12). Soft delete
+ * via deletedAt (body is blanked on delete); replies keep rendering under a
+ * deleted parent tombstone. Plain text only, escaped on render.
+ */
+export const comments = pgTable(
+  "comments",
+  {
+    id: id(),
+    pourId: text("pour_id")
+      .notNull()
+      .references(() => pours.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    parentId: text("parent_id"),
+    body: text("body").notNull(),
+    createdAt: createdAt(),
+    editedAt: timestamp("edited_at", { withTimezone: true, mode: "date" }),
+    deletedAt: timestamp("deleted_at", { withTimezone: true, mode: "date" }),
+  },
+  (t) => [index("comments_pour_idx").on(t.pourId)],
+);
+
+export const REPORT_STATES = ["open", "resolved", "dismissed"] as const;
+export type ReportState = (typeof REPORT_STATES)[number];
+export const REPORT_SUBJECT_TYPES = ["comment", "pour", "profile"] as const;
+export type ReportSubjectType = (typeof REPORT_SUBJECT_TYPES)[number];
+
+/**
+ * Abuse reports (docs/SOCIAL.md §11). Deliberately polymorphic and without a
+ * subject FK so a report survives the reported content's deletion; the queue
+ * UI comes later — this is the durable record.
+ */
+export const reports = pgTable(
+  "reports",
+  {
+    id: id(),
+    subjectType: text("subject_type").$type<ReportSubjectType>().notNull(),
+    subjectId: text("subject_id").notNull(),
+    reporterId: text("reporter_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    reason: text("reason").notNull(),
+    state: text("state").$type<ReportState>().notNull().default("open"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("reports_state_idx").on(t.state)],
 );
 
 export const pairings = pgTable(

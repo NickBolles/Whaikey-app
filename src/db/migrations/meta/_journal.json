@@ -78,6 +78,13 @@
       "when": 1786476293318,
       "tag": "0010_chilly_landau",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1786661873507,
+      "tag": "0011_faulty_purifiers",
+      "breakpoints": true
     }
   ]
 }
