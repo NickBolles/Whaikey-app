@@ -142,6 +142,9 @@ Legend: ● strong · ◐ partial/paywalled · ○ weak/absent. (Wine apps inclu
 | AI chat w/ your data | ●● tool-calling | ○ | ○ | ○ | ◐ tutor | ◐ Fitz | ◐ | ● Vincent | ● CellarChat |
 | Voice → structured notes | ●● | ○ | ○ | ○ | ○ | ○ | ○ | ○ | ○ |
 | Community ratings | ◐ later | ● | ●● | ◐ | ○ | ○ | ●● | ○ | ●● |
+| Social graph / feed | ◐ S1–S2 | ◐ thin | ◐ | ○ | ○ | ○ | ● | ○ | ◐ forums |
+| **Your notes vs. producer's notes** | ●● shipped | ○ | ○ | ○ | ○ | ○ | ○ | ○ | ○ |
+| **Your notes vs. a friend's notes** | ●● S2 target | ○ | ○ | ○ | ○ | ○ | ○ | ○ | ○ |
 | Mobile quality/reliability | ● non-negotiable | ● | ○ | ● | ? | ◐ | ● | ● iOS | ◐ |
 | Cross-platform | ● iOS+Android+web | ● | ◐ | ● | ○ iOS | ● | ● | ○ iOS | ● |
 
@@ -157,6 +160,16 @@ Legend: ● strong · ◐ partial/paywalled · ○ weak/absent. (Wine apps inclu
 4. **Mobile reliability as a feature** — the whiskey category leader-by-database has a 2.5★ app; the best-funded AI entrant has a crashing scanner. Boring excellence wins reviews here.
 5. **Honest valuation in a down market** — post-crash, "estimate with range + trend" framing beats hype; almost everyone else built valuation UX in the bull market.
 6. **AI that acts, not just chats** — every 2024–26 "AI somm" is read-only chat. Tool-calling that executes (add to wishlist, log the pour, build the flight from *your* shelf) is a generation ahead.
+7. **Comparable tasting notes** — every competitor stores notes as free text or a proprietary graph, so notes can be *displayed* next to each other but never *compared*. Our shared 8-wedge/~55-leaf taxonomy plus attributed producer claims makes "you called it cinnamon, the label called it clove, your friend called it baking spice" computable. That's the whole social differentiator (SOCIAL.md §2.1); a feed on top of free-text notes can't produce it, which is why the four whiskey apps that already have feeds haven't.
+
+### 5.1 The social caveat, stated honestly
+
+Social is **not** an open gap. Distiller has friends and community notes, Whiskybase has follows and 1.2M+ ratings, and DramIt and Whiskey Social lead with a live activity feed. Shipping "a feed" buys nothing.
+
+Two reference points outside whiskey set the strategy instead:
+
+- **Strava** — the mechanic that matters isn't the feed, it's the **segment**: a shared course that makes comparison meaningful, plus clubs for small-group belonging (club members ~3.5× more likely to still be active at 12 months). Our segment is the bottle, and what varies is the palate.
+- **Untappd** — the cautionary case. A 2026 longitudinal study ([arXiv 2601.04841](https://arxiv.org/html/2601.04841v1)) found its volume, streak, ABV and time-of-day badges essentially unchanged after five years of published ethical criticism, and concluded that disclaimers don't fix persuasive mechanics — the mechanics have to be different. **This is a positioning opportunity, not just a constraint:** an alcohol social product that visibly refuses consumption gamification is differentiated in a category where the incumbent is repeatedly written up for it.
 
 ## 6. Threats & honest risks
 
@@ -178,6 +191,10 @@ Legend: ● strong · ◐ partial/paywalled · ○ weak/absent. (Wine apps inclu
 | Mobile reliability & offline as explicit NFRs | The two highest-profile competitor failures (Whiskybase mobile, Daily Pour scanner) are reliability failures |
 | Ship **shareable palate wheel** before any social graph | Vivino/Delectable show community is a years-long moat build; shareable cards are the cheap growth loop first |
 | Steal: bottle **lifecycle statuses** (OnlyDrams), **infinity bottle** + store-pick/barrel-number tracking (Whiskey Shelf/BarrelBook) | High-value collector features with low build cost — added to FEATURES.md backlog |
+| Social ships as **comparison, not an activity stream** | Four whiskey apps already have feeds; none can compare notes descriptor-by-descriptor, because none has a shared taxonomy (§5.7) |
+| **Refuse consumption gamification** — no streaks, volume/ABV badges, or drinking leaderboards — and say so publicly | Untappd's mechanics are a documented, repeatedly-criticised liability; refusing them is both an ethics floor and a differentiator (§5.1) |
+| Social features are **free**; only deeper *analysis* of social data is Pro | Same logic as free scanning — a paywalled graph doesn't grow (PLAN.md §6.2.1) |
+| **Clubs before public community** | Strava's retention comes from small groups, not the global feed; also caps moderation load while the team is small |
 
 ---
 
