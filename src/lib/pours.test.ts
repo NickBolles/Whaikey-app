@@ -3,6 +3,7 @@ import { and, eq } from "drizzle-orm";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
 import { createTestBottle, createTestUser, setupTestDb, uid } from "@/test/helpers";
+import { updateSocialPrefs } from "@/lib/social";
 import {
   BottleNotFoundError,
   deletePour,
@@ -10,6 +11,7 @@ import {
   getPour,
   listPours,
   logPour,
+  updatePourVisibility,
 } from "@/lib/pours";
 
 async function createUserBottle(
@@ -58,6 +60,23 @@ describe("logPour", () => {
     expect(pour.rating).toBe(4.5);
     expect(pour.amountMl).toBe(45); // default pour
     expect(note).toBeNull();
+  });
+
+  it("defaults visibility to private when the user has no social prefs row", async () => {
+    const { pour } = await logPour(db, userId, { bottleId, rating: 4 });
+    expect(pour.visibility).toBe("private");
+  });
+
+  it("uses the user's defaultPourVisibility pref when input.visibility is absent", async () => {
+    await updateSocialPrefs(db, userId, { defaultPourVisibility: "followers" });
+    const { pour } = await logPour(db, userId, { bottleId, rating: 4 });
+    expect(pour.visibility).toBe("followers");
+  });
+
+  it("prefers an explicit input.visibility over the user's pref", async () => {
+    await updateSocialPrefs(db, userId, { defaultPourVisibility: "followers" });
+    const { pour } = await logPour(db, userId, { bottleId, rating: 4, visibility: "public" });
+    expect(pour.visibility).toBe("public");
   });
 
   it("shelves an unfiled bottle as tried so the pour is never orphaned", async () => {
@@ -242,5 +261,22 @@ describe("listPours / getPour / deletePour", () => {
     expect(await deletePour(db, userId, pour.id)).toBe(true);
     expect(await db.query.pours.findMany()).toHaveLength(0);
     expect(await db.query.tastingNotes.findMany()).toHaveLength(0);
+  });
+
+  it("updatePourVisibility changes visibility only for the owner", async () => {
+    const other = await createTestUser(db);
+    const { pour } = await logPour(db, userId, { bottleId, rating: 4 });
+    expect(pour.visibility).toBe("private");
+
+    expect(await updatePourVisibility(db, other.id, pour.id, "public")).toBeNull();
+    const updated = await updatePourVisibility(db, userId, pour.id, "public");
+    expect(updated?.visibility).toBe("public");
+
+    const reread = await getPour(db, userId, pour.id);
+    expect(reread?.pour.visibility).toBe("public");
+  });
+
+  it("updatePourVisibility returns null for a missing pour", async () => {
+    expect(await updatePourVisibility(db, userId, "ghost", "public")).toBeNull();
   });
 });

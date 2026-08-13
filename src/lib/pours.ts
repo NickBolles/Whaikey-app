@@ -2,9 +2,10 @@ import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
-import { SERVING_STYLES, type Pour, type TastingNote } from "@/db/schema";
+import { POUR_VISIBILITIES, SERVING_STYLES, type Pour, type PourVisibility, type TastingNote } from "@/db/schema";
 import { isValidLeaf } from "@/lib/flavor-wheel";
 import { refreshUserPalate } from "@/lib/palate-store";
+import { getSocialPrefs } from "@/lib/social";
 
 /** Standard pour when the user doesn't specify an amount. */
 export const DEFAULT_POUR_ML = 45;
@@ -59,6 +60,7 @@ export const pourInputSchema = z.object({
       flavorTags: flavorTagsSchema.optional(),
     })
     .optional(),
+  visibility: z.enum(POUR_VISIBILITIES).optional(),
 });
 
 export type PourInput = z.infer<typeof pourInputSchema>;
@@ -89,7 +91,8 @@ function noteHasContent(note: NonNullable<PourInput["note"]>): boolean {
  * linked to the user's shelf row for that bottle, creating a "tried" row when
  * none exists, and when that row is an "open" bottle with a fill level, the
  * fill is decremented ~3% per 30ml poured (floored at 0). An optional tasting
- * note is stored 1:1 with the pour.
+ * note is stored 1:1 with the pour. Visibility is `input.visibility` when
+ * given, else the user's `defaultPourVisibility` social pref, else "private".
  */
 export async function logPour(db: DB, userId: string, input: PourInput): Promise<LoggedPour> {
   const parsed = pourInputSchema.parse(input);
@@ -100,6 +103,8 @@ export async function logPour(db: DB, userId: string, input: PourInput): Promise
   if (!bottle) throw new BottleNotFoundError(parsed.bottleId);
 
   const amountMl = parsed.amountMl ?? DEFAULT_POUR_ML;
+  const visibility: PourVisibility =
+    parsed.visibility ?? (await getSocialPrefs(db, userId)).defaultPourVisibility;
   const { pour, note } = await db.transaction(async (tx) => {
     let userBottle = await tx.query.userBottles.findFirst({
       where: and(eq(schema.userBottles.userId, userId), eq(schema.userBottles.bottleId, parsed.bottleId)),
@@ -124,6 +129,7 @@ export async function logPour(db: DB, userId: string, input: PourInput): Promise
       .values({
         id: crypto.randomUUID(), userId, bottleId: parsed.bottleId, userBottleId: userBottle?.id ?? null,
         rating: parsed.rating ?? null, servingStyle: parsed.servingStyle ?? null, amountMl, context: parsed.context ?? null,
+        visibility,
       })
       .returning();
     if (userBottle?.status === "open" && userBottle.fillLevel != null) {
@@ -213,6 +219,21 @@ export async function getPour(
   const row = rows[0];
   if (!row) return null;
   return { pour: row.pour, bottleName: row.bottleName, note: row.note ?? null };
+}
+
+/** Update a pour's social visibility. Owner-scoped; returns null for missing/others'. */
+export async function updatePourVisibility(
+  db: DB,
+  userId: string,
+  pourId: string,
+  visibility: PourVisibility,
+): Promise<Pour | null> {
+  const rows = await db
+    .update(schema.pours)
+    .set({ visibility })
+    .where(and(eq(schema.pours.id, pourId), eq(schema.pours.userId, userId)))
+    .returning();
+  return rows[0] ?? null;
 }
 
 /** Delete a pour (tasting note cascades). Returns false for missing/others'. */
