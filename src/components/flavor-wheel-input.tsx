@@ -37,6 +37,11 @@ const R_LEAF_IN = 116;
 const R_LEAF_OUT = 144; // grows +4 per intensity step, max 156
 const WEDGE_LABEL_R = (R_WEDGE_IN + R_WEDGE_OUT) / 2;
 const LEAF_LABEL_R = (R_LEAF_IN + R_LEAF_OUT) / 2;
+const INTENSITY_HAPTIC: Record<1 | 2 | 3, "intensity-1" | "intensity-2" | "intensity-3"> = {
+  1: "intensity-1",
+  2: "intensity-2",
+  3: "intensity-3",
+};
 
 /**
  * The Whaikey flavor wheel. Inner ring: the 8 core wedges. Tap a wedge and
@@ -91,12 +96,12 @@ export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
   }, [value]);
 
   const cycleLeaf = (leafId: string) => {
-    const next = ((value[leafId] ?? 0) + 1) % 4;
+    const next = (((value[leafId] ?? 0) + 1) % 4) as 0 | 1 | 2 | 3;
     const nextValue = { ...value };
     if (next === 0) delete nextValue[leafId];
     else {
       nextValue[leafId] = next;
-      haptic(({ 1: "intensity-1", 2: "intensity-2", 3: "intensity-3" } as const)[next]);
+      haptic(INTENSITY_HAPTIC[next]);
     }
     onChange(nextValue);
   };
