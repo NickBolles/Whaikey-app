@@ -12,6 +12,7 @@ import {
   profileCreateSchema,
   profileUpdateSchema,
   setSocialEnabled,
+  SocialDisabledError,
   updateProfile,
 } from "@/lib/social";
 
@@ -92,7 +93,20 @@ export async function PATCH(req: Request) {
 
     const db = getDb();
     const { socialEnabled, ...profilePatch } = parsed.data;
-    const updated = await updateProfile(db, user.id, profilePatch);
+    // Re-enable first so "turn social back on and go public" works in one
+    // PATCH; the exposure gate in updateProfile then sees the new state.
+    if (socialEnabled === true) {
+      await setSocialEnabled(db, user.id, true);
+    }
+    let updated;
+    try {
+      updated = await updateProfile(db, user.id, profilePatch);
+    } catch (err) {
+      if (err instanceof SocialDisabledError) {
+        return NextResponse.json({ error: "social_disabled" }, { status: 409 });
+      }
+      throw err;
+    }
     if (!updated) {
       return NextResponse.json({ error: "not_found" }, { status: 404 });
     }
@@ -103,9 +117,6 @@ export async function PATCH(req: Request) {
       // US-11 reset (pours private, links revoked, profile unlisted) so no
       // API path can report "social off" while bearer links stay live.
       await makeEverythingPrivate(db, user.id);
-      profile = (await getOwnProfile(db, user.id)) ?? updated;
-    } else if (socialEnabled === true) {
-      await setSocialEnabled(db, user.id, true);
       profile = (await getOwnProfile(db, user.id)) ?? updated;
     }
     return NextResponse.json(profile);

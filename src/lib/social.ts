@@ -60,6 +60,14 @@ export function isReservedHandle(handle: string): boolean {
   return RESERVED_HANDLES.has(normalizeHandle(handle));
 }
 
+/** Thrown when a write would raise social exposure while the owner is stepped back (US-11). */
+export class SocialDisabledError extends Error {
+  constructor() {
+    super("Social is turned off");
+    this.name = "SocialDisabledError";
+  }
+}
+
 export class HandleTakenError extends Error {
   constructor(handle: string) {
     super(`Handle already taken: "${handle}"`);
@@ -149,12 +157,27 @@ export async function updateProfile(
   if (patch.isPublic !== undefined) values.isPublic = patch.isPublic;
   if (patch.discoverable !== undefined) values.discoverable = patch.discoverable;
 
-  const rows = await db
-    .update(schema.userProfiles)
-    .set(values)
-    .where(eq(schema.userProfiles.userId, userId))
-    .returning();
-  return rows[0] ? toSocialProfile(rows[0]) : null;
+  const raisesExposure = patch.isPublic === true || patch.discoverable === true;
+  return db.transaction(async (tx) => {
+    if (raisesExposure) {
+      // Serialized with makeEverythingPrivate: a stale tab's isPublic /
+      // discoverable=true must not land after the US-11 reset and silently
+      // re-list the profile when social is re-enabled. Text-only edits (bio,
+      // display name) stay allowed while stepped back — the profile is theirs.
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`social-reset:${userId}`}))`);
+      const current = await tx.query.userProfiles.findFirst({
+        columns: { socialEnabled: true },
+        where: eq(schema.userProfiles.userId, userId),
+      });
+      if (current && !current.socialEnabled) throw new SocialDisabledError();
+    }
+    const rows = await tx
+      .update(schema.userProfiles)
+      .set(values)
+      .where(eq(schema.userProfiles.userId, userId))
+      .returning();
+    return rows[0] ? toSocialProfile(rows[0]) : null;
+  });
 }
 
 /** docs/SOCIAL.md §11: no links in bios until there's a reason. */
@@ -470,8 +493,16 @@ export async function updateSocialPrefs(db: DB, userId: string, patch: Partial<S
   if (patch.allowComments !== undefined) set.allowComments = patch.allowComments;
   await db.transaction(async (tx) => {
     // Same lock as makeEverythingPrivate: an in-flight prefs save must not
-    // commit after the US-11 reset and quietly restore a visible default.
+    // commit after the US-11 reset and quietly restore a visible default. The
+    // lock alone doesn't order requests, so re-check the reset state inside.
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`social-reset:${userId}`}))`);
+    if (patch.defaultPourVisibility !== undefined && patch.defaultPourVisibility !== "private") {
+      const profile = await tx.query.userProfiles.findFirst({
+        columns: { socialEnabled: true },
+        where: eq(schema.userProfiles.userId, userId),
+      });
+      if (profile && !profile.socialEnabled) throw new SocialDisabledError();
+    }
     await tx
       .insert(schema.userSocialPrefs)
       .values({
@@ -823,6 +854,10 @@ export async function getFriendFeed(db: DB, viewerId: string, opts: { limit?: nu
       and(
         inArray(schema.pours.userId, followeeIds),
         eq(schema.userProfiles.socialEnabled, true),
+        // followeeIds was snapshotted moments ago; the live predicate means a
+        // block that lands between the snapshot and this query still excludes
+        // the pair (blocks are enforced in the read query itself).
+        contributorVisibleSql(schema.pours.userId, viewerId),
         visibilityCond,
         or(isNotNull(schema.pours.rating), isNotNull(schema.tastingNotes.id)),
       ),

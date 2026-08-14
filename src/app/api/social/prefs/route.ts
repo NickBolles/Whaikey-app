@@ -3,7 +3,7 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import { POUR_VISIBILITIES } from "@/db/schema";
 import { requireUser, withErrorHandling } from "@/lib/session";
-import { getSocialPrefs, updateSocialPrefs } from "@/lib/social";
+import { SocialDisabledError, getSocialPrefs, updateSocialPrefs } from "@/lib/social";
 
 const prefsPatchSchema = z.object({
   defaultPourVisibility: z.enum(POUR_VISIBILITIES).optional(),
@@ -29,7 +29,15 @@ export async function PATCH(req: Request) {
       return NextResponse.json({ error: "Invalid input" }, { status: 400 });
     }
 
-    const prefs = await updateSocialPrefs(getDb(), user.id, parsed.data);
+    let prefs;
+    try {
+      prefs = await updateSocialPrefs(getDb(), user.id, parsed.data);
+    } catch (err) {
+      if (err instanceof SocialDisabledError) {
+        return NextResponse.json({ error: "social_disabled" }, { status: 409 });
+      }
+      throw err;
+    }
     return NextResponse.json(prefs);
   });
 }

@@ -1,8 +1,8 @@
 "use client";
 
-import { useSyncExternalStore } from "react";
+import { useState, useSyncExternalStore } from "react";
 import Link from "next/link";
-import { MessageCircle, Star, Wine } from "lucide-react";
+import { BookmarkPlus, MessageCircle, Star, Wine } from "lucide-react";
 import { UserAvatar } from "@/components/user-avatar";
 import { FLAVOR_WHEEL, leafLabel, wedgeForLeaf } from "@/lib/flavor-wheel";
 import { compareFlavorNotes } from "@/lib/flavor-compare";
@@ -128,7 +128,29 @@ function FeedCard({ item }: { item: FriendFeedItem }) {
   const snippet = noteSnippet(item);
   const tags = item.flavorTags ? Object.entries(item.flavorTags).slice(0, 4) : [];
   const hasComparison = item.viewerTags != null && Object.keys(item.viewerTags).length > 0;
-  const isWishlisted = item.viewerBottleRelationship === "wishlist";
+  // US-7: the discovery card carries a one-tap wishlist action of its own.
+  const [wishlisted, setWishlisted] = useState(item.viewerBottleRelationship === "wishlist");
+  const [wishlistBusy, setWishlistBusy] = useState(false);
+  const isWishlisted = wishlisted;
+  const showWishlistAction = !hasComparison && !isWishlisted && item.viewerBottleRelationship == null;
+
+  async function handleWishlist() {
+    if (wishlistBusy || wishlisted) return;
+    setWishlistBusy(true);
+    try {
+      const res = await fetch("/api/user-bottles", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ bottleId: item.bottleId, relationship: "wishlist" }),
+      });
+      if (res.ok) setWishlisted(true);
+    } catch {
+      // Quietly keep the button; the note page offers the same action.
+    } finally {
+      setWishlistBusy(false);
+    }
+  }
+
   const hydrated = useHydrated();
   const dateLabel = hydrated
     ? relativeDate(item.createdAt)
@@ -190,12 +212,24 @@ function FeedCard({ item }: { item: FriendFeedItem }) {
               ? "On your wishlist."
               : "New to you — see what they thought."}
         </p>
-        <Link
-          href={`/notes/${item.pourId}`}
-          className="shrink-0 text-xs font-medium text-accent hover:brightness-110 transition-[filter]"
-        >
-          {hasComparison ? "Compare notes →" : "See the note →"}
-        </Link>
+        <span className="flex shrink-0 items-center gap-3">
+          {showWishlistAction && (
+            <button
+              type="button"
+              onClick={handleWishlist}
+              disabled={wishlistBusy}
+              className="tap-target inline-flex items-center gap-1 text-xs font-medium text-accent hover:brightness-110 transition-[filter] disabled:opacity-60"
+            >
+              <BookmarkPlus size={13} strokeWidth={1.8} aria-hidden /> Wishlist
+            </button>
+          )}
+          <Link
+            href={`/notes/${item.pourId}`}
+            className="text-xs font-medium text-accent hover:brightness-110 transition-[filter]"
+          >
+            {hasComparison ? "Compare notes →" : "See the note →"}
+          </Link>
+        </span>
       </div>
 
       <div className="flex items-center gap-3 text-xs text-muted">
