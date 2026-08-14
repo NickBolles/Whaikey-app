@@ -208,7 +208,7 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
   const [rating, setRating] = useState<number | null>(null);
   const [servingStyle, setServingStyle] = useState<ServingStyle | null>(null);
   const [amountMl, setAmountMl] = useState<number>(45);
-  const [notesOpen, setNotesOpen] = useState(false);
+  const [notesOpen, setNotesOpen] = useState(true);
   const [nose, setNose] = useState("");
   const [palate, setPalate] = useState("");
   const [finish, setFinish] = useState("");
@@ -244,7 +244,7 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
     setRating(null);
     setServingStyle(null);
     setAmountMl(45);
-    setNotesOpen(false);
+    setNotesOpen(true);
     setNose("");
     setPalate("");
     setFinish("");

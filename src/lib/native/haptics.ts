@@ -12,6 +12,12 @@ import { loadPlugin } from "./platform";
 export type HapticMoment =
   /** A discrete choice landed: a flavor wedge, a star, a chip. */
   | "tap"
+  /** A light, directional change while choosing a flavor family. */
+  | "category"
+  /** Flavor presence levels climb from light to strong as the wheel moves outward. */
+  | "intensity-1"
+  | "intensity-2"
+  | "intensity-3"
   /** The scanner locked onto a barcode. */
   | "lock"
   /** Something was saved: a bottle shelved, a pour logged. */
@@ -22,6 +28,10 @@ export type HapticMoment =
 /** Web fallback durations in ms; a pattern array reads as a double-buzz. */
 const WEB_PATTERN: Record<HapticMoment, number | number[]> = {
   tap: 12,
+  category: 8,
+  "intensity-1": 18,
+  "intensity-2": 32,
+  "intensity-3": [42, 35, 42],
   lock: 30,
   success: 60,
   warning: [40, 60, 40],
@@ -52,10 +62,16 @@ async function run(moment: HapticMoment): Promise<void> {
   try {
     switch (moment) {
       case "tap":
+      case "category":
+      case "intensity-1":
         await Haptics.impact({ style: ImpactStyle.Light });
         break;
       case "lock":
+      case "intensity-2":
         await Haptics.impact({ style: ImpactStyle.Medium });
+        break;
+      case "intensity-3":
+        await Haptics.impact({ style: ImpactStyle.Heavy });
         break;
       case "success":
         await Haptics.notification({ type: NotificationType.Success });

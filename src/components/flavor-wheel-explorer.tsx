@@ -35,6 +35,7 @@ export function FlavorWheelExplorer() {
   const holdElapsed = useRef(false);
   const activationStart = useRef<{ clientX: number; clientY: number } | null>(null);
   const activePointerId = useRef<number | null>(null);
+  const gestureCategoryId = useRef<string | null>(null);
   const suppressClick = useRef(false);
   const selected = FLAVOR_WHEEL.find((w) => w.id === selectedId) ?? null;
   const note = selected ? WEDGE_NOTES[selected.id] : null;
@@ -47,11 +48,15 @@ export function FlavorWheelExplorer() {
     holdElapsed.current = false;
     activationStart.current = null;
     activePointerId.current = null;
+    gestureCategoryId.current = null;
   };
 
   const selectAtPointer = (event: PointerEvent<SVGSVGElement>) => {
     const point = wheelPointFromPointer(event, SIZE);
-    setSelectedId(FLAVOR_WHEEL[wheelIndex(point.angle, FLAVOR_WHEEL.length)].id);
+    const categoryId = FLAVOR_WHEEL[wheelIndex(point.angle, FLAVOR_WHEEL.length)].id;
+    if (gestureCategoryId.current !== categoryId) haptic("category");
+    gestureCategoryId.current = categoryId;
+    setSelectedId(categoryId);
   };
 
   const startGesture = (event: PointerEvent<SVGSVGElement>) => {
@@ -59,6 +64,7 @@ export function FlavorWheelExplorer() {
     const { clientX, clientY, pointerId } = event;
     activePointerId.current = pointerId;
     activationStart.current = { clientX, clientY };
+    gestureCategoryId.current = FLAVOR_WHEEL[wheelIndex(wheelPointFromPointer(event, SIZE).angle, FLAVOR_WHEEL.length)].id;
     holdTimer.current = setTimeout(() => {
       holdElapsed.current = true;
     }, WHEEL_HOLD_MS);
@@ -97,7 +103,7 @@ export function FlavorWheelExplorer() {
     <div className="flex flex-col gap-4">
       <svg
         viewBox={`0 0 ${SIZE} ${SIZE}`}
-        className="w-full max-w-[360px] self-center select-none touch-none"
+        className="w-full max-w-[360px] self-center select-none touch-pan-y"
         role="application"
         aria-label="Flavor wheel explorer"
         onPointerDown={startGesture}

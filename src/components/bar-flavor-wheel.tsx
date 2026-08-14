@@ -120,6 +120,7 @@ export function BarFlavorWheel({ wedgeHeat, leafHeat, caption, subCaption, selec
   const activationStart = useRef<{ clientX: number; clientY: number } | null>(null);
   const activePointerId = useRef<number | null>(null);
   const gestureLeafId = useRef<string | null>(null);
+  const gestureCategoryId = useRef<string | null>(null);
   const suppressClick = useRef(false);
   const wedgeSpan = 360 / FLAVOR_WHEEL.length;
   const segments: ReactNode[] = [];
@@ -235,12 +236,15 @@ export function BarFlavorWheel({ wedgeHeat, leafHeat, caption, subCaption, selec
     activationStart.current = null;
     activePointerId.current = null;
     gestureLeafId.current = null;
+    gestureCategoryId.current = null;
   };
 
   const updateGesture = (event: PointerEvent<SVGSVGElement>) => {
     const point = wheelPointFromPointer(event, SIZE);
     const wedgeIndex = wheelIndex(point.angle, FLAVOR_WHEEL.length);
     const wedge = FLAVOR_WHEEL[wedgeIndex];
+    if (gestureCategoryId.current !== wedge.id) haptic("category");
+    gestureCategoryId.current = wedge.id;
     if (point.radius < OUTER[0]) {
       gestureLeafId.current = null;
       return;
@@ -254,6 +258,7 @@ export function BarFlavorWheel({ wedgeHeat, leafHeat, caption, subCaption, selec
     if (!shouldStartWheelGesture(event) || activePointerId.current !== null) return;
     activePointerId.current = event.pointerId;
     activationStart.current = { clientX: event.clientX, clientY: event.clientY };
+    gestureCategoryId.current = FLAVOR_WHEEL[wheelIndex(wheelPointFromPointer(event, SIZE).angle, FLAVOR_WHEEL.length)].id;
     holdTimer.current = setTimeout(() => {
       holdElapsed.current = true;
     }, WHEEL_HOLD_MS);
