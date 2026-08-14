@@ -157,10 +157,18 @@ export async function updateProfile(
   return rows[0] ? toSocialProfile(rows[0]) : null;
 }
 
+/** docs/SOCIAL.md §11: no links in bios until there's a reason. */
+const LINKISH = /(?:https?:\/\/|www\.|\S+\.(?:com|net|org|io|app|co|xyz|me|link|bar|shop|site)\b)/i;
+const bioSchema = z
+  .string()
+  .trim()
+  .max(280)
+  .refine((v) => !LINKISH.test(v), { message: "Links aren't allowed in bios" });
+
 export const profileCreateSchema = z.object({
   handle: z.string().min(1).max(40),
   displayName: z.string().trim().min(1).max(80).optional(),
-  bio: z.string().trim().max(280).optional(),
+  bio: bioSchema.optional(),
   homeRegion: z.string().trim().max(80).optional(),
   isPublic: z.boolean().optional(),
   discoverable: z.boolean().optional(),
@@ -168,7 +176,7 @@ export const profileCreateSchema = z.object({
 
 export const profileUpdateSchema = z.object({
   displayName: z.string().trim().min(1).max(80).optional(),
-  bio: z.string().trim().max(280).nullable().optional(),
+  bio: bioSchema.nullable().optional(),
   homeRegion: z.string().trim().max(80).nullable().optional(),
   isPublic: z.boolean().optional(),
   discoverable: z.boolean().optional(),
@@ -444,20 +452,21 @@ export async function getSocialPrefs(db: DB, userId: string): Promise<SocialPref
 }
 
 export async function updateSocialPrefs(db: DB, userId: string, patch: Partial<SocialPrefs>): Promise<SocialPrefs> {
-  const current = await getSocialPrefs(db, userId);
-  const next: SocialPrefs = { ...current, ...patch };
+  // Write only the supplied columns: a read-merge-write of the whole row lets
+  // two concurrent patches (e.g. two tabs) restore each other's stale values —
+  // dangerous when the clobbered field is defaultPourVisibility.
+  const set: Partial<typeof schema.userSocialPrefs.$inferInsert> = { updatedAt: new Date() };
+  if (patch.defaultPourVisibility !== undefined) set.defaultPourVisibility = patch.defaultPourVisibility;
+  if (patch.allowComments !== undefined) set.allowComments = patch.allowComments;
   await db
     .insert(schema.userSocialPrefs)
-    .values({ userId, defaultPourVisibility: next.defaultPourVisibility, allowComments: next.allowComments })
-    .onConflictDoUpdate({
-      target: schema.userSocialPrefs.userId,
-      set: {
-        defaultPourVisibility: next.defaultPourVisibility,
-        allowComments: next.allowComments,
-        updatedAt: new Date(),
-      },
-    });
-  return next;
+    .values({
+      userId,
+      ...(patch.defaultPourVisibility !== undefined ? { defaultPourVisibility: patch.defaultPourVisibility } : {}),
+      ...(patch.allowComments !== undefined ? { allowComments: patch.allowComments } : {}),
+    })
+    .onConflictDoUpdate({ target: schema.userSocialPrefs.userId, set });
+  return getSocialPrefs(db, userId);
 }
 
 /**
@@ -1023,6 +1032,24 @@ async function listRecentVisibleNotes(
   author: ProfileSummary & { socialEnabled: boolean },
   limit: number,
 ): Promise<SocialNote[]> {
+  // Resolve the viewer's relationship once and filter visibility in SQL — a
+  // bounded over-fetch would let a run of newer private pours hide older
+  // public notes entirely ("No public notes yet" on a profile that has them).
+  const isSelf = viewerId != null && viewerId === author.userId;
+  let allowedTiers: PourVisibility[] | null = null; // null = owner, all tiers
+  if (!isSelf) {
+    if (viewerId == null) return [];
+    const follower = await db.query.follows.findFirst({
+      where: and(
+        eq(schema.follows.followerId, viewerId),
+        eq(schema.follows.followeeId, author.userId),
+        eq(schema.follows.state, "accepted"),
+      ),
+    });
+    const friend = follower ? await areFriends(db, viewerId, author.userId) : false;
+    allowedTiers = ["public", ...(follower ? (["followers"] as const) : []), ...(friend ? (["friends"] as const) : [])];
+  }
+
   const rows = await db
     .select({
       pourId: schema.pours.id,
@@ -1046,23 +1073,14 @@ async function listRecentVisibleNotes(
       and(
         eq(schema.pours.userId, author.userId),
         or(isNotNull(schema.pours.rating), isNotNull(schema.tastingNotes.id)),
+        ...(allowedTiers ? [inArray(schema.pours.visibility, allowedTiers)] : []),
       ),
     )
     .orderBy(desc(schema.pours.createdAt))
-    // Over-fetch a bounded amount, then filter per-pour visibility in app code
-    // (the viewer may not be a follower even on a profile they can otherwise see).
-    .limit(limit * 5);
+    .limit(limit);
 
   const out: SocialNote[] = [];
   for (const row of rows) {
-    if (out.length >= limit) break;
-    const ctx: PourAuthContext = {
-      pourId: row.pourId,
-      authorId: author.userId,
-      visibility: row.visibility,
-      authorSocialEnabled: author.socialEnabled,
-    };
-    if (!(await canViewPourContext(db, viewerId, ctx))) continue;
     out.push(await toSocialNote(db, viewerId, row, author));
   }
   return out;

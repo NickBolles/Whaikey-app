@@ -37,6 +37,8 @@ import {
   listFollowing,
   makeEverythingPrivate,
   normalizeHandle,
+  profileCreateSchema,
+  profileUpdateSchema,
   removeFollower,
   softDeleteComment,
   uncheerPour,
@@ -798,5 +800,56 @@ describe("review-pass hardening", () => {
       expect(created).not.toBeNull();
     }
     await expect(addComment(db, commenter.id, pour.id, "one too many")).rejects.toBeInstanceOf(RateLimitedError);
+  });
+});
+
+describe("codex round-2 hardening", () => {
+  let db: DB;
+  beforeEach(async () => {
+    db = await setupTestDb();
+  });
+
+  it("rejects link-like bios but keeps ordinary prose", () => {
+    for (const bad of ["see https://mysite.com", "www.whisky.bar", "buy at whiskydeals.com now"]) {
+      expect(profileCreateSchema.safeParse({ handle: "abc", bio: bad }).success).toBe(false);
+      expect(profileUpdateSchema.safeParse({ bio: bad }).success).toBe(false);
+    }
+    for (const ok of ["Islay obsessive, chasing peat smoke since 2019.", "Portland, OR", "Mr. Peat"]) {
+      expect(profileCreateSchema.safeParse({ handle: "abc", bio: ok }).success).toBe(true);
+    }
+  });
+
+  it("patches only the supplied pref columns", async () => {
+    const user = await createTestUser(db);
+    await updateSocialPrefs(db, user.id, { defaultPourVisibility: "friends" });
+    const after = await updateSocialPrefs(db, user.id, { allowComments: false });
+    expect(after).toEqual({ defaultPourVisibility: "friends", allowComments: false });
+  });
+
+  it("older public notes still surface on a profile behind newer private pours", async () => {
+    const viewer = await createTestUser(db);
+    const author = await createTestUser(db);
+    await claim(db, viewer, "viewer_pn", { isPublic: true });
+    await claim(db, author, "author_pn", { isPublic: true });
+    const bottle = await createTestBottle(db);
+
+    const publicPour = await insertPour(db, author.id, bottle.id, {
+      visibility: "public",
+      rating: 5,
+      createdAt: new Date("2026-01-01T00:00:00Z"),
+    });
+    await insertNote(db, publicPour.id, { freeform: "the good one" });
+    for (let i = 0; i < 20; i += 1) {
+      const p = await insertPour(db, author.id, bottle.id, {
+        visibility: "private",
+        rating: 3,
+        createdAt: new Date(`2026-03-${String((i % 28) + 1).padStart(2, "0")}T00:00:00Z`),
+      });
+      await insertNote(db, p.id, { freeform: `private ${i}` });
+    }
+
+    const view = await getProfileView(db, viewer.id, "author_pn");
+    expect(view!.recentNotes).toHaveLength(1);
+    expect(view!.recentNotes[0].pourId).toBe(publicPour.id);
   });
 });

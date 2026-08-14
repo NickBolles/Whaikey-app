@@ -67,6 +67,19 @@ describe("logPour", () => {
     expect(pour.visibility).toBe("private");
   });
 
+  it("forces visibility private while the user is stepped back, even for explicit non-private writes", async () => {
+    await db.insert(schema.userProfiles).values({
+      userId,
+      handle: "steppedback",
+      displayName: "Stepped Back",
+      socialEnabled: false,
+    });
+    // Simulates an offline-queued pour minted before "make everything private"
+    // replaying afterwards: the stale explicit visibility must not stick.
+    const { pour } = await logPour(db, userId, { bottleId, rating: 4, visibility: "friends" });
+    expect(pour.visibility).toBe("private");
+  });
+
   it("uses the user's defaultPourVisibility pref when input.visibility is absent", async () => {
     await updateSocialPrefs(db, userId, { defaultPourVisibility: "followers" });
     const { pour } = await logPour(db, userId, { bottleId, rating: 4 });

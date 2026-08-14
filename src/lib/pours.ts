@@ -103,8 +103,19 @@ export async function logPour(db: DB, userId: string, input: PourInput): Promise
   if (!bottle) throw new BottleNotFoundError(parsed.bottleId);
 
   const amountMl = parsed.amountMl ?? DEFAULT_POUR_ML;
-  const visibility: PourVisibility =
+  let visibility: PourVisibility =
     parsed.visibility ?? (await getSocialPrefs(db, userId)).defaultPourVisibility;
+  if (visibility !== "private") {
+    // A stepped-back user's new pours are always private, even when the write
+    // carries an explicit visibility — an offline-queued pour minted before
+    // "make everything private" must not resurface as visible on replay
+    // (docs/SOCIAL.md US-11). Re-enabling social restores nothing implicitly.
+    const profile = await db.query.userProfiles.findFirst({
+      columns: { socialEnabled: true },
+      where: eq(schema.userProfiles.userId, userId),
+    });
+    if (profile && !profile.socialEnabled) visibility = "private";
+  }
   const { pour, note } = await db.transaction(async (tx) => {
     let userBottle = await tx.query.userBottles.findFirst({
       where: and(eq(schema.userBottles.userId, userId), eq(schema.userBottles.bottleId, parsed.bottleId)),
