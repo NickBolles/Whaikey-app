@@ -100,3 +100,29 @@ describe("SignInPage", () => {
     expect(social).not.toHaveBeenCalled();
   });
 });
+
+describe("return path (?next=)", () => {
+  it("passes a same-origin next path through as the OAuth callbackURL", async () => {
+    social.mockResolvedValue(undefined);
+    searchParams.value = new URLSearchParams("next=%2Fadd%2Fsasha");
+    render(<SignInPage />);
+    await userEvent.click(screen.getByRole("button", { name: /Continue with Google/i }));
+    await waitFor(() =>
+      expect(social).toHaveBeenCalledWith(expect.objectContaining({ callbackURL: "/add/sasha" })),
+    );
+  });
+
+  it("falls back to '/' for absolute or protocol-relative next values (no open redirect)", async () => {
+    for (const evil of ["https://evil.example/x", "//evil.example/x"]) {
+      social.mockReset();
+      social.mockResolvedValue(undefined);
+      searchParams.value = new URLSearchParams([["next", evil]]);
+      const { unmount } = render(<SignInPage />);
+      await userEvent.click(screen.getByRole("button", { name: /Continue with Google/i }));
+      await waitFor(() =>
+        expect(social).toHaveBeenCalledWith(expect.objectContaining({ callbackURL: "/" })),
+      );
+      unmount();
+    }
+  });
+});

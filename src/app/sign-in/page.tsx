@@ -41,6 +41,13 @@ function SignInForm() {
   const [retried, setRetried] = useState(false);
   const displayError = error ?? (retried ? null : searchParams.get("error"));
 
+  // Optional same-origin return path (e.g. a scanned /add/<handle> code —
+  // the person should land back on the confirm screen, not Home). Only a
+  // single-leading-slash path is honored; anything else (absolute URLs,
+  // protocol-relative "//host") would be an open redirect and falls back to "/".
+  const rawNext = searchParams.get("next");
+  const nextPath = rawNext && /^\/(?!\/)/.test(rawNext) ? rawNext : "/";
+
   async function handleSignIn(provider: Provider) {
     if (pending) return;
     setPending(provider);
@@ -62,7 +69,7 @@ function SignInForm() {
       // On success better-auth redirects to `callbackURL`, so we intentionally
       // leave `pending` set — the page is on its way out. Only an error path
       // (blocked popup, network failure, misconfig) resolves/throws here.
-      const res = await signIn.social({ provider, callbackURL: "/" });
+      const res = await signIn.social({ provider, callbackURL: nextPath });
       if (res && "error" in res && res.error) {
         setError(res.error.message ?? "Sign-in failed. Please try again.");
         setPending(null);

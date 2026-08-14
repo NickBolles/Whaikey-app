@@ -38,7 +38,10 @@ export default async function AddPage({ params }: Props) {
             Sign in to Whaikey, then come back to this link to add them.
           </p>
         </div>
-        <Link href="/sign-in" className="btn-primary px-8 py-3">
+        <Link
+          href={`/sign-in?next=${encodeURIComponent(`/add/${handle}`)}`}
+          className="btn-primary px-8 py-3"
+        >
           Sign in
         </Link>
       </div>
