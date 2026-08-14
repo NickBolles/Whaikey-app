@@ -23,6 +23,16 @@ export const CODE_TTL_MS = 60_000;
 /** The scheme registered in Info.plist and AndroidManifest.xml. */
 export const NATIVE_CALLBACK_SCHEME = "whaikey";
 
+/**
+ * The only return target the native sign-in flow will honor: a same-origin
+ * relative path with a single leading slash. Anything else — absolute URLs,
+ * protocol-relative "//host" — would turn the exchange redirect into an open
+ * redirect and collapses to null (callers fall back to "/").
+ */
+export function safeReturnPath(raw: string | null | undefined): string | null {
+  return raw && /^\/(?!\/)/.test(raw) ? raw : null;
+}
+
 export function hashCode(code: string): string {
   return createHash("sha256").update(code).digest("hex");
 }

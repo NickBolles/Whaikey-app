@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { issueNativeAuthCode, NATIVE_CALLBACK_SCHEME } from "@/lib/native-auth";
+import { issueNativeAuthCode, NATIVE_CALLBACK_SCHEME, safeReturnPath } from "@/lib/native-auth";
 import { getSessionUser } from "@/lib/session";
 
 /**
@@ -49,7 +49,8 @@ export async function GET(request: NextRequest) {
       sessionCookieName: cookieName,
       sessionCookie,
     });
-    return appRedirect({ code });
+    const next = safeReturnPath(request.nextUrl.searchParams.get("next"));
+    return appRedirect(next ? { code, next } : { code });
   } catch (err) {
     console.error("[native-auth] failed to issue exchange code", err);
     return appRedirect({ error: "exchange_failed" });

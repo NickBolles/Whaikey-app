@@ -33,15 +33,22 @@ export function QrScanButton() {
   const router = useRouter();
   const [state, setState] = useState<ScanState>("idle");
   const sessionRef = useRef<NativeScanSession | null>(null);
+  // Bumped on every stop/unmount. startNativeScan awaits permissions and
+  // camera startup, so a session can resolve AFTER the user cancelled or the
+  // component unmounted — a stale generation means "stop it immediately"
+  // rather than adopting it and leaving the camera running.
+  const scanGenRef = useRef(0);
 
   useEffect(() => {
     return () => {
+      scanGenRef.current += 1;
       void sessionRef.current?.stop();
       sessionRef.current = null;
     };
   }, []);
 
   async function stopScan() {
+    scanGenRef.current += 1;
     const session = sessionRef.current;
     sessionRef.current = null;
     setState("idle");
@@ -50,6 +57,7 @@ export function QrScanButton() {
 
   async function startScan() {
     setState("scanning");
+    const gen = ++scanGenRef.current;
     const session = await startNativeScan({
       formats: "qr",
       onBarcode: (raw) => {
@@ -59,6 +67,11 @@ export function QrScanButton() {
         router.push(path);
       },
     });
+    if (gen !== scanGenRef.current) {
+      // Cancelled or unmounted while the camera was starting up.
+      void session?.stop();
+      return;
+    }
     if (!session) {
       setState("unavailable");
       return;

@@ -57,7 +57,7 @@ function SignInForm() {
     // Inside the native shell, OAuth cannot run in the WebView — Google rejects
     // embedded user agents outright. Hand off to the system browser; the app is
     // woken back up by the whaikey:// callback (docs/NATIVE_APP.md §2.3).
-    const native = await startNativeSignIn(provider);
+    const native = await startNativeSignIn(provider, nextPath === "/" ? undefined : nextPath);
     if (native.status === "started") return; // the browser owns the flow now
     if (native.status === "failed") {
       setError(native.reason);

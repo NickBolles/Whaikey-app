@@ -782,7 +782,9 @@ export async function makeEverythingPrivate(db: DB, userId: string): Promise<voi
       .where(and(eq(schema.pourShares.userId, userId), isNull(schema.pourShares.revokedAt)));
     await tx
       .update(schema.userProfiles)
-      .set({ socialEnabled: false, isPublic: false, discoverable: false, updatedAt: now })
+      // phoneDiscoverable included: re-enabling social must not silently make
+      // the stored number findable again without a fresh opt-in (US-11).
+      .set({ socialEnabled: false, isPublic: false, discoverable: false, phoneDiscoverable: false, updatedAt: now })
       .where(eq(schema.userProfiles.userId, userId));
     await tx
       .insert(schema.userSocialPrefs)

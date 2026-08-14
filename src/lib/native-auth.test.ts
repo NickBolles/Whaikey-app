@@ -119,3 +119,16 @@ describe("isNativeProvider", () => {
     expect(isNativeProvider(null)).toBe(false);
   });
 });
+
+describe("safeReturnPath", () => {
+  it("accepts single-leading-slash paths and rejects everything else", async () => {
+    const { safeReturnPath } = await import("@/lib/native-auth");
+    expect(safeReturnPath("/add/sasha")).toBe("/add/sasha");
+    expect(safeReturnPath("/")).toBe("/");
+    expect(safeReturnPath("//evil.example/x")).toBeNull();
+    expect(safeReturnPath("https://evil.example/x")).toBeNull();
+    expect(safeReturnPath("whaikey://auth/callback")).toBeNull();
+    expect(safeReturnPath(null)).toBeNull();
+    expect(safeReturnPath("")).toBeNull();
+  });
+});

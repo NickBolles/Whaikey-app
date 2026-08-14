@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { redeemNativeAuthCode } from "@/lib/native-auth";
+import { redeemNativeAuthCode, safeReturnPath } from "@/lib/native-auth";
 
 /**
  * Step 3 of native sign-in (docs/NATIVE_APP.md §2.3).
@@ -10,8 +10,10 @@ import { redeemNativeAuthCode } from "@/lib/native-auth";
  * dance. From here on the native app is just the web app, signed in, with
  * ordinary first-party cookie auth.
  *
- * The redirect is always same-origin and always a fixed path, so a code replayed
- * from elsewhere gains nothing beyond what redeeming it already would.
+ * The redirect is always same-origin: either "/" or a safeReturnPath-validated
+ * relative path (a scanned /add/<handle> code that should survive sign-in), so a
+ * code replayed from elsewhere gains nothing beyond what redeeming it already
+ * would, and the `next` param can never leave the origin.
  */
 export const dynamic = "force-dynamic";
 
@@ -24,7 +26,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(new URL("/sign-in?error=expired", request.nextUrl.origin));
   }
 
-  const response = NextResponse.redirect(new URL("/", request.nextUrl.origin));
+  const next = safeReturnPath(request.nextUrl.searchParams.get("next")) ?? "/";
+  const response = NextResponse.redirect(new URL(next, request.nextUrl.origin));
   response.cookies.set({
     name: redeemed.sessionCookieName,
     value: redeemed.sessionCookie,

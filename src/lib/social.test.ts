@@ -1146,3 +1146,27 @@ describe("getAddTarget", () => {
     expect(after?.followsYou).toBe(true);
   });
 });
+
+describe("privacy reset clears phone discovery", () => {
+  it("makeEverythingPrivate flips phoneDiscoverable off; re-enable does not restore it", async () => {
+    const db = await setupTestDb();
+    const user = await createTestUser(db);
+    await claim(db, user, "phone_reset", { isPublic: true });
+    await setPhone(db, user.id, "+15551230099", true);
+
+    await makeEverythingPrivate(db, user.id);
+    let profile = await db.query.userProfiles.findFirst({
+      where: eq(schema.userProfiles.userId, user.id),
+    });
+    expect(profile?.phoneDiscoverable).toBe(false);
+    // The number itself is kept (nothing deleted) — only discovery is off.
+    expect(profile?.phoneHash).not.toBeNull();
+
+    const { setSocialEnabled } = await import("@/lib/social");
+    await setSocialEnabled(db, user.id, true);
+    profile = await db.query.userProfiles.findFirst({
+      where: eq(schema.userProfiles.userId, user.id),
+    });
+    expect(profile?.phoneDiscoverable).toBe(false);
+  });
+});

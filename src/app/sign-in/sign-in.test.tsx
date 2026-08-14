@@ -96,7 +96,7 @@ describe("SignInPage", () => {
 
     // Google rejects OAuth from an embedded WebView, so the in-page flow must
     // not run at all once the native handoff has taken over.
-    expect(startNativeSignIn).toHaveBeenCalledWith("google");
+    expect(startNativeSignIn).toHaveBeenCalledWith("google", undefined);
     expect(social).not.toHaveBeenCalled();
   });
 });

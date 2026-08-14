@@ -84,3 +84,19 @@ describe("startNativeSignIn", () => {
     await expect(mod.startNativeSignIn("google")).resolves.toEqual({ status: "unavailable" });
   });
 });
+
+describe("return path threading", () => {
+  it("parses a next param out of the auth callback", () => {
+    expect(mod.parseAuthCallback("whaikey://auth/callback?code=abc&next=%2Fadd%2Fsasha")).toEqual({
+      code: "abc",
+      next: "/add/sasha",
+    });
+  });
+
+  it("exchangeUrl carries next, encoded", () => {
+    expect(mod.exchangeUrl("abc", "/add/sasha")).toBe(
+      "/api/auth/native/exchange?code=abc&next=%2Fadd%2Fsasha",
+    );
+    expect(mod.exchangeUrl("abc")).toBe("/api/auth/native/exchange?code=abc");
+  });
+});
