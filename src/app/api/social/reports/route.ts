@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/db";
 import { requireUser, withErrorHandling } from "@/lib/session";
-import { createReport, getOwnProfile, reportSchema } from "@/lib/social";
+import { RateLimitedError, createReport, getOwnProfile, reportSchema } from "@/lib/social";
 
 /** POST /api/social/reports body reportSchema — 409 profile_required, 201 on success. */
 export async function POST(req: Request) {
@@ -19,7 +19,18 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "profile_required" }, { status: 409 });
     }
 
-    await createReport(db, user.id, parsed.data);
+    let created;
+    try {
+      created = await createReport(db, user.id, parsed.data);
+    } catch (err) {
+      if (err instanceof RateLimitedError) {
+        return NextResponse.json({ error: "rate_limited" }, { status: 429 });
+      }
+      throw err;
+    }
+    if (!created) {
+      return NextResponse.json({ error: "not_found" }, { status: 404 });
+    }
     return NextResponse.json({ ok: true }, { status: 201 });
   });
 }

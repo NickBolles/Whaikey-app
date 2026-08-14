@@ -488,6 +488,9 @@ export async function updateSocialPrefs(db: DB, userId: string, patch: Partial<S
 export async function makeEverythingPrivate(db: DB, userId: string): Promise<void> {
   const now = new Date();
   await db.transaction(async (tx) => {
+    // Shared with createPourShare: a share request must fully serialize with
+    // the reset so it can't mint a live bearer link mid-reset.
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`social-reset:${userId}`}))`);
     await tx.update(schema.pours).set({ visibility: "private" }).where(eq(schema.pours.userId, userId));
     await tx
       .update(schema.pourShares)
@@ -1370,18 +1373,64 @@ export async function softDeleteComment(db: DB, userId: string, commentId: strin
   return updated.length > 0;
 }
 
+export const REPORT_RATE_LIMIT_PER_HOUR = 20;
+
+/**
+ * Files a report. Returns false when the subject doesn't exist (fabricated
+ * ids never reach the moderation queue); duplicate open reports by the same
+ * reporter are absorbed idempotently; per-reporter writes are rate-limited
+ * under an advisory lock (§11 — the queue must not be floodable).
+ */
 export async function createReport(
   db: DB,
   reporterId: string,
   input: { subjectType: ReportSubjectType; subjectId: string; reason: string },
-): Promise<void> {
-  await db.insert(schema.reports).values({
-    id: crypto.randomUUID(),
-    subjectType: input.subjectType,
-    subjectId: input.subjectId,
-    reporterId,
-    reason: input.reason.trim(),
+): Promise<boolean> {
+  let subjectExists = false;
+  if (input.subjectType === "pour") {
+    subjectExists = Boolean(
+      await db.query.pours.findFirst({ columns: { id: true }, where: eq(schema.pours.id, input.subjectId) }),
+    );
+  } else if (input.subjectType === "comment") {
+    subjectExists = Boolean(
+      await db.query.comments.findFirst({ columns: { id: true }, where: eq(schema.comments.id, input.subjectId) }),
+    );
+  } else {
+    subjectExists = Boolean(
+      await db.query.userProfiles.findFirst({
+        columns: { userId: true },
+        where: eq(schema.userProfiles.userId, input.subjectId),
+      }),
+    );
+  }
+  if (!subjectExists) return false;
+
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`report-rl:${reporterId}`}))`);
+    const existing = await tx.query.reports.findFirst({
+      where: and(
+        eq(schema.reports.reporterId, reporterId),
+        eq(schema.reports.subjectType, input.subjectType),
+        eq(schema.reports.subjectId, input.subjectId),
+        eq(schema.reports.state, "open"),
+      ),
+    });
+    if (existing) return;
+    const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    const recent = await tx
+      .select({ n: sql<number>`count(*)` })
+      .from(schema.reports)
+      .where(and(eq(schema.reports.reporterId, reporterId), sql`${schema.reports.createdAt} > ${hourAgo}`));
+    if (Number(recent[0]?.n ?? 0) >= REPORT_RATE_LIMIT_PER_HOUR) throw new RateLimitedError();
+    await tx.insert(schema.reports).values({
+      id: crypto.randomUUID(),
+      subjectType: input.subjectType,
+      subjectId: input.subjectId,
+      reporterId,
+      reason: input.reason.trim(),
+    });
   });
+  return true;
 }
 
 export const commentCreateSchema = z.object({

@@ -580,14 +580,21 @@ describe("comments", () => {
     expect(listed?.[0].parentId).toBe(c1!.id); // orphaned, but still renders
   });
 
-  it("createReport records a report", async () => {
+  it("createReport records a report, absorbs duplicates, and rejects fabricated subjects", async () => {
     const c1 = await addComment(db, commenter.id, pourId, "spam-ish");
     await expect(
       createReport(db, owner.id, { subjectType: "comment", subjectId: c1!.id, reason: "spam" }),
-    ).resolves.toBeUndefined();
+    ).resolves.toBe(true);
+    // Same reporter + same open subject: absorbed, not duplicated.
+    await createReport(db, owner.id, { subjectType: "comment", subjectId: c1!.id, reason: "spam again" });
     const rows = await db.select().from(schema.reports);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ subjectType: "comment", subjectId: c1!.id, reporterId: owner.id, reason: "spam" });
+    // A fabricated subject never reaches the queue.
+    await expect(
+      createReport(db, owner.id, { subjectType: "pour", subjectId: "no-such-pour", reason: "spam" }),
+    ).resolves.toBe(false);
+    expect(await db.select().from(schema.reports)).toHaveLength(1);
   });
 });
 

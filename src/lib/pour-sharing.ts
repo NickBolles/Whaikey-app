@@ -1,4 +1,4 @@
-import { and, desc, eq, isNotNull, isNull } from "drizzle-orm";
+import { and, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
 import { SocialDisabledError } from "@/lib/pours";
@@ -50,92 +50,99 @@ function cleanLocationLabel(value: string | null | undefined): string | null {
  * pour must belong to the requesting user; no private collection data crosses
  * this boundary.
  */
+const NOT_FOUND = Symbol("share-not-found");
+const RETRY = Symbol("share-retry");
+
 export async function createPourShare(
   db: DB,
   userId: string,
   pourId: string,
   options: PourShareOptions = {},
 ): Promise<{ code: string } | null> {
-  // US-11: while the owner is stepped back, no new bearer link can be minted
-  // (and no revoked one reactivated) — a stale tab must not undo the
-  // "make everything private" guarantee. SocialDisabledError → 409 upstream.
-  const profile = await db.query.userProfiles.findFirst({
-    columns: { socialEnabled: true },
-    where: eq(schema.userProfiles.userId, userId),
-  });
-  if (profile && !profile.socialEnabled) throw new SocialDisabledError();
-
   const locationLabel = cleanLocationLabel(options.locationLabel);
-  const existing = await db.query.pourShares.findFirst({
-    where: and(eq(schema.pourShares.pourId, pourId), eq(schema.pourShares.userId, userId)),
-  });
-  if (existing) {
-    if (existing.revokedAt) {
-      // A revoked link must never come back to life: re-sharing mints a fresh
-      // code on the same row (pour_shares.pour_id is unique) rather than
-      // reusing the dead one.
-      for (let attempt = 0; attempt < 3; attempt += 1) {
-        const code = newShareCode();
-        try {
-          // Conditional on the row still being revoked: two concurrent
-          // re-shares must not have the second overwrite (and thereby kill)
-          // the code the first request already returned to its client.
-          const updated = await db
-            .update(schema.pourShares)
-            .set({
-              code,
-              revokedAt: null,
-              ...(options.locationLabel !== undefined ? { locationLabel } : {}),
-            })
-            .where(
-              and(
-                eq(schema.pourShares.id, existing.id),
-                eq(schema.pourShares.userId, userId),
-                isNotNull(schema.pourShares.revokedAt),
-              ),
-            )
-            .returning({ code: schema.pourShares.code });
-          if (updated[0]) return updated[0];
-          const winner = await db.query.pourShares.findFirst({
-            where: and(eq(schema.pourShares.id, existing.id), eq(schema.pourShares.userId, userId)),
-          });
-          if (winner && !winner.revokedAt) return { code: winner.code };
-        } catch (err) {
-          // Only a code-uniqueness collision earns a retry; anything else is a
-          // real database failure that must surface, not read as bad luck.
-          const message = err instanceof Error ? err.message : String(err);
-          if (!/unique|duplicate/i.test(message)) throw err;
-        }
-      }
-      throw new Error("Unable to create a unique pour share link");
-    }
-    if (options.locationLabel !== undefined) {
-      await db
-        .update(schema.pourShares)
-        .set({ locationLabel })
-        .where(and(eq(schema.pourShares.id, existing.id), eq(schema.pourShares.userId, userId)));
-    }
-    return { code: existing.code };
-  }
 
-  const pour = await db.query.pours.findFirst({
-    where: and(eq(schema.pours.id, pourId), eq(schema.pours.userId, userId)),
-  });
-  if (!pour) return null;
-
+  // Each attempt is one transaction under the same per-user advisory lock
+  // makeEverythingPrivate takes, so a share request fully serializes with the
+  // US-11 reset — it can never mint or reactivate a link mid-reset. Cross-user
+  // code collisions abort the transaction, hence retry-outside-transaction.
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const code = newShareCode();
-    const inserted = await db
-      .insert(schema.pourShares)
-      .values({ id: crypto.randomUUID(), pourId, userId, code, locationLabel })
-      .onConflictDoNothing()
-      .returning({ code: schema.pourShares.code });
-    if (inserted[0]) return inserted[0];
+    try {
+      const result = await db.transaction(async (tx) => {
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`social-reset:${userId}`}))`);
 
-    const raced = await db.query.pourShares.findFirst({
-      where: and(eq(schema.pourShares.pourId, pourId), eq(schema.pourShares.userId, userId)),
-    });
-    if (raced) return { code: raced.code };
+        // US-11: while the owner is stepped back, no new bearer link can be
+        // minted (and no revoked one reactivated). SocialDisabledError → 409.
+        const profile = await tx.query.userProfiles.findFirst({
+          columns: { socialEnabled: true },
+          where: eq(schema.userProfiles.userId, userId),
+        });
+        if (profile && !profile.socialEnabled) throw new SocialDisabledError();
+
+        const existing = await tx.query.pourShares.findFirst({
+          where: and(eq(schema.pourShares.pourId, pourId), eq(schema.pourShares.userId, userId)),
+        });
+        if (existing) {
+          if (existing.revokedAt) {
+            // A revoked link must never come back to life: re-sharing mints a
+            // fresh code on the same row. Conditional on still-revoked so two
+            // concurrent re-shares can't have the second overwrite (and kill)
+            // the code the first already returned.
+            const updated = await tx
+              .update(schema.pourShares)
+              .set({
+                code,
+                revokedAt: null,
+                ...(options.locationLabel !== undefined ? { locationLabel } : {}),
+              })
+              .where(
+                and(
+                  eq(schema.pourShares.id, existing.id),
+                  eq(schema.pourShares.userId, userId),
+                  isNotNull(schema.pourShares.revokedAt),
+                ),
+              )
+              .returning({ code: schema.pourShares.code });
+            if (updated[0]) return updated[0];
+            const winner = await tx.query.pourShares.findFirst({
+              where: and(eq(schema.pourShares.id, existing.id), eq(schema.pourShares.userId, userId)),
+            });
+            return winner && !winner.revokedAt ? { code: winner.code } : RETRY;
+          }
+          if (options.locationLabel !== undefined) {
+            await tx
+              .update(schema.pourShares)
+              .set({ locationLabel })
+              .where(and(eq(schema.pourShares.id, existing.id), eq(schema.pourShares.userId, userId)));
+          }
+          return { code: existing.code };
+        }
+
+        const pour = await tx.query.pours.findFirst({
+          where: and(eq(schema.pours.id, pourId), eq(schema.pours.userId, userId)),
+        });
+        if (!pour) return NOT_FOUND;
+
+        const inserted = await tx
+          .insert(schema.pourShares)
+          .values({ id: crypto.randomUUID(), pourId, userId, code, locationLabel })
+          .onConflictDoNothing()
+          .returning({ code: schema.pourShares.code });
+        if (inserted[0]) return inserted[0];
+        const raced = await tx.query.pourShares.findFirst({
+          where: and(eq(schema.pourShares.pourId, pourId), eq(schema.pourShares.userId, userId)),
+        });
+        return raced ? { code: raced.code } : RETRY;
+      });
+      if (result === NOT_FOUND) return null;
+      if (result !== RETRY) return result;
+    } catch (err) {
+      // Only a code-uniqueness collision earns a retry; anything else is a
+      // real database failure that must surface, not read as bad luck.
+      if (err instanceof SocialDisabledError) throw err;
+      const message = err instanceof Error ? err.message : String(err);
+      if (!/unique|duplicate/i.test(message)) throw err;
+    }
   }
   throw new Error("Unable to create a unique pour share link");
 }
