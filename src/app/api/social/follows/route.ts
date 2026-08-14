@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { requireUser, withErrorHandling } from "@/lib/session";
-import { followByHandle, getOwnProfile, listFollowRequests, listFollowers, listFollowing } from "@/lib/social";
+import { SocialDisabledError, followByHandle, getOwnProfile, listFollowRequests, listFollowers, listFollowing } from "@/lib/social";
 
 const FOLLOW_LIST_TYPES = ["following", "followers", "requests"] as const;
 type FollowListType = (typeof FOLLOW_LIST_TYPES)[number];
@@ -52,7 +52,15 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "social_disabled" }, { status: 409 });
     }
 
-    const result = await followByHandle(db, user.id, parsed.data.handle);
+    let result;
+    try {
+      result = await followByHandle(db, user.id, parsed.data.handle);
+    } catch (err) {
+      if (err instanceof SocialDisabledError) {
+        return NextResponse.json({ error: "social_disabled" }, { status: 409 });
+      }
+      throw err;
+    }
     if (!result) {
       return NextResponse.json({ error: "not_found" }, { status: 404 });
     }

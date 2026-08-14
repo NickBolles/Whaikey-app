@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/db";
 import { requireUser, withErrorHandling } from "@/lib/session";
-import { cheerPour, getOwnProfile, uncheerPour } from "@/lib/social";
+import { SocialDisabledError, cheerPour, getOwnProfile, uncheerPour } from "@/lib/social";
 
 type Ctx = { params: Promise<{ pourId: string }> };
 
@@ -22,7 +22,15 @@ export async function POST(_req: Request, ctx: Ctx) {
       return NextResponse.json({ error: "social_disabled" }, { status: 409 });
     }
 
-    const result = await cheerPour(db, user.id, pourId);
+    let result;
+    try {
+      result = await cheerPour(db, user.id, pourId);
+    } catch (err) {
+      if (err instanceof SocialDisabledError) {
+        return NextResponse.json({ error: "social_disabled" }, { status: 409 });
+      }
+      throw err;
+    }
     if (!result) {
       return NextResponse.json({ error: "not_found" }, { status: 404 });
     }

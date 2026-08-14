@@ -251,11 +251,21 @@ export async function followByHandle(db: DB, followerId: string, handle: string)
   if (existing) return { state: existing.state };
 
   const state: FollowState = target.isPublic ? "accepted" : "pending";
-  const inserted = await db
-    .insert(schema.follows)
-    .values({ id: crypto.randomUUID(), followerId, followeeId: target.userId, state })
-    .onConflictDoNothing()
-    .returning();
+  const inserted = await db.transaction(async (tx) => {
+    // Serialized with the US-11 reset: a follow from a caller mid-step-back
+    // must not land beside the reset and resurface on re-enable.
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`social-reset:${followerId}`}))`);
+    const caller = await tx.query.userProfiles.findFirst({
+      columns: { socialEnabled: true },
+      where: eq(schema.userProfiles.userId, followerId),
+    });
+    if (caller && !caller.socialEnabled) throw new SocialDisabledError();
+    return tx
+      .insert(schema.follows)
+      .values({ id: crypto.randomUUID(), followerId, followeeId: target.userId, state })
+      .onConflictDoNothing()
+      .returning();
+  });
   if (inserted[0]) return { state: inserted[0].state };
 
   const raced = await db.query.follows.findFirst({
@@ -1217,10 +1227,20 @@ export async function cheerPour(db: DB, userId: string, pourId: string): Promise
   // an author quietly inflate the count the UI renders on the object.
   if (ctx.authorId === userId) return null;
   if (!(await canViewPourContext(db, userId, ctx))) return null;
-  await db
-    .insert(schema.reactions)
-    .values({ id: crypto.randomUUID(), pourId, userId, kind: "cheers" })
-    .onConflictDoNothing();
+  await db.transaction(async (tx) => {
+    // Serialized with the US-11 reset: a cheer must not land beside a
+    // concurrent step-back and resurface on re-enable.
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`social-reset:${userId}`}))`);
+    const cheerer = await tx.query.userProfiles.findFirst({
+      columns: { socialEnabled: true },
+      where: eq(schema.userProfiles.userId, userId),
+    });
+    if (cheerer && !cheerer.socialEnabled) throw new SocialDisabledError();
+    await tx
+      .insert(schema.reactions)
+      .values({ id: crypto.randomUUID(), pourId, userId, kind: "cheers" })
+      .onConflictDoNothing();
+  });
   return { cheersCount: await countCheers(db, pourId, userId) };
 }
 
@@ -1357,6 +1377,15 @@ export async function addComment(
   // run under a per-user advisory lock so concurrent requests can't all read
   // a below-limit count before any of them inserts.
   const [row] = await db.transaction(async (tx) => {
+    // Reset lock first (fixed ordering to avoid deadlocks), then the
+    // rate-limit lock: a comment must not slip in beside a concurrent US-11
+    // reset only to resurface when social is re-enabled.
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`social-reset:${userId}`}))`);
+    const authorProfile = await tx.query.userProfiles.findFirst({
+      columns: { socialEnabled: true },
+      where: eq(schema.userProfiles.userId, userId),
+    });
+    if (authorProfile && !authorProfile.socialEnabled) throw new SocialDisabledError();
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`comment-rl:${userId}`}))`);
     const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
     const recent = await tx

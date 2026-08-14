@@ -111,12 +111,11 @@ describe("/api/social/reports", () => {
     ).toBe(401);
   });
 
-  it("returns 409 profile_required when the caller has no profile", async () => {
+  it("works without a profile — reporting is a safety action (§11)", async () => {
     const res = await REPORT(
       jsonRequest("/api/social/reports", "POST", { subjectType: "pour", subjectId: pourId, reason: "spam" }),
     );
-    expect(res.status).toBe(409);
-    expect(await res.json()).toEqual({ error: "profile_required" });
+    expect(res.status).toBe(201);
   });
 
   it("returns 400 for an invalid body", async () => {

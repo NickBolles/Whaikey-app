@@ -37,10 +37,10 @@ describe("/api/social/blocks", () => {
     expect(await res.json()).toEqual({ error: "cannot_block_self" });
   });
 
-  it("POST returns 409 profile_required when the caller has no profile", async () => {
+  it("POST works without a profile — blocking is a safety action (US-10)", async () => {
     const res = await POST(jsonRequest("/api/social/blocks", "POST", { userId: target.id }));
-    expect(res.status).toBe(409);
-    expect(await res.json()).toEqual({ error: "profile_required" });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
   });
 
   it("POST blocks a user, GET lists it, DELETE unblocks", async () => {

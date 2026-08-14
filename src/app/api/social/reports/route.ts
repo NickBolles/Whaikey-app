@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/db";
 import { requireUser, withErrorHandling } from "@/lib/session";
-import { RateLimitedError, createReport, getOwnProfile, reportSchema } from "@/lib/social";
+import { RateLimitedError, createReport, reportSchema } from "@/lib/social";
 
-/** POST /api/social/reports body reportSchema — 409 profile_required, 201 on success. */
+/** POST /api/social/reports body reportSchema — 201 on success; no profile required (safety action). */
 export async function POST(req: Request) {
   return withErrorHandling(async () => {
     const user = await requireUser();
@@ -13,12 +13,10 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Invalid input" }, { status: 400 });
     }
 
+    // Deliberately NO profile requirement: reporting is a safety action that
+    // identifies the reporter by user id — encountering abuse must not
+    // require claiming a handle first (docs/SOCIAL.md §11).
     const db = getDb();
-    const profile = await getOwnProfile(db, user.id);
-    if (!profile) {
-      return NextResponse.json({ error: "profile_required" }, { status: 409 });
-    }
-
     let created;
     try {
       created = await createReport(db, user.id, parsed.data);

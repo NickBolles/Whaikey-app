@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import * as schema from "@/db/schema";
 import { requireUser, withErrorHandling } from "@/lib/session";
-import { blockUser, getOwnProfile, listBlocked } from "@/lib/social";
+import { blockUser, listBlocked } from "@/lib/social";
 
 const blockCreateSchema = z.object({ userId: z.string().min(1) });
 
@@ -30,12 +30,10 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "cannot_block_self" }, { status: 400 });
     }
 
+    // Deliberately NO profile requirement: blocking is a safety action keyed
+    // on user ids — nobody should have to claim a handle to make an abusive
+    // account disappear (US-10).
     const db = getDb();
-    const profile = await getOwnProfile(db, user.id);
-    if (!profile) {
-      return NextResponse.json({ error: "profile_required" }, { status: 409 });
-    }
-
     const target = await db.query.user.findFirst({
       columns: { id: true },
       where: eq(schema.user.id, parsed.data.userId),

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/db";
 import { requireUser, withErrorHandling } from "@/lib/session";
-import { RateLimitedError, addComment, commentCreateSchema, getOwnProfile, listComments } from "@/lib/social";
+import { RateLimitedError, SocialDisabledError, addComment, commentCreateSchema, getOwnProfile, listComments } from "@/lib/social";
 
 /** GET /api/social/comments?pourId= — no profile needed to read; 404 when the pour isn't visible. */
 export async function GET(req: Request) {
@@ -52,6 +52,9 @@ export async function POST(req: Request) {
     } catch (err) {
       if (err instanceof RateLimitedError) {
         return NextResponse.json({ error: "rate_limited" }, { status: 429 });
+      }
+      if (err instanceof SocialDisabledError) {
+        return NextResponse.json({ error: "social_disabled" }, { status: 409 });
       }
       throw err;
     }
