@@ -12,7 +12,7 @@
  * A signed-out viewer (viewerId === null) sees nothing cross-user — share
  * links (src/lib/pour-sharing.ts) are a separate bearer-token mechanism.
  */
-import { and, asc, desc, eq, inArray, isNotNull, isNull, or, sql, type AnyColumn } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, or, sql, type AnyColumn } from "drizzle-orm";
 import { z } from "zod";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
@@ -540,6 +540,30 @@ function isUniqueViolation(err: unknown): boolean {
 }
 
 /**
+ * The durable enumeration throttle, shared by every path that tests a number
+ * against the database: lookups AND set attempts. Saving probes too —
+ * posting candidates distinguishes "taken" (phone_taken) from "free"
+ * regardless of the target's discoverability, so an unmetered POST would be
+ * a lookup-endpoint bypass. The row is written before the caller learns
+ * anything, misses included. Rows that have aged out of the window stop
+ * counting but would otherwise accumulate forever, so each permitted probe
+ * also sweeps expired rows (the nativeAuthCodes cleanup pattern).
+ */
+async function recordPhoneProbe(db: DB, userId: string): Promise<void> {
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`phone-lookup-rl:${userId}`}))`);
+    const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    const recent = await tx
+      .select({ n: sql<number>`count(*)` })
+      .from(schema.phoneLookups)
+      .where(and(eq(schema.phoneLookups.userId, userId), sql`${schema.phoneLookups.createdAt} > ${hourAgo}`));
+    if (Number(recent[0]?.n ?? 0) >= PHONE_LOOKUP_LIMIT_PER_HOUR) throw new RateLimitedError();
+    await tx.insert(schema.phoneLookups).values({ id: crypto.randomUUID(), userId });
+    await tx.delete(schema.phoneLookups).where(lt(schema.phoneLookups.createdAt, hourAgo));
+  });
+}
+
+/**
  * Set (or replace) the caller's phone number. Requires an existing profile —
  * returns null otherwise (route maps that to 409 profile_required). Throws
  * PhoneTakenError when the hash collides with another account's number
@@ -547,7 +571,9 @@ function isUniqueViolation(err: unknown): boolean {
  * plain update can't race itself into a false negative). Raising
  * discoverable to true while stepped back (socialEnabled=false) throws
  * SocialDisabledError, under the same social-reset lock as every other
- * exposure-raising write; discoverable=false is always allowed.
+ * exposure-raising write; discoverable=false is always allowed. Every
+ * attempt counts against the shared phone-probe limit (RateLimitedError) —
+ * see recordPhoneProbe for why a save is also an enumeration probe.
  */
 export async function setPhone(
   db: DB,
@@ -558,6 +584,8 @@ export async function setPhone(
   const canonical = normalizePhone(rawPhone); // throws InvalidPhoneError
   const hash = hashPhone(canonical);
   const last2 = phoneLast2(canonical);
+
+  await recordPhoneProbe(db, userId); // throws RateLimitedError
 
   try {
     return await db.transaction(async (tx) => {
@@ -624,31 +652,22 @@ export async function setPhoneDiscoverable(db: DB, userId: string, discoverable:
 }
 
 /**
- * Exact-match phone lookup. Records a phone_lookups row FIRST, inside a
- * per-user advisory-locked transaction (same pattern as addComment's
- * comment-rl lock), and throws RateLimitedError past
- * PHONE_LOOKUP_LIMIT_PER_HOUR — a miss counts toward the limit too, which is
- * the enumeration guard: an unthrottled endpoint would let an account iterate
- * numbers and map who's on the app, so the row is written before the caller
- * ever learns whether the number matched. Throws InvalidPhoneError for a
- * malformed number. Every non-match reason (no such number, not discoverable,
- * stepped-back owner, blocked either way) returns the same null — a self
- * lookup is allowed to match (harmless; the UI can say "that's you").
+ * Exact-match phone lookup. Records a phone-probe row FIRST (see
+ * recordPhoneProbe — per-user advisory lock, the addComment comment-rl
+ * pattern) and throws RateLimitedError past PHONE_LOOKUP_LIMIT_PER_HOUR — a
+ * miss counts toward the limit too, which is the enumeration guard: an
+ * unthrottled endpoint would let an account iterate numbers and map who's on
+ * the app, so the row is written before the caller ever learns whether the
+ * number matched. Throws InvalidPhoneError for a malformed number. Every
+ * non-match reason (no such number, not discoverable, stepped-back owner,
+ * blocked either way) returns the same null — a self lookup is allowed to
+ * match (harmless; the UI can say "that's you").
  */
 export async function findProfileByPhone(db: DB, viewerId: string, rawPhone: string): Promise<ProfileSummary | null> {
   const canonical = normalizePhone(rawPhone); // throws InvalidPhoneError
   const hash = hashPhone(canonical);
 
-  await db.transaction(async (tx) => {
-    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`phone-lookup-rl:${viewerId}`}))`);
-    const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
-    const recent = await tx
-      .select({ n: sql<number>`count(*)` })
-      .from(schema.phoneLookups)
-      .where(and(eq(schema.phoneLookups.userId, viewerId), sql`${schema.phoneLookups.createdAt} > ${hourAgo}`));
-    if (Number(recent[0]?.n ?? 0) >= PHONE_LOOKUP_LIMIT_PER_HOUR) throw new RateLimitedError();
-    await tx.insert(schema.phoneLookups).values({ id: crypto.randomUUID(), userId: viewerId });
-  });
+  await recordPhoneProbe(db, viewerId);
 
   const target = await db.query.userProfiles.findFirst({ where: eq(schema.userProfiles.phoneHash, hash) });
   if (!target) return null;

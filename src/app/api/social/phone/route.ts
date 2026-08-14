@@ -4,6 +4,7 @@ import { InvalidPhoneError } from "@/lib/phone";
 import { requireUser, withErrorHandling } from "@/lib/session";
 import {
   PhoneTakenError,
+  RateLimitedError,
   SocialDisabledError,
   clearPhone,
   phoneDiscoverablePatchSchema,
@@ -17,7 +18,10 @@ import {
  * number. 400 invalid_phone for a malformed number or body; 409
  * profile_required (no profile yet), phone_taken (another account already
  * claimed this hash), or social_disabled (discoverable=true while stepped
- * back). Never echoes the phone back — only the last-2 + discoverable flag.
+ * back); 429 rate_limited — a save attempt tests a number against the
+ * database exactly like a lookup does (phone_taken is an oracle otherwise),
+ * so it draws from the same durable phone-probe budget as /api/social/lookup.
+ * Never echoes the phone back — only the last-2 + discoverable flag.
  */
 export async function POST(req: Request) {
   return withErrorHandling(async () => {
@@ -40,6 +44,9 @@ export async function POST(req: Request) {
       }
       if (err instanceof SocialDisabledError) {
         return NextResponse.json({ error: "social_disabled" }, { status: 409 });
+      }
+      if (err instanceof RateLimitedError) {
+        return NextResponse.json({ error: "rate_limited" }, { status: 429 });
       }
       throw err;
     }

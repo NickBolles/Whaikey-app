@@ -61,6 +61,10 @@ export function FriendFinderCard({
         );
         return;
       }
+      if (res.status === 429) {
+        setError("Too many attempts — try again in an hour.");
+        return;
+      }
       if (!res.ok || !body?.phoneLast2) {
         setError("Couldn't save that number — try again.");
         return;

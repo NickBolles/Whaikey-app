@@ -301,23 +301,37 @@ test.describe("social: phone discovery settings", () => {
     if (await claimButton.isVisible().catch(() => false)) {
       await page.getByLabel("Handle").fill("samscanner");
       await claimButton.click();
-      await expect(page.getByText("How friends find you")).toBeVisible();
+      // Generous timeout: on a cold dev server the post-claim refresh compiles
+      // /friends from scratch and can outlast the default 5s.
+      await expect(page.getByText("How friends find you")).toBeVisible({ timeout: 15000 });
     }
 
     const finderCard = page.locator("section", { hasText: "How friends find you" });
     await expect(finderCard).toBeVisible();
 
-    // No number yet (or a fresh claim): the add form is showing.
+    // No number yet (or a fresh claim): the add form is showing. Discovery is
+    // never preselected (docs/SOCIAL.md D8 as amended), so opting in is an
+    // explicit tap before saving.
     const phoneInput = finderCard.getByLabel("Phone number");
     if (await phoneInput.isVisible().catch(() => false)) {
       await phoneInput.fill("+15551230099");
+      const optIn = finderCard.getByRole("switch", { name: "Let people find me by phone" });
+      await expect(optIn).toHaveAttribute("aria-checked", "false");
+      await optIn.click();
+      await expect(optIn).toHaveAttribute("aria-checked", "true");
       await finderCard.getByRole("button", { name: "Save" }).click();
     }
 
-    await expect(finderCard.getByText(/••••\s*••99\s*·\s*discoverable/)).toBeVisible();
+    await expect(finderCard.getByText(/••••\s*••99/)).toBeVisible();
 
+    // A retry reuses the seeded DB, so a prior attempt may have already
+    // toggled discovery off — bring it back on before asserting the cycle.
     const toggle = finderCard.getByRole("switch", { name: "Let people find me by phone" });
+    if ((await toggle.getAttribute("aria-checked")) === "false") {
+      await toggle.click();
+    }
     await expect(toggle).toHaveAttribute("aria-checked", "true");
+    await expect(finderCard.getByText(/••••\s*••99\s*·\s*discoverable/)).toBeVisible();
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-checked", "false");
     await expect(finderCard.getByText(/••••\s*••99\s*·\s*not discoverable/)).toBeVisible();

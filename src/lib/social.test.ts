@@ -1085,6 +1085,37 @@ describe("phone discovery", () => {
     const rows = await db.query.phoneLookups.findMany({ where: eq(schema.phoneLookups.userId, viewer.id) });
     expect(rows).toHaveLength(PHONE_LOOKUP_LIMIT_PER_HOUR);
   });
+
+  it("setPhone draws from the same probe budget — saving candidates can't out-enumerate the lookup limit", async () => {
+    const user = await createTestUser(db);
+    await claim(db, user, "probesaver");
+
+    for (let i = 0; i < PHONE_LOOKUP_LIMIT_PER_HOUR; i += 1) {
+      expect(await findProfileByPhone(db, user.id, `415555${String(9000 + i)}`)).toBeNull();
+    }
+    // The exhausted budget blocks set attempts too: posting candidates with
+    // discoverable=false would otherwise read "phone_taken vs success" as an
+    // unmetered registered-number oracle that ignores discoverability.
+    await expect(setPhone(db, user.id, "4155550123", false)).rejects.toBeInstanceOf(RateLimitedError);
+  });
+
+  it("each permitted probe sweeps rows that aged out of the rate window", async () => {
+    const user = await createTestUser(db);
+    await claim(db, user, "sweeper");
+
+    await db.insert(schema.phoneLookups).values({
+      id: crypto.randomUUID(),
+      userId: user.id,
+      createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000),
+    });
+
+    expect(await findProfileByPhone(db, user.id, "4155550001")).toBeNull();
+
+    const rows = await db.query.phoneLookups.findMany({ where: eq(schema.phoneLookups.userId, user.id) });
+    // Only the probe just recorded survives — the expired row no longer
+    // counted toward the limit and is gone rather than accumulating forever.
+    expect(rows).toHaveLength(1);
+  });
 });
 
 describe("getAddTarget", () => {

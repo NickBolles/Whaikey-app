@@ -7,7 +7,7 @@ import { createTestUser, jsonRequest, mockSessionModule, setSessionUser, setupTe
 vi.mock("@/lib/session", async () => mockSessionModule());
 
 import { DELETE, PATCH, POST } from "@/app/api/social/phone/route";
-import { createProfile } from "@/lib/social";
+import { PHONE_LOOKUP_LIMIT_PER_HOUR, createProfile } from "@/lib/social";
 
 describe("/api/social/phone", () => {
   let db: DB;
@@ -83,6 +83,17 @@ describe("/api/social/phone", () => {
     // discoverable=false is always allowed, even stepped back.
     const allowed = await POST(jsonRequest("/api/social/phone", "POST", { phone: "4155550123", discoverable: false }));
     expect(allowed.status).toBe(200);
+  });
+
+  it("POST returns 429 rate_limited once the shared phone-probe budget is spent", async () => {
+    await createProfile(db, { id: user.id, name: user.name }, "phoneuser7");
+    for (let i = 0; i < PHONE_LOOKUP_LIMIT_PER_HOUR; i += 1) {
+      await db.insert(schema.phoneLookups).values({ id: crypto.randomUUID(), userId: user.id });
+    }
+
+    const res = await POST(jsonRequest("/api/social/phone", "POST", { phone: "4155550123", discoverable: false }));
+    expect(res.status).toBe(429);
+    expect(await res.json()).toEqual({ error: "rate_limited" });
   });
 
   it("DELETE removes the phone and returns { removed }", async () => {
