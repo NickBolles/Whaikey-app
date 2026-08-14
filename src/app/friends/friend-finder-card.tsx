@@ -72,6 +72,7 @@ export function FriendFinderCard({
       setPhoneLast2(body.phoneLast2);
       setDiscoverable(Boolean(body.phoneDiscoverable));
       setPhoneInput("");
+      setNewDiscoverable(false);
       setEditing(false);
     } catch {
       setError("Couldn't save that number — try again.");
@@ -89,6 +90,9 @@ export function FriendFinderCard({
       if (!res.ok) throw new Error("remove failed");
       setPhoneLast2(null);
       setDiscoverable(false);
+      // The add form is about to reappear — a leftover true here would let a
+      // replacement number post discoverable without a fresh opt-in.
+      setNewDiscoverable(false);
     } catch {
       setError("Couldn't remove that number — try again.");
     } finally {
@@ -156,7 +160,12 @@ export function FriendFinderCard({
             <div className="flex gap-2">
               <button
                 type="button"
-                onClick={() => setEditing(true)}
+                onClick={() => {
+                  // Replacing re-opens the add form: discovery starts off
+                  // again, whatever the previous save opted into.
+                  setNewDiscoverable(false);
+                  setEditing(true);
+                }}
                 className="btn-secondary tap-target px-3 py-2 text-xs"
               >
                 Replace number
