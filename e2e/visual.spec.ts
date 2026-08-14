@@ -270,4 +270,53 @@ test.describe("signed in (demo collector)", () => {
     await settle(page);
     await expect(page).toHaveScreenshot(shot("import"), { fullPage: true });
   });
+
+  // Social (docs/SOCIAL.md): Jordan and Sasha Glen are mutual friends, seeded
+  // in e2e/demo-seed.ts. These screens exercise the follow graph, a note
+  // discussion, the sharing/privacy hub, and a signed-in bearer-link
+  // comparison — see CONTRACTS.md for the underlying data shapes.
+
+  test("friends: following, followers, and a mutual", async ({ page }) => {
+    await page.goto("/friends");
+    await expect(page.getByRole("heading", { name: "Friends" })).toBeVisible();
+    await expect(page.getByText("Sasha Glen").first()).toBeVisible();
+    await expect(page.getByText("Friends", { exact: true }).last()).toBeVisible();
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("friends"), { fullPage: true });
+  });
+
+  test("a friend's profile: palate, signature descriptors, recent notes", async ({ page }) => {
+    await page.goto("/u/sasha");
+    await expect(page.getByRole("heading", { name: "Sasha Glen" })).toBeVisible();
+    await expect(page.getByText("Recent notes")).toBeVisible();
+    await expect(page.getByText(/Lagavulin/i).first()).toBeVisible();
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("profile"), { fullPage: true });
+  });
+
+  test("note discussion: comparison, cheers, and a threaded reply", async ({ page }) => {
+    await page.goto("/notes/demo-friend-pour-1");
+    await expect(page.getByRole("heading", { name: "Comments" })).toBeVisible();
+    await expect(page.getByText(/did you get any of that/i)).toBeVisible();
+    await expect(page.getByText("You've tasted this too")).toBeVisible();
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("note-discussion"), { fullPage: true });
+  });
+
+  test("sharing: privacy controls, no shared links yet", async ({ page }) => {
+    await page.goto("/sharing");
+    await expect(page.getByRole("heading", { name: "Sharing", exact: true })).toBeVisible();
+    await expect(page.getByText("No shared links yet")).toBeVisible();
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("sharing"), { fullPage: true });
+  });
+
+  test("shared pour link: signed-in viewer gets a comparison and discussion", async ({ page }) => {
+    await page.goto("/s/sashalagav16");
+    await expect(page.getByRole("heading", { name: "Lagavulin 16" })).toBeVisible();
+    await expect(page.getByText("You've tasted this too")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Comments" })).toBeVisible();
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("share-comparison"), { fullPage: true });
+  });
 });

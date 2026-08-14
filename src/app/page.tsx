@@ -3,7 +3,9 @@ import { and, desc, eq, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { getSessionUser } from "@/lib/session";
 import { isAiConfigured } from "@/lib/ai/client";
+import { getFriendFeed, getOwnProfile, listFollowing } from "@/lib/social";
 import { HomeConcierge } from "@/components/home-concierge";
+import { FriendsModule, type FriendFeedItem } from "@/components/friends-module";
 import {
   Search,
   ScanLine,
@@ -79,6 +81,36 @@ export default async function HomePage() {
     .limit(5);
 
 
+  // US-7: the "From your friends" Home module (docs/SOCIAL.md §7.3). A profile
+  // and at least one accepted follow are prerequisites for the graph to have
+  // anything to show — checked separately from the feed query so the empty
+  // states can tell "no friends yet" apart from "friends, quiet week".
+  const [ownProfile, following] = await Promise.all([
+    getOwnProfile(db, user.id),
+    listFollowing(db, user.id),
+  ]);
+  const hasProfile = Boolean(ownProfile?.socialEnabled);
+  const hasFollows = following.some((f) => f.state === "accepted");
+  const friendFeedRaw = hasFollows ? await getFriendFeed(db, user.id, { limit: 3 }) : [];
+  const friendFeedItems: FriendFeedItem[] = friendFeedRaw.map((f) => ({
+    pourId: f.pourId,
+    bottleId: f.bottleId,
+    bottleName: f.bottleName,
+    author: f.author,
+    rating: f.rating,
+    servingStyle: f.servingStyle,
+    createdAt: f.createdAt.toISOString(),
+    nose: f.nose,
+    palate: f.palate,
+    finish: f.finish,
+    freeform: f.freeform,
+    flavorTags: f.flavorTags,
+    cheersCount: f.cheersCount,
+    commentCount: f.commentCount,
+    viewerTags: f.viewerTags,
+    viewerBottleRelationship: f.viewerBottleRelationship,
+  }));
+
   const firstName = user.name?.split(" ")[0] ?? "there";
   const stats = [
     { value: String(owned?.count ?? 0), label: "bottles owned" },
@@ -124,6 +156,8 @@ export default async function HomePage() {
           <ChevronRight size={18} strokeWidth={1.8} className="text-muted shrink-0" aria-hidden />
         </Link>
       </section>
+
+      <FriendsModule items={friendFeedItems} hasProfile={hasProfile} hasFollows={hasFollows} />
 
       {recentPours.length > 0 && (
         <section aria-label="Recent pours">

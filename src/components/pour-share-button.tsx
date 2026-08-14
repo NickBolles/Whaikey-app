@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { MapPin, Share2 } from "lucide-react";
 import { share } from "@/lib/native/share";
 
@@ -8,12 +9,14 @@ export function PourShareButton({ pourId, bottleName }: { pourId: string; bottle
   const [expanded, setExpanded] = useState(false);
   const [locationLabel, setLocationLabel] = useState("");
   const [status, setStatus] = useState<string | null>(null);
+  const [shared, setShared] = useState(false);
   const [busy, setBusy] = useState(false);
 
   async function handleShare() {
     if (busy) return;
     setBusy(true);
     setStatus(null);
+    setShared(false);
     try {
       const res = await fetch(`/api/pours/${pourId}/share`, {
         method: "POST",
@@ -30,6 +33,7 @@ export function PourShareButton({ pourId, bottleName }: { pourId: string; bottle
         dialogTitle: "Share tasting note",
       });
       setStatus(outcome === "copied" ? "Link copied" : outcome === "shared" ? "Ready to share" : "Link created");
+      setShared(true);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Couldn’t create a share link.");
     } finally {
@@ -65,7 +69,19 @@ export function PourShareButton({ pourId, bottleName }: { pourId: string; bottle
           </button>
         </div>
       )}
-      {status && <span className="text-xs text-muted" role="status">{status}</span>}
+      {status && (
+        <span className="text-xs text-muted" role="status">
+          {status}
+          {shared && (
+            <>
+              {" · "}
+              <Link href="/sharing" className="text-accent hover:brightness-110 transition-[filter]">
+                Manage shared links
+              </Link>
+            </>
+          )}
+        </span>
+      )}
     </div>
   );
 }

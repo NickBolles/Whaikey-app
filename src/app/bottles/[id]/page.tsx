@@ -1,14 +1,18 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { eq, and } from "drizzle-orm";
 import { Flame, Martini, UtensilsCrossed, type LucideIcon } from "lucide-react";
-import { getDb } from "@/db";
+import { getDb, schema } from "@/db";
 import type { Pairing } from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
 import { getBottleDetail } from "@/lib/search";
 import { getUserPalate } from "@/lib/palate-store";
 import { tasteMatchPercent } from "@/lib/palate";
+import { hasPublishedProducerFlavorNotes } from "@/lib/bar";
+import { getFriendNotesForBottle } from "@/lib/social";
 import { CategoryChip } from "@/components/category-chip";
 import { FlavorRadar } from "@/components/flavor-radar";
+import { SameDram, type SameDramFriendNote, type SameDramProducer } from "@/components/same-dram";
 import { ShelfActions } from "./shelf-actions";
 
 export const dynamic = "force-dynamic";
@@ -72,10 +76,52 @@ export default async function BottleDetailPage({
   // bottle's flavor profile. Null (hidden) for signed-out users, users with no
   // palate signal yet, or bottles without a flavor profile.
   let match: number | null = null;
+  // Same Dram (US-8): the viewer's own union tags on this bottle, friends'
+  // notes, and the producer column (only when attributed). Signed-out
+  // viewers get none of this — the section is hidden entirely for them.
+  let sameDram: { viewerTags: Record<string, number> | null; friends: SameDramFriendNote[]; hasViewerNotes: boolean } | null = null;
   if (user) {
-    const palate = await getUserPalate(getDb(), user.id);
+    const db = getDb();
+    const palate = await getUserPalate(db, user.id);
     match = tasteMatchPercent(palate.vector, bottle.flavorProfile, palate.sampleSize);
+
+    const [viewerNoteRows, friendNotes] = await Promise.all([
+      db
+        .select({ flavorTags: schema.tastingNotes.flavorTags })
+        .from(schema.tastingNotes)
+        .innerJoin(schema.pours, eq(schema.tastingNotes.pourId, schema.pours.id))
+        .where(and(eq(schema.pours.userId, user.id), eq(schema.pours.bottleId, bottle.id))),
+      getFriendNotesForBottle(db, user.id, bottle.id),
+    ]);
+
+    const viewerFlavorTags: Record<string, number> = {};
+    for (const row of viewerNoteRows) {
+      for (const [leafId, intensity] of Object.entries(row.flavorTags ?? {})) {
+        viewerFlavorTags[leafId] = Math.max(viewerFlavorTags[leafId] ?? 0, intensity);
+      }
+    }
+
+    sameDram = {
+      viewerTags: Object.keys(viewerFlavorTags).length > 0 ? viewerFlavorTags : null,
+      friends: friendNotes.map((f) => ({
+        author: f.author,
+        pourId: f.pourId,
+        rating: f.rating,
+        createdAt: f.createdAt.toISOString(),
+        flavorTags: f.flavorTags,
+      })),
+      hasViewerNotes: viewerNoteRows.length > 0,
+    };
   }
+
+  const producer: SameDramProducer | null =
+    hasPublishedProducerFlavorNotes(bottle) && bottle.producerFlavorTags
+      ? {
+          tags: bottle.producerFlavorTags,
+          sourceLabel: bottle.producerFlavorSourceLabel as string,
+          sourceUrl: bottle.producerFlavorSourceUrl as string,
+        }
+      : null;
 
   const metaParts = [
     bottle.region ?? distillery?.region ?? null,
@@ -173,6 +219,15 @@ export default async function BottleDetailPage({
           </span>
         )}
       </section>
+
+      {sameDram && (
+        <SameDram
+          viewerTags={sameDram.viewerTags}
+          producer={producer}
+          friends={sameDram.friends}
+          hasViewerNotes={sameDram.hasViewerNotes}
+        />
+      )}
 
       {/* Your shelf */}
       <section aria-label="Your shelf">

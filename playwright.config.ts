@@ -28,7 +28,7 @@ export default defineConfig({
   projects: [
     {
       name: "functional",
-      testMatch: /smoke\.spec\.ts/,
+      testMatch: /(smoke|social)\.spec\.ts/,
       use: { viewport: { width: 390, height: 844 } },
     },
     {

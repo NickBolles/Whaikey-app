@@ -15,7 +15,7 @@ import {
 vi.mock("@/lib/session", async () => mockSessionModule());
 
 import { GET, POST } from "@/app/api/pours/route";
-import { DELETE, GET as GET_ONE } from "@/app/api/pours/[id]/route";
+import { DELETE, GET as GET_ONE, PATCH } from "@/app/api/pours/[id]/route";
 
 const ctx = (id: string) => ({ params: Promise.resolve({ id }) });
 
@@ -200,5 +200,35 @@ describe("/api/pours", () => {
 
     const gone = await DELETE(jsonRequest(`/api/pours/${pour.id}`, "DELETE"), ctx(pour.id));
     expect(gone.status).toBe(404);
+  });
+
+  it("PATCH /api/pours/[id] updates visibility, owner-only", async () => {
+    const createRes = await POST(jsonRequest("/api/pours", "POST", { bottleId: bottle.id, rating: 4 }));
+    const { pour } = await createRes.json();
+    expect(pour.visibility).toBe("private");
+
+    setSessionUser(null);
+    const anon = await PATCH(jsonRequest(`/api/pours/${pour.id}`, "PATCH", { visibility: "public" }), ctx(pour.id));
+    expect(anon.status).toBe(401);
+    setSessionUser(user);
+
+    const bad = await PATCH(jsonRequest(`/api/pours/${pour.id}`, "PATCH", { visibility: "loud" }), ctx(pour.id));
+    expect(bad.status).toBe(400);
+
+    const other = await createTestUser(db);
+    setSessionUser(other);
+    const foreign = await PATCH(jsonRequest(`/api/pours/${pour.id}`, "PATCH", { visibility: "public" }), ctx(pour.id));
+    expect(foreign.status).toBe(404);
+    setSessionUser(user);
+
+    const missing = await PATCH(jsonRequest("/api/pours/ghost", "PATCH", { visibility: "public" }), ctx("ghost"));
+    expect(missing.status).toBe(404);
+
+    const res = await PATCH(jsonRequest(`/api/pours/${pour.id}`, "PATCH", { visibility: "public" }), ctx(pour.id));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ visibility: "public" });
+
+    const reread = await GET_ONE(jsonRequest(`/api/pours/${pour.id}`, "GET"), ctx(pour.id));
+    expect((await reread.json()).pour.visibility).toBe("public");
   });
 });
