@@ -119,25 +119,28 @@ export async function logPour(db: DB, userId: string, input: PourInput): Promise
     });
     if (profile && !profile.socialEnabled) visibility = "private";
   }
-  if (visibility !== "private") {
-    // docs/SOCIAL.md §11: notes are user-generated text and cross-user writes
-    // are rate-limited. Logging itself must never block (the private journal
-    // is the core loop), so past the cap the pour still lands — as private.
-    // Generous for a human, tight for a bot flooding followers' feeds.
-    const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
-    const recentVisible = await db
-      .select({ n: sql<number>`count(*)` })
-      .from(schema.pours)
-      .where(
-        and(
-          eq(schema.pours.userId, userId),
-          sql`${schema.pours.visibility} <> 'private'`,
-          sql`${schema.pours.createdAt} > ${hourAgo}`,
-        ),
-      );
-    if (Number(recentVisible[0]?.n ?? 0) >= VISIBLE_POUR_LIMIT_PER_HOUR) visibility = "private";
-  }
   const { pour, note } = await db.transaction(async (tx) => {
+    if (visibility !== "private") {
+      // docs/SOCIAL.md §11: notes are user-generated text and cross-user
+      // writes are rate-limited. Logging itself must never block (the private
+      // journal is the core loop), so past the cap the pour still lands — as
+      // private. The count runs under a per-user advisory lock inside the
+      // same transaction as the insert, so concurrent requests can't all read
+      // a below-limit count before any of them commits.
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`pour-vis:${userId}`}))`);
+      const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
+      const recentVisible = await tx
+        .select({ n: sql<number>`count(*)` })
+        .from(schema.pours)
+        .where(
+          and(
+            eq(schema.pours.userId, userId),
+            sql`${schema.pours.visibility} <> 'private'`,
+            sql`${schema.pours.createdAt} > ${hourAgo}`,
+          ),
+        );
+      if (Number(recentVisible[0]?.n ?? 0) >= VISIBLE_POUR_LIMIT_PER_HOUR) visibility = "private";
+    }
     let userBottle = await tx.query.userBottles.findFirst({
       where: and(eq(schema.userBottles.userId, userId), eq(schema.userBottles.bottleId, parsed.bottleId)),
     });

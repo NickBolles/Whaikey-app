@@ -113,3 +113,22 @@ describe("pour sharing", () => {
     expect(shares[0]).toMatchObject({ pourId: pourA.id, bottleId: bottleA.id, bottleName: "Alpha" });
   });
 });
+
+describe("step-back share gate (US-11)", () => {
+  it("refuses to mint or reactivate a share while the owner is stepped back", async () => {
+    const db = await setupTestDb();
+    const user = await createTestUser(db);
+    const bottle = await createTestBottle(db);
+    const [pour] = await db
+      .insert(schema.pours)
+      .values({ id: uid("pour"), userId: user.id, bottleId: bottle.id, rating: 4 })
+      .returning();
+    await db.insert(schema.userProfiles).values({
+      userId: user.id,
+      handle: "steppedshare",
+      displayName: "Stepped",
+      socialEnabled: false,
+    });
+    await expect(createPourShare(db, user.id, pour.id)).rejects.toThrow("Social is turned off");
+  });
+});

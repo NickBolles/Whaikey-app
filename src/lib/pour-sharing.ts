@@ -1,6 +1,7 @@
 import { and, desc, eq, isNotNull, isNull } from "drizzle-orm";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
+import { SocialDisabledError } from "@/lib/pours";
 
 const SHARE_CODE_LENGTH = 12;
 
@@ -55,6 +56,15 @@ export async function createPourShare(
   pourId: string,
   options: PourShareOptions = {},
 ): Promise<{ code: string } | null> {
+  // US-11: while the owner is stepped back, no new bearer link can be minted
+  // (and no revoked one reactivated) — a stale tab must not undo the
+  // "make everything private" guarantee. SocialDisabledError → 409 upstream.
+  const profile = await db.query.userProfiles.findFirst({
+    columns: { socialEnabled: true },
+    where: eq(schema.userProfiles.userId, userId),
+  });
+  if (profile && !profile.socialEnabled) throw new SocialDisabledError();
+
   const locationLabel = cleanLocationLabel(options.locationLabel);
   const existing = await db.query.pourShares.findFirst({
     where: and(eq(schema.pourShares.pourId, pourId), eq(schema.pourShares.userId, userId)),
