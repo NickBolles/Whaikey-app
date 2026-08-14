@@ -26,8 +26,18 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(new URL("/sign-in?error=expired", request.nextUrl.origin));
   }
 
+  // Belt and braces on top of safeReturnPath: resolve the candidate against
+  // our origin and verify it stayed there. Whatever future parser quirk slips
+  // past the string checks, a redirect can never leave this origin.
   const next = safeReturnPath(request.nextUrl.searchParams.get("next")) ?? "/";
-  const response = NextResponse.redirect(new URL(next, request.nextUrl.origin));
+  let target = new URL("/", request.nextUrl.origin);
+  try {
+    const resolved = new URL(next, request.nextUrl.origin);
+    if (resolved.origin === request.nextUrl.origin) target = resolved;
+  } catch {
+    // Unparseable → fall back to "/".
+  }
+  const response = NextResponse.redirect(target);
   response.cookies.set({
     name: redeemed.sessionCookieName,
     value: redeemed.sessionCookie,

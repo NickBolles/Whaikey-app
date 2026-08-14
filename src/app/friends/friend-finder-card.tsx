@@ -28,7 +28,9 @@ export function FriendFinderCard({
   const [phoneLast2, setPhoneLast2] = useState(initialPhoneLast2);
   const [discoverable, setDiscoverable] = useState(initialPhoneDiscoverable);
   const [phoneInput, setPhoneInput] = useState("");
-  const [newDiscoverable, setNewDiscoverable] = useState(true);
+  // Discovery is a separate, explicit opt-in (docs/SOCIAL.md D8 as amended):
+  // saving a number must never preselect exposure.
+  const [newDiscoverable, setNewDiscoverable] = useState(false);
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);

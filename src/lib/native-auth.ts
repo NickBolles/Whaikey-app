@@ -32,6 +32,11 @@ export const NATIVE_CALLBACK_SCHEME = "whaikey";
  */
 export function safeReturnPath(raw: string | null | undefined): string | null {
   if (!raw || !/^\/(?!\/)/.test(raw) || raw.includes("\\")) return null;
+  // WHATWG URL parsing strips tab/CR/LF anywhere in the input, so
+  // "/\t/evil.example" would collapse to protocol-relative "//evil.example".
+  // Reject every C0 control character (and DEL) outright.
+  // eslint-disable-next-line no-control-regex
+  if (/[\x00-\x1f\x7f]/.test(raw)) return null;
   return raw;
 }
 
