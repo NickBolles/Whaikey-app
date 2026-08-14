@@ -259,13 +259,31 @@ export async function followByHandle(db: DB, followerId: string, handle: string)
       where: eq(schema.userProfiles.userId, followerId),
     });
     if (caller && !caller.socialEnabled) throw new SocialDisabledError();
-    // The accepted-vs-pending decision reads the target's CURRENT privacy in
-    // the same transaction as the insert: a profile that just went private
-    // must yield a request, never an unapproved accepted follower.
-    const liveTarget = await tx.query.userProfiles.findFirst({
-      columns: { isPublic: true, socialEnabled: true },
-      where: eq(schema.userProfiles.userId, target.userId),
-    });
+    // Pair lock shared with blockUser (sorted so both sides agree on the
+    // key): a follow insert can't interleave with a block's edge deletion and
+    // leave a hidden edge that resurfaces on unblock.
+    const [pairA, pairB] = [followerId, target.userId].sort();
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`graph-pair:${pairA}:${pairB}`}))`);
+    const blockedNow = await tx
+      .select({ id: schema.blocks.id })
+      .from(schema.blocks)
+      .where(
+        or(
+          and(eq(schema.blocks.blockerId, followerId), eq(schema.blocks.blockedId, target.userId)),
+          and(eq(schema.blocks.blockerId, target.userId), eq(schema.blocks.blockedId, followerId)),
+        ),
+      );
+    if (blockedNow.length > 0) return [];
+
+    // The accepted-vs-pending decision reads the target's CURRENT privacy
+    // with a row lock (FOR UPDATE), so it truly serializes with a concurrent
+    // going-private profile update: a profile that just went private must
+    // yield a request, never an unapproved accepted follower.
+    const [liveTarget] = await tx
+      .select({ isPublic: schema.userProfiles.isPublic, socialEnabled: schema.userProfiles.socialEnabled })
+      .from(schema.userProfiles)
+      .where(eq(schema.userProfiles.userId, target.userId))
+      .for("update");
     if (!liveTarget || !liveTarget.socialEnabled) return [];
     const state: FollowState = liveTarget.isPublic ? "accepted" : "pending";
     return tx
@@ -421,6 +439,10 @@ export async function areFriends(db: DB, a: string, b: string): Promise<boolean>
 /** Idempotent; deletes any follow rows between the pair, both directions, in one transaction. */
 export async function blockUser(db: DB, blockerId: string, blockedId: string): Promise<void> {
   await db.transaction(async (tx) => {
+    // Same pair lock as followByHandle's insert: the edge deletion below and
+    // any concurrent follow insert for this pair are strictly ordered.
+    const [pairA, pairB] = [blockerId, blockedId].sort();
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`graph-pair:${pairA}:${pairB}`}))`);
     await tx
       .insert(schema.blocks)
       .values({ id: crypto.randomUUID(), blockerId, blockedId })
