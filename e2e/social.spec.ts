@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { DEMO_FRIEND_PHONE } from "./demo-seed";
 import { DEMO_SESSION_TOKEN, SCAN_SESSION_TOKEN, signIn } from "./fixtures";
 
 // Deterministic ids from e2e/demo-seed.ts (docs/SOCIAL.md fixture block) —
@@ -105,13 +106,15 @@ test.describe("social: signed in as Jordan (the demo user)", () => {
     await expect(cheersButton).toContainText("1");
   });
 
-  test("/friends lists Sasha under both Following and Followers with a Friends chip, plus the exact-handle follow form", async ({
+  test("/friends lists Sasha under both Following and Followers with a Friends chip, plus the handle-or-phone finder form", async ({
     page,
   }) => {
     await page.goto("/friends");
 
-    await expect(page.getByLabel("Handle to follow")).toBeVisible();
-    await expect(page.getByRole("button", { name: "Follow", exact: true })).toBeVisible();
+    // v2 finder form (docs/SOCIAL.md §7.2): a single input takes @handle or
+    // phone number, landing on /add/[handle] rather than following inline.
+    await expect(page.getByLabel("Handle or phone number to add")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Add", exact: true })).toBeVisible();
 
     const followingSection = page.locator("section", {
       has: page.getByRole("heading", { name: "Following", exact: true }),
@@ -123,6 +126,74 @@ test.describe("social: signed in as Jordan (the demo user)", () => {
       has: page.getByRole("heading", { name: "Followers", exact: true }),
     });
     await expect(followersSection.getByText("@sasha")).toBeVisible();
+  });
+
+  test("/friends' How friends find you card shows the handle, a phone section, and Show my code reveals a QR", async ({
+    page,
+  }) => {
+    await page.goto("/friends");
+
+    const finderCard = page.locator("section", { hasText: "How friends find you" });
+    await expect(finderCard.getByText("@jordan")).toBeVisible();
+    await expect(finderCard.getByText(/Phone number/)).toBeVisible();
+
+    await finderCard.getByRole("button", { name: "Show my code" }).click();
+    const qr = finderCard.getByRole("img", { name: "QR code to add @jordan on Whaikey" });
+    await expect(qr).toBeVisible();
+    await expect(qr).toHaveAttribute("src", /^data:image\/png;base64,/);
+  });
+
+  test("typing a handle in the finder lands on /add/sasha showing her identity and Following state", async ({
+    page,
+  }) => {
+    await page.goto("/friends");
+    await page.getByLabel("Handle or phone number to add").fill("sasha");
+    await page.getByRole("button", { name: "Add", exact: true }).click();
+
+    await expect(page).toHaveURL(/\/add\/sasha$/);
+    await expect(page.getByRole("heading", { name: "Sasha Glen" })).toBeVisible();
+    // Exact match: a substring match also hits Next's route announcer div,
+    // which echoes the page title ("Add @sasha · Whaikey").
+    await expect(page.getByText("@sasha", { exact: true })).toBeVisible();
+    // Jordan already follows Sasha and she follows him back (seeded mutual).
+    // Not anchored/exact: the chip ("Friends") and the state pill ("Following")
+    // sit as adjacent inline spans, so the accessibility tree can merge their
+    // text into one node — a substring match is robust to that either way.
+    await expect(page.getByText("Friends", { exact: true })).toBeVisible();
+    await expect(page.getByText(/Following/)).toBeVisible();
+  });
+
+  test("typing Sasha's seeded phone number looks her up and lands on /add/sasha", async ({ page }) => {
+    await page.goto("/friends");
+    await page.getByLabel("Handle or phone number to add").fill(DEMO_FRIEND_PHONE);
+    await page.getByRole("button", { name: "Add", exact: true }).click();
+
+    await expect(page).toHaveURL(/\/add\/sasha$/);
+    await expect(page.getByRole("heading", { name: "Sasha Glen" })).toBeVisible();
+  });
+
+  test("an unknown phone number stays on /friends with the no-match copy", async ({ page }) => {
+    await page.goto("/friends");
+    await page.getByLabel("Handle or phone number to add").fill("+15550001234");
+    await page.getByRole("button", { name: "Add", exact: true }).click();
+
+    await expect(
+      page.getByText("No one found by that number. They may not have opted in — ask them for their @handle or code."),
+    ).toBeVisible();
+    await expect(page).toHaveURL(/\/friends$/);
+  });
+
+  test("/add/nobody999 shows friendly not-found copy", async ({ page }) => {
+    await page.goto("/add/nobody999");
+    await expect(page.getByRole("heading", { name: "No one by that handle" })).toBeVisible();
+    await expect(page.getByText("Codes expire when accounts close.")).toBeVisible();
+    await expect(page.getByRole("link", { name: "Back to Friends" })).toBeVisible();
+  });
+
+  test("/add/sasha shows no price data (money-leak guard)", async ({ page }) => {
+    await page.goto("/add/sasha");
+    await expect(page.getByRole("heading", { name: "Sasha Glen" })).toBeVisible();
+    await expect(page.locator("body")).not.toContainText("$");
   });
 
   test("/u/sasha renders her palate card and signature descriptors, shows Following state, and leaks no prices", async ({
@@ -200,6 +271,56 @@ test.describe("social: signed-out visitor", () => {
     await expect(page.getByRole("heading", { name: "Comments" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: /Cheers/ })).toHaveCount(0);
     await expect(page.locator("body")).not.toContainText("$");
+  });
+
+  test("/add/sasha shows the sign-in hero and leaks no identity", async ({ page }) => {
+    const response = await page.goto("/add/sasha");
+    expect(response?.status()).toBe(200);
+    await expect(page.getByRole("heading", { name: "Add @sasha" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Sign in" })).toBeVisible();
+    // No identity leak: her display name must never render for a signed-out visitor.
+    await expect(page.getByText("Sasha Glen")).toHaveCount(0);
+  });
+});
+
+test.describe("social: phone discovery settings", () => {
+  test.beforeEach(async ({ context, baseURL }) => {
+    // scan-user (see e2e/fixtures.ts) is the mutation-safe user — keeps
+    // Jordan's seeded profile/phone state untouched for the other tests and
+    // for the visual baselines. It has no profile yet, so the finder card
+    // (phone settings included) only appears after claiming a handle.
+    await signIn(context, baseURL!, SCAN_SESSION_TOKEN);
+  });
+
+  test("claiming a handle, then setting and toggling off a discoverable phone number", async ({ page }) => {
+    await page.goto("/friends");
+
+    // Retries reuse the same seeded DB within a run, so only claim a handle
+    // when this attempt actually needs to (idempotent across a retry).
+    const claimButton = page.getByRole("button", { name: "Claim handle" });
+    if (await claimButton.isVisible().catch(() => false)) {
+      await page.getByLabel("Handle").fill("samscanner");
+      await claimButton.click();
+      await expect(page.getByText("How friends find you")).toBeVisible();
+    }
+
+    const finderCard = page.locator("section", { hasText: "How friends find you" });
+    await expect(finderCard).toBeVisible();
+
+    // No number yet (or a fresh claim): the add form is showing.
+    const phoneInput = finderCard.getByLabel("Phone number");
+    if (await phoneInput.isVisible().catch(() => false)) {
+      await phoneInput.fill("+15551230099");
+      await finderCard.getByRole("button", { name: "Save" }).click();
+    }
+
+    await expect(finderCard.getByText(/••••\s*••99\s*·\s*discoverable/)).toBeVisible();
+
+    const toggle = finderCard.getByRole("switch", { name: "Let people find me by phone" });
+    await expect(toggle).toHaveAttribute("aria-checked", "true");
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-checked", "false");
+    await expect(finderCard.getByText(/••••\s*••99\s*·\s*not discoverable/)).toBeVisible();
   });
 });
 

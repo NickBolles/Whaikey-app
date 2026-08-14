@@ -1,12 +1,33 @@
 import { eq } from "drizzle-orm";
 import type { DB } from "../src/db/index";
 import * as schema from "../src/db/schema";
-import { DEMO_SESSION_TOKEN, DEMO_USER_ID, SCAN_SESSION_TOKEN, SCAN_USER_ID } from "./fixtures";
+import { hashPhone, normalizePhone } from "../src/lib/phone";
+import { DEMO_SESSION_TOKEN, DEMO_USER_ID, E2E_SECRET, SCAN_SESSION_TOKEN, SCAN_USER_ID } from "./fixtures";
 
 const D = (iso: string) => new Date(iso);
 
 /** Sasha Glen — the demo collector's mutual friend, for the social surfaces. */
 export const DEMO_FRIEND_ID = "demo-friend";
+
+/**
+ * Sasha's seeded, discoverable phone number (used by the phone-lookup e2e
+ * path). Fixed so e2e/social.spec.ts can look it up deterministically.
+ */
+export const DEMO_FRIEND_PHONE = "+15559870042";
+
+/**
+ * hashPhone() keys itself off WHAIKEY_PHONE_KEY ?? BETTER_AUTH_SECRET (see
+ * src/lib/phone.ts). This seed runs as a `tsx` subprocess of Playwright's
+ * global-setup, which inherits the *outer* shell's env — not the dev
+ * server's, which playwright.config.ts spawns separately with
+ * BETTER_AUTH_SECRET="e2e-secret" (E2E_SECRET here). If the outer shell
+ * doesn't already have BETTER_AUTH_SECRET set, hashPhone() would silently
+ * fall back to "dev-phone-key" here while the running server hashes with
+ * "e2e-secret" — two different hashes for the same number, so the lookup
+ * would always miss. Force parity with the server's env unconditionally so
+ * the seed and the server are hashing the same key.
+ */
+process.env.BETTER_AUTH_SECRET = E2E_SECRET;
 
 /**
  * Deterministic demo data for visual/e2e tests: a signed-in collector with a
@@ -235,6 +256,12 @@ export async function seedDemoUser(db: DB): Promise<void> {
       isPublic: true,
       discoverable: true,
       socialEnabled: true,
+      // Discoverable phone number (docs/SOCIAL.md §7.2 phone lookup path) —
+      // raw number never stored, only the keyed hash + last-2 (see the
+      // BETTER_AUTH_SECRET note above for why the key must match the server's).
+      phoneHash: hashPhone(normalizePhone(DEMO_FRIEND_PHONE)),
+      phoneLast2: DEMO_FRIEND_PHONE.slice(-2),
+      phoneDiscoverable: true,
       createdAt: D("2026-02-05T12:00:00Z"),
       updatedAt: D("2026-02-05T12:00:00Z"),
     },

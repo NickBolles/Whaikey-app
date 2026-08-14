@@ -285,6 +285,14 @@ test.describe("signed in (demo collector)", () => {
     await expect(page).toHaveScreenshot(shot("friends"), { fullPage: true });
   });
 
+  test("add-confirm: Sasha's identity preview with the Following state", async ({ page }) => {
+    await page.goto("/add/sasha");
+    await expect(page.getByRole("heading", { name: "Sasha Glen" })).toBeVisible();
+    await expect(page.getByText("Friends", { exact: true })).toBeVisible();
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("add-confirm"), { fullPage: true });
+  });
+
   test("a friend's profile: palate, signature descriptors, recent notes", async ({ page }) => {
     await page.goto("/u/sasha");
     await expect(page.getByRole("heading", { name: "Sasha Glen" })).toBeVisible();
