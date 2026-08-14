@@ -254,9 +254,16 @@ function FriendSection({ title, empty, children }: { title: string; empty?: stri
   );
 }
 
-/** A phone-shaped input: a leading "+" or 7+ digits, distinguishing it from an @handle. */
+/**
+ * A phone-shaped input. An explicit "@" prefix is always a handle (handles may
+ * be digits-only, e.g. @1234567, and must stay reachable); otherwise phone
+ * means a leading "+" or 7+ characters drawn purely from phone punctuation —
+ * anything containing a letter or underscore is a handle.
+ */
 function looksLikePhone(input: string): boolean {
-  return input.startsWith("+") || input.replace(/\D/g, "").length >= 7;
+  if (input.startsWith("@")) return false;
+  if (input.startsWith("+")) return true;
+  return /^[\d\s().-]{7,}$/.test(input);
 }
 
 /**

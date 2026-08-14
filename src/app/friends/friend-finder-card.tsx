@@ -91,7 +91,12 @@ export function FriendFinderCard({
   }
 
   async function toggleDiscoverable(next: boolean) {
+    // One write at a time, reconciled from the server's acknowledgement —
+    // overlapping toggles could otherwise commit out of order and leave the
+    // switch showing OFF while the database says discoverable.
+    if (busy) return;
     const previous = discoverable;
+    setBusy(true);
     setDiscoverable(next);
     setError(null);
     try {
@@ -101,9 +106,13 @@ export function FriendFinderCard({
         body: JSON.stringify({ discoverable: next }),
       });
       if (!res.ok) throw new Error("update failed");
+      const saved = (await res.json().catch(() => null)) as { phoneDiscoverable?: boolean } | null;
+      if (typeof saved?.phoneDiscoverable === "boolean") setDiscoverable(saved.phoneDiscoverable);
     } catch {
       setDiscoverable(previous);
       setError("Couldn't update that — try again.");
+    } finally {
+      setBusy(false);
     }
   }
 

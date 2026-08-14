@@ -43,10 +43,11 @@ function SignInForm() {
 
   // Optional same-origin return path (e.g. a scanned /add/<handle> code —
   // the person should land back on the confirm screen, not Home). Only a
-  // single-leading-slash path is honored; anything else (absolute URLs,
-  // protocol-relative "//host") would be an open redirect and falls back to "/".
+  // single-leading-slash path without backslashes is honored; anything else
+  // (absolute URLs, protocol-relative "//host", "/\host" — WHATWG treats "\"
+  // as "/") would be an open redirect and falls back to "/".
   const rawNext = searchParams.get("next");
-  const nextPath = rawNext && /^\/(?!\/)/.test(rawNext) ? rawNext : "/";
+  const nextPath = rawNext && /^\/(?!\/)/.test(rawNext) && !rawNext.includes("\\") ? rawNext : "/";
 
   async function handleSignIn(provider: Provider) {
     if (pending) return;

@@ -126,6 +126,7 @@ describe("safeReturnPath", () => {
     expect(safeReturnPath("/add/sasha")).toBe("/add/sasha");
     expect(safeReturnPath("/")).toBe("/");
     expect(safeReturnPath("//evil.example/x")).toBeNull();
+    expect(safeReturnPath("/\\evil.example/x")).toBeNull(); // WHATWG parses "\" as "/"
     expect(safeReturnPath("https://evil.example/x")).toBeNull();
     expect(safeReturnPath("whaikey://auth/callback")).toBeNull();
     expect(safeReturnPath(null)).toBeNull();

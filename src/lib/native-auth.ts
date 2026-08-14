@@ -26,11 +26,13 @@ export const NATIVE_CALLBACK_SCHEME = "whaikey";
 /**
  * The only return target the native sign-in flow will honor: a same-origin
  * relative path with a single leading slash. Anything else — absolute URLs,
- * protocol-relative "//host" — would turn the exchange redirect into an open
- * redirect and collapses to null (callers fall back to "/").
+ * protocol-relative "//host", or backslash variants like "/\evil.example"
+ * (WHATWG URL parsing treats "\" as "/") — would turn the exchange redirect
+ * into an open redirect and collapses to null (callers fall back to "/").
  */
 export function safeReturnPath(raw: string | null | undefined): string | null {
-  return raw && /^\/(?!\/)/.test(raw) ? raw : null;
+  if (!raw || !/^\/(?!\/)/.test(raw) || raw.includes("\\")) return null;
+  return raw;
 }
 
 export function hashCode(code: string): string {
