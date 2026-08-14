@@ -6,6 +6,8 @@ import { createTestBottle, createTestUser, setupTestDb, uid } from "@/test/helpe
 import { updateSocialPrefs } from "@/lib/social";
 import {
   BottleNotFoundError,
+  SocialDisabledError,
+  VISIBLE_POUR_LIMIT_PER_HOUR,
   deletePour,
   fillDecrementFor,
   getPour,
@@ -291,5 +293,42 @@ describe("listPours / getPour / deletePour", () => {
 
   it("updatePourVisibility returns null for a missing pour", async () => {
     expect(await updatePourVisibility(db, userId, "ghost", "public")).toBeNull();
+  });
+});
+
+describe("visible-write guards (docs/SOCIAL.md §11 / US-11)", () => {
+  let db: DB;
+  let userId: string;
+  let bottleId: string;
+
+  beforeEach(async () => {
+    db = await setupTestDb();
+    userId = (await createTestUser(db)).id;
+    bottleId = (await createTestBottle(db)).id;
+  });
+
+  it("downgrades visible pours to private past the hourly cap, without blocking logging", async () => {
+    for (let i = 0; i < VISIBLE_POUR_LIMIT_PER_HOUR; i += 1) {
+      const { pour } = await logPour(db, userId, { bottleId, rating: 4, visibility: "public" });
+      expect(pour.visibility).toBe("public");
+    }
+    const { pour: capped } = await logPour(db, userId, { bottleId, rating: 4, visibility: "public" });
+    expect(capped.visibility).toBe("private");
+    // Private logging is never throttled — the core loop stays open.
+    const { pour: privatePour } = await logPour(db, userId, { bottleId, rating: 4 });
+    expect(privatePour.id).toBeTruthy();
+  });
+
+  it("rejects non-private visibility PATCHes while stepped back, but allows going private", async () => {
+    await db.insert(schema.userProfiles).values({
+      userId,
+      handle: "steppedpatch",
+      displayName: "Stepped",
+      socialEnabled: false,
+    });
+    const { pour } = await logPour(db, userId, { bottleId, rating: 4 });
+    await expect(updatePourVisibility(db, userId, pour.id, "friends")).rejects.toBeInstanceOf(SocialDisabledError);
+    const updated = await updatePourVisibility(db, userId, pour.id, "private");
+    expect(updated?.visibility).toBe("private");
   });
 });

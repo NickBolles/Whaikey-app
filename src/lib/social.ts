@@ -1258,15 +1258,6 @@ export async function addComment(
   const trimmed = body.trim();
   if (trimmed.length === 0 || trimmed.length > COMMENT_MAX_LENGTH) return null;
 
-  // Durable limit straight off the comments table — includes soft-deleted
-  // rows so delete-and-repost can't reset the window.
-  const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
-  const recent = await db
-    .select({ n: sql<number>`count(*)` })
-    .from(schema.comments)
-    .where(and(eq(schema.comments.userId, userId), sql`${schema.comments.createdAt} > ${hourAgo}`));
-  if (Number(recent[0]?.n ?? 0) >= COMMENT_RATE_LIMIT_PER_HOUR) throw new RateLimitedError();
-
   const ctx = await loadPourAuthContext(db, pourId);
   if (!ctx) return null;
   if (!(await canViewPourContext(db, userId, ctx))) return null;
@@ -1285,10 +1276,23 @@ export async function addComment(
     if (parent.parentId != null) effectiveParentId = parent.parentId;
   }
 
-  const [row] = await db
-    .insert(schema.comments)
-    .values({ id: crypto.randomUUID(), pourId, userId, parentId: effectiveParentId, body: trimmed })
-    .returning();
+  // Durable rate limit off the comments table itself — soft-deleted rows
+  // count, so delete-and-repost can't reset the window. The count and insert
+  // run under a per-user advisory lock so concurrent requests can't all read
+  // a below-limit count before any of them inserts.
+  const [row] = await db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`comment-rl:${userId}`}))`);
+    const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    const recent = await tx
+      .select({ n: sql<number>`count(*)` })
+      .from(schema.comments)
+      .where(and(eq(schema.comments.userId, userId), sql`${schema.comments.createdAt} > ${hourAgo}`));
+    if (Number(recent[0]?.n ?? 0) >= COMMENT_RATE_LIMIT_PER_HOUR) throw new RateLimitedError();
+    return tx
+      .insert(schema.comments)
+      .values({ id: crypto.randomUUID(), pourId, userId, parentId: effectiveParentId, body: trimmed })
+      .returning();
+  });
 
   const author = await getOwnProfile(db, userId);
   return {

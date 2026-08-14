@@ -3,7 +3,7 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import { POUR_VISIBILITIES } from "@/db/schema";
 import { requireUser, withErrorHandling } from "@/lib/session";
-import { deletePour, getPour, updatePourVisibility } from "@/lib/pours";
+import { SocialDisabledError, deletePour, getPour, updatePourVisibility } from "@/lib/pours";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -41,7 +41,15 @@ export async function PATCH(req: Request, ctx: Ctx) {
       );
     }
 
-    const updated = await updatePourVisibility(getDb(), user.id, id, parsed.data.visibility);
+    let updated;
+    try {
+      updated = await updatePourVisibility(getDb(), user.id, id, parsed.data.visibility);
+    } catch (err) {
+      if (err instanceof SocialDisabledError) {
+        return NextResponse.json({ error: "social_disabled" }, { status: 409 });
+      }
+      throw err;
+    }
     if (!updated) {
       return NextResponse.json({ error: "Pour not found" }, { status: 404 });
     }

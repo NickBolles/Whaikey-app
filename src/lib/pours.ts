@@ -10,6 +10,9 @@ import { getSocialPrefs } from "@/lib/social";
 /** Standard pour when the user doesn't specify an amount. */
 export const DEFAULT_POUR_ML = 45;
 
+/** docs/SOCIAL.md §11: cap on cross-user-visible pour writes per hour; past it, pours still log — as private. */
+export const VISIBLE_POUR_LIMIT_PER_HOUR = 30;
+
 export class BottleNotFoundError extends Error {
   constructor(bottleId: string) {
     super(`Bottle not found: ${bottleId}`);
@@ -115,6 +118,24 @@ export async function logPour(db: DB, userId: string, input: PourInput): Promise
       where: eq(schema.userProfiles.userId, userId),
     });
     if (profile && !profile.socialEnabled) visibility = "private";
+  }
+  if (visibility !== "private") {
+    // docs/SOCIAL.md §11: notes are user-generated text and cross-user writes
+    // are rate-limited. Logging itself must never block (the private journal
+    // is the core loop), so past the cap the pour still lands — as private.
+    // Generous for a human, tight for a bot flooding followers' feeds.
+    const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    const recentVisible = await db
+      .select({ n: sql<number>`count(*)` })
+      .from(schema.pours)
+      .where(
+        and(
+          eq(schema.pours.userId, userId),
+          sql`${schema.pours.visibility} <> 'private'`,
+          sql`${schema.pours.createdAt} > ${hourAgo}`,
+        ),
+      );
+    if (Number(recentVisible[0]?.n ?? 0) >= VISIBLE_POUR_LIMIT_PER_HOUR) visibility = "private";
   }
   const { pour, note } = await db.transaction(async (tx) => {
     let userBottle = await tx.query.userBottles.findFirst({
@@ -232,13 +253,33 @@ export async function getPour(
   return { pour: row.pour, bottleName: row.bottleName, note: row.note ?? null };
 }
 
-/** Update a pour's social visibility. Owner-scoped; returns null for missing/others'. */
+export class SocialDisabledError extends Error {
+  constructor() {
+    super("Social is turned off");
+    this.name = "SocialDisabledError";
+  }
+}
+
+/**
+ * Update a pour's social visibility. Owner-scoped; returns null for
+ * missing/others'. While the owner is stepped back (socialEnabled=false),
+ * non-private updates are rejected — otherwise a stale History tab could
+ * re-expose a pour that "make everything private" just hid, with the change
+ * surfacing only when social is re-enabled (docs/SOCIAL.md US-11).
+ */
 export async function updatePourVisibility(
   db: DB,
   userId: string,
   pourId: string,
   visibility: PourVisibility,
 ): Promise<Pour | null> {
+  if (visibility !== "private") {
+    const profile = await db.query.userProfiles.findFirst({
+      columns: { socialEnabled: true },
+      where: eq(schema.userProfiles.userId, userId),
+    });
+    if (profile && !profile.socialEnabled) throw new SocialDisabledError();
+  }
   const rows = await db
     .update(schema.pours)
     .set({ visibility })
