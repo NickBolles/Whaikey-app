@@ -468,14 +468,19 @@ export async function updateSocialPrefs(db: DB, userId: string, patch: Partial<S
   const set: Partial<typeof schema.userSocialPrefs.$inferInsert> = { updatedAt: new Date() };
   if (patch.defaultPourVisibility !== undefined) set.defaultPourVisibility = patch.defaultPourVisibility;
   if (patch.allowComments !== undefined) set.allowComments = patch.allowComments;
-  await db
-    .insert(schema.userSocialPrefs)
-    .values({
-      userId,
-      ...(patch.defaultPourVisibility !== undefined ? { defaultPourVisibility: patch.defaultPourVisibility } : {}),
-      ...(patch.allowComments !== undefined ? { allowComments: patch.allowComments } : {}),
-    })
-    .onConflictDoUpdate({ target: schema.userSocialPrefs.userId, set });
+  await db.transaction(async (tx) => {
+    // Same lock as makeEverythingPrivate: an in-flight prefs save must not
+    // commit after the US-11 reset and quietly restore a visible default.
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`social-reset:${userId}`}))`);
+    await tx
+      .insert(schema.userSocialPrefs)
+      .values({
+        userId,
+        ...(patch.defaultPourVisibility !== undefined ? { defaultPourVisibility: patch.defaultPourVisibility } : {}),
+        ...(patch.allowComments !== undefined ? { allowComments: patch.allowComments } : {}),
+      })
+      .onConflictDoUpdate({ target: schema.userSocialPrefs.userId, set });
+  });
   return getSocialPrefs(db, userId);
 }
 

@@ -126,9 +126,12 @@ export function ProfileEditor({ profile: initial }: { profile: SocialProfile }) 
               checked={isPublic}
               onChange={setIsPublic}
             />
+            {/* The flag never gates exact-handle lookup (docs/SOCIAL.md §7.1:
+                exact handle always resolves) — it only opts out of future
+                suggestion surfaces, so the copy must not overclaim. */}
             <ToggleSwitch
               label="Discoverable"
-              hint="Findable by exact handle search."
+              hint="May appear in future friend suggestions. Your exact handle always resolves."
               checked={discoverable}
               onChange={setDiscoverable}
             />
