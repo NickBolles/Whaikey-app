@@ -4,6 +4,10 @@ import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ProfileClaim } from "@/components/profile-claim";
 
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }),
+}));
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();

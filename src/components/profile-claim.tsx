@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { AtSign, Check } from "lucide-react";
 import type { SocialProfile } from "@/lib/social";
 
@@ -25,6 +26,7 @@ export function ProfileClaim({
   description?: string;
   onClaimed?: (profile: SocialProfile) => void;
 }) {
+  const router = useRouter();
   const [handle, setHandle] = useState(suggestedHandle);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -57,6 +59,10 @@ export function ProfileClaim({
       const profile = (body.userId ? body : (body as unknown as { profile: SocialProfile }).profile) as SocialProfile;
       setClaimed(profile);
       onClaimed?.(profile);
+      // Server components branch on profile existence (e.g. /friends swaps
+      // the claim card for follow management) — refresh so the flow continues
+      // without a manual reload.
+      router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't claim that handle.");
     } finally {
