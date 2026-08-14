@@ -1,0 +1,106 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { Camera, ScanLine, X } from "lucide-react";
+import { startNativeScan, type NativeScanSession } from "@/lib/native/barcode";
+
+/**
+ * Accept ONLY same-origin `/add/<handle>` paths from a scanned code — never
+ * navigate to an arbitrary scanned URL. Exported for direct testing.
+ */
+export function parseAddPath(raw: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(raw, typeof window === "undefined" ? undefined : window.location.origin);
+  } catch {
+    return null;
+  }
+  if (typeof window !== "undefined" && url.origin !== window.location.origin) return null;
+  const match = /^\/add\/([a-z0-9_]{3,20})$/.exec(url.pathname);
+  return match ? url.pathname : null;
+}
+
+type ScanState = "idle" | "scanning" | "unavailable";
+
+/**
+ * Scan a friend's QR code. Native path via `startNativeScan({ formats: "qr" })`
+ * (docs/NATIVE_APP.md §3.1); on the web, or wherever native scanning isn't
+ * available, falls back to a calm instruction rather than a broken camera UI —
+ * the `BarcodeDetector` polyfill is deliberately not wired up here.
+ */
+export function QrScanButton() {
+  const router = useRouter();
+  const [state, setState] = useState<ScanState>("idle");
+  const sessionRef = useRef<NativeScanSession | null>(null);
+
+  useEffect(() => {
+    return () => {
+      void sessionRef.current?.stop();
+      sessionRef.current = null;
+    };
+  }, []);
+
+  async function stopScan() {
+    const session = sessionRef.current;
+    sessionRef.current = null;
+    setState("idle");
+    await session?.stop();
+  }
+
+  async function startScan() {
+    setState("scanning");
+    const session = await startNativeScan({
+      formats: "qr",
+      onBarcode: (raw) => {
+        const path = parseAddPath(raw);
+        if (!path) return;
+        void stopScan();
+        router.push(path);
+      },
+    });
+    if (!session) {
+      setState("unavailable");
+      return;
+    }
+    sessionRef.current = session;
+  }
+
+  if (state === "scanning") {
+    return (
+      <div className="card-flat flex items-center justify-between gap-3 p-3.5">
+        <span className="flex items-center gap-2 text-sm text-muted">
+          <ScanLine size={18} strokeWidth={1.8} className="text-accent" aria-hidden />
+          Point at a friend&apos;s code…
+        </span>
+        <button
+          type="button"
+          onClick={() => void stopScan()}
+          aria-label="Stop scanning"
+          className="tap-target flex h-9 w-9 items-center justify-center rounded-xl text-muted transition-colors hover:text-foreground"
+        >
+          <X size={16} strokeWidth={1.8} aria-hidden />
+        </button>
+      </div>
+    );
+  }
+
+  if (state === "unavailable") {
+    return (
+      <div className="card-flat flex items-center gap-2 p-3.5 text-sm text-muted">
+        <Camera size={18} strokeWidth={1.8} className="shrink-0" aria-hidden />
+        Point your phone&apos;s camera at a friend&apos;s code, or type their handle.
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => void startScan()}
+      className="btn-secondary tap-target inline-flex items-center gap-1.5 px-4 py-2 text-sm"
+    >
+      <ScanLine size={16} strokeWidth={1.8} aria-hidden /> Scan a code
+    </button>
+  );
+}

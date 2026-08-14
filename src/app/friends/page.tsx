@@ -1,5 +1,7 @@
 import Link from "next/link";
+import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
+import * as schema from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
 import { getOwnProfile, listBlocked, listFollowRequests, listFollowers, listFollowing } from "@/lib/social";
 import { ProfileClaim } from "@/components/profile-claim";
@@ -50,11 +52,17 @@ export default async function FriendsPage() {
     );
   }
 
-  const [requests, following, followers, blocked] = await Promise.all([
+  const [requests, following, followers, blocked, phoneRow] = await Promise.all([
     listFollowRequests(db, user.id),
     listFollowing(db, user.id),
     listFollowers(db, user.id),
     listBlocked(db, user.id),
+    // Not covered by getOwnProfile's projection — read the raw row for these
+    // two columns; the owner reading their own phone state is fine.
+    db.query.userProfiles.findFirst({
+      where: eq(schema.userProfiles.userId, user.id),
+      columns: { phoneLast2: true, phoneDiscoverable: true },
+    }),
   ]);
 
   const followerIds = new Set(followers.map((f) => f.userId));
@@ -67,6 +75,9 @@ export default async function FriendsPage() {
         <p className="mt-1 text-sm text-muted">@{profile.handle}</p>
       </header>
       <FriendsClient
+        handle={profile.handle}
+        phoneLast2={phoneRow?.phoneLast2 ?? null}
+        phoneDiscoverable={phoneRow?.phoneDiscoverable ?? false}
         requests={requests}
         following={followingWithMutual}
         followers={followers}
