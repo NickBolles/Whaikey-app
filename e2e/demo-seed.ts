@@ -5,6 +5,9 @@ import { DEMO_SESSION_TOKEN, DEMO_USER_ID, SCAN_SESSION_TOKEN, SCAN_USER_ID } fr
 
 const D = (iso: string) => new Date(iso);
 
+/** Sasha Glen — the demo collector's mutual friend, for the social surfaces. */
+export const DEMO_FRIEND_ID = "demo-friend";
+
 /**
  * Deterministic demo data for visual/e2e tests: a signed-in collector with a
  * lived-in bar, pours with notes, and fixed timestamps so screenshots are
@@ -192,6 +195,172 @@ export async function seedDemoUser(db: DB): Promise<void> {
       flavorTags: { honey: 2, vanilla: 2, cinnamon: 2, oak: 1 },
       extractedBy: "user",
       createdAt: D("2026-06-28T20:15:00Z"),
+    },
+  ]);
+
+  // ---------------------------------------------------------------------------
+  // Social (docs/SOCIAL.md): a second user, Sasha Glen, mutual friends with
+  // Jordan, so the social surfaces (profile, friends, note discussion,
+  // sharing, comparisons) have something real to render. Every id/timestamp
+  // here is fixed for stable screenshots; nothing above this point is touched.
+  // ---------------------------------------------------------------------------
+  await db.insert(schema.user).values({
+    id: DEMO_FRIEND_ID,
+    name: "Sasha Glen",
+    email: "friend@whaikey.app",
+    emailVerified: true,
+    createdAt: D("2026-02-01T12:00:00Z"),
+    updatedAt: D("2026-02-01T12:00:00Z"),
+  });
+
+  await db.insert(schema.userProfiles).values([
+    {
+      userId: DEMO_USER_ID,
+      handle: "jordan",
+      displayName: "Jordan Rivers",
+      bio: "Bourbon-leaning collector, always curious about the next shelf.",
+      homeRegion: "Austin, TX",
+      isPublic: true,
+      discoverable: true,
+      socialEnabled: true,
+      createdAt: D("2026-06-01T12:00:00Z"),
+      updatedAt: D("2026-06-01T12:00:00Z"),
+    },
+    {
+      userId: DEMO_FRIEND_ID,
+      handle: "sasha",
+      displayName: "Sasha Glen",
+      bio: "Islay obsessive, chasing peat smoke since 2019.",
+      homeRegion: "Portland, OR",
+      isPublic: true,
+      discoverable: true,
+      socialEnabled: true,
+      createdAt: D("2026-02-05T12:00:00Z"),
+      updatedAt: D("2026-02-05T12:00:00Z"),
+    },
+  ]);
+
+  // Mutual accepted follow — "friends" in every sense the app cares about.
+  await db.insert(schema.follows).values([
+    {
+      id: "demo-follow-1",
+      followerId: DEMO_USER_ID,
+      followeeId: DEMO_FRIEND_ID,
+      state: "accepted",
+      createdAt: D("2026-06-10T12:00:00Z"),
+    },
+    {
+      id: "demo-follow-2",
+      followerId: DEMO_FRIEND_ID,
+      followeeId: DEMO_USER_ID,
+      state: "accepted",
+      createdAt: D("2026-06-10T12:05:00Z"),
+    },
+  ]);
+
+  await db.insert(schema.userSocialPrefs).values([
+    {
+      userId: DEMO_USER_ID,
+      defaultPourVisibility: "friends",
+      allowComments: true,
+      createdAt: D("2026-06-01T12:00:00Z"),
+      updatedAt: D("2026-06-01T12:00:00Z"),
+    },
+    {
+      userId: DEMO_FRIEND_ID,
+      defaultPourVisibility: "friends",
+      allowComments: true,
+      createdAt: D("2026-02-05T12:00:00Z"),
+      updatedAt: D("2026-02-05T12:00:00Z"),
+    },
+  ]);
+
+  // Sasha's pour + note on lagavulin-16 — a bottle Jordan already has notes on
+  // (demo-note-2: campfire/brine/raisin/chocolate/medicinal) — with tags that
+  // overlap (campfire, brine) and diverge (peat, ash hers only; raisin,
+  // chocolate, medicinal his only), so Compare/Same-Dram show all three
+  // groups. Plus a second pour on a bottle Jordan has never tried, for the
+  // Home "From your friends" discovery card. Both "friends"-visible.
+  await db.insert(schema.pours).values([
+    {
+      id: "demo-friend-pour-1",
+      userId: DEMO_FRIEND_ID,
+      bottleId: "lagavulin-16",
+      rating: 4.5,
+      servingStyle: "neat",
+      amountMl: 30,
+      visibility: "friends",
+      createdAt: D("2026-07-15T20:00:00Z"),
+    },
+    {
+      id: "demo-friend-pour-2",
+      userId: DEMO_FRIEND_ID,
+      bottleId: "highland-park-12",
+      rating: 4,
+      servingStyle: "neat",
+      amountMl: 30,
+      visibility: "friends",
+      createdAt: D("2026-07-16T19:00:00Z"),
+    },
+  ]);
+
+  await db.insert(schema.tastingNotes).values([
+    {
+      id: "demo-friend-note-1",
+      pourId: "demo-friend-pour-1",
+      nose: "Campfire smoke straight off, a little brine.",
+      palate: "Peat and iodine up front, ash on the back end.",
+      finish: "Long, smoky, a touch of the sea.",
+      flavorTags: { campfire: 2, brine: 1, peat: 3, ash: 1 },
+      extractedBy: "user",
+      createdAt: D("2026-07-15T20:05:00Z"),
+    },
+    {
+      id: "demo-friend-note-2",
+      pourId: "demo-friend-pour-2",
+      nose: "Heather honey and dried fruit.",
+      palate: "Sweet honey, dark fruit, a whisper of smoke.",
+      finish: "Medium, warm, gently smoky.",
+      flavorTags: { honey: 2, heather: 2, "dark-fruit": 2, peat: 1 },
+      extractedBy: "user",
+      createdAt: D("2026-07-16T19:05:00Z"),
+    },
+  ]);
+
+  // A public share link for Sasha's lagavulin pour — the /s/[code] comparison view.
+  await db.insert(schema.pourShares).values({
+    id: "demo-share-1",
+    pourId: "demo-friend-pour-1",
+    userId: DEMO_FRIEND_ID,
+    code: "sashalagav16",
+    createdAt: D("2026-07-15T20:10:00Z"),
+  });
+
+  // A cheers from Jordan, and a threaded reply pair on Sasha's lagavulin note.
+  await db.insert(schema.reactions).values({
+    id: "demo-reaction-1",
+    pourId: "demo-friend-pour-1",
+    userId: DEMO_USER_ID,
+    kind: "cheers",
+    createdAt: D("2026-07-15T21:05:00Z"),
+  });
+
+  await db.insert(schema.comments).values([
+    {
+      id: "demo-comment-1",
+      pourId: "demo-friend-pour-1",
+      userId: DEMO_FRIEND_ID,
+      parentId: null,
+      body: "Funny how much iodine hit me on this one — did you get any of that?",
+      createdAt: D("2026-07-15T21:00:00Z"),
+    },
+    {
+      id: "demo-comment-2",
+      pourId: "demo-friend-pour-1",
+      userId: DEMO_USER_ID,
+      parentId: "demo-comment-1",
+      body: "A little, but raisin and chocolate dominated for me. Great pour though.",
+      createdAt: D("2026-07-15T21:15:00Z"),
     },
   ]);
 

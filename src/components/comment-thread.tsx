@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { CornerDownRight, Flag, MessageCircle, Pencil, Send, Trash2 } from "lucide-react";
 import { UserAvatar } from "@/components/user-avatar";
@@ -42,6 +42,29 @@ function formatRelativeTime(iso: string): string {
   const diffDay = Math.round(diffHour / 24);
   if (diffDay < 7) return `${diffDay}d ago`;
   return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+function absoluteDate(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+function noopSubscribe() {
+  return () => {};
+}
+
+/**
+ * True only once the client has mounted. `formatRelativeTime` reads
+ * Date.now(), so rendering it during SSR — and again for hydration's
+ * matching first client pass — would use the server's real wall-clock time;
+ * a test's fake `page.clock` only takes effect after that, so the two can
+ * disagree (e.g. "Jul 15, 2026" vs "4d ago") and React flags it as a
+ * hydration mismatch. Gating on this (the pattern also used by
+ * history-timeline.tsx and recommendation-rail.tsx) renders the same
+ * clock-independent fallback on the server and the first client paint, then
+ * swaps in the real relative time right after mount.
+ */
+function useHydrated(): boolean {
+  return useSyncExternalStore(noopSubscribe, () => true, () => false);
 }
 
 interface ComposerProps {
@@ -162,6 +185,7 @@ function CommentRow(props: CommentRowProps) {
   } = props;
 
   const [reportReason, setReportReason] = useState(REPORT_REASONS[0].value);
+  const hydrated = useHydrated();
   const busy = busyId === comment.id;
   const isAuthor = viewerUserId != null && comment.author?.userId === viewerUserId;
   const canReport = !comment.deleted && viewerSignedIn && comment.author != null && !isAuthor;
@@ -188,7 +212,9 @@ function CommentRow(props: CommentRowProps) {
             ) : (
               <span className="text-sm font-medium text-muted">Someone</span>
             )}
-            <span className="text-xs text-muted">{formatRelativeTime(comment.createdAt)}</span>
+            <span className="text-xs text-muted">
+              {hydrated ? formatRelativeTime(comment.createdAt) : absoluteDate(comment.createdAt)}
+            </span>
             {comment.editedAt && <span className="text-xs text-muted">· edited</span>}
           </div>
 

@@ -1,8 +1,31 @@
+"use client";
+
+import { useSyncExternalStore } from "react";
 import Link from "next/link";
 import { MessageCircle, Star, Wine } from "lucide-react";
 import { UserAvatar } from "@/components/user-avatar";
 import { FLAVOR_WHEEL, leafLabel, wedgeForLeaf } from "@/lib/flavor-wheel";
 import { compareFlavorNotes } from "@/lib/flavor-compare";
+
+// `relativeDate` below reads the clock, so — like recommendation-rail.tsx and
+// history-timeline.tsx — this must be a client component: a server component
+// would bake "3 days ago" into the server's real wall-clock time at request
+// time, which drifts (and crosses "days"/"weeks"/"months" bucket boundaries)
+// independent of the fixed timestamps in the seed. Being a client component
+// alone isn't sufficient, though: Next still server-renders it for the first
+// paint using real time, and a test's fake `page.clock` only takes effect in
+// the browser, so that first paint and the post-hydration client render can
+// disagree — a hydration mismatch. `useHydrated` below defers the
+// clock-dependent text to a post-mount render so SSR and the first client
+// paint always match (same fix as comment-thread.tsx's `formatRelativeTime`).
+
+function noopSubscribe() {
+  return () => {};
+}
+
+function useHydrated(): boolean {
+  return useSyncExternalStore(noopSubscribe, () => true, () => false);
+}
 
 /** Nudge a wedge hue toward the warm brass palette (kept in sync with history-timeline.tsx). */
 function warmify(hex: string): string {
@@ -106,6 +129,10 @@ function FeedCard({ item }: { item: FriendFeedItem }) {
   const tags = item.flavorTags ? Object.entries(item.flavorTags).slice(0, 4) : [];
   const hasComparison = item.viewerTags != null && Object.keys(item.viewerTags).length > 0;
   const isWishlisted = item.viewerBottleRelationship === "wishlist";
+  const hydrated = useHydrated();
+  const dateLabel = hydrated
+    ? relativeDate(item.createdAt)
+    : new Date(item.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 
   return (
     <li className="card-flat flex flex-col gap-3 p-4">
@@ -126,7 +153,7 @@ function FeedCard({ item }: { item: FriendFeedItem }) {
               </Link>
             </div>
             <div className="mt-0.5 text-xs text-muted">
-              {[item.servingStyle, relativeDate(item.createdAt)].filter(Boolean).join(" · ")}
+              {[item.servingStyle, dateLabel].filter(Boolean).join(" · ")}
             </div>
           </div>
         </div>
