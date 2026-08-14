@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, isNotNull, isNull } from "drizzle-orm";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
 
@@ -67,6 +67,9 @@ export async function createPourShare(
       for (let attempt = 0; attempt < 3; attempt += 1) {
         const code = newShareCode();
         try {
+          // Conditional on the row still being revoked: two concurrent
+          // re-shares must not have the second overwrite (and thereby kill)
+          // the code the first request already returned to its client.
           const updated = await db
             .update(schema.pourShares)
             .set({
@@ -74,9 +77,19 @@ export async function createPourShare(
               revokedAt: null,
               ...(options.locationLabel !== undefined ? { locationLabel } : {}),
             })
-            .where(and(eq(schema.pourShares.id, existing.id), eq(schema.pourShares.userId, userId)))
+            .where(
+              and(
+                eq(schema.pourShares.id, existing.id),
+                eq(schema.pourShares.userId, userId),
+                isNotNull(schema.pourShares.revokedAt),
+              ),
+            )
             .returning({ code: schema.pourShares.code });
           if (updated[0]) return updated[0];
+          const winner = await db.query.pourShares.findFirst({
+            where: and(eq(schema.pourShares.id, existing.id), eq(schema.pourShares.userId, userId)),
+          });
+          if (winner && !winner.revokedAt) return { code: winner.code };
         } catch (err) {
           // Only a code-uniqueness collision earns a retry; anything else is a
           // real database failure that must surface, not read as bad luck.

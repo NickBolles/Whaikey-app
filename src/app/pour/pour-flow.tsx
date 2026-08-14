@@ -215,6 +215,9 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
   const [freeform, setFreeform] = useState("");
   const [flavorTags, setFlavorTags] = useState<Record<string, number>>({});
   const [visibility, setVisibility] = useState<PourVisibility>("private");
+  // The user's saved default, so "Log another" starts fresh instead of
+  // silently inheriting a previous pour's one-off visibility choice.
+  const [defaultVisibility, setDefaultVisibility] = useState<PourVisibility>("private");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [done, setDone] = useState<{
@@ -231,7 +234,10 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
     fetch("/api/social/prefs")
       .then((res) => (res.ok ? res.json() : null))
       .then((data: { defaultPourVisibility?: PourVisibility } | null) => {
-        if (!cancelled && data?.defaultPourVisibility) setVisibility(data.defaultPourVisibility);
+        if (!cancelled && data?.defaultPourVisibility) {
+          setVisibility(data.defaultPourVisibility);
+          setDefaultVisibility(data.defaultPourVisibility);
+        }
       })
       .catch(() => {});
     return () => {
@@ -250,6 +256,7 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
     setFinish("");
     setFreeform("");
     setFlavorTags({});
+    setVisibility(defaultVisibility);
     setSubmitting(false);
     setSubmitError(null);
     setDone(null);

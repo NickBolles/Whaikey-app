@@ -64,7 +64,9 @@ test.describe("signed-in scan flow", () => {
 
     await input.fill("080244009960"); // seeded: Buffalo Trace
     await page.getByRole("button", { name: "Scan" }).click();
-    await expect(page.getByRole("status")).toContainText(/Added Buffalo Trace/i);
+    // Filtered: a lingering "Starting camera…" status can coexist under load,
+    // and bare getByRole("status") strict-mode-collides with it.
+    await expect(page.getByRole("status").filter({ hasText: /Added/i })).toContainText(/Added Buffalo Trace/i);
     await expect(page.getByText(/Scanned this session \(1\)/i)).toBeVisible();
 
     await input.fill("096749001613"); // seeded: Elijah Craig Small Batch

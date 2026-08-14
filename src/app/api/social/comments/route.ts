@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/db";
 import { requireUser, withErrorHandling } from "@/lib/session";
-import { addComment, commentCreateSchema, getOwnProfile, listComments } from "@/lib/social";
+import { RateLimitedError, addComment, commentCreateSchema, getOwnProfile, listComments } from "@/lib/social";
 
 /** GET /api/social/comments?pourId= — no profile needed to read; 404 when the pour isn't visible. */
 export async function GET(req: Request) {
@@ -41,7 +41,15 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "profile_required" }, { status: 409 });
     }
 
-    const comment = await addComment(db, user.id, parsed.data.pourId, parsed.data.body, parsed.data.parentId);
+    let comment;
+    try {
+      comment = await addComment(db, user.id, parsed.data.pourId, parsed.data.body, parsed.data.parentId);
+    } catch (err) {
+      if (err instanceof RateLimitedError) {
+        return NextResponse.json({ error: "rate_limited" }, { status: 429 });
+      }
+      throw err;
+    }
     if (!comment) {
       return NextResponse.json({ error: "not_found" }, { status: 404 });
     }

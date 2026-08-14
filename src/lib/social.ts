@@ -1,5 +1,5 @@
 /**
- * Social core library (docs/SOCIAL.md — binding; CONTRACTS.md §"src/lib/social.ts").
+ * Social core library (docs/SOCIAL.md — binding).
  *
  * Every cross-user read in this file goes through an explicit column
  * projection (the getPublicPourShare pattern in src/lib/pour-sharing.ts) and
@@ -12,7 +12,7 @@
  * A signed-out viewer (viewerId === null) sees nothing cross-user — share
  * links (src/lib/pour-sharing.ts) are a separate bearer-token mechanism.
  */
-import { and, asc, desc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, or, sql, type AnyColumn } from "drizzle-orm";
 import { z } from "zod";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
@@ -298,7 +298,7 @@ export async function listFollowing(
     })
     .from(schema.follows)
     .innerJoin(schema.userProfiles, eq(schema.follows.followeeId, schema.userProfiles.userId))
-    .where(eq(schema.follows.followerId, userId))
+    .where(and(eq(schema.follows.followerId, userId), eq(schema.userProfiles.socialEnabled, true)))
     .orderBy(desc(schema.follows.createdAt));
   return rows.map((r) => ({ ...toProfileSummary(r), state: r.state }));
 }
@@ -313,7 +313,13 @@ export async function listFollowers(db: DB, userId: string): Promise<ProfileSumm
     })
     .from(schema.follows)
     .innerJoin(schema.userProfiles, eq(schema.follows.followerId, schema.userProfiles.userId))
-    .where(and(eq(schema.follows.followeeId, userId), eq(schema.follows.state, "accepted")))
+    .where(
+      and(
+        eq(schema.follows.followeeId, userId),
+        eq(schema.follows.state, "accepted"),
+        eq(schema.userProfiles.socialEnabled, true),
+      ),
+    )
     .orderBy(desc(schema.follows.createdAt));
   return rows.map(toProfileSummary);
 }
@@ -328,7 +334,13 @@ export async function listFollowRequests(db: DB, userId: string): Promise<Profil
     })
     .from(schema.follows)
     .innerJoin(schema.userProfiles, eq(schema.follows.followerId, schema.userProfiles.userId))
-    .where(and(eq(schema.follows.followeeId, userId), eq(schema.follows.state, "pending")))
+    .where(
+      and(
+        eq(schema.follows.followeeId, userId),
+        eq(schema.follows.state, "pending"),
+        eq(schema.userProfiles.socialEnabled, true),
+      ),
+    )
     .orderBy(desc(schema.follows.createdAt));
   return rows.map(toProfileSummary);
 }
@@ -582,17 +594,23 @@ export interface SocialNote {
 }
 
 /**
- * Counts shown next to a thread must agree with the thread: contributions
- * from users blocked either way w.r.t. the viewer are excluded, matching
- * listComments' filtering (a mismatched count would reveal hidden activity).
+ * SQL predicate: the contribution's author (`userCol`) is visible to the
+ * viewer — not blocked in either direction, and not stepped back
+ * (userProfiles.socialEnabled=false hides a user's cheers, comments, and
+ * graph rows from everyone but themself; US-11). Every count rendered next
+ * to a thread or card must use this so counts agree with the visible thread —
+ * a mismatched count would reveal hidden activity.
  */
+function contributorVisibleSql(userCol: AnyColumn, viewerId: string) {
+  return sql`(${userCol} = ${viewerId} or (
+    not exists (select 1 from blocks b where (b.blocker_id = ${viewerId} and b.blocked_id = ${userCol}) or (b.blocker_id = ${userCol} and b.blocked_id = ${viewerId}))
+    and not exists (select 1 from user_profiles sp where sp.user_id = ${userCol} and sp.social_enabled = false)
+  ))`;
+}
+
 async function countCheers(db: DB, pourId: string, viewerId: string | null): Promise<number> {
   const conditions = [eq(schema.reactions.pourId, pourId), eq(schema.reactions.kind, "cheers")];
-  if (viewerId) {
-    conditions.push(
-      sql`not exists (select 1 from blocks b where (b.blocker_id = ${viewerId} and b.blocked_id = ${schema.reactions.userId}) or (b.blocker_id = ${schema.reactions.userId} and b.blocked_id = ${viewerId}))`,
-    );
-  }
+  if (viewerId) conditions.push(contributorVisibleSql(schema.reactions.userId, viewerId));
   const rows = await db
     .select({ n: sql<number>`count(*)` })
     .from(schema.reactions)
@@ -602,11 +620,7 @@ async function countCheers(db: DB, pourId: string, viewerId: string | null): Pro
 
 async function countComments(db: DB, pourId: string, viewerId: string | null): Promise<number> {
   const conditions = [eq(schema.comments.pourId, pourId), isNull(schema.comments.deletedAt)];
-  if (viewerId) {
-    conditions.push(
-      sql`not exists (select 1 from blocks b where (b.blocker_id = ${viewerId} and b.blocked_id = ${schema.comments.userId}) or (b.blocker_id = ${schema.comments.userId} and b.blocked_id = ${viewerId}))`,
-    );
-  }
+  if (viewerId) conditions.push(contributorVisibleSql(schema.comments.userId, viewerId));
   const rows = await db
     .select({ n: sql<number>`count(*)` })
     .from(schema.comments)
@@ -796,14 +810,26 @@ export async function getFriendFeed(db: DB, viewerId: string, opts: { limit?: nu
   const cheersRows = await db
     .select({ pourId: schema.reactions.pourId, n: sql<number>`count(*)` })
     .from(schema.reactions)
-    .where(and(inArray(schema.reactions.pourId, pourIds), eq(schema.reactions.kind, "cheers")))
+    .where(
+      and(
+        inArray(schema.reactions.pourId, pourIds),
+        eq(schema.reactions.kind, "cheers"),
+        contributorVisibleSql(schema.reactions.userId, viewerId),
+      ),
+    )
     .groupBy(schema.reactions.pourId);
   const cheersMap = new Map(cheersRows.map((r) => [r.pourId, Number(r.n)]));
 
   const commentRows = await db
     .select({ pourId: schema.comments.pourId, n: sql<number>`count(*)` })
     .from(schema.comments)
-    .where(and(inArray(schema.comments.pourId, pourIds), isNull(schema.comments.deletedAt)))
+    .where(
+      and(
+        inArray(schema.comments.pourId, pourIds),
+        isNull(schema.comments.deletedAt),
+        contributorVisibleSql(schema.comments.userId, viewerId),
+      ),
+    )
     .groupBy(schema.comments.pourId);
   const commentMap = new Map(commentRows.map((r) => [r.pourId, Number(r.n)]));
 
@@ -918,7 +944,9 @@ export async function getFriendNotesForBottle(db: DB, viewerId: string, bottleId
     })
     .from(schema.pours)
     .innerJoin(schema.userProfiles, eq(schema.userProfiles.userId, schema.pours.userId))
-    .leftJoin(schema.tastingNotes, eq(schema.tastingNotes.pourId, schema.pours.id))
+    // Inner join: Same Dram compares notes, so a newer note-less pour must not
+    // shadow a friend's older tasted-and-described one.
+    .innerJoin(schema.tastingNotes, eq(schema.tastingNotes.pourId, schema.pours.id))
     .where(
       and(
         eq(schema.pours.bottleId, bottleId),
@@ -1154,6 +1182,7 @@ export async function listComments(db: DB, viewerId: string | null, pourId: stri
       authorHandle: schema.userProfiles.handle,
       authorDisplayName: schema.userProfiles.displayName,
       authorAvatarUrl: schema.userProfiles.avatarUrl,
+      authorSocialEnabled: schema.userProfiles.socialEnabled,
     })
     .from(schema.comments)
     .leftJoin(schema.userProfiles, eq(schema.userProfiles.userId, schema.comments.userId))
@@ -1166,6 +1195,8 @@ export async function listComments(db: DB, viewerId: string | null, pourId: stri
   const out: CommentView[] = [];
   for (const row of rows) {
     if (blocked.has(row.userId)) continue;
+    // A stepped-back author's comments vanish for everyone but themself (US-11).
+    if (row.authorSocialEnabled === false && row.userId !== viewerId) continue;
     const deleted = row.deletedAt != null;
     const isAuthor = viewerId != null && viewerId === row.userId;
     const canEdit = isAuthor && !deleted && now - row.createdAt.getTime() <= COMMENT_EDIT_WINDOW_MS;
@@ -1189,6 +1220,16 @@ export async function listComments(db: DB, viewerId: string | null, pourId: stri
 }
 
 /** null: pour not visible to `userId`, the pour owner has comments off, or parentId is missing/foreign/deleted. */
+/** docs/SOCIAL.md §11: user-generated text is rate-limited on write. */
+export const COMMENT_RATE_LIMIT_PER_HOUR = 30;
+
+export class RateLimitedError extends Error {
+  constructor() {
+    super("Rate limited");
+    this.name = "RateLimitedError";
+  }
+}
+
 export async function addComment(
   db: DB,
   userId: string,
@@ -1198,6 +1239,15 @@ export async function addComment(
 ): Promise<CommentView | null> {
   const trimmed = body.trim();
   if (trimmed.length === 0 || trimmed.length > COMMENT_MAX_LENGTH) return null;
+
+  // Durable limit straight off the comments table — includes soft-deleted
+  // rows so delete-and-repost can't reset the window.
+  const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
+  const recent = await db
+    .select({ n: sql<number>`count(*)` })
+    .from(schema.comments)
+    .where(and(eq(schema.comments.userId, userId), sql`${schema.comments.createdAt} > ${hourAgo}`));
+  if (Number(recent[0]?.n ?? 0) >= COMMENT_RATE_LIMIT_PER_HOUR) throw new RateLimitedError();
 
   const ctx = await loadPourAuthContext(db, pourId);
   if (!ctx) return null;

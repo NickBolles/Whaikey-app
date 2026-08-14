@@ -167,7 +167,8 @@ export default async function SharedPourPage({ params }: Props) {
         <div className="flex flex-wrap items-center gap-3 text-sm text-muted">
           {share.pour.rating != null && <span className="flex items-center gap-1 text-accent"><Star size={15} fill="currentColor" aria-hidden /> {share.pour.rating.toFixed(1)}</span>}
           {share.pour.servingStyle && <span className="capitalize">{share.pour.servingStyle}</span>}
-          {share.pour.amountMl != null && <span>{share.pour.amountMl} ml</span>}
+          {/* Pour size is deliberately not shown: a volume metric never renders
+              to another user, even on an opt-in share (docs/SOCIAL.md §3.1). */}
           {share.locationLabel && <span>at {share.locationLabel}</span>}
         </div>
         {Object.keys(leafHeat).length > 0 && (

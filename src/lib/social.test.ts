@@ -5,8 +5,10 @@ import * as schema from "@/db/schema";
 import { createTestBottle, createTestUser, setupTestDb, uid } from "@/test/helpers";
 import {
   COMMENT_EDIT_WINDOW_MS,
+  COMMENT_RATE_LIMIT_PER_HOUR,
   HandleTakenError,
   InvalidHandleError,
+  RateLimitedError,
   addComment,
   approveFollow,
   areFriends,
@@ -457,16 +459,18 @@ describe("getFriendNotesForBottle", () => {
     await followByHandle(db, viewer.id, "friend_t");
 
     const bottle = await createTestBottle(db);
-    await insertPour(db, friendUser.id, bottle.id, {
+    const earlier = await insertPour(db, friendUser.id, bottle.id, {
       visibility: "public",
       rating: 3,
       createdAt: new Date("2026-01-01T00:00:00Z"),
     });
+    await insertNote(db, earlier.id, { flavorTags: { honey: 1 } });
     const latest = await insertPour(db, friendUser.id, bottle.id, {
       visibility: "public",
       rating: 4.5,
       createdAt: new Date("2026-02-01T00:00:00Z"),
     });
+    await insertNote(db, latest.id, { flavorTags: { vanilla: 2 } });
 
     const notes = await getFriendNotesForBottle(db, viewer.id, bottle.id);
     expect(notes).toHaveLength(1);
@@ -710,5 +714,89 @@ describe("money/volume guard", () => {
       expect(serialized).not.toMatch(/amountMl/i);
       expect(serialized).not.toContain("199.99");
     }
+  });
+});
+
+describe("review-pass hardening", () => {
+  let db: DB;
+  beforeEach(async () => {
+    db = await setupTestDb();
+  });
+
+  async function mutualFollow(a: schema.User, b: schema.User, aHandle: string, bHandle: string) {
+    await claim(db, a, aHandle, { isPublic: true });
+    await claim(db, b, bHandle, { isPublic: true });
+    await followByHandle(db, a.id, bHandle);
+    await followByHandle(db, b.id, aHandle);
+  }
+
+  it("a stepped-back user's comments, cheers, and graph rows vanish for others but not for themself", async () => {
+    const viewer = await createTestUser(db);
+    const stepped = await createTestUser(db);
+    const bottle = await createTestBottle(db);
+    await mutualFollow(viewer, stepped, "viewer_sb", "stepped_sb");
+
+    const pour = await insertPour(db, viewer.id, bottle.id, { visibility: "public", rating: 4 });
+    await insertNote(db, pour.id, { freeform: "mine" });
+    await addComment(db, stepped.id, pour.id, "was here");
+    await cheerPour(db, stepped.id, pour.id);
+
+    // Sanity before stepping back: contribution and graph rows are visible.
+    expect((await listComments(db, viewer.id, pour.id))!.some((c) => c.author?.userId === stepped.id)).toBe(true);
+    expect((await getSocialNote(db, viewer.id, pour.id))!.cheersCount).toBe(1);
+
+    await makeEverythingPrivate(db, stepped.id);
+
+    const comments = await listComments(db, viewer.id, pour.id);
+    expect(comments!.some((c) => c.author?.userId === stepped.id)).toBe(false);
+    // Counts agree with the visible thread — no hidden-activity leak.
+    const ownNote = await getSocialNote(db, viewer.id, pour.id);
+    expect(ownNote!.cheersCount).toBe(0);
+    expect(ownNote!.commentCount).toBe(0);
+    expect(await listFollowing(db, viewer.id)).toHaveLength(0);
+    expect(await listFollowers(db, viewer.id)).toHaveLength(0);
+
+    // The stepped-back user still sees their own comment (nothing deleted).
+    const own = await listComments(db, stepped.id, pour.id);
+    expect(own!.some((c) => c.author?.userId === stepped.id)).toBe(true);
+  });
+
+  it("Same Dram picks a friend's latest NOTED pour, not a newer note-less one", async () => {
+    const viewer = await createTestUser(db);
+    const friend = await createTestUser(db);
+    const bottle = await createTestBottle(db);
+    await mutualFollow(viewer, friend, "viewer_sd", "friend_sd");
+
+    const noted = await insertPour(db, friend.id, bottle.id, {
+      visibility: "friends",
+      rating: 4,
+      createdAt: new Date("2026-07-01T00:00:00Z"),
+    });
+    await insertNote(db, noted.id, { flavorTags: { vanilla: 3 } });
+    await insertPour(db, friend.id, bottle.id, {
+      visibility: "friends",
+      rating: 3,
+      createdAt: new Date("2026-07-10T00:00:00Z"),
+    });
+
+    const rows = await getFriendNotesForBottle(db, viewer.id, bottle.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].pourId).toBe(noted.id);
+    expect(rows[0].flavorTags).toEqual({ vanilla: 3 });
+  });
+
+  it("comment writes are rate-limited per hour", async () => {
+    const owner = await createTestUser(db);
+    const commenter = await createTestUser(db);
+    const bottle = await createTestBottle(db);
+    await mutualFollow(owner, commenter, "owner_rl", "commenter_rl");
+    const pour = await insertPour(db, owner.id, bottle.id, { visibility: "public", rating: 4 });
+    await insertNote(db, pour.id, { freeform: "note" });
+
+    for (let i = 0; i < COMMENT_RATE_LIMIT_PER_HOUR; i += 1) {
+      const created = await addComment(db, commenter.id, pour.id, `c${i}`);
+      expect(created).not.toBeNull();
+    }
+    await expect(addComment(db, commenter.id, pour.id, "one too many")).rejects.toBeInstanceOf(RateLimitedError);
   });
 });
