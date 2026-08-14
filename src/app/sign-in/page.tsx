@@ -4,6 +4,7 @@ import { Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { signIn } from "@/lib/auth-client";
 import { startNativeSignIn } from "@/lib/native/auth";
+import { safeReturnPath } from "@/lib/return-path";
 
 type Provider = "google" | "apple";
 
@@ -42,12 +43,11 @@ function SignInForm() {
   const displayError = error ?? (retried ? null : searchParams.get("error"));
 
   // Optional same-origin return path (e.g. a scanned /add/<handle> code —
-  // the person should land back on the confirm screen, not Home). Only a
-  // single-leading-slash path without backslashes is honored; anything else
-  // (absolute URLs, protocol-relative "//host", "/\host" — WHATWG treats "\"
-  // as "/") would be an open redirect and falls back to "/".
-  const rawNext = searchParams.get("next");
-  const nextPath = rawNext && /^\/(?!\/)/.test(rawNext) && !rawNext.includes("\\") ? rawNext : "/";
+  // the person should land back on the confirm screen, not Home). Validated
+  // by the same safeReturnPath as the native exchange redirect — absolute
+  // URLs, protocol-relative "//host", backslash and control-char variants
+  // all fall back to "/" rather than becoming an open redirect.
+  const nextPath = safeReturnPath(searchParams.get("next")) ?? "/";
 
   async function handleSignIn(provider: Provider) {
     if (pending) return;

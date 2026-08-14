@@ -1,0 +1,1 @@
+CREATE INDEX "phone_lookups_created_at_idx" ON "phone_lookups" USING btree ("created_at");

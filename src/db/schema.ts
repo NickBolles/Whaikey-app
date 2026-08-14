@@ -378,7 +378,12 @@ export const phoneLookups = pgTable(
       .references(() => user.id, { onDelete: "cascade" }),
     createdAt: createdAt(),
   },
-  (t) => [index("phone_lookups_user_idx").on(t.userId)],
+  (t) => [
+    index("phone_lookups_user_idx").on(t.userId),
+    // The retention sweep (recordPhoneProbe) deletes by age across all users;
+    // without this index every probe would seq-scan the whole table.
+    index("phone_lookups_created_at_idx").on(t.createdAt),
+  ],
 );
 
 export const FOLLOW_STATES = ["pending", "accepted"] as const;

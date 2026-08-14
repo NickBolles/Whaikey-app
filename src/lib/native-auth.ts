@@ -23,21 +23,10 @@ export const CODE_TTL_MS = 60_000;
 /** The scheme registered in Info.plist and AndroidManifest.xml. */
 export const NATIVE_CALLBACK_SCHEME = "whaikey";
 
-/**
- * The only return target the native sign-in flow will honor: a same-origin
- * relative path with a single leading slash. Anything else — absolute URLs,
- * protocol-relative "//host", or backslash variants like "/\evil.example"
- * (WHATWG URL parsing treats "\" as "/") — would turn the exchange redirect
- * into an open redirect and collapses to null (callers fall back to "/").
- */
-export function safeReturnPath(raw: string | null | undefined): string | null {
-  if (!raw || !/^\/(?!\/)/.test(raw) || raw.includes("\\")) return null;
-  // WHATWG URL parsing strips tab/CR/LF anywhere in the input, so
-  // "/\t/evil.example" would collapse to protocol-relative "//evil.example".
-  // Reject every C0 control character (and DEL) outright.
-  if (/[\x00-\x1f\x7f]/.test(raw)) return null;
-  return raw;
-}
+// Shared with the client-side sign-in page — the validation itself lives in
+// the dependency-free return-path module; re-exported here so server callers
+// keep their import path.
+export { safeReturnPath } from "@/lib/return-path";
 
 export function hashCode(code: string): string {
   return createHash("sha256").update(code).digest("hex");

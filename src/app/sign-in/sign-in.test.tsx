@@ -113,7 +113,9 @@ describe("return path (?next=)", () => {
   });
 
   it("falls back to '/' for absolute or protocol-relative next values (no open redirect)", async () => {
-    for (const evil of ["https://evil.example/x", "//evil.example/x"]) {
+    // "/\t/evil.example" and "/\evil.example" matter here: WHATWG URL parsing
+    // strips tabs and treats "\" as "/", so either would resolve off-origin.
+    for (const evil of ["https://evil.example/x", "//evil.example/x", "/\\evil.example/x", "/\t/evil.example"]) {
       social.mockReset();
       social.mockResolvedValue(undefined);
       searchParams.value = new URLSearchParams([["next", evil]]);
