@@ -1163,7 +1163,12 @@ export async function getProfileView(db: DB, viewerId: string | null, handle: st
 // ---------------------------------------------------------------------------
 
 export async function cheerPour(db: DB, userId: string, pourId: string): Promise<{ cheersCount: number } | null> {
-  if (!(await canViewPour(db, userId, pourId))) return null;
+  const ctx = await loadPourAuthContext(db, pourId);
+  if (!ctx) return null;
+  // Cheers are a reader-to-author gesture — cheering your own note would let
+  // an author quietly inflate the count the UI renders on the object.
+  if (ctx.authorId === userId) return null;
+  if (!(await canViewPourContext(db, userId, ctx))) return null;
   await db
     .insert(schema.reactions)
     .values({ id: crypto.randomUUID(), pourId, userId, kind: "cheers" })
@@ -1394,24 +1399,30 @@ export async function createReport(
   reporterId: string,
   input: { subjectType: ReportSubjectType; subjectId: string; reason: string },
 ): Promise<boolean> {
-  let subjectExists = false;
+  // The subject must be VISIBLE to the reporter, not merely exist — a bare
+  // existence check would make the 201/404 split an oracle for probing
+  // private pour/comment ids, and you can only report what reached you.
+  let subjectVisible = false;
   if (input.subjectType === "pour") {
-    subjectExists = Boolean(
-      await db.query.pours.findFirst({ columns: { id: true }, where: eq(schema.pours.id, input.subjectId) }),
-    );
+    subjectVisible = await canViewPour(db, reporterId, input.subjectId);
   } else if (input.subjectType === "comment") {
-    subjectExists = Boolean(
-      await db.query.comments.findFirst({ columns: { id: true }, where: eq(schema.comments.id, input.subjectId) }),
-    );
+    const comment = await db.query.comments.findFirst({
+      columns: { id: true, pourId: true, userId: true },
+      where: eq(schema.comments.id, input.subjectId),
+    });
+    subjectVisible =
+      comment != null &&
+      (await canViewPour(db, reporterId, comment.pourId)) &&
+      !(await isBlockedEither(db, reporterId, comment.userId));
   } else {
-    subjectExists = Boolean(
-      await db.query.userProfiles.findFirst({
-        columns: { userId: true },
-        where: eq(schema.userProfiles.userId, input.subjectId),
-      }),
-    );
+    const profile = await db.query.userProfiles.findFirst({
+      columns: { userId: true, socialEnabled: true },
+      where: eq(schema.userProfiles.userId, input.subjectId),
+    });
+    subjectVisible =
+      profile != null && profile.socialEnabled && !(await isBlockedEither(db, reporterId, profile.userId));
   }
-  if (!subjectExists) return false;
+  if (!subjectVisible) return false;
 
   await db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`report-rl:${reporterId}`}))`);

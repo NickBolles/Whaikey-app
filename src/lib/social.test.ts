@@ -487,19 +487,23 @@ describe("cheers", () => {
     db = await setupTestDb();
   });
 
-  it("is idempotent and returns null when the pour isn't visible", async () => {
+  it("is idempotent, rejects self-cheers, and returns null when the pour isn't visible", async () => {
     const owner = await createTestUser(db);
     const stranger = await createTestUser(db);
-    await claim(db, owner, "owner_t");
+    await claim(db, owner, "owner_t", { isPublic: true });
+    await claim(db, stranger, "reader_t", { isPublic: true });
     const bottle = await createTestBottle(db);
-    const pour = await insertPour(db, owner.id, bottle.id, { visibility: "private", rating: 4 });
+    const hidden = await insertPour(db, owner.id, bottle.id, { visibility: "private", rating: 4 });
+    const pour = await insertPour(db, owner.id, bottle.id, { visibility: "public", rating: 4 });
 
-    expect(await cheerPour(db, stranger.id, pour.id)).toBeNull();
+    expect(await cheerPour(db, stranger.id, hidden.id)).toBeNull();
+    // Cheers are reader-to-author: the author can't inflate their own count.
+    expect(await cheerPour(db, owner.id, pour.id)).toBeNull();
 
-    expect(await cheerPour(db, owner.id, pour.id)).toEqual({ cheersCount: 1 });
-    expect(await cheerPour(db, owner.id, pour.id)).toEqual({ cheersCount: 1 }); // idempotent
-    expect(await uncheerPour(db, owner.id, pour.id)).toEqual({ cheersCount: 0 });
-    expect(await uncheerPour(db, owner.id, pour.id)).toEqual({ cheersCount: 0 }); // idempotent
+    expect(await cheerPour(db, stranger.id, pour.id)).toEqual({ cheersCount: 1 });
+    expect(await cheerPour(db, stranger.id, pour.id)).toEqual({ cheersCount: 1 }); // idempotent
+    expect(await uncheerPour(db, stranger.id, pour.id)).toEqual({ cheersCount: 0 });
+    expect(await uncheerPour(db, stranger.id, pour.id)).toEqual({ cheersCount: 0 }); // idempotent
   });
 });
 

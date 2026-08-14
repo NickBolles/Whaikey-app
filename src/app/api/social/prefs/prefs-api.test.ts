@@ -94,6 +94,9 @@ describe("/api/social/reports", () => {
     db = await setupTestDb();
     user = await createTestUser(db, { name: "Reporter" });
     author = await createTestUser(db, { name: "Reported" });
+    // The reported subject must be VISIBLE to the reporter: a profile-less
+    // author's pours never surface socially, so give the author a profile.
+    await createProfile(db, { id: author.id, name: author.name }, "reported_author");
     const bottle = await createTestBottle(db);
     const { pour } = await logPour(db, author.id, { bottleId: bottle.id, rating: 3, visibility: "public" });
     pourId = pour.id;

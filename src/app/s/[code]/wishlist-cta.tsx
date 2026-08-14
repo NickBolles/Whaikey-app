@@ -27,6 +27,22 @@ export function WishlistCta({
     setBusy(true);
     setError(null);
     try {
+      // The page may be stale: if the viewer shelved this bottle elsewhere
+      // since it rendered, show that relationship instead of demoting an
+      // owned/tried bottle back to a wishlist entry via the upsert.
+      const current = await fetch("/api/user-bottles")
+        .then((res) => (res.ok ? res.json() : null))
+        .catch(() => null);
+      const existing = Array.isArray(current)
+        ? (current as Array<{ bottleId: string; relationship: Relationship }>).find(
+            (row) => row.bottleId === bottleId,
+          )
+        : null;
+      if (existing) {
+        setRelationship(existing.relationship);
+        return;
+      }
+
       const res = await fetch("/api/user-bottles", {
         method: "POST",
         headers: { "content-type": "application/json" },
