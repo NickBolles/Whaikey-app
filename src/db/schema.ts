@@ -349,9 +349,37 @@ export const userProfiles = pgTable("user_profiles", {
    * feed presence, friend notes) without deleting anything. Reversible.
    */
   socialEnabled: boolean("social_enabled").notNull().default(true),
+  /**
+   * Phone discovery (docs/SOCIAL.md §7.2, D8 as amended): the raw number is
+   * NEVER stored — only an HMAC (keyed by a server secret) for exact-match
+   * lookup, plus the last two digits so the owner can recognize which number
+   * they registered. Discovery is double-opt-in: the owner must both set a
+   * number and flip phoneDiscoverable (default OFF). Contact-book import
+   * remains banned; this is single-number exact lookup only.
+   */
+  phoneHash: text("phone_hash").unique(),
+  phoneLast2: text("phone_last2"),
+  phoneDiscoverable: boolean("phone_discoverable").notNull().default(false),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
+
+/**
+ * One row per phone lookup, kept solely to rate-limit them durably — an
+ * unthrottled endpoint would let an account iterate numbers and map who is
+ * on the app. Only the requester is recorded; never the number queried.
+ */
+export const phoneLookups = pgTable(
+  "phone_lookups",
+  {
+    id: id(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("phone_lookups_user_idx").on(t.userId)],
+);
 
 export const FOLLOW_STATES = ["pending", "accepted"] as const;
 export type FollowState = (typeof FOLLOW_STATES)[number];
