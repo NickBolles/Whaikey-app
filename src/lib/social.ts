@@ -250,7 +250,6 @@ export async function followByHandle(db: DB, followerId: string, handle: string)
   });
   if (existing) return { state: existing.state };
 
-  const state: FollowState = target.isPublic ? "accepted" : "pending";
   const inserted = await db.transaction(async (tx) => {
     // Serialized with the US-11 reset: a follow from a caller mid-step-back
     // must not land beside the reset and resurface on re-enable.
@@ -260,6 +259,15 @@ export async function followByHandle(db: DB, followerId: string, handle: string)
       where: eq(schema.userProfiles.userId, followerId),
     });
     if (caller && !caller.socialEnabled) throw new SocialDisabledError();
+    // The accepted-vs-pending decision reads the target's CURRENT privacy in
+    // the same transaction as the insert: a profile that just went private
+    // must yield a request, never an unapproved accepted follower.
+    const liveTarget = await tx.query.userProfiles.findFirst({
+      columns: { isPublic: true, socialEnabled: true },
+      where: eq(schema.userProfiles.userId, target.userId),
+    });
+    if (!liveTarget || !liveTarget.socialEnabled) return [];
+    const state: FollowState = liveTarget.isPublic ? "accepted" : "pending";
     return tx
       .insert(schema.follows)
       .values({ id: crypto.randomUUID(), followerId, followeeId: target.userId, state })

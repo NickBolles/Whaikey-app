@@ -32,7 +32,10 @@ describe("PrivacyControls", () => {
     expect(screen.getByText("Default visibility for new pours")).toBeInTheDocument();
     expect(screen.getByText(/appear once you set up a profile/i)).toBeInTheDocument();
     expect(screen.queryByText("Allow comments")).not.toBeInTheDocument();
-    expect(screen.queryByText("Step back from social")).not.toBeInTheDocument();
+    // The US-11 bulk reset is a safety action and never requires a profile —
+    // an S1 sharer with active bearer links can revoke everything in one tap.
+    expect(screen.getByText("Step back from social")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Make everything private" })).toBeInTheDocument();
   });
 
   it("requires an inline confirm before running the privacy reset, then calls the reset route", async () => {

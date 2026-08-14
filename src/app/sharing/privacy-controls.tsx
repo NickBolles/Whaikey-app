@@ -154,7 +154,7 @@ export function PrivacyControls({
 
       {!hasProfile && (
         <p className="text-xs text-muted">
-          Comments and the step-back switch appear once you set up a profile from{" "}
+          Comment settings appear once you set up a profile from{" "}
           <Link href="/friends" className="text-accent hover:brightness-110 transition-[filter]">
             Friends
           </Link>
@@ -163,15 +163,18 @@ export function PrivacyControls({
       )}
 
       {hasProfile && (
-        <>
-          <ToggleSwitch
-            label="Allow comments"
-            hint="People who can see a note can reply under it."
-            checked={allowComments}
-            onChange={handleAllowComments}
-          />
+        <ToggleSwitch
+          label="Allow comments"
+          hint="People who can see a note can reply under it."
+          checked={allowComments}
+          onChange={handleAllowComments}
+        />
+      )}
 
-          {socialEnabled ? (
+      {/* The US-11 bulk reset is a safety action and never requires a profile:
+          an S1 sharer with active bearer links must be able to revoke
+          everything in one tap. The re-enable block is profile-only. */}
+      {(!hasProfile || socialEnabled) ? (
             <div className="flex flex-col gap-2 border-t border-border-subtle pt-4">
               <span className="text-sm">Step back from social</span>
               {!confirming ? (
@@ -223,8 +226,6 @@ export function PrivacyControls({
               </button>
             </div>
           )}
-        </>
-      )}
 
       {error && (
         <p role="alert" className="text-sm text-danger">
