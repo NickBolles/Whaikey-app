@@ -215,6 +215,10 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
   const [freeform, setFreeform] = useState("");
   const [flavorTags, setFlavorTags] = useState<Record<string, number>>({});
   const [visibility, setVisibility] = useState<PourVisibility>("private");
+  // Once the user touches the selector, a late-arriving prefs response must
+  // never overwrite their explicit choice (e.g. flip "Only me" to a broader
+  // saved default right before submit).
+  const visibilityDirtyRef = useRef(false);
   // The user's saved default, so "Log another" starts fresh instead of
   // silently inheriting a previous pour's one-off visibility choice.
   const [defaultVisibility, setDefaultVisibility] = useState<PourVisibility>("private");
@@ -235,7 +239,7 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
       .then((res) => (res.ok ? res.json() : null))
       .then((data: { defaultPourVisibility?: PourVisibility } | null) => {
         if (!cancelled && data?.defaultPourVisibility) {
-          setVisibility(data.defaultPourVisibility);
+          if (!visibilityDirtyRef.current) setVisibility(data.defaultPourVisibility);
           setDefaultVisibility(data.defaultPourVisibility);
         }
       })
@@ -256,6 +260,7 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
     setFinish("");
     setFreeform("");
     setFlavorTags({});
+    visibilityDirtyRef.current = false;
     setVisibility(defaultVisibility);
     setSubmitting(false);
     setSubmitError(null);
@@ -515,7 +520,14 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
 
                 <div className="flex flex-col gap-1.5">
                   <span className="section-label">Who can see this</span>
-                  <VisibilityChips value={visibility} onChange={setVisibility} idPrefix="pour-visibility" />
+                  <VisibilityChips
+                    value={visibility}
+                    onChange={(value) => {
+                      visibilityDirtyRef.current = true;
+                      setVisibility(value);
+                    }}
+                    idPrefix="pour-visibility"
+                  />
                 </div>
               </div>
             )}
