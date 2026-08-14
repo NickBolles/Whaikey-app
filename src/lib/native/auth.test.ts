@@ -34,6 +34,12 @@ describe("parseAuthCallback", () => {
     });
   });
 
+  it("keeps the return target on error callbacks, so a retry still lands on the scanned page", () => {
+    expect(
+      mod.parseAuthCallback("whaikey://auth/callback?error=not_signed_in&next=%2Fadd%2Fsasha"),
+    ).toEqual({ error: "not_signed_in", next: "/add/sasha" });
+  });
+
   it("treats a callback with neither code nor error as an unknown failure", () => {
     // Better a clear message than a silent hang on the sign-in screen.
     expect(mod.parseAuthCallback("whaikey://auth/callback")).toEqual({ error: "unknown" });

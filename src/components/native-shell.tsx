@@ -62,7 +62,11 @@ export function NativeShell() {
           window.location.assign(exchangeUrl(callback.code, callback.next));
         } else {
           const message = describeNativeAuthError(callback.error);
-          router.push(`/sign-in?error=${encodeURIComponent(message ?? "Sign-in failed.")}`);
+          const retry = new URLSearchParams({ error: message ?? "Sign-in failed." });
+          // Keep the return target on the retry, so trying again still lands
+          // on the scanned page (the sign-in page re-validates it).
+          if (callback.next) retry.set("next", callback.next);
+          router.push(`/sign-in?${retry.toString()}`);
         }
         return;
       }

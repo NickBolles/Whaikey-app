@@ -19,17 +19,21 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
   const code = request.nextUrl.searchParams.get("code") ?? "";
+  const next = safeReturnPath(request.nextUrl.searchParams.get("next")) ?? "/";
   const redeemed = await redeemNativeAuthCode(code);
 
   if (!redeemed) {
     // Unknown, expired, or already redeemed — all indistinguishable on purpose.
-    return NextResponse.redirect(new URL("/sign-in?error=expired", request.nextUrl.origin));
+    // `next` rides along so retrying sign-in still lands on the scanned target
+    // instead of making the person scan again.
+    const retry = new URL("/sign-in?error=expired", request.nextUrl.origin);
+    if (next !== "/") retry.searchParams.set("next", next);
+    return NextResponse.redirect(retry);
   }
 
   // Belt and braces on top of safeReturnPath: resolve the candidate against
   // our origin and verify it stayed there. Whatever future parser quirk slips
   // past the string checks, a redirect can never leave this origin.
-  const next = safeReturnPath(request.nextUrl.searchParams.get("next")) ?? "/";
   let target = new URL("/", request.nextUrl.origin);
   try {
     const resolved = new URL(next, request.nextUrl.origin);

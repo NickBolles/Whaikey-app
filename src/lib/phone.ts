@@ -49,8 +49,27 @@ export function normalizePhone(raw: string): string {
   return `+${digits}`;
 }
 
+let warnedAuthSecretFallback = false;
+
+/**
+ * The HMAC key must be STABLE for the life of the database: a stored hash can
+ * only ever match a number hashed with the same key, so rotating the key
+ * orphans every saved number — existing users silently become undiscoverable
+ * and their numbers can be claimed again under fresh hashes. Prefer a
+ * dedicated WHAIKEY_PHONE_KEY so rotating BETTER_AUTH_SECRET (which is
+ * routinely rotatable) doesn't take the phone graph with it; the fallback
+ * keeps small deploys working but warns once in production.
+ */
 function phoneKey(): string {
-  return process.env.WHAIKEY_PHONE_KEY ?? process.env.BETTER_AUTH_SECRET ?? "dev-phone-key";
+  const dedicated = process.env.WHAIKEY_PHONE_KEY;
+  if (dedicated) return dedicated;
+  if (!warnedAuthSecretFallback && process.env.NODE_ENV === "production") {
+    warnedAuthSecretFallback = true;
+    console.warn(
+      "[phone] WHAIKEY_PHONE_KEY is unset — phone hashes are keyed by BETTER_AUTH_SECRET, so rotating that secret will orphan every stored phone number. Set a dedicated, never-rotated WHAIKEY_PHONE_KEY.",
+    );
+  }
+  return process.env.BETTER_AUTH_SECRET ?? "dev-phone-key";
 }
 
 /**

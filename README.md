@@ -56,6 +56,7 @@ Import the GitHub repo at [vercel.com/new](https://vercel.com/new). Vercel auto-
 | --- | --- | --- |
 | `DATABASE_URL` | Supabase pooler URL (from step 1) | Production, Preview |
 | `BETTER_AUTH_SECRET` | `openssl rand -base64 32` | Production, Preview |
+| `WHAIKEY_PHONE_KEY` | `openssl rand -base64 32` — dedicated, **never rotated** key for phone-number hashes (falls back to `BETTER_AUTH_SECRET`, but rotating that would orphan every stored number) | Production, Preview |
 | `BETTER_AUTH_URL` | your production URL, e.g. `https://whaikey.vercel.app` | Production |
 | `GOOGLE_CLIENT_ID` | Google OAuth client ID (step 5) | Production |
 | `GOOGLE_CLIENT_SECRET` | Google OAuth client secret (step 5) | Production |

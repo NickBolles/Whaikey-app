@@ -34,17 +34,20 @@ export function describeNativeAuthError(code: string | null): string | null {
  */
 export function parseAuthCallback(
   url: string,
-): { code: string; next?: string } | { error: string } | null {
+): { code: string; next?: string } | { error: string; next?: string } | null {
   const path = deepLinkPath(url);
   if (!path || !path.startsWith("/auth/callback")) return null;
 
   const params = new URLSearchParams(path.slice(path.indexOf("?") + 1));
   const code = params.get("code");
+  const next = params.get("next") ?? undefined;
   if (code) {
-    const next = params.get("next");
     return next ? { code, next } : { code };
   }
-  return { error: params.get("error") ?? "unknown" };
+  // Errors keep the return target too: the retry sign-in should still land on
+  // the scanned page rather than sending the person back to their camera.
+  const error = params.get("error") ?? "unknown";
+  return next ? { error, next } : { error };
 }
 
 /** The in-WebView URL that turns an exchange code into a session cookie. */
