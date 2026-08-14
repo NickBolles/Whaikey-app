@@ -966,9 +966,17 @@ export async function getFriendNotesForBottle(db: DB, viewerId: string, bottleId
     })
     .from(schema.pours)
     .innerJoin(schema.userProfiles, eq(schema.userProfiles.userId, schema.pours.userId))
-    // Inner join: Same Dram compares notes, so a newer note-less pour must not
-    // shadow a friend's older tasted-and-described one.
-    .innerJoin(schema.tastingNotes, eq(schema.tastingNotes.pourId, schema.pours.id))
+    // Inner join + non-empty tags: Same Dram compares flavor descriptors, so a
+    // newer text-only or note-less pour must not shadow a friend's older
+    // tagged one (and an empty row must not read as "didn't name it" in the
+    // contested-descriptor computation).
+    .innerJoin(
+      schema.tastingNotes,
+      and(
+        eq(schema.tastingNotes.pourId, schema.pours.id),
+        sql`${schema.tastingNotes.flavorTags} is not null and ${schema.tastingNotes.flavorTags} <> '{}'::jsonb`,
+      ),
+    )
     .where(
       and(
         eq(schema.pours.bottleId, bottleId),

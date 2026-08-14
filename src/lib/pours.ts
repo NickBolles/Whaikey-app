@@ -108,26 +108,29 @@ export async function logPour(db: DB, userId: string, input: PourInput): Promise
   const amountMl = parsed.amountMl ?? DEFAULT_POUR_ML;
   let visibility: PourVisibility =
     parsed.visibility ?? (await getSocialPrefs(db, userId)).defaultPourVisibility;
-  if (visibility !== "private") {
-    // A stepped-back user's new pours are always private, even when the write
-    // carries an explicit visibility — an offline-queued pour minted before
-    // "make everything private" must not resurface as visible on replay
-    // (docs/SOCIAL.md US-11). Re-enabling social restores nothing implicitly.
-    const profile = await db.query.userProfiles.findFirst({
-      columns: { socialEnabled: true },
-      where: eq(schema.userProfiles.userId, userId),
-    });
-    if (profile && !profile.socialEnabled) visibility = "private";
-  }
   const { pour, note } = await db.transaction(async (tx) => {
+    if (visibility !== "private") {
+      // Everything below runs under the same per-user advisory lock as
+      // makeEverythingPrivate, so a visible write can't slip past a
+      // concurrent US-11 reset and land after it with stale visibility.
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`social-reset:${userId}`}))`);
+
+      // A stepped-back user's new pours are always private, even when the
+      // write carries an explicit visibility — an offline-queued pour minted
+      // before "make everything private" must not resurface as visible on
+      // replay (US-11). Re-enabling social restores nothing implicitly.
+      const profile = await tx.query.userProfiles.findFirst({
+        columns: { socialEnabled: true },
+        where: eq(schema.userProfiles.userId, userId),
+      });
+      if (profile && !profile.socialEnabled) visibility = "private";
+    }
     if (visibility !== "private") {
       // docs/SOCIAL.md §11: notes are user-generated text and cross-user
       // writes are rate-limited. Logging itself must never block (the private
       // journal is the core loop), so past the cap the pour still lands — as
-      // private. The count runs under a per-user advisory lock inside the
-      // same transaction as the insert, so concurrent requests can't all read
-      // a below-limit count before any of them commits.
-      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`pour-vis:${userId}`}))`);
+      // private. Counting inside the locked transaction means concurrent
+      // requests can't all read a below-limit count before any commits.
       const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
       const recentVisible = await tx
         .select({ n: sql<number>`count(*)` })
@@ -276,19 +279,24 @@ export async function updatePourVisibility(
   pourId: string,
   visibility: PourVisibility,
 ): Promise<Pour | null> {
-  if (visibility !== "private") {
-    const profile = await db.query.userProfiles.findFirst({
-      columns: { socialEnabled: true },
-      where: eq(schema.userProfiles.userId, userId),
-    });
-    if (profile && !profile.socialEnabled) throw new SocialDisabledError();
-  }
-  const rows = await db
-    .update(schema.pours)
-    .set({ visibility })
-    .where(and(eq(schema.pours.id, pourId), eq(schema.pours.userId, userId)))
-    .returning();
-  return rows[0] ?? null;
+  return db.transaction(async (tx) => {
+    if (visibility !== "private") {
+      // Same lock as makeEverythingPrivate: the check and the write are
+      // atomic w.r.t. a concurrent US-11 reset.
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`social-reset:${userId}`}))`);
+      const profile = await tx.query.userProfiles.findFirst({
+        columns: { socialEnabled: true },
+        where: eq(schema.userProfiles.userId, userId),
+      });
+      if (profile && !profile.socialEnabled) throw new SocialDisabledError();
+    }
+    const rows = await tx
+      .update(schema.pours)
+      .set({ visibility })
+      .where(and(eq(schema.pours.id, pourId), eq(schema.pours.userId, userId)))
+      .returning();
+    return rows[0] ?? null;
+  });
 }
 
 /** Delete a pour (tasting note cascades). Returns false for missing/others'. */
