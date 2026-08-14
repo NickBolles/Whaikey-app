@@ -101,3 +101,43 @@ describe("/api/social/profile", () => {
     expect((await on.json()).socialEnabled).toBe(true);
   });
 });
+
+describe("PATCH socialEnabled — US-11 coupling", () => {
+  let db: DB;
+  let user: schema.User;
+
+  beforeEach(async () => {
+    db = await setupTestDb();
+    user = await createTestUser(db, { name: "Reset Tester" });
+    setSessionUser(user);
+  });
+
+  it("disabling social via PATCH runs the full privacy reset (pours private, shares revoked)", async () => {
+    await createProfile(db, user, "reset_tester");
+    const bottle = await db
+      .insert(schema.bottles)
+      .values({ id: "reset-bottle", name: "Reset Bottle", category: "bourbon" })
+      .returning();
+    const [pour] = await db
+      .insert(schema.pours)
+      .values({ id: "reset-pour", userId: user.id, bottleId: bottle[0].id, visibility: "public", rating: 4 })
+      .returning();
+    await db
+      .insert(schema.pourShares)
+      .values({ id: "reset-share", pourId: pour.id, userId: user.id, code: "resetcode123" });
+
+    const res = await PATCH(jsonRequest("/api/social/profile", "PATCH", { socialEnabled: false }));
+    expect(res.status).toBe(200);
+
+    const pourAfter = await db.query.pours.findFirst({ where: (t, { eq }) => eq(t.id, pour.id) });
+    expect(pourAfter?.visibility).toBe("private");
+    const shareAfter = await db.query.pourShares.findFirst({ where: (t, { eq }) => eq(t.id, "reset-share") });
+    expect(shareAfter?.revokedAt).not.toBeNull();
+
+    // Re-enabling restores access but nothing else implicitly.
+    const res2 = await PATCH(jsonRequest("/api/social/profile", "PATCH", { socialEnabled: true }));
+    expect(res2.status).toBe(200);
+    const pourStillPrivate = await db.query.pours.findFirst({ where: (t, { eq }) => eq(t.id, pour.id) });
+    expect(pourStillPrivate?.visibility).toBe("private");
+  });
+});

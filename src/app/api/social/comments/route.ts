@@ -40,6 +40,11 @@ export async function POST(req: Request) {
     if (!profile) {
       return NextResponse.json({ error: "profile_required" }, { status: 409 });
     }
+    if (!profile.socialEnabled) {
+      // Contributions made while stepped back would resurface on re-enable;
+      // reject them outright (docs/SOCIAL.md US-11).
+      return NextResponse.json({ error: "social_disabled" }, { status: 409 });
+    }
 
     let comment;
     try {

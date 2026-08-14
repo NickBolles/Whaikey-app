@@ -16,6 +16,11 @@ export async function POST(_req: Request, ctx: Ctx) {
     if (!profile) {
       return NextResponse.json({ error: "profile_required" }, { status: 409 });
     }
+    if (!profile.socialEnabled) {
+      // Contributions made while stepped back would resurface on re-enable;
+      // reject them outright (docs/SOCIAL.md US-11).
+      return NextResponse.json({ error: "social_disabled" }, { status: 409 });
+    }
 
     const result = await cheerPour(db, user.id, pourId);
     if (!result) {

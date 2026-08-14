@@ -306,7 +306,15 @@ export async function listFollowing(
     })
     .from(schema.follows)
     .innerJoin(schema.userProfiles, eq(schema.follows.followeeId, schema.userProfiles.userId))
-    .where(and(eq(schema.follows.followerId, userId), eq(schema.userProfiles.socialEnabled, true)))
+    .where(
+      and(
+        eq(schema.follows.followerId, userId),
+        eq(schema.userProfiles.socialEnabled, true),
+        // Belt and braces: blockUser deletes the edges, but a follow racing a
+        // block can recreate one — the read path never shows a blocked pair.
+        contributorVisibleSql(schema.follows.followeeId, userId),
+      ),
+    )
     .orderBy(desc(schema.follows.createdAt));
   return rows.map((r) => ({ ...toProfileSummary(r), state: r.state }));
 }
@@ -326,6 +334,7 @@ export async function listFollowers(db: DB, userId: string): Promise<ProfileSumm
         eq(schema.follows.followeeId, userId),
         eq(schema.follows.state, "accepted"),
         eq(schema.userProfiles.socialEnabled, true),
+        contributorVisibleSql(schema.follows.followerId, userId),
       ),
     )
     .orderBy(desc(schema.follows.createdAt));
@@ -347,6 +356,7 @@ export async function listFollowRequests(db: DB, userId: string): Promise<Profil
         eq(schema.follows.followeeId, userId),
         eq(schema.follows.state, "pending"),
         eq(schema.userProfiles.socialEnabled, true),
+        contributorVisibleSql(schema.follows.followerId, userId),
       ),
     )
     .orderBy(desc(schema.follows.createdAt));
@@ -1072,7 +1082,9 @@ async function listRecentVisibleNotes(
     .where(
       and(
         eq(schema.pours.userId, author.userId),
-        or(isNotNull(schema.pours.rating), isNotNull(schema.tastingNotes.id)),
+        // The palate card shows *notes* (§7.1) — a rating-only pour must not
+        // consume one of the three slots and crowd out a real description.
+        isNotNull(schema.tastingNotes.id),
         ...(allowedTiers ? [inArray(schema.pours.visibility, allowedTiers)] : []),
       ),
     )

@@ -8,6 +8,7 @@ import {
   getSocialPrefs,
   HandleTakenError,
   InvalidHandleError,
+  makeEverythingPrivate,
   profileCreateSchema,
   profileUpdateSchema,
   setSocialEnabled,
@@ -97,8 +98,14 @@ export async function PATCH(req: Request) {
     }
 
     let profile = updated;
-    if (socialEnabled !== undefined) {
-      await setSocialEnabled(db, user.id, socialEnabled);
+    if (socialEnabled === false) {
+      // Disabling social is never a bare flag flip: it always runs the full
+      // US-11 reset (pours private, links revoked, profile unlisted) so no
+      // API path can report "social off" while bearer links stay live.
+      await makeEverythingPrivate(db, user.id);
+      profile = (await getOwnProfile(db, user.id)) ?? updated;
+    } else if (socialEnabled === true) {
+      await setSocialEnabled(db, user.id, true);
       profile = (await getOwnProfile(db, user.id)) ?? updated;
     }
     return NextResponse.json(profile);

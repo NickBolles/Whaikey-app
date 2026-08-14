@@ -853,3 +853,55 @@ describe("codex round-2 hardening", () => {
     expect(view!.recentNotes[0].pourId).toBe(publicPour.id);
   });
 });
+
+describe("codex round-5 hardening", () => {
+  let db: DB;
+  beforeEach(async () => {
+    db = await setupTestDb();
+  });
+
+  it("profile note slots are reserved for pours with tasting notes", async () => {
+    const viewer = await createTestUser(db);
+    const author = await createTestUser(db);
+    await claim(db, viewer, "viewer_ns", { isPublic: true });
+    await claim(db, author, "author_ns", { isPublic: true });
+    const bottle = await createTestBottle(db);
+
+    const noted = await insertPour(db, author.id, bottle.id, {
+      visibility: "public",
+      rating: 4,
+      createdAt: new Date("2026-01-01T00:00:00Z"),
+    });
+    await insertNote(db, noted.id, { freeform: "actual words" });
+    for (let i = 0; i < 3; i += 1) {
+      await insertPour(db, author.id, bottle.id, {
+        visibility: "public",
+        rating: 3,
+        createdAt: new Date(`2026-02-0${i + 1}T00:00:00Z`),
+      });
+    }
+
+    const view = await getProfileView(db, viewer.id, "author_ns");
+    expect(view!.recentNotes).toHaveLength(1);
+    expect(view!.recentNotes[0].pourId).toBe(noted.id);
+  });
+
+  it("follow lists never show a blocked pair, even if an edge row survives", async () => {
+    const a = await createTestUser(db);
+    const b = await createTestUser(db);
+    await claim(db, a, "a_bl", { isPublic: true });
+    await claim(db, b, "b_bl", { isPublic: true });
+    await followByHandle(db, a.id, "b_bl");
+    await followByHandle(db, b.id, "a_bl");
+    await blockUser(db, a.id, b.id);
+    // Simulate a follow insert that raced the block's edge deletion.
+    await db.insert(schema.follows).values({
+      id: uid("follow"),
+      followerId: a.id,
+      followeeId: b.id,
+      state: "accepted",
+    });
+    expect(await listFollowing(db, a.id)).toHaveLength(0);
+    expect(await listFollowers(db, b.id)).toHaveLength(0);
+  });
+});
