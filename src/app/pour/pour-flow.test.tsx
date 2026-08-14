@@ -14,6 +14,13 @@ function stubFetch(impl: (url: string, init?: RequestInit) => Promise<Response> 
   return fn;
 }
 
+/** The tasting-notes section's default open state is a product decision that
+ * has flipped before (#65); these tests only care that the section IS open. */
+function ensureNotesOpen() {
+  const toggle = screen.getByRole("button", { name: /tasting notes/i });
+  if (toggle.getAttribute("aria-expanded") === "false") fireEvent.click(toggle);
+}
+
 describe("PourFlow — visibility (US-6)", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -31,7 +38,7 @@ describe("PourFlow — visibility (US-6)", () => {
 
     await act(async () => {});
 
-    fireEvent.click(screen.getByRole("button", { name: /tasting notes/i }));
+    ensureNotesOpen();
 
     expect(screen.getByText("Who can see this")).toBeInTheDocument();
     const group = screen.getByRole("group", { name: "Who can see this" });
@@ -55,7 +62,7 @@ describe("PourFlow — visibility (US-6)", () => {
     render(<PourFlow initialBottle={{ id: "b1", name: "Test Bourbon" }} />);
     await act(async () => {});
 
-    fireEvent.click(screen.getByRole("button", { name: /tasting notes/i }));
+    ensureNotesOpen();
     expect(screen.getByRole("button", { name: "Only me" })).toHaveAttribute("aria-pressed", "true");
 
     fireEvent.click(screen.getByRole("button", { name: "Public" }));
