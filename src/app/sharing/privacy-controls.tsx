@@ -36,8 +36,14 @@ export function PrivacyControls({
   const [socialEnabled, setSocialEnabled] = useState(initialSocialEnabled);
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  /**
+   * Saves run one at a time and the UI reconciles from the SERVER's response:
+   * two overlapping PATCHes could otherwise commit out of order and leave the
+   * database default broader than what the screen shows.
+   */
   async function patchPrefs(patch: Partial<{ defaultPourVisibility: PourVisibility; allowComments: boolean }>) {
     const res = await fetch("/api/social/prefs", {
       method: "PATCH",
@@ -45,31 +51,43 @@ export function PrivacyControls({
       body: JSON.stringify(patch),
     });
     if (!res.ok) throw new Error("Couldn't save that.");
+    const saved = (await res.json().catch(() => null)) as {
+      defaultPourVisibility?: PourVisibility;
+      allowComments?: boolean;
+    } | null;
+    if (saved?.defaultPourVisibility) setVisibility(saved.defaultPourVisibility);
+    if (typeof saved?.allowComments === "boolean") setAllowComments(saved.allowComments);
   }
 
   async function handleVisibility(value: PourVisibility) {
-    if (value === visibility || busy) return;
+    if (value === visibility || busy || saving) return;
     const previous = visibility;
     setVisibility(value);
+    setSaving(true);
     setError(null);
     try {
       await patchPrefs({ defaultPourVisibility: value });
     } catch (err) {
       setVisibility(previous);
       setError(err instanceof Error ? err.message : "Couldn't save that.");
+    } finally {
+      setSaving(false);
     }
   }
 
   async function handleAllowComments(next: boolean) {
-    if (busy) return;
+    if (busy || saving) return;
     const previous = allowComments;
     setAllowComments(next);
+    setSaving(true);
     setError(null);
     try {
       await patchPrefs({ allowComments: next });
     } catch (err) {
       setAllowComments(previous);
       setError(err instanceof Error ? err.message : "Couldn't save that.");
+    } finally {
+      setSaving(false);
     }
   }
 

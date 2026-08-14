@@ -552,12 +552,17 @@ export async function makeEverythingPrivate(db: DB, userId: string): Promise<voi
  * the profile stays non-public until the owner explicitly changes each one.
  */
 export async function setSocialEnabled(db: DB, userId: string, enabled: boolean): Promise<boolean> {
-  const rows = await db
-    .update(schema.userProfiles)
-    .set({ socialEnabled: enabled, updatedAt: new Date() })
-    .where(eq(schema.userProfiles.userId, userId))
-    .returning({ userId: schema.userProfiles.userId });
-  return rows.length > 0;
+  return db.transaction(async (tx) => {
+    // Serialized with makeEverythingPrivate so a stale "turn social back on"
+    // can't commit immediately after a reset and undo it.
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`social-reset:${userId}`}))`);
+    const rows = await tx
+      .update(schema.userProfiles)
+      .set({ socialEnabled: enabled, updatedAt: new Date() })
+      .where(eq(schema.userProfiles.userId, userId))
+      .returning({ userId: schema.userProfiles.userId });
+    return rows.length > 0;
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1022,6 +1027,9 @@ export async function getFriendNotesForBottle(db: DB, viewerId: string, bottleId
         eq(schema.pours.bottleId, bottleId),
         inArray(schema.pours.userId, followeeIds),
         eq(schema.userProfiles.socialEnabled, true),
+        // Live block predicate, same as the Home feed: the followee snapshot
+        // above must not admit a pair blocked between snapshot and query.
+        contributorVisibleSql(schema.pours.userId, viewerId),
         visibilityCond,
       ),
     )
