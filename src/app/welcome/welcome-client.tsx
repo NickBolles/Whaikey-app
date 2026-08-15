@@ -140,7 +140,7 @@ export function WelcomeClient({
               key={i}
               aria-hidden
               className={`h-1.5 rounded-full transition-colors ${
-                i === step ? "w-5 bg-accent" : "w-1.5 bg-border"
+                i === step ? "w-5 bg-accent" : "w-1.5 bg-muted/40"
               }`}
             />
           ))}
