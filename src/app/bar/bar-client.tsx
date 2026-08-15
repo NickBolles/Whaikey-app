@@ -594,6 +594,36 @@ export function BarClient({
         </section>
       )}
 
+      {/* The wheel reads first and filters the list further down: a tap lands
+          as a removable token in the FilterBar directly above that list, so the
+          feedback sits adjacent to what it narrows. */}
+      {flavorFilterable && (
+        <FlavorMapSection
+          heat={activeFlavorHeat}
+          lens={effectiveLens}
+          weightByRating={weightByRating}
+          onWeightChange={setWeightByRating}
+          hasPublishedNotes={hasPublishedNotes}
+          canCompare={canCompare}
+          calibration={activeCalibration}
+          marks={marks}
+          rows={activeRows}
+          scope={flavorScope}
+          onLensChange={changeLens}
+          selectedFlavorIds={selectedFlavorIds}
+          onToggleFlavor={toggleFlavor}
+          onClearFlavors={() => setSelectedFlavorIds([])}
+          shownCount={filteredRows.length}
+          totalCount={activeRows.length}
+          rowNoun={collection === "tried" ? "tastings" : "bottles"}
+          topWedgeIds={palate.topWedgeIds}
+        />
+      )}
+
+      {collection === "own" && (
+        <RecommendationRail mode="discovery" title="For your palate" />
+      )}
+
       <FilterBar
         collection={collection}
         onCollectionChange={changeCollection}
@@ -702,41 +732,6 @@ export function BarClient({
             </li>
           ))}
         </ul>
-      )}
-
-      {flavorFilterable && (
-        <div className="flex flex-col gap-5 mt-2">
-          <div className="flex items-center gap-3">
-            <h2 className="section-label">Insights</h2>
-            <div aria-hidden className="h-px flex-1 bg-border-subtle" />
-          </div>
-          {/* The wheel sits below the list but still filters it: a tap lands as
-              a removable token in the FilterBar above — that token row is the
-              visible feedback, no scrolling on the user's behalf. */}
-          <FlavorMapSection
-            heat={activeFlavorHeat}
-            lens={effectiveLens}
-            weightByRating={weightByRating}
-            onWeightChange={setWeightByRating}
-            hasPublishedNotes={hasPublishedNotes}
-            canCompare={canCompare}
-            calibration={activeCalibration}
-            marks={marks}
-            rows={activeRows}
-            scope={flavorScope}
-            onLensChange={changeLens}
-            selectedFlavorIds={selectedFlavorIds}
-            onToggleFlavor={toggleFlavor}
-            onClearFlavors={() => setSelectedFlavorIds([])}
-            shownCount={filteredRows.length}
-            totalCount={activeRows.length}
-            rowNoun={collection === "tried" ? "tastings" : "bottles"}
-            topWedgeIds={palate.topWedgeIds}
-          />
-          {collection === "own" && (
-            <RecommendationRail mode="discovery" title="For your palate" />
-          )}
-        </div>
       )}
     </div>
   );

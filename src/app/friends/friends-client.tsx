@@ -8,11 +8,13 @@ import { FriendQr } from "@/components/friend-qr";
 import { QrScanButton } from "@/components/qr-scan-button";
 import type { FollowState } from "@/db/schema";
 import type { ProfileSummary } from "@/lib/social";
-import { DiscoverySettings } from "./discovery-settings";
+import { DiscoveryPanel } from "./discovery-settings";
 
 type FollowingRow = ProfileSummary & { state: FollowState; mutual: boolean };
 
 type PeopleTab = "following" | "followers" | "blocked";
+
+type FindFace = "people" | "discovery";
 
 export interface FriendsClientProps {
   /** The signed-in user's own handle, for the Find friends card's QR code. */
@@ -27,8 +29,9 @@ export interface FriendsClientProps {
 
 /**
  * US-5/US-10: the /friends body — requests first, then the Find friends card
- * (the page's one accent moment), then the people lists behind a segmented
- * control, with discovery settings demoted to a disclosure at the bottom.
+ * (the page's single social hub and its one accent moment: finding people AND
+ * how you're found live behind a segmented control inside it), then the people
+ * lists behind their own segmented control. Nothing lives below People.
  */
 export function FriendsClient({
   handle,
@@ -178,7 +181,7 @@ export function FriendsClient({
         </section>
       )}
 
-      <FindFriendsCard handle={handle} />
+      <FindFriendsCard handle={handle} phoneLast2={phoneLast2} phoneDiscoverable={phoneDiscoverable} />
 
       {sectionError && (
         <p role="alert" className="text-sm text-danger">
@@ -290,8 +293,6 @@ export function FriendsClient({
           )}
         </div>
       </section>
-
-      <DiscoverySettings initialPhoneLast2={phoneLast2} initialPhoneDiscoverable={phoneDiscoverable} />
     </div>
   );
 }
@@ -309,13 +310,31 @@ function looksLikePhone(input: string): boolean {
 }
 
 /**
- * The page's one accent moment: a single input for @handle or phone number
- * with the primary Add button, plus the QR show/scan pair beneath. Both text
- * paths land on /add/[handle] — nothing follows on lookup alone
- * (docs/SOCIAL.md §7.2).
+ * The page's single social hub, with two faces behind a small segmented
+ * control:
+ *
+ * - "Find people" (default, the one accent moment): a single input for
+ *   @handle or phone number with the primary Add button, plus the QR
+ *   show/scan pair beneath. Both text paths land on /add/[handle] — nothing
+ *   follows on lookup alone (docs/SOCIAL.md §7.2).
+ * - "How you're found": the phone-discovery settings (DiscoveryPanel),
+ *   promoted here from the old bottom-of-page disclosure so discoverability
+ *   is never buried.
+ *
+ * Both faces stay mounted (the inactive one carries `hidden`) so a phone
+ * save isn't forgotten when the user flips back to Find people.
  */
-function FindFriendsCard({ handle }: { handle: string }) {
+function FindFriendsCard({
+  handle,
+  phoneLast2,
+  phoneDiscoverable,
+}: {
+  handle: string;
+  phoneLast2: string | null;
+  phoneDiscoverable: boolean;
+}) {
   const router = useRouter();
+  const [face, setFace] = useState<FindFace>("people");
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
@@ -372,37 +391,81 @@ function FindFriendsCard({ handle }: { handle: string }) {
     }
   }
 
+  const faces: Array<{ key: FindFace; label: string }> = [
+    { key: "people", label: "Find people" },
+    { key: "discovery", label: "How you're found" },
+  ];
+
   return (
     <section className="card flex flex-col gap-3 p-5">
       <h2 className="section-label">Find friends</h2>
-      <form onSubmit={handleSubmit} className="flex items-center gap-2">
-        <div className="flex min-h-11 flex-1 items-center gap-1.5 rounded-xl border border-border-subtle bg-surface px-3 focus-within:ring-2 focus-within:ring-accent/60">
-          <AtSign size={16} strokeWidth={1.8} className="shrink-0 text-muted" aria-hidden />
-          <input
-            value={value}
-            onChange={(event) => setValue(event.target.value)}
-            maxLength={32}
-            placeholder="@handle or phone number"
-            aria-label="Handle or phone number to add"
-            className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted"
-          />
+      <div
+        role="tablist"
+        aria-label="Find friends"
+        className="inline-flex self-start rounded-full border border-border-subtle bg-background p-1 gap-0.5"
+      >
+        {faces.map((f) => (
+          <button
+            key={f.key}
+            role="tab"
+            id={`find-tab-${f.key}`}
+            aria-selected={face === f.key}
+            aria-controls={`find-panel-${f.key}`}
+            onClick={() => setFace(f.key)}
+            className={`tap-target inline-flex min-h-10 items-center rounded-full px-3.5 text-[13px] font-medium transition-colors ${
+              face === f.key ? "chip-active" : "text-muted hover:text-foreground"
+            }`}
+          >
+            {f.label}
+          </button>
+        ))}
+      </div>
+
+      <div
+        role="tabpanel"
+        id="find-panel-people"
+        aria-labelledby="find-tab-people"
+        hidden={face !== "people"}
+        className="flex flex-col gap-3"
+      >
+        <form onSubmit={handleSubmit} className="flex items-center gap-2">
+          <div className="flex min-h-11 flex-1 items-center gap-1.5 rounded-xl border border-border-subtle bg-surface px-3 focus-within:ring-2 focus-within:ring-accent/60">
+            <AtSign size={16} strokeWidth={1.8} className="shrink-0 text-muted" aria-hidden />
+            <input
+              value={value}
+              onChange={(event) => setValue(event.target.value)}
+              maxLength={32}
+              placeholder="@handle or phone number"
+              aria-label="Handle or phone number to add"
+              className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted"
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={busy || !value.trim()}
+            className="btn-primary tap-target inline-flex min-h-11 items-center gap-1.5 px-4 text-sm disabled:opacity-60"
+          >
+            <UserPlus size={16} strokeWidth={1.8} aria-hidden /> {busy ? "…" : "Add"}
+          </button>
+        </form>
+        {status && (
+          <p role="status" className={`text-xs ${isError ? "text-danger" : "text-muted"}`}>
+            {status}
+          </p>
+        )}
+        <div className="flex flex-wrap gap-2 border-t border-border-subtle pt-3">
+          <FriendQr handle={handle} />
+          <QrScanButton />
         </div>
-        <button
-          type="submit"
-          disabled={busy || !value.trim()}
-          className="btn-primary tap-target inline-flex min-h-11 items-center gap-1.5 px-4 text-sm disabled:opacity-60"
-        >
-          <UserPlus size={16} strokeWidth={1.8} aria-hidden /> {busy ? "…" : "Add"}
-        </button>
-      </form>
-      {status && (
-        <p role="status" className={`text-xs ${isError ? "text-danger" : "text-muted"}`}>
-          {status}
-        </p>
-      )}
-      <div className="flex flex-wrap gap-2 border-t border-border-subtle pt-3">
-        <FriendQr handle={handle} />
-        <QrScanButton />
+      </div>
+
+      <div
+        role="tabpanel"
+        id="find-panel-discovery"
+        aria-labelledby="find-tab-discovery"
+        hidden={face !== "discovery"}
+      >
+        <DiscoveryPanel initialPhoneLast2={phoneLast2} initialPhoneDiscoverable={phoneDiscoverable} />
       </div>
     </section>
   );

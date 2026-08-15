@@ -120,8 +120,7 @@ test.describe("signed in (demo collector)", () => {
   test("home dashboard", async ({ page }) => {
     await page.goto("/");
     await expect(page.getByText(/Welcome back/i)).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Your next pour" })).toBeVisible();
-    // The "tonight" rail lives on Home now; this is the pinned-clock guard
+    // The hero IS tonight's pick now; its heading is the pinned-clock guard
     // that used to sit on the /bar shots — if the fixed time stops taking,
     // this names the cause instead of leaving a 20px reflow to a pixel diff.
     await expect(page.getByRole("heading", { name: "Tonight’s pour" })).toBeVisible();
@@ -132,7 +131,7 @@ test.describe("signed in (demo collector)", () => {
   test("my bar", async ({ page }) => {
     await page.goto("/bar");
     await expect(page.getByText(/Eagle Rare/i).first()).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Insights" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "For your palate" })).toBeVisible();
     await settle(page);
     await expect(page).toHaveScreenshot(shot("bar-own"), { fullPage: true });
   });
@@ -205,7 +204,7 @@ test.describe("signed in (demo collector)", () => {
     await expect(page.getByRole("button", { name: "Remove Open filter" })).toBeVisible();
     await settle(page);
     await expect(page.getByLabel("Active filters")).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Insights" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "For your palate" })).toBeVisible();
     await expect(page).toHaveScreenshot(shot("bar-filter-panel"), { fullPage: true });
   });
 

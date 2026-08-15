@@ -10,22 +10,9 @@ import { getFriendFeed, getOwnProfile, listFollowing } from "@/lib/social";
 import { HomeConcierge } from "@/components/home-concierge";
 import { HomeHero } from "@/components/home-hero";
 import { FriendsModule, type FriendFeedItem } from "@/components/friends-module";
-import { RecommendationRail } from "@/components/recommendation-rail";
-import { UserAvatar } from "@/components/user-avatar";
-import { BookOpen, ChevronRight, GraduationCap, Star, Users } from "lucide-react";
+import { ChevronRight, GraduationCap, Star } from "lucide-react";
 
 export const dynamic = "force-dynamic";
-
-function Wordmark() {
-  return (
-    <div className="flex items-center gap-2 text-muted">
-      <span aria-hidden className="text-base leading-none">
-        🥃
-      </span>
-      <span className="font-display text-sm tracking-wide">Whaikey</span>
-    </div>
-  );
-}
 
 function SignedOutHero() {
   return (
@@ -49,9 +36,6 @@ function SignedOutHero() {
     </div>
   );
 }
-
-const ICON_LINK_CLASS =
-  "flex h-11 w-11 items-center justify-center rounded-xl text-muted transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent/60";
 
 /**
  * Deterministic (no clock, no locale surprises) date label for journal rows,
@@ -138,29 +122,9 @@ export default async function HomePage() {
   const firstName = user.name?.split(" ")[0] || "there";
   const bottleCount = owned?.count ?? 0;
   const pourCount = pourStats?.count ?? 0;
-  const profileHref = ownProfile ? `/u/${ownProfile.handle}` : "/friends";
 
   return (
     <div className="flex flex-col gap-7 px-4 pt-5">
-      <div className="flex items-center justify-between">
-        <Wordmark />
-        <nav aria-label="Your pages" className="-mr-2 flex items-center gap-0.5">
-          <Link href="/history" aria-label="Journal" className={ICON_LINK_CLASS}>
-            <BookOpen size={20} strokeWidth={1.8} aria-hidden />
-          </Link>
-          <Link href="/friends" aria-label="Friends" className={ICON_LINK_CLASS}>
-            <Users size={20} strokeWidth={1.8} aria-hidden />
-          </Link>
-          <Link href={profileHref} aria-label="Your profile" className={ICON_LINK_CLASS}>
-            <UserAvatar
-              name={ownProfile?.displayName ?? user.name ?? "?"}
-              image={ownProfile?.avatarUrl ?? user.image}
-              size={26}
-            />
-          </Link>
-        </nav>
-      </div>
-
       <header>
         <h1 className="font-display text-[2rem] font-semibold leading-tight">
           Welcome back, {firstName}
@@ -169,8 +133,6 @@ export default async function HomePage() {
       </header>
 
       <HomeHero bottleCount={bottleCount} pourCount={pourCount} />
-
-      {bottleCount > 0 && <RecommendationRail mode="tonight" title="What to pour tonight" />}
 
       <FriendsModule items={friendFeedItems} hasProfile={hasProfile} hasFollows={hasFollows} />
 

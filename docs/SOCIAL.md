@@ -189,6 +189,8 @@ With a realistic early graph (~4 friends), the feed produces **~2 items a week**
 - The tab bar does not change in S1–S3. No fifth destination fights for a slot until the content justifies it.
 - **Promotion tripwire, decided by data not taste:** if the median weekly-active user has 5+ friends with notes and the friends module is a top-3 tapped element on Home, promote it to a tab (Search is the candidate to fold into ＋, where it already appears). Until then, no.
 
+> **Amended 2026-08 (owner decision):** during the app-wide UX redesign the owner promoted **`/friends` to a tab-bar slot** (Search folded into the ＋ quick-actions sheet and the new global header, freeing the slot). This is *not* the tripwire firing: the tab opens **follow management and discovery** — requests, following, followers, find-people — not a feed. The comparison stream itself remains a Home module, sparse-first as above, and the data tripwire still governs any future promotion of the *feed*.
+
 One more flow rule, restated from §7.3 because it's structural: **there is no composer anywhere.** Sharing is a property of the pour you already logged (log sheet, history row, bottle page). The moment a "create post" button exists, we're building a feed product, and we said we wouldn't.
 
 ---
@@ -431,7 +433,7 @@ The first draft left 14 questions open "for a human call before S1 code." Under 
 | D7 | Handle reservations | Reserve an obvious-brands list at launch; expand on demand. Not a 500-name project. |
 | D8 | Graph import | **Amended (post-S2, owner call):** exact single-number phone lookup and profile QR codes are in — both double-opt-in (the target must set a number AND enable phone discovery; QR is the owner deliberately showing their own code), numbers stored only as a keyed hash, lookups durably rate-limited (claim/save attempts draw from the same budget — a save tests a number against the database too), "no match" indistinguishable from "not discoverable." Contact-book/bulk import remains banned — the liability was the address-book grab, not knowing one friend's number. |
 | D9 | Friends' ratings vs. community rating | Separate labelled row, never mixed into the public average. |
-| D10 | Feed placement | Home module, not a tab; data-driven promotion tripwire (§6.3). |
+| D10 | Feed placement | Home module, not a tab; data-driven promotion tripwire (§6.3). **Amended 2026-08 (owner decision):** `/friends` — follow management/discovery, not the feed — now holds a tab-bar slot from the app-wide UX redesign (Search moved into ＋ and the global header). The feed stays a Home module and the tripwire still governs promoting the *feed* itself (§6.3 note). |
 | D11 | Indexing | Shared pages stay `noindex` through S3; revisit at S4 with the jurisdiction review. |
 | D12 | Edited shared notes | Link shows current state with an "edited" marker; deletion revokes. Never a stale public copy. |
 | D13 | Venue/bar tagging | Not building it — the mechanic most implicated in the Untappd critique, and it buys us little. Reopen only with a concrete user need. |

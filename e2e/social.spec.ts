@@ -128,7 +128,7 @@ test.describe("social: signed in as Jordan (the demo user)", () => {
     await expect(page.getByText("@sasha")).toBeVisible();
   });
 
-  test("/friends shows identity up top, QR in the Find friends card, and phone behind Discovery settings", async ({
+  test("/friends shows identity up top and the Find friends card with both faces", async ({
     page,
   }) => {
     await page.goto("/friends");
@@ -136,17 +136,16 @@ test.describe("social: signed in as Jordan (the demo user)", () => {
     // Identity header card carries the handle now.
     await expect(page.getByText("@jordan").first()).toBeVisible();
 
-    // The QR pair moved into the Find friends card.
+    // Default face ("Find people"): the add form and the QR pair.
     await page.getByRole("button", { name: "Show my code" }).click();
     const qr = page.getByRole("img", { name: "QR code to add @jordan on Whaikey" });
     await expect(qr).toBeVisible();
     await expect(qr).toHaveAttribute("src", /^data:image\/png;base64,/);
 
-    // Phone discovery is demoted behind the collapsed Discovery settings card.
-    const toggle = page.getByRole("button", { name: /Discovery settings/ });
-    await expect(toggle).toHaveAttribute("aria-expanded", "false");
-    await toggle.click();
-    await expect(page.getByText(/Phone number/)).toBeVisible();
+    // Second face: phone-discovery settings live inside the same card.
+    await page.getByRole("tab", { name: "How you're found" }).click();
+    await expect(page.getByLabel("Phone number")).toBeVisible();
+    await expect(page.getByRole("switch", { name: "Let people find me by phone" })).toBeVisible();
   });
 
   test("typing a handle in the finder lands on /add/sasha showing her identity and Following state", async ({
@@ -309,15 +308,17 @@ test.describe("social: phone discovery settings", () => {
       await claimButton.click();
       // Generous timeout: on a cold dev server the post-claim refresh compiles
       // /friends from scratch and can outlast the default 5s.
-      await expect(page.getByText("How friends find you")).toBeVisible({ timeout: 15000 });
+      await expect(page.getByRole("tab", { name: "How you're found" })).toBeVisible({
+        timeout: 15000,
+      });
     }
 
-    const finderCard = page.locator("section", { hasText: "How friends find you" });
+    // Phone settings are the second face of the Find friends card — switch to
+    // it before driving the phone flow. (Face selection resets per page load,
+    // so retries switch again.)
+    await page.getByRole("tab", { name: "How you're found" }).click();
+    const finderCard = page.locator("section", { hasText: "Find friends" });
     await expect(finderCard).toBeVisible();
-    // Phone settings live behind the collapsed Discovery settings disclosure
-    // now — expand it before driving the phone flow. (Collapse state resets
-    // per page load, so retries expand it again.)
-    await finderCard.getByRole("button", { name: /Discovery settings/ }).click();
 
     // No number yet (or a fresh claim): the add form is showing. Discovery is
     // never preselected (docs/SOCIAL.md D8 as amended), so opting in is an

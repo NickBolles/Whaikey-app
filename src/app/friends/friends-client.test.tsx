@@ -50,7 +50,9 @@ const defaultProps: FriendsClientProps = {
   blocked: [],
 };
 
-const panel = () => screen.getByRole("tabpanel");
+// The Find friends card also renders a tabpanel (its visible face), so the
+// People panel is picked out by its accessible name — the active People tab.
+const panel = () => screen.getByRole("tabpanel", { name: /following|followers|blocked/i });
 
 describe("FriendsClient people tabs", () => {
   it("shows Following by default and switches to Followers on tap", async () => {
@@ -136,19 +138,48 @@ describe("FriendsClient graph actions", () => {
   });
 });
 
-describe("FriendsClient page furniture", () => {
-  it("renders the Find friends card with the QR actions inside it", () => {
+describe("FriendsClient Find friends card (the single social hub)", () => {
+  it("defaults to the Find people face, with the QR actions inside it", () => {
     render(<FriendsClient {...defaultProps} handle="jess" />);
     expect(screen.getByText("Find friends")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Find people" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("button", { name: "Show my code" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Scan a code" })).toBeInTheDocument();
+    // The discovery face exists in the card but stays tucked behind its tab.
+    expect(screen.queryByRole("textbox", { name: "Phone number" })).not.toBeInTheDocument();
   });
 
-  it("renders Discovery settings collapsed at the bottom", () => {
+  it("switches to How you're found: phone settings + privacy link, add flow tucked away", async () => {
     render(<FriendsClient {...defaultProps} />);
-    const toggle = screen.getByRole("button", { name: /discovery settings/i });
-    expect(toggle).toHaveAttribute("aria-expanded", "false");
-    expect(screen.queryByLabelText("Phone number")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("tab", { name: "How you're found" }));
+
+    expect(screen.getByRole("tab", { name: "How you're found" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("textbox", { name: "Phone number" })).toBeInTheDocument();
+    // D8 as amended: the opt-in is never pre-selected, even reached this way.
+    expect(screen.getByRole("switch", { name: "Let people find me by phone" })).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
+    expect(screen.getByRole("link", { name: /privacy & sharing/i })).toHaveAttribute("href", "/sharing");
+    expect(screen.queryByRole("button", { name: "Show my code" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: /handle or phone number to add/i })).not.toBeInTheDocument();
+  });
+
+  it("keeps the discovery face mounted across switches, so in-progress edits survive", async () => {
+    render(<FriendsClient {...defaultProps} />);
+
+    await userEvent.click(screen.getByRole("tab", { name: "How you're found" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "Phone number" }), "+1555");
+    await userEvent.click(screen.getByRole("tab", { name: "Find people" }));
+    await userEvent.click(screen.getByRole("tab", { name: "How you're found" }));
+
+    expect(screen.getByRole("textbox", { name: "Phone number" })).toHaveValue("+1555");
+  });
+
+  it("no longer renders the old bottom-of-page Discovery settings disclosure", () => {
+    render(<FriendsClient {...defaultProps} />);
+    expect(screen.queryByRole("button", { name: /discovery settings/i })).not.toBeInTheDocument();
   });
 });
 

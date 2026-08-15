@@ -1,6 +1,10 @@
 import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
+import { getDb } from "@/db";
+import { getOwnProfile } from "@/lib/social";
+import { getSessionUser } from "@/lib/session";
+import { AppHeader } from "@/components/app-header";
 import { AppNav } from "@/components/app-nav";
 import { NativeShell } from "@/components/native-shell";
 
@@ -60,7 +64,12 @@ export const viewport: Viewport = {
   viewportFit: "cover",
 };
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  // Session + own-profile lookup for the global header. Every page under this
+  // layout is force-dynamic already, so reading request headers here (inside
+  // getSessionUser) changes nothing about rendering mode.
+  const user = await getSessionUser();
+  const profile = user ? await getOwnProfile(getDb(), user.id) : null;
   return (
     <html
       lang="en"
@@ -69,6 +78,10 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       <body className="min-h-dvh">
         <NativeShell />
         <div className="mx-auto max-w-2xl min-h-dvh flex flex-col">
+          <AppHeader
+            user={user ? { name: user.name, image: user.image } : null}
+            profileHandle={profile?.handle ?? null}
+          />
           <main className="flex-1">{children}</main>
           <AppNav />
         </div>
