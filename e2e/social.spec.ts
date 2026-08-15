@@ -119,7 +119,10 @@ test.describe("social: signed in as Jordan (the demo user)", () => {
     // Following/Followers are a tab pair now, not stacked sections.
     await page.getByRole("tab", { name: /Following/ }).click();
     await expect(page.getByText("@sasha")).toBeVisible();
-    await expect(page.getByText("Friends", { exact: true })).toBeVisible();
+    // Scoped to Sasha's row: the page h1 is also exactly "Friends".
+    await expect(
+      page.getByRole("link", { name: /Sasha Glen/ }).getByText("Friends", { exact: true }),
+    ).toBeVisible();
 
     await page.getByRole("tab", { name: /Followers/ }).click();
     await expect(page.getByText("@sasha")).toBeVisible();
@@ -311,6 +314,10 @@ test.describe("social: phone discovery settings", () => {
 
     const finderCard = page.locator("section", { hasText: "How friends find you" });
     await expect(finderCard).toBeVisible();
+    // Phone settings live behind the collapsed Discovery settings disclosure
+    // now — expand it before driving the phone flow. (Collapse state resets
+    // per page load, so retries expand it again.)
+    await finderCard.getByRole("button", { name: /Discovery settings/ }).click();
 
     // No number yet (or a fresh claim): the add form is showing. Discovery is
     // never preselected (docs/SOCIAL.md D8 as amended), so opting in is an
