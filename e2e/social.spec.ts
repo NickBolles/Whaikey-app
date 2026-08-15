@@ -116,31 +116,34 @@ test.describe("social: signed in as Jordan (the demo user)", () => {
     await expect(page.getByLabel("Handle or phone number to add")).toBeVisible();
     await expect(page.getByRole("button", { name: "Add", exact: true })).toBeVisible();
 
-    const followingSection = page.locator("section", {
-      has: page.getByRole("heading", { name: "Following", exact: true }),
-    });
-    await expect(followingSection.getByText("@sasha")).toBeVisible();
-    await expect(followingSection.getByText("Friends", { exact: true })).toBeVisible();
+    // Following/Followers are a tab pair now, not stacked sections.
+    await page.getByRole("tab", { name: /Following/ }).click();
+    await expect(page.getByText("@sasha")).toBeVisible();
+    await expect(page.getByText("Friends", { exact: true })).toBeVisible();
 
-    const followersSection = page.locator("section", {
-      has: page.getByRole("heading", { name: "Followers", exact: true }),
-    });
-    await expect(followersSection.getByText("@sasha")).toBeVisible();
+    await page.getByRole("tab", { name: /Followers/ }).click();
+    await expect(page.getByText("@sasha")).toBeVisible();
   });
 
-  test("/friends' How friends find you card shows the handle, a phone section, and Show my code reveals a QR", async ({
+  test("/friends shows identity up top, QR in the Find friends card, and phone behind Discovery settings", async ({
     page,
   }) => {
     await page.goto("/friends");
 
-    const finderCard = page.locator("section", { hasText: "How friends find you" });
-    await expect(finderCard.getByText("@jordan")).toBeVisible();
-    await expect(finderCard.getByText(/Phone number/)).toBeVisible();
+    // Identity header card carries the handle now.
+    await expect(page.getByText("@jordan").first()).toBeVisible();
 
-    await finderCard.getByRole("button", { name: "Show my code" }).click();
-    const qr = finderCard.getByRole("img", { name: "QR code to add @jordan on Whaikey" });
+    // The QR pair moved into the Find friends card.
+    await page.getByRole("button", { name: "Show my code" }).click();
+    const qr = page.getByRole("img", { name: "QR code to add @jordan on Whaikey" });
     await expect(qr).toBeVisible();
     await expect(qr).toHaveAttribute("src", /^data:image\/png;base64,/);
+
+    // Phone discovery is demoted behind the collapsed Discovery settings card.
+    const toggle = page.getByRole("button", { name: /Discovery settings/ });
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await toggle.click();
+    await expect(page.getByText(/Phone number/)).toBeVisible();
   });
 
   test("typing a handle in the finder lands on /add/sasha showing her identity and Following state", async ({

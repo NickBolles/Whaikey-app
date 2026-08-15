@@ -197,7 +197,7 @@ One more flow rule, restated from §7.3 because it's structural: **there is no c
 
 ### 7.1 Identity — profile & palate card (S2)
 
-- `@handle` (unique, immutable-ish, claimable at first social action — not at signup, which stays a 90-second path), display name, avatar, one-line bio, optional home region.
+- `@handle` (unique, immutable-ish, claimable at first social action — not at signup, which stays a 90-second path), display name, avatar, one-line bio, optional home region. *(Amended 2026-08, owner decision: handle + display name are now ALSO offered during the optional, fully skippable `/welcome` first-run onboarding. Signup itself remains the 90-second path and every default is unchanged — the wizard adds an offer, never a requirement, and skipping it or any step of it costs nothing.)*
 - **The profile *is* the palate card**, not a wall of pours: your palate wheel, your top signature descriptors, regions/styles covered, and 3 recent public notes. This is the shareable artifact (FEATURES.md §9.3) and the thing that makes a follow decision easy.
 - Public-profile toggle; a private profile is discoverable only by exact handle.
 - Profiles never show: spend, collection value, purchase prices, bottle counts by quantity, or anything from §3.1.

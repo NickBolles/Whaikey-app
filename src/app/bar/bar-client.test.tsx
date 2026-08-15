@@ -877,6 +877,55 @@ describe("BarClient keeps server-derived data honest", () => {
   });
 });
 
+describe("BarClient shelf-first layout", () => {
+  it("promotes the bottle list above the flavor map, which reads under Insights", () => {
+    const rows = [bottleRow("owned-row", "Owned Bottle", "own", {})];
+    render(<BarClient initialRows={rows} flavorHeat={heatMatrix()}
+        calibration={calibrationMatrix()} palate={palate} />);
+
+    // The shelf is the point of the page; the analytics read below it.
+    const bottle = screen.getByText("Owned Bottle");
+    const map = screen.getByRole("region", { name: "Flavor map" });
+    expect(bottle.compareDocumentPosition(map) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Insights" })).toBeInTheDocument();
+  });
+
+  it("shows one slim stats strip on the own shelf only — the sole money surface", () => {
+    const rows = [
+      { ...bottleRow("owned-row", "Owned Bottle", "own", {}), purchasePrice: 50 } as Row,
+      bottleRow("tried-row", "Tried Bottle", "tried", {}),
+    ];
+    render(<BarClient initialRows={rows} flavorHeat={heatMatrix()}
+        calibration={calibrationMatrix()} palate={palate} />);
+
+    const stats = screen.getByRole("region", { name: "Bar stats" });
+    expect(stats).toHaveTextContent("spent");
+    expect(stats).toHaveTextContent("est. value");
+
+    // Money never describes bottles that are not the owner's own collection.
+    fireEvent.click(screen.getByRole("tab", { name: /Tried/ }));
+    expect(screen.queryByRole("region", { name: "Bar stats" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the discovery rail but not the tonight rail, which moved to Home", () => {
+    render(<BarClient initialRows={[]} flavorHeat={heatMatrix()}
+        calibration={calibrationMatrix()} palate={palate} />);
+
+    expect(screen.getByRole("heading", { name: "For your palate" })).toBeInTheDocument();
+    expect(screen.queryByText(/pour tonight/i)).not.toBeInTheDocument();
+  });
+
+  it("offers the tour as a quiet fourth rung of the empty own shelf", () => {
+    render(<BarClient initialRows={[]} flavorHeat={heatMatrix()}
+        calibration={calibrationMatrix()} palate={palate} />);
+
+    expect(screen.getByRole("link", { name: /take the tour/i })).toHaveAttribute(
+      "href",
+      "/welcome",
+    );
+  });
+});
+
 describe("BarClient descriptor detail copy", () => {
   it("explains a blind spot that only an unpoured label names", () => {
     // Cinnamon is blind because a label names it — on a bottle never poured.

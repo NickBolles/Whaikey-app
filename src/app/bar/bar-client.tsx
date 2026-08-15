@@ -583,6 +583,17 @@ export function BarClient({
         </Link>
       </header>
 
+      {collection === "own" && (
+        /* The only money surface on this page: spend and est. value stay inside
+           the owner's own-collection view and never join a social projection. */
+        <section aria-label="Bar stats" className="card-flat flex divide-x divide-border-subtle">
+          <Stat value={String(stats.bottleCount)} label="bottles" />
+          <Stat value={String(stats.openCount)} label="open" />
+          <Stat value={money(stats.totalSpent)} label="spent" />
+          <Stat value={money(stats.estValue)} label="est. value" />
+        </section>
+      )}
+
       <FilterBar
         collection={collection}
         onCollectionChange={changeCollection}
@@ -606,45 +617,6 @@ export function BarClient({
         <div className="rounded-xl border border-danger/40 bg-danger/10 text-danger text-sm p-3">
           {error}
         </div>
-      )}
-
-      {collection === "own" && (
-        <section aria-label="Bar stats" className="grid grid-cols-4 gap-2">
-          <StatCard value={String(stats.bottleCount)} label="bottles" />
-          <StatCard value={String(stats.openCount)} label="open" />
-          <StatCard value={money(stats.totalSpent)} label="spent" />
-          <StatCard value={money(stats.estValue)} label="est. value" />
-        </section>
-      )}
-
-      {flavorFilterable && (
-        <FlavorMapSection
-          heat={activeFlavorHeat}
-          lens={effectiveLens}
-          weightByRating={weightByRating}
-          onWeightChange={setWeightByRating}
-          hasPublishedNotes={hasPublishedNotes}
-          canCompare={canCompare}
-          calibration={activeCalibration}
-          marks={marks}
-          rows={activeRows}
-          scope={flavorScope}
-          onLensChange={changeLens}
-          selectedFlavorIds={selectedFlavorIds}
-          onToggleFlavor={toggleFlavor}
-          onClearFlavors={() => setSelectedFlavorIds([])}
-          shownCount={filteredRows.length}
-          totalCount={activeRows.length}
-          rowNoun={collection === "tried" ? "tastings" : "bottles"}
-          topWedgeIds={palate.topWedgeIds}
-        />
-      )}
-
-      {collection === "own" && (
-        <>
-          <RecommendationRail mode="tonight" title="What to pour tonight" />
-          <RecommendationRail mode="discovery" title="For your palate" />
-        </>
       )}
 
       {filteredRows.length === 0 ? (
@@ -730,6 +702,41 @@ export function BarClient({
             </li>
           ))}
         </ul>
+      )}
+
+      {flavorFilterable && (
+        <div className="flex flex-col gap-5 mt-2">
+          <div className="flex items-center gap-3">
+            <h2 className="section-label">Insights</h2>
+            <div aria-hidden className="h-px flex-1 bg-border-subtle" />
+          </div>
+          {/* The wheel sits below the list but still filters it: a tap lands as
+              a removable token in the FilterBar above — that token row is the
+              visible feedback, no scrolling on the user's behalf. */}
+          <FlavorMapSection
+            heat={activeFlavorHeat}
+            lens={effectiveLens}
+            weightByRating={weightByRating}
+            onWeightChange={setWeightByRating}
+            hasPublishedNotes={hasPublishedNotes}
+            canCompare={canCompare}
+            calibration={activeCalibration}
+            marks={marks}
+            rows={activeRows}
+            scope={flavorScope}
+            onLensChange={changeLens}
+            selectedFlavorIds={selectedFlavorIds}
+            onToggleFlavor={toggleFlavor}
+            onClearFlavors={() => setSelectedFlavorIds([])}
+            shownCount={filteredRows.length}
+            totalCount={activeRows.length}
+            rowNoun={collection === "tried" ? "tastings" : "bottles"}
+            topWedgeIds={palate.topWedgeIds}
+          />
+          {collection === "own" && (
+            <RecommendationRail mode="discovery" title="For your palate" />
+          )}
+        </div>
       )}
     </div>
   );
@@ -1088,11 +1095,12 @@ function bottleCount(n: number): string {
   return `${n} bottle${n === 1 ? "" : "s"}`;
 }
 
-function StatCard({ value, label }: { value: string; label: string }) {
+/** One figure in the slim stats strip: a display numeral over an 11px label. */
+function Stat({ value, label }: { value: string; label: string }) {
   return (
-    <div className="card p-3">
-      <div className="stat-number text-[1.35rem] leading-none text-accent">{value}</div>
-      <div className="text-[10px] text-muted mt-2">{label}</div>
+    <div className="min-w-0 flex-1 px-2 py-3 text-center">
+      <div className="stat-number truncate text-lg leading-none">{value}</div>
+      <div className="mt-1 text-[11px] text-muted">{label}</div>
     </div>
   );
 }
@@ -1355,6 +1363,12 @@ function EmptyState({ collection }: { collection: Collection }) {
           </Link>
           <Link href="/import" className="text-sm text-muted hover:text-foreground transition-colors">
             or import a spreadsheet / app export
+          </Link>
+          <Link
+            href="/welcome"
+            className="text-xs text-muted/80 hover:text-foreground transition-colors"
+          >
+            New here? Take the tour
           </Link>
         </>
       ) : (

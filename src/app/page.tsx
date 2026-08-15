@@ -1,27 +1,27 @@
 import Link from "next/link";
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { getSessionUser } from "@/lib/session";
 import { isAiConfigured } from "@/lib/ai/client";
+import { ONBOARDING_COOKIE, needsOnboarding } from "@/lib/onboarding";
 import { getFriendFeed, getOwnProfile, listFollowing } from "@/lib/social";
 import { HomeConcierge } from "@/components/home-concierge";
+import { HomeHero } from "@/components/home-hero";
 import { FriendsModule, type FriendFeedItem } from "@/components/friends-module";
-import {
-  Search,
-  ScanLine,
-  Wine,
-  GlassWater,
-  GraduationCap,
-  ChevronRight,
-  Star,
-} from "lucide-react";
+import { RecommendationRail } from "@/components/recommendation-rail";
+import { UserAvatar } from "@/components/user-avatar";
+import { BookOpen, ChevronRight, GraduationCap, Star, Users } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
 function Wordmark() {
   return (
     <div className="flex items-center gap-2 text-muted">
-      <span aria-hidden className="text-base leading-none">🥃</span>
+      <span aria-hidden className="text-base leading-none">
+        🥃
+      </span>
       <span className="font-display text-sm tracking-wide">Whaikey</span>
     </div>
   );
@@ -29,13 +29,15 @@ function Wordmark() {
 
 function SignedOutHero() {
   return (
-    <div className="flex flex-col items-center justify-center min-h-[78dvh] px-6 text-center gap-7">
-      <div aria-hidden className="text-6xl drop-shadow-[0_0_24px_rgba(232,161,60,0.25)]">🥃</div>
+    <div className="flex min-h-[78dvh] flex-col items-center justify-center gap-7 px-6 text-center">
+      <div aria-hidden className="text-6xl drop-shadow-[0_0_24px_rgba(232,161,60,0.25)]">
+        🥃
+      </div>
       <div>
         <h1 className="font-display text-5xl font-semibold tracking-tight text-gradient-amber">
           Whaikey
         </h1>
-        <p className="text-muted mt-4 max-w-sm leading-relaxed">
+        <p className="mx-auto mt-4 max-w-sm leading-relaxed text-muted">
           Track your bottles, log your pours, map your palate — and ask the AI concierge anything
           about whiskey or your own bar.
         </p>
@@ -48,16 +50,39 @@ function SignedOutHero() {
   );
 }
 
+const ICON_LINK_CLASS =
+  "flex h-11 w-11 items-center justify-center rounded-xl text-muted transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent/60";
+
+/**
+ * Deterministic (no clock, no locale surprises) date label for journal rows,
+ * so server-rendered output stays stable under the pinned-clock visual suite.
+ */
+function pourDateLabel(date: Date): string {
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+}
+
+/** One state-aware line under the greeting; qualitative so it never repeats the hero's counts. */
+function greetingSubtitle(bottleCount: number, pourCount: number): string {
+  if (bottleCount === 0 && pourCount === 0) return "Let’s get the first bottle on your shelf.";
+  if (pourCount === 0) return "Your shelf is stocked — the journal starts with a pour.";
+  return "Your bar, your journal, and a concierge when you want one.";
+}
+
 export default async function HomePage() {
   const user = await getSessionUser();
   if (!user) return <SignedOutHero />;
 
   const db = getDb();
+
+  // First-run handoff: the /welcome tour owns brand-new accounts. The cookie
+  // (set by /welcome on finish or skip) short-circuits the DB check.
+  const cookieStore = await cookies();
+  if (!cookieStore.get(ONBOARDING_COOKIE) && (await needsOnboarding(db, user.id))) {
+    redirect("/welcome");
+  }
+
   const [owned] = await db
-    .select({
-      count: sql<number>`count(*)`,
-      spent: sql<number>`coalesce(sum(${schema.userBottles.purchasePrice} * ${schema.userBottles.quantity}), 0)`,
-    })
+    .select({ count: sql<number>`count(*)` })
     .from(schema.userBottles)
     .where(and(eq(schema.userBottles.userId, user.id), eq(schema.userBottles.relationship, "own")));
 
@@ -78,8 +103,7 @@ export default async function HomePage() {
     .innerJoin(schema.bottles, eq(schema.pours.bottleId, schema.bottles.id))
     .where(eq(schema.pours.userId, user.id))
     .orderBy(desc(schema.pours.createdAt))
-    .limit(5);
-
+    .limit(3);
 
   // US-7: the "From your friends" Home module (docs/SOCIAL.md §7.3). A profile
   // and at least one accepted follow are prerequisites for the graph to have
@@ -111,67 +135,71 @@ export default async function HomePage() {
     viewerBottleRelationship: f.viewerBottleRelationship,
   }));
 
-  const firstName = user.name?.split(" ")[0] ?? "there";
-  const stats = [
-    { value: String(owned?.count ?? 0), label: "bottles owned" },
-    { value: String(pourStats?.count ?? 0), label: "pours logged" },
-    { value: `$${Math.round(owned?.spent ?? 0).toLocaleString()}`, label: "total spent" },
-  ];
+  const firstName = user.name?.split(" ")[0] || "there";
+  const bottleCount = owned?.count ?? 0;
+  const pourCount = pourStats?.count ?? 0;
+  const profileHref = ownProfile ? `/u/${ownProfile.handle}` : "/friends";
 
   return (
-    <div className="px-4 pt-5 flex flex-col gap-7">
-      <Wordmark />
+    <div className="flex flex-col gap-7 px-4 pt-5">
+      <div className="flex items-center justify-between">
+        <Wordmark />
+        <nav aria-label="Your pages" className="-mr-2 flex items-center gap-0.5">
+          <Link href="/history" aria-label="Journal" className={ICON_LINK_CLASS}>
+            <BookOpen size={20} strokeWidth={1.8} aria-hidden />
+          </Link>
+          <Link href="/friends" aria-label="Friends" className={ICON_LINK_CLASS}>
+            <Users size={20} strokeWidth={1.8} aria-hidden />
+          </Link>
+          <Link href={profileHref} aria-label="Your profile" className={ICON_LINK_CLASS}>
+            <UserAvatar
+              name={ownProfile?.displayName ?? user.name ?? "?"}
+              image={ownProfile?.avatarUrl ?? user.image}
+              size={26}
+            />
+          </Link>
+        </nav>
+      </div>
 
       <header>
-        <h1 className="font-display text-[2rem] leading-tight font-semibold">Welcome back, {firstName}</h1>
-        <p className="text-muted mt-1">Your shelf, your next pour, and a concierge when you want one.</p>
+        <h1 className="font-display text-[2rem] font-semibold leading-tight">
+          Welcome back, {firstName}
+        </h1>
+        <p className="mt-1 text-muted">{greetingSubtitle(bottleCount, pourCount)}</p>
       </header>
 
-      <section aria-label="Your bar" className="card p-5">
-        <div className="flex items-start justify-between gap-4"><div><p className="section-label">Start with your shelf</p><h2 className="font-display mt-1 text-xl font-semibold">Choose a bottle from My Bar</h2><p className="mt-1 text-sm text-muted">Pick a bottle first, then log the pour — no extra hunt.</p></div><Wine size={28} className="shrink-0 text-accent" aria-hidden /></div>
-        <div className="mt-4 grid grid-cols-2 gap-2"><Link href="/bar" className="btn-primary flex items-center justify-center gap-2 px-3 py-3 text-sm"><Wine size={16} aria-hidden /> My Bar</Link><Link href="/pour" className="btn-secondary flex items-center justify-center gap-2 px-3 py-3 text-sm"><GlassWater size={16} aria-hidden /> Pick any bottle</Link></div>
-      </section>
+      <HomeHero bottleCount={bottleCount} pourCount={pourCount} />
 
-      <section aria-label="Your stats" className="grid grid-cols-3 gap-3">{stats.map((s) => <div key={s.label} className="card p-4"><div className="stat-number text-[1.7rem] leading-none text-accent">{s.value}</div><div className="text-[11px] text-muted mt-2">{s.label}</div></div>)}</section>
-
-      <HomeConcierge aiConfigured={isAiConfigured()} />
-
-      <section aria-label="Quick actions" className="grid grid-cols-2 gap-3">
-        {[{ href: "/search", label: "Find a bottle", icon: Search }, { href: "/scan", label: "Scan bottles", icon: ScanLine }].map(({ href, label, icon: Icon }) => <Link key={href} href={href} className="card flex items-center gap-3 p-4 text-sm hover:brightness-110 transition-[filter]"><Icon size={20} className="text-accent" aria-hidden />{label}</Link>)}
-      </section>
-
-      <section aria-label="Whiskey School">
-        <h2 className="section-label mb-3">Whiskey School</h2>
-        <Link
-          href="/learn"
-          className="card flex items-center gap-4 p-5 hover:brightness-110 transition-[filter]"
-        >
-          <GraduationCap size={22} strokeWidth={1.8} className="text-accent shrink-0" aria-hidden />
-          <span className="flex-1 min-w-0">
-            <span className="font-display text-lg font-semibold block">Learn as you sip</span>
-            <span className="text-sm text-muted block mt-0.5">
-              Short lessons on styles, casks, and the flavor wheel.
-            </span>
-          </span>
-          <ChevronRight size={18} strokeWidth={1.8} className="text-muted shrink-0" aria-hidden />
-        </Link>
-      </section>
+      {bottleCount > 0 && <RecommendationRail mode="tonight" title="What to pour tonight" />}
 
       <FriendsModule items={friendFeedItems} hasProfile={hasProfile} hasFollows={hasFollows} />
 
       {recentPours.length > 0 && (
-        <section aria-label="Recent pours">
-          <h2 className="section-label mb-3">Recent pours</h2>
+        <section aria-label="Your journal">
+          <div className="mb-3 flex items-baseline justify-between">
+            <h2 className="section-label">Your journal</h2>
+            <Link
+              href="/history"
+              className="tap-target text-sm text-muted transition-colors hover:text-foreground"
+            >
+              See all →
+            </Link>
+          </div>
           <ul className="flex flex-col gap-2.5">
             {recentPours.map((p) => (
               <li key={p.id}>
                 <Link
                   href={`/bottles/${p.bottleId}`}
-                  className="card-flat flex items-center justify-between p-4 hover:bg-surface-raised transition-colors"
+                  className="card-flat flex items-center justify-between gap-3 p-4 transition-colors hover:bg-surface-raised"
                 >
-                  <span className="font-medium">{p.bottleName}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-medium">{p.bottleName}</span>
+                    <span className="mt-0.5 block text-xs text-muted">
+                      {pourDateLabel(p.createdAt)}
+                    </span>
+                  </span>
                   {p.rating != null && (
-                    <span className="flex items-center gap-1.5 text-accent">
+                    <span className="flex shrink-0 items-center gap-1.5 text-accent">
                       <Star size={14} fill="currentColor" aria-hidden />
                       <span className="stat-number text-lg leading-none">{p.rating.toFixed(1)}</span>
                     </span>
@@ -182,6 +210,20 @@ export default async function HomePage() {
           </ul>
         </section>
       )}
+
+      <section aria-label="More from Whaikey" className="flex flex-col gap-2.5">
+        <Link
+          href="/learn"
+          className="card-flat flex min-h-11 items-center gap-3 px-4 py-3 transition-colors hover:bg-surface-raised"
+        >
+          <GraduationCap size={18} strokeWidth={1.8} className="shrink-0 text-muted" aria-hidden />
+          <span className="min-w-0 flex-1 truncate text-sm">
+            Whiskey School — short lessons on styles, casks, and the flavor wheel.
+          </span>
+          <ChevronRight size={18} strokeWidth={1.8} className="shrink-0 text-muted" aria-hidden />
+        </Link>
+        <HomeConcierge aiConfigured={isAiConfigured()} />
+      </section>
     </div>
   );
 }

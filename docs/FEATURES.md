@@ -11,10 +11,10 @@ Companion to [PLAN.md](../PLAN.md). This document specifies every feature area i
 | # | Feature | Pri | Notes |
 |---|---------|-----|-------|
 | 1.1 | Auth: Apple / Google / email magic link | 🟢 | Apple sign-in required for iOS App Store anyway |
-| 1.2 | Taste onboarding quiz | 🟡 | 5–7 swipeable questions ("Peat: love it / hate it / what's peat?") seeds the palate profile before any pours are logged |
-| 1.3 | "Add your first 3 bottles" prompt | 🟢 | Empty-state flow that immediately demonstrates search + My Bar |
+| 1.2 | Taste onboarding quiz | 🟡 | 5–7 swipeable questions ("Peat: love it / hate it / what's peat?") seeds the palate profile before any pours are logged. Still open — the `/welcome` first-run wizard (see 1.3) is the natural slot for it when it ships |
+| 1.3 | "Add your first 3 bottles" prompt | 🟢 | *Shipped (2026-08)* as the "Your first bottle" step of the `/welcome` first-run wizard: catalog search with one-tap "Add to bar" / "Wishlist" and a `/scan` handoff — the empty-state flow that immediately demonstrates search + My Bar. Every wizard step is skippable |
 | 1.4 | Import from spreadsheet/CSV + competitor exports | 🟢 | *Shipped (v1)* at `/import`: paste or upload CSV/TSV → AI-assisted column mapping (heuristic fallback when no key — "this column looks like purchase price") → rows matched by UPC then fuzzy name → user confirms every match before commit. Purchase price/date/store/notes come along; rows with barcodes teach the UPC map. Arbitrary headers means competitor exports (Distiller/Whiskybase-style) work too — InVintory proved competitor import is a switching weapon (see COMPETITORS.md §7). v2: format-specific presets, unmatched rows → user-submitted bottles |
-| 1.5 | Experience level selector | 🟡 | Beginner / enthusiast / collector — tunes copy depth, default rating scale, and AI chat tone |
+| 1.5 | Experience level selector | 🟡 | Beginner / enthusiast / collector — tunes copy depth, default rating scale, and AI chat tone. Still open — would also slot into `/welcome` |
 
 **UX flow (first run):** splash → auth → 3-question mini quiz (skippable) → "scan or search your first bottle" → land on My Bar with one bottle in it. Target: < 90 seconds to first bottle.
 

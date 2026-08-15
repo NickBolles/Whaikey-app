@@ -2,12 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { FriendFinderCard } from "@/app/friends/friend-finder-card";
-
-// The QR pair reaches for canvas / native seams that don't exist in jsdom —
-// this card's own concern is the phone settings.
-vi.mock("@/components/friend-qr", () => ({ FriendQr: () => null }));
-vi.mock("@/components/qr-scan-button", () => ({ QrScanButton: () => null }));
+import { DiscoverySettings } from "@/app/friends/discovery-settings";
 
 afterEach(() => {
   cleanup();
@@ -26,15 +21,37 @@ function mockFetchOnce(response: { ok: boolean; status?: number; body?: unknown 
 
 const optInSwitch = () => screen.getByRole("switch", { name: "Let people find me by phone" });
 
-describe("FriendFinderCard phone opt-in (docs/SOCIAL.md D8 as amended)", () => {
-  it("never preselects discovery on the add form", () => {
-    render(<FriendFinderCard handle="me" initialPhoneLast2={null} initialPhoneDiscoverable={false} />);
+async function openDisclosure() {
+  await userEvent.click(screen.getByRole("button", { name: /discovery settings/i }));
+}
+
+describe("DiscoverySettings disclosure", () => {
+  it("is collapsed by default and expands to the phone settings + privacy link", async () => {
+    render(<DiscoverySettings initialPhoneLast2={null} initialPhoneDiscoverable={false} />);
+
+    const toggle = screen.getByRole("button", { name: /discovery settings/i });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByLabelText("Phone number")).not.toBeInTheDocument();
+
+    await openDisclosure();
+
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByLabelText("Phone number")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /privacy & sharing/i })).toHaveAttribute("href", "/sharing");
+  });
+});
+
+describe("DiscoverySettings phone opt-in (docs/SOCIAL.md D8 as amended)", () => {
+  it("never preselects discovery on the add form", async () => {
+    render(<DiscoverySettings initialPhoneLast2={null} initialPhoneDiscoverable={false} />);
+    await openDisclosure();
     expect(optInSwitch()).toHaveAttribute("aria-checked", "false");
   });
 
   it("removing a discoverable number resets the add form's opt-in to off", async () => {
     mockFetchOnce({ ok: true, body: { removed: true } });
-    render(<FriendFinderCard handle="me" initialPhoneLast2="23" initialPhoneDiscoverable={true} />);
+    render(<DiscoverySettings initialPhoneLast2="23" initialPhoneDiscoverable={true} />);
+    await openDisclosure();
 
     await userEvent.click(screen.getByRole("button", { name: "Remove" }));
 
@@ -45,7 +62,8 @@ describe("FriendFinderCard phone opt-in (docs/SOCIAL.md D8 as amended)", () => {
   });
 
   it("replacing a number re-opens the form with discovery off, whatever the previous save opted into", async () => {
-    render(<FriendFinderCard handle="me" initialPhoneLast2="23" initialPhoneDiscoverable={true} />);
+    render(<DiscoverySettings initialPhoneLast2="23" initialPhoneDiscoverable={true} />);
+    await openDisclosure();
 
     await userEvent.click(screen.getByRole("button", { name: "Replace number" }));
 
