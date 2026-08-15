@@ -207,3 +207,11 @@ html.native-scanning .card-viewfinder {
   background: transparent;
   box-shadow: none;
 }
+
+/* Friend-QR scanning happens on the dense /friends page, where opaque cards
+   would cover the whole camera preview. While the QR session is live, hide the
+   app (visibility, so layout and scroll survive) and let QrScanButton's portal
+   overlay (data-qr-overlay) provide the framing UI. */
+html.qr-scanning body > :not([data-qr-overlay]) {
+  visibility: hidden;
+}

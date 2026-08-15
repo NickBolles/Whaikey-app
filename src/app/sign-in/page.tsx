@@ -4,6 +4,7 @@ import { Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { signIn } from "@/lib/auth-client";
 import { startNativeSignIn } from "@/lib/native/auth";
+import { safeReturnPath } from "@/lib/return-path";
 
 type Provider = "google" | "apple";
 
@@ -41,6 +42,13 @@ function SignInForm() {
   const [retried, setRetried] = useState(false);
   const displayError = error ?? (retried ? null : searchParams.get("error"));
 
+  // Optional same-origin return path (e.g. a scanned /add/<handle> code —
+  // the person should land back on the confirm screen, not Home). Validated
+  // by the same safeReturnPath as the native exchange redirect — absolute
+  // URLs, protocol-relative "//host", backslash and control-char variants
+  // all fall back to "/" rather than becoming an open redirect.
+  const nextPath = safeReturnPath(searchParams.get("next")) ?? "/";
+
   async function handleSignIn(provider: Provider) {
     if (pending) return;
     setPending(provider);
@@ -50,7 +58,7 @@ function SignInForm() {
     // Inside the native shell, OAuth cannot run in the WebView — Google rejects
     // embedded user agents outright. Hand off to the system browser; the app is
     // woken back up by the whaikey:// callback (docs/NATIVE_APP.md §2.3).
-    const native = await startNativeSignIn(provider);
+    const native = await startNativeSignIn(provider, nextPath === "/" ? undefined : nextPath);
     if (native.status === "started") return; // the browser owns the flow now
     if (native.status === "failed") {
       setError(native.reason);
@@ -62,7 +70,7 @@ function SignInForm() {
       // On success better-auth redirects to `callbackURL`, so we intentionally
       // leave `pending` set — the page is on its way out. Only an error path
       // (blocked popup, network failure, misconfig) resolves/throws here.
-      const res = await signIn.social({ provider, callbackURL: "/" });
+      const res = await signIn.social({ provider, callbackURL: nextPath });
       if (res && "error" in res && res.error) {
         setError(res.error.message ?? "Sign-in failed. Please try again.");
         setPending(null);

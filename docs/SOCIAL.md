@@ -207,7 +207,8 @@ One more flow rule, restated from §7.3 because it's structural: **there is no c
 **Decision: asymmetric follow, with an optional approval gate.** Reasons: it's the lower-friction growth mechanic (Strava, Instagram), it lets a beginner follow an expert taster without a reciprocal relationship, and mutual-follow can be *derived* ("friends" = you follow each other) to gate the more intimate surfaces. Private accounts flip follows into requests.
 
 - Visibility tiers used everywhere: **Only me** (default) → **Friends** (mutual follows) → **Followers** → **Anyone with the link** → **Public**.
-- Finding people: exact-handle search, invite links, "friends of friends who drink what you drink," and same-bottle discovery (§7.6). No contact-book import in S2 (§14 D8).
+- Finding people: exact-handle search, invite links, **profile QR codes** (show yours in person; scanning opens a preview-then-confirm add screen), **exact phone lookup** (double-opt-in, keyed-hash storage, rate-limited; §14 D8 as amended), "friends of friends who drink what you drink," and same-bottle discovery (§7.6). No contact-book/bulk import — ever (§14 D8).
+- Every add path — handle, phone, QR — lands on the same confirm screen (`/add/[handle]`): identity preview first, then an explicit Follow tap. Nothing follows on lookup alone.
 - Blocking is first-class from day one of the graph, enforced on every read path in both directions. (Reporting ships with comments in S3 — see §11 for why.)
 
 ### 7.3 The stream — a Home module, not a feed product (S2)
@@ -428,7 +429,7 @@ The first draft left 14 questions open "for a human call before S1 code." Under 
 | D5 | Feed ordering | Chronological with a light own-bottles boost; no engagement ranking. Revisit only if sparsity, not attention, is the problem. |
 | D6 | Community aggregates | Anonymous by default; attribution per-note opt-in (shipped stance). |
 | D7 | Handle reservations | Reserve an obvious-brands list at launch; expand on demand. Not a 500-name project. |
-| D8 | Graph import | Invite links only through S2. Contact matching is a privacy liability we don't need to grow 4-person clubs. |
+| D8 | Graph import | **Amended (post-S2, owner call):** exact single-number phone lookup and profile QR codes are in — both double-opt-in (the target must set a number AND enable phone discovery; QR is the owner deliberately showing their own code), numbers stored only as a keyed hash, lookups durably rate-limited (claim/save attempts draw from the same budget — a save tests a number against the database too), "no match" indistinguishable from "not discoverable." Contact-book/bulk import remains banned — the liability was the address-book grab, not knowing one friend's number. |
 | D9 | Friends' ratings vs. community rating | Separate labelled row, never mixed into the public average. |
 | D10 | Feed placement | Home module, not a tab; data-driven promotion tripwire (§6.3). |
 | D11 | Indexing | Shared pages stay `noindex` through S3; revisit at S4 with the jurisdiction review. |

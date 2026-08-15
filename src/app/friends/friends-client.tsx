@@ -6,18 +6,31 @@ import { AtSign, Check, ShieldOff, UserMinus, UserPlus, UserX, X } from "lucide-
 import { ProfileSummaryRow } from "@/components/profile-summary-row";
 import type { FollowState } from "@/db/schema";
 import type { ProfileSummary } from "@/lib/social";
+import { FriendFinderCard } from "./friend-finder-card";
 
 type FollowingRow = ProfileSummary & { state: FollowState; mutual: boolean };
 
 export interface FriendsClientProps {
+  /** The signed-in user's own handle, for the "How friends find you" card. */
+  handle: string;
+  phoneLast2: string | null;
+  phoneDiscoverable: boolean;
   requests: ProfileSummary[];
   following: FollowingRow[];
   followers: ProfileSummary[];
   blocked: ProfileSummary[];
 }
 
-/** US-5/US-10: follow request/following/followers/blocked management, plus the exact-handle "Add a friend" form. */
-export function FriendsClient({ requests, following, followers, blocked }: FriendsClientProps) {
+/** US-5/US-10: follow request/following/followers/blocked management, plus the handle-or-phone "Add a friend" form. */
+export function FriendsClient({
+  handle,
+  phoneLast2,
+  phoneDiscoverable,
+  requests,
+  following,
+  followers,
+  blocked,
+}: FriendsClientProps) {
   const [requestRows, setRequestRows] = useState(requests);
   const [followingRows, setFollowingRows] = useState(following);
   const [followerRows, setFollowerRows] = useState(followers);
@@ -103,6 +116,12 @@ export function FriendsClient({ requests, following, followers, blocked }: Frien
 
   return (
     <div className="flex flex-col gap-8">
+      <FriendFinderCard
+        handle={handle}
+        initialPhoneLast2={phoneLast2}
+        initialPhoneDiscoverable={phoneDiscoverable}
+      />
+
       <AddFriendForm />
 
       {sectionError && (
@@ -235,42 +254,72 @@ function FriendSection({ title, empty, children }: { title: string; empty?: stri
   );
 }
 
+/**
+ * A phone-shaped input. An explicit "@" prefix is always a handle (handles may
+ * be digits-only, e.g. @1234567, and must stay reachable); otherwise phone
+ * means a leading "+" or 7+ characters drawn purely from phone punctuation —
+ * anything containing a letter or underscore is a handle.
+ */
+function looksLikePhone(input: string): boolean {
+  if (input.startsWith("@")) return false;
+  if (input.startsWith("+")) return true;
+  return /^[\d\s().-]{7,}$/.test(input);
+}
+
+/**
+ * Single input for @handle or phone number. Both paths land on
+ * /add/[handle] — nothing follows on lookup alone (docs/SOCIAL.md §7.2).
+ */
 function AddFriendForm() {
   const router = useRouter();
-  const [handle, setHandle] = useState("");
+  const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [isError, setIsError] = useState(false);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
-    const normalized = handle.trim().toLowerCase();
-    if (!normalized || busy) return;
+    const trimmed = value.trim();
+    if (!trimmed || busy) return;
     setBusy(true);
     setStatus(null);
     setIsError(false);
     try {
-      const res = await fetch("/api/social/follows", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ handle: normalized }),
-      });
-      if (res.status === 404) {
-        setStatus("No one found with that handle.");
-        setIsError(true);
+      if (looksLikePhone(trimmed)) {
+        const res = await fetch("/api/social/lookup", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ phone: trimmed }),
+        });
+        if (res.status === 429) {
+          setStatus("Too many lookups — try again in a bit.");
+          setIsError(true);
+          return;
+        }
+        if (res.status === 400) {
+          setStatus("That doesn't look like a phone number.");
+          setIsError(true);
+          return;
+        }
+        const body = (await res.json().catch(() => null)) as { profile?: ProfileSummary | null } | null;
+        if (!res.ok || !body) {
+          setStatus("Couldn't look that up — try again.");
+          setIsError(true);
+          return;
+        }
+        if (!body.profile) {
+          setStatus("No one found by that number. They may not have opted in — ask them for their @handle or code.");
+          setIsError(true);
+          return;
+        }
+        setValue("");
+        router.push(`/add/${body.profile.handle}`);
         return;
       }
-      const body = (await res.json().catch(() => null)) as { state?: FollowState } | null;
-      if (!res.ok || !body?.state) {
-        setStatus("Couldn't send that — try again.");
-        setIsError(true);
-        return;
-      }
-      setStatus(
-        body.state === "accepted" ? `Now following @${normalized}.` : `Requested to follow @${normalized}.`,
-      );
-      setHandle("");
-      router.refresh();
+
+      const normalized = trimmed.replace(/^@/, "").toLowerCase();
+      setValue("");
+      router.push(`/add/${normalized}`);
     } catch {
       setStatus("Couldn't send that — try again.");
       setIsError(true);
@@ -286,20 +335,20 @@ function AddFriendForm() {
         <div className="flex min-h-11 flex-1 items-center gap-1.5 rounded-xl border border-border-subtle bg-surface px-3">
           <AtSign size={16} strokeWidth={1.8} className="shrink-0 text-muted" aria-hidden />
           <input
-            value={handle}
-            onChange={(event) => setHandle(event.target.value.toLowerCase())}
-            maxLength={20}
-            placeholder="theirhandle"
-            aria-label="Handle to follow"
+            value={value}
+            onChange={(event) => setValue(event.target.value)}
+            maxLength={32}
+            placeholder="@handle or phone number"
+            aria-label="Handle or phone number to add"
             className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted"
           />
         </div>
         <button
           type="submit"
-          disabled={busy || !handle.trim()}
+          disabled={busy || !value.trim()}
           className="btn-primary tap-target inline-flex min-h-11 items-center gap-1.5 px-4 text-sm disabled:opacity-60"
         >
-          <UserPlus size={16} strokeWidth={1.8} aria-hidden /> Follow
+          <UserPlus size={16} strokeWidth={1.8} aria-hidden /> {busy ? "…" : "Add"}
         </button>
       </div>
       {status && (

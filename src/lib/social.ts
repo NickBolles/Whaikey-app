@@ -12,13 +12,14 @@
  * A signed-out viewer (viewerId === null) sees nothing cross-user — share
  * links (src/lib/pour-sharing.ts) are a separate bearer-token mechanism.
  */
-import { and, asc, desc, eq, inArray, isNotNull, isNull, or, sql, type AnyColumn } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, or, sql, type AnyColumn } from "drizzle-orm";
 import { z } from "zod";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
 import { REPORT_SUBJECT_TYPES, type FollowState, type PourVisibility, type ReportSubjectType } from "@/db/schema";
 import { getUserPalate } from "@/lib/palate-store";
 import { palateWheelHeat } from "@/lib/palate";
+import { hashPhone, normalizePhone, phoneLast2 } from "@/lib/phone";
 import { RESERVED_HANDLES } from "@/lib/reserved-handles";
 
 // ---------------------------------------------------------------------------
@@ -508,6 +509,232 @@ export async function isBlockedEither(db: DB, a: string, b: string): Promise<boo
 }
 
 // ---------------------------------------------------------------------------
+// Phone discovery & add-target (docs/SOCIAL.md §7.2, D8 as amended)
+//
+// Double opt-in: a match requires the target to have set a number AND
+// phoneDiscoverable=true AND socialEnabled=true, and neither party may have
+// blocked the other. Every non-match reason — no such number, a real number
+// that isn't discoverable, a stepped-back owner, a block — collapses to the
+// same `null`; the raw number is never stored, logged, or echoed back.
+// ---------------------------------------------------------------------------
+
+export const PHONE_LOOKUP_LIMIT_PER_HOUR = 20;
+
+export class PhoneTakenError extends Error {
+  constructor() {
+    super("Phone number already claimed by another account");
+    this.name = "PhoneTakenError";
+  }
+}
+
+/**
+ * True for a Postgres unique-violation (23505). Drizzle wraps the driver
+ * error in a DrizzleQueryError, so the pg error code lands on `.cause.code`
+ * (checked first) rather than the outer error — true for both drivers we run
+ * against (postgres-js in prod, PGlite in tests/dev).
+ */
+function isUniqueViolation(err: unknown): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  const code = (err as { code?: unknown; cause?: { code?: unknown } }).code ?? (err as { cause?: { code?: unknown } }).cause?.code;
+  return code === "23505";
+}
+
+/**
+ * The durable enumeration throttle, shared by every path that tests a number
+ * against the database: lookups AND set attempts. Saving probes too —
+ * posting candidates distinguishes "taken" (phone_taken) from "free"
+ * regardless of the target's discoverability, so an unmetered POST would be
+ * a lookup-endpoint bypass. The row is written before the caller learns
+ * anything, misses included. Rows that have aged out of the window stop
+ * counting but would otherwise accumulate forever, so each permitted probe
+ * also sweeps expired rows (the nativeAuthCodes cleanup pattern).
+ */
+async function recordPhoneProbe(db: DB, userId: string): Promise<void> {
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`phone-lookup-rl:${userId}`}))`);
+    const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    const recent = await tx
+      .select({ n: sql<number>`count(*)` })
+      .from(schema.phoneLookups)
+      .where(and(eq(schema.phoneLookups.userId, userId), sql`${schema.phoneLookups.createdAt} > ${hourAgo}`));
+    if (Number(recent[0]?.n ?? 0) >= PHONE_LOOKUP_LIMIT_PER_HOUR) throw new RateLimitedError();
+    await tx.insert(schema.phoneLookups).values({ id: crypto.randomUUID(), userId });
+    await tx.delete(schema.phoneLookups).where(lt(schema.phoneLookups.createdAt, hourAgo));
+  });
+}
+
+/**
+ * Set (or replace) the caller's phone number. Requires an existing profile —
+ * returns null otherwise (route maps that to 409 profile_required). Throws
+ * PhoneTakenError when the hash collides with another account's number
+ * (closed by the DB's unique constraint on phoneHash, not a pre-check — a
+ * plain update can't race itself into a false negative). Raising
+ * discoverable to true while stepped back (socialEnabled=false) throws
+ * SocialDisabledError, under the same social-reset lock as every other
+ * exposure-raising write; discoverable=false is always allowed. Every
+ * attempt counts against the shared phone-probe limit (RateLimitedError) —
+ * see recordPhoneProbe for why a save is also an enumeration probe.
+ */
+export async function setPhone(
+  db: DB,
+  userId: string,
+  rawPhone: string,
+  discoverable: boolean,
+): Promise<{ phoneLast2: string; phoneDiscoverable: boolean } | null> {
+  const canonical = normalizePhone(rawPhone); // throws InvalidPhoneError
+  const hash = hashPhone(canonical);
+  const last2 = phoneLast2(canonical);
+
+  await recordPhoneProbe(db, userId); // throws RateLimitedError
+
+  try {
+    return await db.transaction(async (tx) => {
+      if (discoverable) {
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`social-reset:${userId}`}))`);
+        const current = await tx.query.userProfiles.findFirst({
+          columns: { socialEnabled: true },
+          where: eq(schema.userProfiles.userId, userId),
+        });
+        if (!current) return null;
+        if (!current.socialEnabled) throw new SocialDisabledError();
+      }
+      const rows = await tx
+        .update(schema.userProfiles)
+        .set({ phoneHash: hash, phoneLast2: last2, phoneDiscoverable: discoverable, updatedAt: new Date() })
+        .where(eq(schema.userProfiles.userId, userId))
+        .returning({
+          phoneLast2: schema.userProfiles.phoneLast2,
+          phoneDiscoverable: schema.userProfiles.phoneDiscoverable,
+        });
+      const row = rows[0];
+      if (!row || row.phoneLast2 == null) return null;
+      return { phoneLast2: row.phoneLast2, phoneDiscoverable: row.phoneDiscoverable };
+    });
+  } catch (err) {
+    if (isUniqueViolation(err)) throw new PhoneTakenError();
+    throw err;
+  }
+}
+
+/** Removes the caller's phone number and turns discoverability off. Always allowed (lowering exposure). Returns false when there's no profile. */
+export async function clearPhone(db: DB, userId: string): Promise<boolean> {
+  const rows = await db
+    .update(schema.userProfiles)
+    .set({ phoneHash: null, phoneLast2: null, phoneDiscoverable: false, updatedAt: new Date() })
+    .where(eq(schema.userProfiles.userId, userId))
+    .returning({ userId: schema.userProfiles.userId });
+  return rows.length > 0;
+}
+
+/**
+ * Flip discoverability without touching the number. Setting it to true while
+ * stepped back throws SocialDisabledError under the social-reset lock, same
+ * as updateProfile's isPublic/discoverable raise. Returns false when there's
+ * no profile.
+ */
+export async function setPhoneDiscoverable(db: DB, userId: string, discoverable: boolean): Promise<boolean> {
+  return db.transaction(async (tx) => {
+    if (discoverable) {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`social-reset:${userId}`}))`);
+      const current = await tx.query.userProfiles.findFirst({
+        columns: { socialEnabled: true },
+        where: eq(schema.userProfiles.userId, userId),
+      });
+      if (current && !current.socialEnabled) throw new SocialDisabledError();
+    }
+    const rows = await tx
+      .update(schema.userProfiles)
+      .set({ phoneDiscoverable: discoverable, updatedAt: new Date() })
+      .where(eq(schema.userProfiles.userId, userId))
+      .returning({ userId: schema.userProfiles.userId });
+    return rows.length > 0;
+  });
+}
+
+/**
+ * Exact-match phone lookup. Records a phone-probe row FIRST (see
+ * recordPhoneProbe — per-user advisory lock, the addComment comment-rl
+ * pattern) and throws RateLimitedError past PHONE_LOOKUP_LIMIT_PER_HOUR — a
+ * miss counts toward the limit too, which is the enumeration guard: an
+ * unthrottled endpoint would let an account iterate numbers and map who's on
+ * the app, so the row is written before the caller ever learns whether the
+ * number matched. Throws InvalidPhoneError for a malformed number. Every
+ * non-match reason (no such number, not discoverable, stepped-back owner,
+ * blocked either way) returns the same null — a self lookup is allowed to
+ * match (harmless; the UI can say "that's you").
+ */
+export async function findProfileByPhone(db: DB, viewerId: string, rawPhone: string): Promise<ProfileSummary | null> {
+  const canonical = normalizePhone(rawPhone); // throws InvalidPhoneError
+  const hash = hashPhone(canonical);
+
+  await recordPhoneProbe(db, viewerId);
+
+  const target = await db.query.userProfiles.findFirst({ where: eq(schema.userProfiles.phoneHash, hash) });
+  if (!target) return null;
+  if (!target.phoneDiscoverable || !target.socialEnabled) return null;
+  if (await isBlockedEither(db, viewerId, target.userId)) return null;
+  return toProfileSummary(target);
+}
+
+export interface AddTarget {
+  profile: ProfileSummary;
+  isPublic: boolean;
+  followState: FollowState | null;
+  followsYou: boolean;
+  isSelf: boolean;
+}
+
+/**
+ * Light identity projection for the /add/[handle] confirm screen — every add
+ * path (handle, phone, QR) lands here before anything follows. Null for a
+ * missing handle, socialEnabled=false (unless self), or a block either way
+ * (unless self); isSelf is allowed through and flagged so the UI can render
+ * "that's your own code" instead of a follow button.
+ */
+export async function getAddTarget(db: DB, viewerId: string, handle: string): Promise<AddTarget | null> {
+  const row = await db.query.userProfiles.findFirst({ where: eq(schema.userProfiles.handle, normalizeHandle(handle)) });
+  if (!row) return null;
+
+  const isSelf = viewerId === row.userId;
+  if (!isSelf) {
+    if (!row.socialEnabled) return null;
+    if (await isBlockedEither(db, viewerId, row.userId)) return null;
+  }
+
+  let followState: FollowState | null = null;
+  let followsYou = false;
+  if (!isSelf) {
+    const forward = await db.query.follows.findFirst({
+      where: and(eq(schema.follows.followerId, viewerId), eq(schema.follows.followeeId, row.userId)),
+    });
+    followState = forward ? forward.state : null;
+    const back = await db.query.follows.findFirst({
+      where: and(
+        eq(schema.follows.followerId, row.userId),
+        eq(schema.follows.followeeId, viewerId),
+        eq(schema.follows.state, "accepted"),
+      ),
+    });
+    followsYou = Boolean(back);
+  }
+
+  return { profile: toProfileSummary(row), isPublic: row.isPublic, followState, followsYou, isSelf };
+}
+
+export const phoneSetSchema = z.object({
+  phone: z.string().trim().min(1),
+  discoverable: z.boolean(),
+});
+
+export const phoneDiscoverablePatchSchema = z.object({
+  discoverable: z.boolean(),
+});
+
+export const phoneLookupSchema = z.object({
+  phone: z.string().trim().min(1),
+});
+
+// ---------------------------------------------------------------------------
 // Prefs & the step-back switch
 // ---------------------------------------------------------------------------
 
@@ -574,7 +801,9 @@ export async function makeEverythingPrivate(db: DB, userId: string): Promise<voi
       .where(and(eq(schema.pourShares.userId, userId), isNull(schema.pourShares.revokedAt)));
     await tx
       .update(schema.userProfiles)
-      .set({ socialEnabled: false, isPublic: false, discoverable: false, updatedAt: now })
+      // phoneDiscoverable included: re-enabling social must not silently make
+      // the stored number findable again without a fresh opt-in (US-11).
+      .set({ socialEnabled: false, isPublic: false, discoverable: false, phoneDiscoverable: false, updatedAt: now })
       .where(eq(schema.userProfiles.userId, userId));
     await tx
       .insert(schema.userSocialPrefs)

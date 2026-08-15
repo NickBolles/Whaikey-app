@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { issueNativeAuthCode, NATIVE_CALLBACK_SCHEME } from "@/lib/native-auth";
+import { issueNativeAuthCode, NATIVE_CALLBACK_SCHEME, safeReturnPath } from "@/lib/native-auth";
 import { getSessionUser } from "@/lib/session";
 
 /**
@@ -24,11 +24,16 @@ function appRedirect(params: Record<string, string>): NextResponse {
 }
 
 export async function GET(request: NextRequest) {
+  // Validated once and carried on every outcome, error included — a cancelled
+  // or failed sign-in should retry toward the scanned target, not lose it.
+  const next = safeReturnPath(request.nextUrl.searchParams.get("next"));
+  const withNext = (params: Record<string, string>) => appRedirect(next ? { ...params, next } : params);
+
   const user = await getSessionUser();
   if (!user) {
     // OAuth was cancelled or the callback failed — tell the app so it can show a
     // real message rather than hanging on a browser that silently closed.
-    return appRedirect({ error: "not_signed_in" });
+    return withNext({ error: "not_signed_in" });
   }
 
   const { auth } = await import("@/lib/auth");
@@ -40,7 +45,7 @@ export async function GET(request: NextRequest) {
 
   if (!sessionCookie) {
     console.error("[native-auth] signed in but no session cookie named", cookieName);
-    return appRedirect({ error: "no_session_cookie" });
+    return withNext({ error: "no_session_cookie" });
   }
 
   try {
@@ -49,9 +54,9 @@ export async function GET(request: NextRequest) {
       sessionCookieName: cookieName,
       sessionCookie,
     });
-    return appRedirect({ code });
+    return withNext({ code });
   } catch (err) {
     console.error("[native-auth] failed to issue exchange code", err);
-    return appRedirect({ error: "exchange_failed" });
+    return withNext({ error: "exchange_failed" });
   }
 }

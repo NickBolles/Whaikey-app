@@ -2,24 +2,31 @@ import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
+import { InvalidPhoneError } from "@/lib/phone";
 import { createTestBottle, createTestUser, setupTestDb, uid } from "@/test/helpers";
 import {
   COMMENT_EDIT_WINDOW_MS,
   COMMENT_RATE_LIMIT_PER_HOUR,
   HandleTakenError,
   InvalidHandleError,
+  PHONE_LOOKUP_LIMIT_PER_HOUR,
+  PhoneTakenError,
   RateLimitedError,
+  SocialDisabledError,
   addComment,
   approveFollow,
   areFriends,
   blockUser,
   canViewPour,
   cheerPour,
+  clearPhone,
   createProfile,
   createReport,
   denyFollow,
   editComment,
+  findProfileByPhone,
   followByHandle,
+  getAddTarget,
   getFriendFeed,
   getFriendNotesForBottle,
   getOwnProfile,
@@ -40,6 +47,8 @@ import {
   profileCreateSchema,
   profileUpdateSchema,
   removeFollower,
+  setPhone,
+  setPhoneDiscoverable,
   softDeleteComment,
   uncheerPour,
   unblockUser,
@@ -914,5 +923,281 @@ describe("codex round-5 hardening", () => {
     });
     expect(await listFollowing(db, a.id)).toHaveLength(0);
     expect(await listFollowers(db, b.id)).toHaveLength(0);
+  });
+});
+
+describe("phone discovery", () => {
+  let db: DB;
+  beforeEach(async () => {
+    db = await setupTestDb();
+  });
+
+  it("setPhone requires an existing profile — null otherwise", async () => {
+    const user = await createTestUser(db);
+    expect(await setPhone(db, user.id, "415-555-0123", true)).toBeNull();
+  });
+
+  it("setPhone normalizes+hashes: the raw number is never stored, only the hash + last 2", async () => {
+    const user = await createTestUser(db);
+    await claim(db, user, "phoneowner");
+
+    const result = await setPhone(db, user.id, "(415) 555-0123", false);
+    expect(result).toEqual({ phoneLast2: "23", phoneDiscoverable: false });
+
+    const profile = await getOwnProfile(db, user.id);
+    expect(profile?.userId).toBeDefined();
+    const row = await db.query.userProfiles.findFirst({ where: eq(schema.userProfiles.userId, user.id) });
+    expect(row?.phoneHash).toBeTruthy();
+    expect(row?.phoneHash).not.toContain("4155550123");
+    expect(row?.phoneHash).not.toBe("(415) 555-0123");
+    expect(row?.phoneLast2).toBe("23");
+  });
+
+  it("setPhone rejects a malformed number with InvalidPhoneError", async () => {
+    const user = await createTestUser(db);
+    await claim(db, user, "phoneowner2");
+    await expect(setPhone(db, user.id, "not a phone", false)).rejects.toBeInstanceOf(InvalidPhoneError);
+  });
+
+  it("setPhone throws PhoneTakenError when another account already holds the number", async () => {
+    const first = await createTestUser(db);
+    const second = await createTestUser(db);
+    await claim(db, first, "firstphone");
+    await claim(db, second, "secondphone");
+
+    await setPhone(db, first.id, "4155550123", false);
+    await expect(setPhone(db, second.id, "4155550123", false)).rejects.toBeInstanceOf(PhoneTakenError);
+  });
+
+  it("setPhone lets a user re-save their own already-claimed number without a false PhoneTakenError", async () => {
+    const user = await createTestUser(db);
+    await claim(db, user, "resaver");
+    await setPhone(db, user.id, "4155550123", false);
+    await expect(setPhone(db, user.id, "4155550123", true)).resolves.toEqual({
+      phoneLast2: "23",
+      phoneDiscoverable: true,
+    });
+  });
+
+  it("setPhone with discoverable=true while stepped back throws SocialDisabledError; discoverable=false is always allowed", async () => {
+    const user = await createTestUser(db);
+    await claim(db, user, "steppedback", { socialEnabled: false });
+
+    await expect(setPhone(db, user.id, "4155550123", true)).rejects.toBeInstanceOf(SocialDisabledError);
+    await expect(setPhone(db, user.id, "4155550123", false)).resolves.toEqual({
+      phoneLast2: "23",
+      phoneDiscoverable: false,
+    });
+  });
+
+  it("clearPhone removes the number and turns discoverability off; false when there's no profile", async () => {
+    const noProfile = await createTestUser(db);
+    expect(await clearPhone(db, noProfile.id)).toBe(false);
+
+    const user = await createTestUser(db);
+    await claim(db, user, "clearme");
+    await setPhone(db, user.id, "4155550123", true);
+    expect(await clearPhone(db, user.id)).toBe(true);
+
+    const row = await db.query.userProfiles.findFirst({ where: eq(schema.userProfiles.userId, user.id) });
+    expect(row?.phoneHash).toBeNull();
+    expect(row?.phoneLast2).toBeNull();
+    expect(row?.phoneDiscoverable).toBe(false);
+  });
+
+  it("setPhoneDiscoverable flips the flag; true while stepped back throws SocialDisabledError", async () => {
+    const user = await createTestUser(db);
+    await claim(db, user, "flipper");
+    await setPhone(db, user.id, "4155550123", false);
+
+    expect(await setPhoneDiscoverable(db, user.id, true)).toBe(true);
+    let row = await db.query.userProfiles.findFirst({ where: eq(schema.userProfiles.userId, user.id) });
+    expect(row?.phoneDiscoverable).toBe(true);
+
+    expect(await setPhoneDiscoverable(db, user.id, false)).toBe(true);
+    row = await db.query.userProfiles.findFirst({ where: eq(schema.userProfiles.userId, user.id) });
+    expect(row?.phoneDiscoverable).toBe(false);
+
+    await db.update(schema.userProfiles).set({ socialEnabled: false }).where(eq(schema.userProfiles.userId, user.id));
+    await expect(setPhoneDiscoverable(db, user.id, true)).rejects.toBeInstanceOf(SocialDisabledError);
+    await expect(setPhoneDiscoverable(db, user.id, false)).resolves.toBe(true);
+  });
+
+  it("setPhoneDiscoverable returns false when there's no profile", async () => {
+    const user = await createTestUser(db);
+    expect(await setPhoneDiscoverable(db, user.id, true)).toBe(false);
+  });
+
+  it("findProfileByPhone: opt-in matrix — no number, not discoverable, stepped back, blocked, and the happy path", async () => {
+    const viewer = await createTestUser(db);
+    await claim(db, viewer, "phoneviewer");
+
+    const noNumber = await createTestUser(db);
+    await claim(db, noNumber, "nonumber");
+    expect(await findProfileByPhone(db, viewer.id, "4155550001")).toBeNull();
+
+    const notDiscoverable = await createTestUser(db);
+    await claim(db, notDiscoverable, "notdiscoverable");
+    await setPhone(db, notDiscoverable.id, "4155550002", false);
+    expect(await findProfileByPhone(db, viewer.id, "4155550002")).toBeNull();
+
+    const steppedBack = await createTestUser(db);
+    await claim(db, steppedBack, "steppedbackphone");
+    await setPhone(db, steppedBack.id, "4155550003", true);
+    await db.update(schema.userProfiles).set({ socialEnabled: false }).where(eq(schema.userProfiles.userId, steppedBack.id));
+    expect(await findProfileByPhone(db, viewer.id, "4155550003")).toBeNull();
+
+    const blocked = await createTestUser(db);
+    await claim(db, blocked, "blockedphone");
+    await setPhone(db, blocked.id, "4155550004", true);
+    await blockUser(db, viewer.id, blocked.id);
+    expect(await findProfileByPhone(db, viewer.id, "4155550004")).toBeNull();
+
+    const findable = await createTestUser(db);
+    await claim(db, findable, "findableuser");
+    await setPhone(db, findable.id, "4155550005", true);
+    const match = await findProfileByPhone(db, viewer.id, "4155550005");
+    expect(match).toEqual({
+      userId: findable.id,
+      handle: "findableuser",
+      displayName: expect.any(String),
+      avatarUrl: null,
+    });
+  });
+
+  it("findProfileByPhone throws InvalidPhoneError for a malformed number", async () => {
+    const viewer = await createTestUser(db);
+    await claim(db, viewer, "invalidlookup");
+    await expect(findProfileByPhone(db, viewer.id, "abc")).rejects.toBeInstanceOf(InvalidPhoneError);
+  });
+
+  it("findProfileByPhone durably rate-limits at 21 lookups/hour, counting misses toward the limit", async () => {
+    const viewer = await createTestUser(db);
+    await claim(db, viewer, "ratelimited");
+
+    for (let i = 0; i < PHONE_LOOKUP_LIMIT_PER_HOUR; i += 1) {
+      // Every one of these is a miss — misses count toward the limit too (the
+      // enumeration guard), so the 20 misses alone exhaust it.
+      expect(await findProfileByPhone(db, viewer.id, `415555${String(9000 + i)}`)).toBeNull();
+    }
+    await expect(findProfileByPhone(db, viewer.id, "4155559999")).rejects.toBeInstanceOf(RateLimitedError);
+
+    const rows = await db.query.phoneLookups.findMany({ where: eq(schema.phoneLookups.userId, viewer.id) });
+    expect(rows).toHaveLength(PHONE_LOOKUP_LIMIT_PER_HOUR);
+  });
+
+  it("setPhone draws from the same probe budget — saving candidates can't out-enumerate the lookup limit", async () => {
+    const user = await createTestUser(db);
+    await claim(db, user, "probesaver");
+
+    for (let i = 0; i < PHONE_LOOKUP_LIMIT_PER_HOUR; i += 1) {
+      expect(await findProfileByPhone(db, user.id, `415555${String(9000 + i)}`)).toBeNull();
+    }
+    // The exhausted budget blocks set attempts too: posting candidates with
+    // discoverable=false would otherwise read "phone_taken vs success" as an
+    // unmetered registered-number oracle that ignores discoverability.
+    await expect(setPhone(db, user.id, "4155550123", false)).rejects.toBeInstanceOf(RateLimitedError);
+  });
+
+  it("each permitted probe sweeps rows that aged out of the rate window", async () => {
+    const user = await createTestUser(db);
+    await claim(db, user, "sweeper");
+
+    await db.insert(schema.phoneLookups).values({
+      id: crypto.randomUUID(),
+      userId: user.id,
+      createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000),
+    });
+
+    expect(await findProfileByPhone(db, user.id, "4155550001")).toBeNull();
+
+    const rows = await db.query.phoneLookups.findMany({ where: eq(schema.phoneLookups.userId, user.id) });
+    // Only the probe just recorded survives — the expired row no longer
+    // counted toward the limit and is gone rather than accumulating forever.
+    expect(rows).toHaveLength(1);
+  });
+});
+
+describe("getAddTarget", () => {
+  let db: DB;
+  beforeEach(async () => {
+    db = await setupTestDb();
+  });
+
+  it("returns null for a missing handle", async () => {
+    const viewer = await createTestUser(db);
+    await claim(db, viewer, "addviewer1");
+    expect(await getAddTarget(db, viewer.id, "ghost")).toBeNull();
+  });
+
+  it("returns null when the target has socialEnabled=false", async () => {
+    const viewer = await createTestUser(db);
+    await claim(db, viewer, "addviewer2");
+    const target = await createTestUser(db);
+    await claim(db, target, "steppedbacktarget", { socialEnabled: false });
+    expect(await getAddTarget(db, viewer.id, "steppedbacktarget")).toBeNull();
+  });
+
+  it("returns null when either party has blocked the other", async () => {
+    const viewer = await createTestUser(db);
+    await claim(db, viewer, "addviewer3");
+    const target = await createTestUser(db);
+    await claim(db, target, "addtarget3");
+    await blockUser(db, viewer.id, target.id);
+    expect(await getAddTarget(db, viewer.id, "addtarget3")).toBeNull();
+
+    const target2 = await createTestUser(db);
+    await claim(db, target2, "addtarget3b");
+    await blockUser(db, target2.id, viewer.id);
+    expect(await getAddTarget(db, viewer.id, "addtarget3b")).toBeNull();
+  });
+
+  it("isSelf is allowed through and flagged", async () => {
+    const user = await createTestUser(db);
+    await claim(db, user, "addself");
+    const result = await getAddTarget(db, user.id, "addself");
+    expect(result).toMatchObject({ isSelf: true, followState: null, followsYou: false });
+    expect(result?.profile.handle).toBe("addself");
+  });
+
+  it("returns identity + follow state for a reachable target", async () => {
+    const viewer = await createTestUser(db);
+    await claim(db, viewer, "addviewer4", { isPublic: true });
+    const target = await createTestUser(db);
+    await claim(db, target, "addtarget4", { isPublic: true });
+
+    const before = await getAddTarget(db, viewer.id, "addtarget4");
+    expect(before).toMatchObject({ isSelf: false, followState: null, followsYou: false, isPublic: true });
+
+    await followByHandle(db, viewer.id, "addtarget4");
+    await followByHandle(db, target.id, "addviewer4");
+
+    const after = await getAddTarget(db, viewer.id, "addtarget4");
+    expect(after?.followState).toBe("accepted");
+    expect(after?.followsYou).toBe(true);
+  });
+});
+
+describe("privacy reset clears phone discovery", () => {
+  it("makeEverythingPrivate flips phoneDiscoverable off; re-enable does not restore it", async () => {
+    const db = await setupTestDb();
+    const user = await createTestUser(db);
+    await claim(db, user, "phone_reset", { isPublic: true });
+    await setPhone(db, user.id, "+15551230099", true);
+
+    await makeEverythingPrivate(db, user.id);
+    let profile = await db.query.userProfiles.findFirst({
+      where: eq(schema.userProfiles.userId, user.id),
+    });
+    expect(profile?.phoneDiscoverable).toBe(false);
+    // The number itself is kept (nothing deleted) — only discovery is off.
+    expect(profile?.phoneHash).not.toBeNull();
+
+    const { setSocialEnabled } = await import("@/lib/social");
+    await setSocialEnabled(db, user.id, true);
+    profile = await db.query.userProfiles.findFirst({
+      where: eq(schema.userProfiles.userId, user.id),
+    });
+    expect(profile?.phoneDiscoverable).toBe(false);
   });
 });
