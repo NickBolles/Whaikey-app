@@ -9,6 +9,7 @@ import { ONBOARDING_COOKIE, needsOnboarding } from "@/lib/onboarding";
 import { getFriendFeed, getOwnProfile, listFollowing } from "@/lib/social";
 import { HomeConcierge } from "@/components/home-concierge";
 import { HomeHero } from "@/components/home-hero";
+import { RecommendationRail } from "@/components/recommendation-rail";
 import { FriendsModule, type FriendFeedItem } from "@/components/friends-module";
 import { ChevronRight, GraduationCap, Star } from "lucide-react";
 
@@ -133,6 +134,10 @@ export default async function HomePage() {
       </header>
 
       <HomeHero bottleCount={bottleCount} pourCount={pourCount} />
+
+      {/* Discovery pairs with tonight's pick: both answer "what's next?" —
+          which is Home's job. My Bar stays about the bottles you own. */}
+      {bottleCount > 0 && <RecommendationRail mode="discovery" title="For your palate" />}
 
       <FriendsModule items={friendFeedItems} hasProfile={hasProfile} hasFollows={hasFollows} />
 

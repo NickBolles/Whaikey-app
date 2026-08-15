@@ -890,13 +890,9 @@ describe("BarClient analytics-first layout", () => {
     expect(map.compareDocumentPosition(bottle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Insights" })).not.toBeInTheDocument();
 
-    // The stats strip stays above the map, and the discovery rail sits between
-    // the map and the filter bar that fronts the list.
+    // The stats strip stays above the map.
     const stats = screen.getByRole("region", { name: "Bar stats" });
     expect(stats.compareDocumentPosition(map) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    const rail = screen.getByRole("heading", { name: "For your palate" });
-    expect(map.compareDocumentPosition(rail) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(rail.compareDocumentPosition(bottle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("shows one slim stats strip on the own shelf only — the sole money surface", () => {
@@ -916,11 +912,11 @@ describe("BarClient analytics-first layout", () => {
     expect(screen.queryByRole("region", { name: "Bar stats" })).not.toBeInTheDocument();
   });
 
-  it("keeps the discovery rail but not the tonight rail, which moved to Home", () => {
+  it("hosts no recommendation rails — both moved to Home", () => {
     render(<BarClient initialRows={[]} flavorHeat={heatMatrix()}
         calibration={calibrationMatrix()} palate={palate} />);
 
-    expect(screen.getByRole("heading", { name: "For your palate" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "For your palate" })).not.toBeInTheDocument();
     expect(screen.queryByText(/pour tonight/i)).not.toBeInTheDocument();
   });
 

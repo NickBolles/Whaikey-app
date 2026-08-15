@@ -16,10 +16,9 @@ async function settle(page: Page) {
   // captured mid-fetch is ~400px shorter than the settled page and fails
   // wherever the fetch wins the race — which is how CI renders it. Resolves
   // immediately on pages that have no rails.
-  await page
-    .getByText("Finding bottles…")
-    .first()
-    .waitFor({ state: "detached", timeout: 15_000 });
+  // Home renders two rails (hero + discovery) that both show this copy, so
+  // wait for every instance to clear, not just the first.
+  await expect(page.getByText("Finding bottles…")).toHaveCount(0, { timeout: 15_000 });
   await page.waitForLoadState("networkidle");
   await page.evaluate(() => document.fonts.ready);
   // Sticky bars get painted at scroll seams in fullPage captures — pin them
@@ -131,7 +130,7 @@ test.describe("signed in (demo collector)", () => {
   test("my bar", async ({ page }) => {
     await page.goto("/bar");
     await expect(page.getByText(/Eagle Rare/i).first()).toBeVisible();
-    await expect(page.getByRole("heading", { name: "For your palate" })).toBeVisible();
+    await expect(page.getByRole("region", { name: /flavor map/i })).toBeVisible();
     await settle(page);
     await expect(page).toHaveScreenshot(shot("bar-own"), { fullPage: true });
   });
@@ -204,7 +203,7 @@ test.describe("signed in (demo collector)", () => {
     await expect(page.getByRole("button", { name: "Remove Open filter" })).toBeVisible();
     await settle(page);
     await expect(page.getByLabel("Active filters")).toBeVisible();
-    await expect(page.getByRole("heading", { name: "For your palate" })).toBeVisible();
+    await expect(page.getByRole("region", { name: /flavor map/i })).toBeVisible();
     await expect(page).toHaveScreenshot(shot("bar-filter-panel"), { fullPage: true });
   });
 

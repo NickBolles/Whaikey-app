@@ -19,7 +19,6 @@ import {
 } from "@/components/bar-flavor-wheel";
 import { FillGauge } from "@/components/fill-gauge";
 import { FlavorHeatLegend } from "@/components/flavor-wheel";
-import { RecommendationRail } from "@/components/recommendation-rail";
 import { FlavorRadar } from "@/components/flavor-radar";
 
 /** BarRow with dates possibly serialized to strings (API JSON responses). */
@@ -618,10 +617,6 @@ export function BarClient({
           rowNoun={collection === "tried" ? "tastings" : "bottles"}
           topWedgeIds={palate.topWedgeIds}
         />
-      )}
-
-      {collection === "own" && (
-        <RecommendationRail mode="discovery" title="For your palate" />
       )}
 
       <FilterBar
