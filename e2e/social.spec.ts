@@ -144,7 +144,8 @@ test.describe("social: signed in as Jordan (the demo user)", () => {
 
     // Second face: phone-discovery settings live inside the same card.
     await page.getByRole("tab", { name: "How you're found" }).click();
-    await expect(page.getByLabel("Phone number")).toBeVisible();
+    // exact: the add-friend input's label also contains "phone number".
+    await expect(page.getByLabel("Phone number", { exact: true })).toBeVisible();
     await expect(page.getByRole("switch", { name: "Let people find me by phone" })).toBeVisible();
   });
 
@@ -164,8 +165,9 @@ test.describe("social: signed in as Jordan (the demo user)", () => {
     // Not anchored/exact: the chip ("Friends") and the state pill ("Following")
     // sit as adjacent inline spans, so the accessibility tree can merge their
     // text into one node — a substring match is robust to that either way.
-    await expect(page.getByText("Friends", { exact: true })).toBeVisible();
-    await expect(page.getByText(/Following/)).toBeVisible();
+    // Scoped to main: the bottom nav's Friends tab also carries this text.
+    await expect(page.getByRole("main").getByText("Friends", { exact: true })).toBeVisible();
+    await expect(page.getByRole("main").getByText(/Following/)).toBeVisible();
   });
 
   test("typing Sasha's seeded phone number looks her up and lands on /add/sasha", async ({ page }) => {
@@ -323,7 +325,8 @@ test.describe("social: phone discovery settings", () => {
     // No number yet (or a fresh claim): the add form is showing. Discovery is
     // never preselected (docs/SOCIAL.md D8 as amended), so opting in is an
     // explicit tap before saving.
-    const phoneInput = finderCard.getByLabel("Phone number");
+    // exact: the add-friend input's label also contains "phone number".
+    const phoneInput = finderCard.getByLabel("Phone number", { exact: true });
     if (await phoneInput.isVisible().catch(() => false)) {
       await phoneInput.fill("+15551230099");
       const optIn = finderCard.getByRole("switch", { name: "Let people find me by phone" });

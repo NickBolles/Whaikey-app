@@ -282,7 +282,9 @@ test.describe("signed in (demo collector)", () => {
     // exact: the redesigned page adds a "Find friends" h2 alongside the h1.
     await expect(page.getByRole("heading", { name: "Friends", exact: true })).toBeVisible();
     await expect(page.getByText("Sasha Glen").first()).toBeVisible();
-    await expect(page.getByText("Friends", { exact: true }).last()).toBeVisible();
+    // Scoped to main (the bottom nav's Friends tab matches too); .last() is
+    // the mutual chip rather than the page h1.
+    await expect(page.getByRole("main").getByText("Friends", { exact: true }).last()).toBeVisible();
     await settle(page);
     await expect(page).toHaveScreenshot(shot("friends"), { fullPage: true });
   });
@@ -290,7 +292,8 @@ test.describe("signed in (demo collector)", () => {
   test("add-confirm: Sasha's identity preview with the Following state", async ({ page }) => {
     await page.goto("/add/sasha");
     await expect(page.getByRole("heading", { name: "Sasha Glen" })).toBeVisible();
-    await expect(page.getByText("Friends", { exact: true })).toBeVisible();
+    // Scoped to main: the bottom nav's Friends tab also carries this text.
+    await expect(page.getByRole("main").getByText("Friends", { exact: true })).toBeVisible();
     await settle(page);
     await expect(page).toHaveScreenshot(shot("add-confirm"), { fullPage: true });
   });
