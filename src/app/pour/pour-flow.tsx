@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ChevronDown, ChevronUp, CloudOff, GlassWater, ScanLine, Search, Star } from "lucide-react";
+import { CloudOff, GlassWater, ScanLine, Search, Star, UserPlus } from "lucide-react";
 import { SERVING_STYLES, type PourVisibility, type ServingStyle } from "@/db/schema";
+import { matchLeafIds } from "@/lib/flavor-wheel";
 import { StarRating } from "@/components/star-rating";
 import { FlavorWheelInput } from "@/components/flavor-wheel-input";
 import { NoteCapture, type ExtractedTastingNote } from "@/components/note-capture";
@@ -25,6 +26,15 @@ interface SearchResult {
 }
 
 const POUR_SIZES = [30, 45, 60] as const;
+
+/** The three places a note can land; one persistent wheel serves them all. */
+const NOTE_SECTIONS = [
+  { key: "nose", label: "Nose", placeholder: "What do you smell?" },
+  { key: "palate", label: "Palate", placeholder: "What do you taste?" },
+  { key: "finish", label: "Finish", placeholder: "How does it linger?" },
+] as const;
+
+type NoteSection = (typeof NOTE_SECTIONS)[number]["key"];
 
 function distilleryName(d: SearchResult["distillery"]): string | null {
   if (!d) return null;
@@ -208,7 +218,9 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
   const [rating, setRating] = useState<number | null>(null);
   const [servingStyle, setServingStyle] = useState<ServingStyle | null>(null);
   const [amountMl, setAmountMl] = useState<number>(45);
-  const [notesOpen, setNotesOpen] = useState(true);
+  const [activeSection, setActiveSection] = useState<NoteSection>("nose");
+  const [peopleOpen, setPeopleOpen] = useState(false);
+  const [companions, setCompanions] = useState("");
   const [nose, setNose] = useState("");
   const [palate, setPalate] = useState("");
   const [finish, setFinish] = useState("");
@@ -254,7 +266,9 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
     setRating(null);
     setServingStyle(null);
     setAmountMl(45);
-    setNotesOpen(true);
+    setActiveSection("nose");
+    setPeopleOpen(false);
+    setCompanions("");
     setNose("");
     setPalate("");
     setFinish("");
@@ -269,6 +283,8 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
 
   // Merge an AI extraction into the user's in-progress note WITHOUT clobbering
   // anything they've already entered. Extraction assists; the user stays author.
+  // Nothing is hidden behind a disclosure anymore — the section tabs' counts
+  // make anything that landed visible without switching.
   const applyExtraction = (r: ExtractedTastingNote) => {
     if (r.nose && !nose.trim()) setNose(r.nose);
     if (r.palate && !palate.trim()) setPalate(r.palate);
@@ -276,14 +292,6 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
     if (Object.keys(r.flavorTags).length > 0) {
       setFlavorTags((cur) => ({ ...r.flavorTags, ...cur }));
     }
-    // Anything that landed in the collapsed section is opened for review —
-    // applied values the user can't see are values they can't correct.
-    const filledDetails =
-      (r.nose && !nose.trim()) ||
-      (r.palate && !palate.trim()) ||
-      (r.finish && !finish.trim()) ||
-      Object.keys(r.flavorTags).length > 0;
-    if (filledDetails) setNotesOpen(true);
     if (r.suggestedRating != null && rating == null) setRating(r.suggestedRating);
     if (
       r.servingStyle &&
@@ -294,7 +302,12 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
     }
   };
 
-  const submit = async () => {
+  /**
+   * `bare` is the "just drinking?" path: record the dram — bottle, amount,
+   * serving, company — and deliberately leave any half-typed note or rating
+   * behind. A pour with one flavor and no score is equally valid via Save.
+   */
+  const submit = async (bare = false) => {
     if (!bottle || submitting) return;
     setSubmitting(true);
     setSubmitError(null);
@@ -306,13 +319,14 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
       freeform: freeform.trim() || undefined,
       flavorTags: Object.keys(flavorTags).length > 0 ? flavorTags : undefined,
     };
-    const hasNote = Object.values(noteFields).some((v) => v !== undefined);
+    const hasNote = !bare && Object.values(noteFields).some((v) => v !== undefined);
 
     const payload = {
       bottleId: bottle.id,
-      rating: rating ?? undefined,
+      rating: bare ? undefined : rating ?? undefined,
       servingStyle: servingStyle ?? undefined,
       amountMl,
+      context: companions.trim() ? { companions: companions.trim() } : undefined,
       note: hasNote ? noteFields : undefined,
       visibility,
     };
@@ -327,7 +341,7 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
         const data = await res.json().catch(() => null);
         throw new Error(data?.error ?? "Something went wrong saving your pour.");
       }
-      setDone({ bottleName: bottle.name, rating, queued: false });
+      setDone({ bottleName: bottle.name, rating: bare ? null : rating, queued: false });
     } catch (err) {
       // A pour is logged where the whiskey is, and that is routinely somewhere
       // with no signal (PLAN.md §4.2). Losing the note the user just wrote is a
@@ -335,7 +349,7 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
       // instead of erroring. A server that answered and said no is a real error.
       if (err instanceof TypeError) {
         await enqueuePour({ body: payload, bottleName: bottle.name });
-        setDone({ bottleName: bottle.name, rating, queued: true });
+        setDone({ bottleName: bottle.name, rating: bare ? null : rating, queued: true });
       } else {
         setSubmitError(err instanceof Error ? err.message : "Something went wrong.");
       }
@@ -384,11 +398,28 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
 
   return (
     <div className="px-4 pt-8 pb-24 flex flex-col gap-6 max-w-lg mx-auto">
-      <header>
-        <h1 className="font-display text-[2rem] leading-tight font-semibold">Log a pour</h1>
-        <p className="text-muted text-sm mt-1">
-          {bottle ? "How was it?" : "Pick a bottle to get started."}
-        </p>
+      {/* Save lives in the header from the first tap — a pour with one flavor
+          and no score is already valid. */}
+      <header
+        data-sticky
+        className="sticky top-0 z-30 -mx-4 flex items-center justify-between gap-3 bg-background/95 px-4 py-2 backdrop-blur"
+      >
+        <div>
+          <h1 className="font-display text-[2rem] leading-tight font-semibold">Log a pour</h1>
+          <p className="text-muted text-sm mt-1">
+            {bottle ? "How was it?" : "Pick a bottle to get started."}
+          </p>
+        </div>
+        {bottle && (
+          <button
+            type="button"
+            onClick={() => submit()}
+            disabled={submitting}
+            className="btn-primary shrink-0 px-5 py-2.5 text-sm disabled:opacity-60"
+          >
+            {submitting ? "Saving…" : "Save"}
+          </button>
+        )}
       </header>
 
       {!bottle ? (
@@ -430,13 +461,8 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
             />
           </section>
 
-          <section aria-label="Rating" className="flex flex-col gap-3">
-            <h2 className="section-label">Rating</h2>
-            <StarRating value={rating} onChange={setRating} />
-          </section>
-
-          <section aria-label="Serving style" className="flex flex-col gap-3">
-            <h2 className="section-label">Serving</h2>
+          {/* Context chips: how it was served, how much, and who with. */}
+          <section aria-label="Context" className="flex flex-col gap-2.5">
             <div className="flex flex-wrap gap-2" role="group" aria-label="Serving style">
               {SERVING_STYLES.map((style) => (
                 <button
@@ -451,6 +477,17 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
                   {style}
                 </button>
               ))}
+              <button
+                type="button"
+                aria-pressed={peopleOpen}
+                aria-expanded={peopleOpen}
+                onClick={() => setPeopleOpen((o) => !o)}
+                className={`chip inline-flex min-h-11 items-center gap-1.5 px-4 text-sm ${
+                  peopleOpen || companions.trim() ? "chip-active font-medium" : "hover:bg-surface-raised"
+                }`}
+              >
+                <UserPlus size={14} strokeWidth={1.8} aria-hidden /> People
+              </button>
             </div>
             <div className="flex gap-2" role="group" aria-label="Pour size">
               {POUR_SIZES.map((ml) => (
@@ -467,71 +504,86 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
                 </button>
               ))}
             </div>
-          </section>
-
-          <section aria-label="Tasting notes" className="flex flex-col gap-3">
-            <button
-              type="button"
-              onClick={() => setNotesOpen((o) => !o)}
-              aria-expanded={notesOpen}
-              className="card flex items-center justify-between p-4 hover:brightness-110 transition-[filter]"
-            >
-              <span className="font-medium text-sm">
-                Tasting notes <span className="text-muted font-normal">(optional)</span>
-              </span>
-              {notesOpen ? (
-                <ChevronUp size={18} strokeWidth={1.8} className="text-muted" aria-hidden />
-              ) : (
-                <ChevronDown size={18} strokeWidth={1.8} className="text-muted" aria-hidden />
-              )}
-            </button>
-
-            {notesOpen && (
-              <div className="flex flex-col gap-4">
-                {(
-                  [
-                    ["Nose", nose, setNose],
-                    ["Palate", palate, setPalate],
-                    ["Finish", finish, setFinish],
-                  ] as const
-                ).map(([label, val, set]) => (
-                  <label key={label} className="flex flex-col gap-1.5">
-                    <span className="section-label">{label}</span>
-                    <textarea
-                      value={val}
-                      onChange={(e) => set(e.target.value)}
-                      rows={2}
-                      placeholder={
-                        label === "Nose"
-                          ? "What do you smell?"
-                          : label === "Palate"
-                            ? "What do you taste?"
-                            : "How does it linger?"
-                      }
-                      className="rounded-xl bg-surface border border-border-subtle p-3 text-sm placeholder:text-muted focus:outline-none focus:border-accent focus-visible:ring-2 focus-visible:ring-accent/60 resize-y"
-                    />
-                  </label>
-                ))}
-
-                <div className="flex flex-col gap-1.5">
-                  <span className="section-label">Flavor wheel</span>
-                  <FlavorWheelInput value={flavorTags} onChange={setFlavorTags} />
-                </div>
-
-                <div className="flex flex-col gap-1.5">
-                  <span className="section-label">Who can see this</span>
-                  <VisibilityChips
-                    value={visibility}
-                    onChange={(value) => {
-                      visibilityDirtyRef.current = true;
-                      setVisibility(value);
-                    }}
-                    idPrefix="pour-visibility"
-                  />
-                </div>
-              </div>
+            {peopleOpen && (
+              <label className="flex flex-col gap-1.5">
+                <span className="sr-only">Who you shared it with</span>
+                <input
+                  value={companions}
+                  onChange={(e) => setCompanions(e.target.value)}
+                  placeholder="Who was there? (optional)"
+                  className="rounded-xl bg-surface border border-border-subtle px-3 py-2.5 text-sm placeholder:text-muted focus:outline-none focus:border-accent"
+                />
+              </label>
             )}
           </section>
+
+          {/* Nose / palate / finish are a filter row over ONE persistent wheel,
+              not three steps: each tab counts the flavors its text names, so
+              coverage is visible without switching. */}
+          <section aria-label="Tasting notes" className="flex flex-col gap-3">
+            <div role="tablist" aria-label="Note section" className="flex gap-1.5">
+              {NOTE_SECTIONS.map((section) => {
+                const text = { nose, palate, finish }[section.key];
+                const count = matchLeafIds(text).length;
+                const active = activeSection === section.key;
+                return (
+                  <button
+                    key={section.key}
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => setActiveSection(section.key)}
+                    className={`tap-target inline-flex min-h-9 flex-1 items-center justify-center gap-1 rounded-full border px-2 text-[12.5px] font-medium transition-colors ${
+                      active ? "chip-active" : "border-border-subtle text-muted hover:text-foreground"
+                    }`}
+                  >
+                    {section.label}
+                    {count > 0 && (
+                      <span className="font-mono text-[10.5px] opacity-70 tabular-nums"> · {count}</span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+            {NOTE_SECTIONS.map((section) => {
+              if (section.key !== activeSection) return null;
+              const [value, set] =
+                section.key === "nose"
+                  ? ([nose, setNose] as const)
+                  : section.key === "palate"
+                    ? ([palate, setPalate] as const)
+                    : ([finish, setFinish] as const);
+              return (
+                <label key={section.key} className="flex flex-col gap-1.5">
+                  <span className="sr-only">{section.label}</span>
+                  <textarea
+                    value={value}
+                    onChange={(e) => set(e.target.value)}
+                    rows={2}
+                    placeholder={section.placeholder}
+                    className="rounded-xl bg-surface border border-border-subtle p-3 text-sm placeholder:text-muted focus:outline-none focus:border-accent focus-visible:ring-2 focus-visible:ring-accent/60 resize-y"
+                  />
+                </label>
+              );
+            })}
+            <FlavorWheelInput value={flavorTags} onChange={setFlavorTags} />
+          </section>
+
+          <section aria-label="Rating" className="flex flex-col gap-3">
+            <h2 className="section-label">Rating</h2>
+            <StarRating value={rating} onChange={setRating} />
+          </section>
+
+          <div className="flex flex-col gap-1.5">
+            <span className="section-label">Who can see this</span>
+            <VisibilityChips
+              value={visibility}
+              onChange={(value) => {
+                visibilityDirtyRef.current = true;
+                setVisibility(value);
+              }}
+              idPrefix="pour-visibility"
+            />
+          </div>
 
           {submitError && (
             <p role="alert" className="text-sm text-danger rounded-xl border border-danger/40 bg-surface p-3">
@@ -541,11 +593,21 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
 
           <button
             type="button"
-            onClick={submit}
+            onClick={() => submit()}
             disabled={submitting}
             className="btn-primary w-full py-3.5 text-base disabled:opacity-60"
           >
             {submitting ? "Saving…" : "Save pour"}
+          </button>
+
+          {/* mb keeps this clear of the floating ＋ button in the nav. */}
+          <button
+            type="button"
+            onClick={() => submit(true)}
+            disabled={submitting}
+            className="tap-target mx-auto mb-6 px-2 text-sm text-muted underline-offset-2 hover:text-foreground hover:underline disabled:opacity-60"
+          >
+            Just drinking? Log the pour without notes
           </button>
         </div>
       )}
