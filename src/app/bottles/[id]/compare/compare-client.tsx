@@ -104,12 +104,9 @@ export function CompareClient({ comparison }: { comparison: BottleComparison }) 
   }
 
   const discussPourId = comparison.friends.notes[0]?.pourId ?? null;
-  const segmentNotes: CompareProseNote[] =
-    source === "friends"
-      ? comparison.friends.notes
-      : source === "community"
-        ? comparison.community.notes
-        : [];
+  // Only friends have prose here: the community segment is an anonymous
+  // aggregate until S4 public discovery clears its jurisdiction review.
+  const segmentNotes: CompareProseNote[] = source === "friends" ? comparison.friends.notes : [];
 
   return (
     <div className="flex flex-col gap-6 px-4 pb-10 pt-5">
@@ -205,6 +202,13 @@ export function CompareClient({ comparison }: { comparison: BottleComparison }) 
           // The absence is informative, so the segment stays and says so.
           <p className="px-1 text-sm text-muted">{SOURCE_META[source].empty}</p>
         )}
+
+        {source === "community" && comparison.community.count > 0 && (
+          <p className="px-1 text-[11px] leading-relaxed text-muted">
+            Counted from pours their owners made public, and anonymous by design — who said
+            what stays between you and the people you follow.
+          </p>
+        )}
       </section>
 
       {/* The distillery card is the fixed reference: visible under EVERY segment. */}
@@ -218,11 +222,6 @@ export function CompareClient({ comparison }: { comparison: BottleComparison }) 
               {sharedWithProducer.length} of {producerTagIds.length} shared
             </span>
           </div>
-          {producer.text && (
-            <p className="font-display text-[15px] italic leading-relaxed text-foreground/80">
-              {producer.text}
-            </p>
-          )}
           <div className="flex flex-wrap gap-1.5">
             {producerTagIds.map((leafId) =>
               (viewerTags[leafId] ?? 0) > 0 ? (
@@ -272,6 +271,14 @@ export function CompareClient({ comparison }: { comparison: BottleComparison }) 
                   )}
                 </div>
                 <p className="text-sm leading-relaxed text-foreground/85">{critic.note}</p>
+                <a
+                  href={critic.sourceUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-[11px] text-muted transition-colors hover:text-foreground"
+                >
+                  Read the review
+                </a>
               </li>
             ))}
           </ul>

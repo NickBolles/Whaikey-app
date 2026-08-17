@@ -142,14 +142,25 @@ describe("getBottleComparison", () => {
     expect(cmp!.friends.tags).toEqual({ campfire: 2, peat: 2 });
     expect(cmp!.friends.notes[0].text).toBe("Smoke first.");
 
-    // Community: only the public pour, not the friend's friends-only one.
+    // Community: only the public pour, not the friend's friends-only one —
+    // and as an ANONYMOUS aggregate: no author, no prose, nothing that could
+    // surface a stranger's note before S4 public discovery.
     expect(cmp!.community.count).toBe(1);
     expect(cmp!.community.tags).toEqual({ medicinal: 3 });
+    expect(cmp!.community).not.toHaveProperty("notes");
+    expect(JSON.stringify(cmp!.community)).not.toContain("stranger");
 
     // Professional: producer plus critic, merged by max, both preserved.
     expect(cmp!.professional.tags).toEqual({ peat: 3, campfire: 2, tar: 2 });
-    expect(cmp!.professional.producer?.text).toBe("Deep smoke over dried fruit.");
     expect(cmp!.professional.critics[0].publication).toBe("Whisky Review");
+    expect(cmp!.professional.critics[0].sourceUrl).toBe("https://example.com/review");
+    // The catalog description is Whaikey's editorial copy, not the producer's
+    // prose, so it never rides along under the producer's attribution.
+    expect(cmp!.professional.producer).toEqual({
+      sourceLabel: "Distillery tasting notes",
+      sourceUrl: "https://example.com/notes",
+      tags: { peat: 3, campfire: 2 },
+    });
 
     // Three different match percentages — the point of the screen.
     const friendsMatch = matchPercent(cmp!.viewerTags, cmp!.friends.tags);

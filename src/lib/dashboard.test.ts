@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
 import { createTestBottle, createTestUser, setupTestDb, uid } from "@/test/helpers";
-import { estimatedPoursLeft, getDashboard } from "./dashboard";
+import { getDashboard } from "./dashboard";
 
 const NOW = new Date("2026-07-19T19:30:00Z");
 
@@ -35,24 +35,28 @@ describe("getDashboard", () => {
     db = await setupTestDb();
   });
 
-  it("counts this month's pours with a delta against last month", async () => {
+  it("measures the month in descriptors named, never in pours poured", async () => {
     const user = await createTestUser(db);
-    const bottle = await createTestBottle(db, { name: "A" });
-    await seedPour(db, user.id, bottle.id, "2026-07-02T12:00:00Z");
-    await seedPour(db, user.id, bottle.id, "2026-07-10T12:00:00Z");
-    await seedPour(db, user.id, bottle.id, "2026-06-20T12:00:00Z");
-    // Outside both windows, and another user's pour: neither counts.
-    await seedPour(db, user.id, bottle.id, "2026-05-01T12:00:00Z");
+    const bottleA = await createTestBottle(db, { name: "A" });
+    const bottleB = await createTestBottle(db, { name: "B" });
+    // Two bottles, four distinct descriptors this month (vanilla named twice).
+    await seedPour(db, user.id, bottleA.id, "2026-07-02T12:00:00Z", { vanilla: 2, oak: 1 });
+    await seedPour(db, user.id, bottleA.id, "2026-07-10T12:00:00Z", { vanilla: 3 });
+    await seedPour(db, user.id, bottleB.id, "2026-07-12T12:00:00Z", { peat: 2, brine: 1 });
+    await seedPour(db, user.id, bottleA.id, "2026-06-20T12:00:00Z", { honey: 2 });
     const other = await createTestUser(db);
-    await seedPour(db, other.id, bottle.id, "2026-07-05T12:00:00Z");
+    await seedPour(db, other.id, bottleA.id, "2026-07-05T12:00:00Z", { cherry: 3 });
 
     const data = await getDashboard(db, user.id, NOW);
     expect(data.monthName).toBe("July");
     expect(data.prevMonthName).toBe("June");
-    expect(data.pourCount).toBe(2);
-    expect(data.pourDelta).toBe(1);
+    expect(data.descriptorsNamed).toBe(4);
+    expect(data.bottlesNoted).toBe(2);
     expect(data.hadPrevMonth).toBe(true);
-    expect(data.totalPours).toBe(4);
+
+    // Nothing on the shape counts or compares pour frequency.
+    expect(data).not.toHaveProperty("pourCount");
+    expect(data).not.toHaveProperty("pourDelta");
   });
 
   it("ranks this month's flavor families and names the one that rose most", async () => {
@@ -77,9 +81,10 @@ describe("getDashboard", () => {
     const data = await getDashboard(db, user.id, NOW);
     expect(data.hadPrevMonth).toBe(false);
     expect(data.risingWedgeId).toBe("sweet");
+    expect(data.descriptorsNamed).toBe(1);
   });
 
-  it("lists open bottles under 30% with estimated pours left, lowest first", async () => {
+  it("lists open bottles under 30% by level, lowest first, with no pour countdown", async () => {
     const user = await createTestUser(db);
     const low = await createTestBottle(db, { name: "Nearly Gone" });
     const lower = await createTestBottle(db, { name: "Fumes" });
@@ -101,8 +106,9 @@ describe("getDashboard", () => {
 
     const data = await getDashboard(db, user.id, NOW);
     expect(data.runningLow.map((r) => r.name)).toEqual(["Fumes", "Nearly Gone"]);
-    expect(data.runningLow[0].poursLeft).toBe(1); // 10% of 750ml ≈ 75ml / 45ml
-    expect(data.runningLow[1].poursLeft).toBe(4); // 25% ≈ 187ml / 45ml
+    expect(data.runningLow.map((r) => r.fillLevel)).toEqual([10, 25]);
+    // "How many pours are left in it" is a target to finish, so it is absent.
+    expect(data.runningLow[0]).not.toHaveProperty("poursLeft");
     expect(data.shelfTotal).toBe(4);
   });
 
@@ -110,7 +116,8 @@ describe("getDashboard", () => {
     const user = await createTestUser(db);
     const data = await getDashboard(db, user.id, NOW);
     expect(data.agreement).toBeNull();
-    expect(data.pourCount).toBe(0);
+    expect(data.descriptorsNamed).toBe(0);
+    expect(data.bottlesNoted).toBe(0);
     expect(data.topCategories).toEqual([]);
     expect(data.risingWedgeId).toBeNull();
   });
@@ -139,13 +146,5 @@ describe("getDashboard", () => {
     const data = await getDashboard(db, user.id, NOW);
     expect(data.newBottles).toBe(1);
     expect(data.shelfTotal).toBe(2);
-  });
-});
-
-describe("estimatedPoursLeft", () => {
-  it("floors to whole pours and never goes negative", () => {
-    expect(estimatedPoursLeft(100)).toBe(16);
-    expect(estimatedPoursLeft(10)).toBe(1);
-    expect(estimatedPoursLeft(0)).toBe(0);
   });
 });

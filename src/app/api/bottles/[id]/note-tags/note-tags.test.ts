@@ -80,6 +80,34 @@ describe("/api/bottles/[id]/note-tags", () => {
     expect(body.flavorTags).toEqual({ peat: 3 });
   });
 
+  it("keeps both tags when two chips are tapped concurrently", async () => {
+    const pour = await seedPour("2026-07-10T12:00:00Z", { campfire: 3 });
+
+    // Both requests start before either commits — a read-modify-write would
+    // let the loser overwrite the winner's tag with its own stale snapshot.
+    const [first, second] = await Promise.all([post("brine"), post("ash")]);
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+
+    const note = await db.query.tastingNotes.findFirst({
+      where: eq(schema.tastingNotes.pourId, pour.id),
+    });
+    expect(note?.flavorTags).toEqual({ campfire: 3, brine: 1, ash: 1 });
+  });
+
+  it("does not race itself into a duplicate note when the pour has none", async () => {
+    const pour = await seedPour("2026-07-10T12:00:00Z");
+
+    await Promise.all([post("honey"), post("oak")]);
+
+    const notes = await db
+      .select({ id: schema.tastingNotes.id, flavorTags: schema.tastingNotes.flavorTags })
+      .from(schema.tastingNotes)
+      .where(eq(schema.tastingNotes.pourId, pour.id));
+    expect(notes).toHaveLength(1);
+    expect(notes[0].flavorTags).toEqual({ honey: 1, oak: 1 });
+  });
+
   it("ignores other users' pours of the same bottle", async () => {
     const other = await createTestUser(db);
     await db

@@ -11,11 +11,11 @@
  * segment switcher can recompute without dragging the DB into the bundle.
  */
 
-import { and, desc, eq, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, ne, sql } from "drizzle-orm";
 import type { DB } from "@/db";
 import { schema } from "@/db";
 import { hasPublishedProducerFlavorNotes } from "@/lib/bar";
-import { getFriendNotesForBottle } from "@/lib/social";
+import { contributorVisibleSql, getFriendNotesForBottle } from "@/lib/social";
 import { meanTags, validTags, type BottleComparison } from "@/lib/compare-math";
 
 export * from "@/lib/compare-math";
@@ -76,33 +76,21 @@ export async function getBottleComparison(
     })),
   };
 
-  // --- Community: opt-in (public-visibility) pours, viewer's own excluded. ---
-  // docs/SOCIAL.md D6: aggregates are built only from what people chose to
-  // publish, and the aggregate itself carries no attribution; the prose cards
-  // below are attributed because a public note is already a social surface.
-  const blockedRows = await db
-    .select({ blockerId: schema.blocks.blockerId, blockedId: schema.blocks.blockedId })
-    .from(schema.blocks)
-    .where(or(eq(schema.blocks.blockerId, viewerId), eq(schema.blocks.blockedId, viewerId)));
-  const blocked = new Set(
-    blockedRows.map((r) => (r.blockerId === viewerId ? r.blockedId : r.blockerId)),
-  );
-
+  // --- Community: an ANONYMOUS aggregate over opt-in (public) pours. ---
+  //
+  // Deliberately tags-only: no identity, no prose, nothing selected that could
+  // become either. Public *discovery* — strangers' notes reaching a viewer who
+  // does not follow them — is deferred to S4 behind the jurisdiction review
+  // (docs/SOCIAL.md §11, §13 roadmap, Q2), so this segment stays at the
+  // aggregate level D6 already allows: built only from what people chose to
+  // publish, and anonymised at read time.
+  //
+  // The block check is a live predicate rather than a snapshot read followed
+  // by a filter: a block created between the two would leave the stale set
+  // admitting the newly blocked user's tags. Same predicate every other
+  // social read path uses, so blocking stays immediate.
   const communityRows = await db
-    .select({
-      pourId: schema.pours.id,
-      userId: schema.pours.userId,
-      rating: schema.pours.rating,
-      createdAt: schema.pours.createdAt,
-      flavorTags: schema.tastingNotes.flavorTags,
-      nose: schema.tastingNotes.nose,
-      palate: schema.tastingNotes.palate,
-      finish: schema.tastingNotes.finish,
-      freeform: schema.tastingNotes.freeform,
-      handle: schema.userProfiles.handle,
-      displayName: schema.userProfiles.displayName,
-      avatarUrl: schema.userProfiles.avatarUrl,
-    })
+    .select({ flavorTags: schema.tastingNotes.flavorTags })
     .from(schema.pours)
     .innerJoin(
       schema.tastingNotes,
@@ -118,36 +106,27 @@ export async function getBottleComparison(
         eq(schema.pours.visibility, "public"),
         ne(schema.pours.userId, viewerId),
         eq(schema.userProfiles.socialEnabled, true),
+        contributorVisibleSql(schema.pours.userId, viewerId),
       ),
-    )
-    .orderBy(desc(schema.pours.createdAt));
-  const visibleCommunity = communityRows.filter((r) => !blocked.has(r.userId));
-
-  const communityProse = [...visibleCommunity]
-    .filter((r) => proseText([r.nose, r.palate, r.finish, r.freeform]) != null)
-    .sort((a, b) => (b.rating ?? -1) - (a.rating ?? -1) || +b.createdAt - +a.createdAt)
-    .slice(0, 3);
+    );
 
   const community = {
-    count: visibleCommunity.length,
-    tags: meanTags(visibleCommunity.map((r) => r.flavorTags)),
-    notes: communityProse.map((r) => ({
-      pourId: r.pourId,
-      author: { handle: r.handle, displayName: r.displayName, avatarUrl: r.avatarUrl },
-      rating: r.rating,
-      createdAt: r.createdAt.toISOString(),
-      text: proseText([r.nose, r.palate, r.finish, r.freeform]),
-      flavorTags: r.flavorTags,
-    })),
+    count: communityRows.length,
+    tags: meanTags(communityRows.map((r) => r.flavorTags)),
   };
 
   // --- Professional: the producer's attributed note plus critics on file. ---
+  //
+  // Tags only, no prose: `bottles.description` is Whaikey's own editorial
+  // catalog copy, written independently of `producerFlavorSourceUrl`, so
+  // rendering it under the DISTILLERY badge beside that link would attribute
+  // our words to the producer. Sourced producer prose needs its own attributed
+  // column before it can appear here.
   const producer =
     hasPublishedProducerFlavorNotes(bottle) && bottle.producerFlavorTags
       ? {
           sourceLabel: bottle.producerFlavorSourceLabel as string,
           sourceUrl: bottle.producerFlavorSourceUrl as string,
-          text: bottle.description,
           tags: validTags(bottle.producerFlavorTags),
         }
       : null;

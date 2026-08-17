@@ -122,13 +122,19 @@ export interface BottleComparison {
   /** The viewer's latest pour of this bottle — where a tapped "+" chip lands. */
   viewerPourId: string | null;
   friends: { count: number; tags: Record<string, number>; notes: CompareProseNote[] };
-  community: { count: number; tags: Record<string, number>; notes: CompareProseNote[] };
+  /**
+   * Anonymous aggregate only — no author, no prose. Strangers' notes reaching
+   * a viewer who does not follow them is S4 public discovery, gated on the
+   * jurisdiction review (docs/SOCIAL.md §11); until then this segment can say
+   * what the community tastes without saying who said it.
+   */
+  community: { count: number; tags: Record<string, number> };
   professional: {
     tags: Record<string, number>;
+    /** Tags + attribution only: catalog copy is not the producer's prose. */
     producer: {
       sourceLabel: string;
       sourceUrl: string;
-      text: string | null;
       tags: Record<string, number>;
     } | null;
     critics: CriticNoteView[];

@@ -1,10 +1,9 @@
 import Link from "next/link";
-import { ScanLine } from "lucide-react";
+import { ScanLine, Search } from "lucide-react";
 import type { DashboardData } from "@/lib/dashboard";
 import { FLAVOR_WHEEL } from "@/lib/flavor-wheel";
 import { warmify } from "@/components/wheel-geometry";
 import { FillSpine, spineTone } from "@/components/fill-spine";
-import { QuickPourButton } from "@/components/quick-pour-button";
 import { UserAvatar } from "@/components/user-avatar";
 
 const WEDGES = new Map(FLAVOR_WHEEL.map((w) => [w.id, w]));
@@ -13,20 +12,20 @@ function wedgeLabel(wedgeId: string | null): string | null {
   return wedgeId ? WEDGES.get(wedgeId)?.label ?? null : null;
 }
 
-/** The one Fraunces sentence: the month's most notable fact, from the data. */
+/**
+ * The one Fraunces sentence: the month's most notable fact about the
+ * drinker's PALATE. Never about how much or how often they poured — that
+ * framing is the frequency reward the guardrails forbid.
+ */
 function monthSentence(data: DashboardData): string {
-  if (data.pourCount === 0) {
-    return `Your ${data.monthName} page is still blank — the first dram writes it.`;
-  }
-  const pours = `${data.pourCount} pour${data.pourCount === 1 ? "" : "s"}`;
   const rising = wedgeLabel(data.risingWedgeId);
-  if (rising && data.hadPrevMonth) {
-    return `${pours} this month, and ${rising} rose the most since ${data.prevMonthName}.`;
+  if (!rising) {
+    return `Your ${data.monthName} page is still blank — the first note writes it.`;
   }
-  if (rising) {
-    return `${pours} this month, led by ${rising}.`;
+  if (data.hadPrevMonth) {
+    return `${rising} rose the most on your palate since ${data.prevMonthName}.`;
   }
-  return `${pours} this month, none tagged yet.`;
+  return `Your palate leaned ${rising} this month.`;
 }
 
 function StatTile({ value, label, sub }: { value: string; label: string; sub: string }) {
@@ -71,14 +70,12 @@ export function Dashboard({
       </div>
 
       <div className={`flex gap-2 ${skeleton ? "opacity-60" : ""}`}>
+        {/* Breadth, not volume: this grows by paying closer attention to a
+            dram, never by pouring another one. */}
         <StatTile
-          value={String(data.pourCount)}
-          label={`pour${data.pourCount === 1 ? "" : "s"} this month`}
-          sub={
-            data.hadPrevMonth
-              ? `${data.pourDelta >= 0 ? "+" : "−"}${Math.abs(data.pourDelta)} vs ${data.prevMonthName}`
-              : "first tracked month"
-          }
+          value={String(data.descriptorsNamed)}
+          label={`flavor${data.descriptorsNamed === 1 ? "" : "s"} named`}
+          sub={`across ${data.bottlesNoted} bottle${data.bottlesNoted === 1 ? "" : "s"}`}
         />
         <StatTile
           value={String(data.newBottles)}
@@ -150,13 +147,18 @@ export function Dashboard({
                   <span className="block truncate text-[14.5px] font-semibold leading-[1.25]">
                     {row.name}
                   </span>
-                  <span className="mt-0.5 block text-xs text-muted">
-                    {row.fillLevel}% left · ~{row.poursLeft} pour{row.poursLeft === 1 ? "" : "s"} to go
-                  </span>
+                  {/* Level only. A "~N pours to go" countdown would turn what
+                      is left in the bottle into a target to finish. */}
+                  <span className="mt-0.5 block text-xs text-muted">{row.fillLevel}% left</span>
                 </Link>
-                <span className="self-center">
-                  <QuickPourButton bottleId={row.bottleId} bottleName={row.name} />
-                </span>
+                {/* The action here is restocking, not drinking. */}
+                <Link
+                  href={`/search?q=${encodeURIComponent(row.name)}`}
+                  className="tap-target inline-flex min-h-9 shrink-0 items-center gap-1.5 self-center rounded-full border border-border-subtle px-3 text-xs font-medium text-muted transition-colors hover:text-foreground"
+                >
+                  <Search size={14} strokeWidth={1.8} aria-hidden />
+                  Restock
+                </Link>
               </li>
             ))}
           </ul>
@@ -169,10 +171,10 @@ export function Dashboard({
 
       {skeleton && (
         <div className="card p-5">
-          <h3 className="font-display text-lg font-semibold">One dram fills this in</h3>
+          <h3 className="font-display text-lg font-semibold">One note fills this in</h3>
           <p className="mt-1 text-sm leading-relaxed text-muted">
-            Log a pour and this becomes your month: what you reached for, how your palate reads
-            against the label, and which bottles need rescuing.
+            Tag what you taste and this becomes your month: the flavors you named, how your
+            palate reads against the label, and which bottles are running low.
           </p>
           <Link
             href="/scan"

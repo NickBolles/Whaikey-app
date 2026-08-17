@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { CloudOff, GlassWater, ScanLine, Search, Star, UserPlus } from "lucide-react";
+import { ChevronDown, ChevronUp, CloudOff, GlassWater, ScanLine, Search, Star, UserPlus } from "lucide-react";
 import { SERVING_STYLES, type PourVisibility, type ServingStyle } from "@/db/schema";
 import { matchLeafIds } from "@/lib/flavor-wheel";
 import { StarRating } from "@/components/star-rating";
@@ -35,6 +35,14 @@ const NOTE_SECTIONS = [
 ] as const;
 
 type NoteSection = (typeof NOTE_SECTIONS)[number]["key"];
+
+/** What the collapsed "add detail" row says the pour is currently set to. */
+const VISIBILITY_SUMMARY: Record<PourVisibility, string> = {
+  private: "Only me",
+  friends: "Friends",
+  followers: "Followers",
+  public: "Public",
+};
 
 function distilleryName(d: SearchResult["distillery"]): string | null {
   if (!d) return null;
@@ -220,6 +228,7 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
   const [amountMl, setAmountMl] = useState<number>(45);
   const [activeSection, setActiveSection] = useState<NoteSection>("nose");
   const [peopleOpen, setPeopleOpen] = useState(false);
+  const [detailOpen, setDetailOpen] = useState(false);
   const [companions, setCompanions] = useState("");
   const [nose, setNose] = useState("");
   const [palate, setPalate] = useState("");
@@ -268,6 +277,7 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
     setAmountMl(45);
     setActiveSection("nose");
     setPeopleOpen(false);
+    setDetailOpen(false);
     setCompanions("");
     setNose("");
     setPalate("");
@@ -573,17 +583,44 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
             <StarRating value={rating} onChange={setRating} />
           </section>
 
-          <div className="flex flex-col gap-1.5">
-            <span className="section-label">Who can see this</span>
-            <VisibilityChips
-              value={visibility}
-              onChange={(value) => {
-                visibilityDirtyRef.current = true;
-                setVisibility(value);
-              }}
-              idPrefix="pour-visibility"
-            />
-          </div>
+          {/* US-6 (docs/SOCIAL.md, binding): visibility lives behind "add
+              detail" so choosing it is never a tap the core loop has to make.
+              The pour already carries the saved default, and the summary line
+              states it — opening this is for changing that default, once. */}
+          <section aria-label="Add detail" className="flex flex-col gap-2">
+            <button
+              type="button"
+              onClick={() => setDetailOpen((o) => !o)}
+              aria-expanded={detailOpen}
+              className="flex items-center justify-between gap-3 rounded-2xl border border-border-subtle bg-surface px-4 py-3 text-left transition-colors hover:bg-surface-raised"
+            >
+              <span className="text-sm font-medium">
+                Add detail{" "}
+                <span className="font-normal text-muted">
+                  · {VISIBILITY_SUMMARY[visibility]}
+                </span>
+              </span>
+              {detailOpen ? (
+                <ChevronUp size={18} strokeWidth={1.8} className="shrink-0 text-muted" aria-hidden />
+              ) : (
+                <ChevronDown size={18} strokeWidth={1.8} className="shrink-0 text-muted" aria-hidden />
+              )}
+            </button>
+
+            {detailOpen && (
+              <div className="flex flex-col gap-1.5">
+                <span className="section-label">Who can see this</span>
+                <VisibilityChips
+                  value={visibility}
+                  onChange={(value) => {
+                    visibilityDirtyRef.current = true;
+                    setVisibility(value);
+                  }}
+                  idPrefix="pour-visibility"
+                />
+              </div>
+            )}
+          </section>
 
           {submitError && (
             <p role="alert" className="text-sm text-danger rounded-xl border border-danger/40 bg-surface p-3">

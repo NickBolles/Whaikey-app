@@ -933,7 +933,7 @@ export interface SocialNote {
  * to a thread or card must use this so counts agree with the visible thread —
  * a mismatched count would reveal hidden activity.
  */
-function contributorVisibleSql(userCol: AnyColumn, viewerId: string) {
+export function contributorVisibleSql(userCol: AnyColumn, viewerId: string) {
   return sql`(${userCol} = ${viewerId} or (
     not exists (select 1 from blocks b where (b.blocker_id = ${viewerId} and b.blocked_id = ${userCol}) or (b.blocker_id = ${userCol} and b.blocked_id = ${viewerId}))
     and not exists (select 1 from user_profiles sp where sp.user_id = ${userCol} and sp.social_enabled = false)

@@ -32,14 +32,12 @@ function comparison(overrides: Partial<BottleComparison> = {}): BottleComparison
     community: {
       count: 3,
       tags: { medicinal: 2.5, campfire: 1 },
-      notes: [],
     },
     professional: {
       tags: { peat: 3, campfire: 2, tar: 2 },
       producer: {
         sourceLabel: "Distillery tasting notes",
         sourceUrl: "https://example.com/notes",
-        text: "Deep smoke over dried fruit.",
         tags: { peat: 3, campfire: 2 },
       },
       critics: [
@@ -88,8 +86,8 @@ describe("CompareClient", () => {
     for (const tabName of [/Community/, "Professional", /Friends/]) {
       fireEvent.click(screen.getByRole("tab", { name: tabName }));
       const card = screen.getByRole("region", { name: "Distillery note" });
-      expect(card).toHaveTextContent("Deep smoke over dried fruit.");
       expect(card).toHaveTextContent("1 of 2 shared");
+      expect(card).toHaveTextContent("Distillery tasting notes");
     }
     // campfire: you both got it (✓); peat: they got it, you didn't (+).
     const chips = screen.getAllByTestId("flavor-chip");
@@ -125,6 +123,23 @@ describe("CompareClient", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Professional" }));
     expect(screen.getByText("Whisky Review")).toBeInTheDocument();
     expect(screen.getByText(/Tar and iodine/)).toBeInTheDocument();
+    // Every displayed critic note is verifiable at its source.
+    expect(screen.getByRole("link", { name: "Read the review" })).toHaveAttribute(
+      "href",
+      "https://example.com/review",
+    );
+    expect(screen.queryByText("Smoke first, then the sea.")).not.toBeInTheDocument();
+  });
+
+  it("keeps the community segment anonymous — bars and a count, never a stranger's note", () => {
+    render(<CompareClient comparison={comparison()} />);
+    fireEvent.click(screen.getByRole("tab", { name: /Community · 3/ }));
+
+    // The aggregate still says something: bars, a match, and how it is built.
+    expect(screen.getByLabelText("Agreement bars")).toBeInTheDocument();
+    expect(screen.getByText(/anonymous by design/)).toBeInTheDocument();
+    // No attributed prose from people the viewer does not follow.
+    expect(screen.queryByLabelText("Community notes")).not.toBeInTheDocument();
     expect(screen.queryByText("Smoke first, then the sea.")).not.toBeInTheDocument();
   });
 
