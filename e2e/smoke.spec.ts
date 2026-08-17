@@ -102,10 +102,8 @@ test.describe("signed-in scan flow", () => {
     await expect(page.getByRole("heading", { name: "Poured." })).toBeVisible();
 
     await page.goto("/bar");
-    // Tried is a panel choice now — the pill row under the header carries
-    // bottle states (Open/Sealed/Wishlist/Finished), not collections.
-    await page.getByRole("button", { name: /Filters/ }).click();
-    await page.getByRole("radio", { name: /Tried/ }).click();
+    // Tried is a quick pick on the filter line.
+    await page.getByRole("button", { name: "Tried", exact: true }).click();
     await expect(page.getByText(/Glenfarclas 105/i).first()).toBeVisible();
   });
 

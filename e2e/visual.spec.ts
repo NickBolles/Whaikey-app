@@ -178,24 +178,32 @@ test.describe("signed in (demo collector)", () => {
     await expect(map).toHaveScreenshot(shot("bar-compare-blind-spot"));
   });
 
-  test("tried: a panel-chosen collection scopes the wheel", async ({ page }) => {
+  test("tried: one quick pick swaps the shelf and scopes the wheel", async ({ page }) => {
     await page.goto("/bar");
-    await page.getByRole("button", { name: /Filters/ }).click();
-    await page.getByRole("radio", { name: /Tried/ }).click();
-    await expect(page.getByRole("radio", { name: /Tried/ })).toHaveAttribute(
-      "aria-checked",
+    await page.getByRole("button", { name: "Tried", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Tried", exact: true })).toHaveAttribute(
+      "aria-pressed",
       "true",
     );
-    // Close the panel so the shot is about the tried shelf, not the panel.
-    await page.getByRole("button", { name: /Filters/ }).click();
     await settle(page);
     await expect(page).toHaveScreenshot(shot("bar-tried"), { fullPage: true });
   });
 
-  test("wishlist, one pill away", async ({ page }) => {
+  test("open: the quick state pick narrows stats, wheel, and list", async ({ page }) => {
     await page.goto("/bar");
-    await page.getByRole("button", { name: "Wishlist" }).click();
+    await page.getByRole("button", { name: "Open", exact: true }).click();
+    await expect(page.getByText(/Eagle Rare/i).first()).toBeVisible();
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("bar-open"), { fullPage: true });
+  });
+
+  test("wishlist, chosen from the filter panel", async ({ page }) => {
+    await page.goto("/bar");
+    await page.getByRole("button", { name: /Filters/ }).click();
+    await page.getByRole("radio", { name: /Wishlist/ }).click();
     await expect(page.getByText(/Yamazaki/i).first()).toBeVisible();
+    // Close the panel so the shot is about the wishlist, not the panel.
+    await page.getByRole("button", { name: /Filters/ }).click();
     await settle(page);
     await expect(page).toHaveScreenshot(shot("bar-wishlist"), { fullPage: true });
   });

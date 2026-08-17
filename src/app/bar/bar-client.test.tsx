@@ -19,8 +19,8 @@ afterEach(() => {
 });
 
 /**
- * Choose a collection from the filter panel (the quick tabs are gone — the
- * pill row under the header carries bottle states, not collections), opening
+ * Choose a collection from the filter panel (the quick line carries only
+ * Mine / Tried / Open — Wishlist and Everything live in the panel), opening
  * the panel if it isn't already.
  */
 function pickCollection(name: RegExp) {
@@ -146,9 +146,16 @@ describe("BarClient flavor map lens", () => {
   });
 
   it("offers Label once bottles in view carry published notes", () => {
+    const rows = [
+      bottleRow("published-row", "Published Bottle", "own", {
+        producerFlavorTags: { oak: 2 },
+        producerFlavorSourceUrl: "https://example.com/notes",
+        producerFlavorSourceLabel: "Distillery tasting notes",
+      }),
+    ];
     render(
       <BarClient
-        initialRows={[]}
+        initialRows={rows}
         flavorHeat={heatMatrix({ "producer:own": oakHeat })}
         calibration={calibrationMatrix({ own: { ...noCalibration, publishedNoteBottles: 2 } })}
         palate={palate}
@@ -164,9 +171,22 @@ describe("BarClient flavor map lens", () => {
   });
 
   it("clears flavor selections when the lens changes", () => {
+    const rows = [
+      bottleRow(
+        "noted-row",
+        "Noted Bottle",
+        "own",
+        {
+          producerFlavorTags: { oak: 2 },
+          producerFlavorSourceUrl: "https://example.com/notes",
+          producerFlavorSourceLabel: "Distillery tasting notes",
+        },
+        { vanilla: 2 },
+      ),
+    ];
     render(
       <BarClient
-        initialRows={[]}
+        initialRows={rows}
         flavorHeat={heatMatrix({ "producer:own": oakHeat })}
         calibration={calibrationMatrix({ own: { ...noCalibration, publishedNoteBottles: 2 } })}
         palate={palate}
@@ -185,9 +205,13 @@ describe("BarClient collection bar", () => {
   const openFilters = () => fireEvent.click(screen.getByRole("button", { name: /Filters/ }));
 
   it("swaps the wheel to the new collection's heat and clears the active filter", () => {
+    const rows = [
+      bottleRow("owned-row", "Owned Bottle", "own", {}, { vanilla: 2 }),
+      bottleRow("tried-row", "Tried Bottle", "tried", {}, { oak: 2 }),
+    ];
     render(
       <BarClient
-        initialRows={[]}
+        initialRows={rows}
         flavorHeat={heatMatrix({ "personal:tried": oakHeat })}
         calibration={calibrationMatrix()}
         palate={palate}
@@ -265,7 +289,7 @@ describe("BarClient filter panel", () => {
   const openFilters = () => fireEvent.click(screen.getByRole("button", { name: /Filters/ }));
 
   const shelf = () => [
-    bottleRow("open-cheap", "Open Cheap Bourbon", "own", { category: "bourbon" }, {}),
+    bottleRow("open-cheap", "Open Cheap Bourbon", "own", { category: "bourbon" }, { vanilla: 2 }),
     bottleRow("sealed-dear", "Sealed Dear Scotch", "own", { category: "scotch-single-malt" }, {}),
     bottleRow("open-dear", "Open Dear Scotch", "own", { category: "scotch-single-malt" }, {}),
   ];
@@ -982,10 +1006,10 @@ describe("BarClient descriptor detail copy", () => {
   });
 });
 
-describe("BarClient status pills", () => {
+describe("BarClient quick filter line", () => {
   const shelf = () => [
-    { ...bottleRow("open-row", "Open Bottle", "own", {}), status: "open", fillLevel: 60 } as Row,
-    { ...bottleRow("sealed-row", "Sealed Bottle", "own", {}), status: "sealed" } as Row,
+    { ...bottleRow("open-row", "Open Bottle", "own", { avgPrice: 50 }), status: "open", fillLevel: 60, purchasePrice: 40 } as Row,
+    { ...bottleRow("sealed-row", "Sealed Bottle", "own", { avgPrice: 100 }), status: "sealed", purchasePrice: 90 } as Row,
     { ...bottleRow("fin-row", "Finished Bottle", "own", {}), status: "finished", fillLevel: 0 } as Row,
     bottleRow("wish-row", "Wished Bottle", "wishlist", {}),
   ];
@@ -995,7 +1019,7 @@ describe("BarClient status pills", () => {
         calibration={calibrationMatrix()} palate={palate} />);
   }
 
-  it("filters the owned shelf by bottle state, and tapping again clears it", () => {
+  it("filters the owned shelf by Open, and tapping again falls back to Mine", () => {
     renderShelf();
 
     fireEvent.click(screen.getByRole("button", { name: "Open" }));
@@ -1004,28 +1028,75 @@ describe("BarClient status pills", () => {
     expect(screen.queryByText("Finished Bottle")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    expect(screen.getByRole("button", { name: "Mine" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByText("Sealed Bottle")).toBeInTheDocument();
     expect(screen.getByText("Finished Bottle")).toBeInTheDocument();
   });
 
-  it("treats an owned row without a status as sealed", () => {
+  it("narrows the stats strip along with the list", () => {
+    renderShelf();
+
+    // The whole shelf first: 3 owned bottles, $130 spent.
+    const stats = () => screen.getByRole("region", { name: "Bar stats" });
+    expect(stats()).toHaveTextContent("3");
+    expect(stats()).toHaveTextContent("$130");
+
+    // Open narrows the numbers to the bottles in view, not just the rows.
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    expect(stats()).toHaveTextContent("$40");
+  });
+
+  it("repaints the wheel from the rows the filters leave in view", () => {
+    renderShelf([
+      { ...bottleRow("open-row", "Open Sweet", "own", { flavorProfile: { sweet: 8 } }), status: "open" } as Row,
+      { ...bottleRow("sealed-row", "Sealed Woody", "own", { flavorProfile: { woody: 8 } }), status: "sealed" } as Row,
+    ]);
+
+    const wedgeOpacity = (name: string) =>
+      Number(
+        screen
+          .getByRole("button", { name: `Filter by ${name}` })
+          .querySelector("path")
+          ?.getAttribute("fill-opacity"),
+      );
+
+    // Both families glow while both bottles are in view.
+    const woodyBefore = wedgeOpacity("Woody");
+    expect(woodyBefore).toBeGreaterThan(wedgeOpacity("Feinty")); // vs. a cold wedge
+
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    // The sealed bottle left the view, and its family's heat left with it.
+    expect(wedgeOpacity("Woody")).toBeLessThan(woodyBefore);
+    expect(wedgeOpacity("Sweet")).toBeGreaterThan(wedgeOpacity("Woody"));
+  });
+
+  it("keeps Tried one tap away on the line", () => {
+    renderShelf([...shelf(), bottleRow("tried-row", "Tried Bottle", "tried", {})]);
+    fireEvent.click(screen.getByRole("button", { name: "Tried" }));
+    expect(screen.getByText("Tried Bottle")).toBeInTheDocument();
+    expect(screen.queryByText("Open Bottle")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Tried" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("reaches Sealed and Finished through the panel's bottle group", () => {
+    renderShelf();
+    fireEvent.click(screen.getByRole("button", { name: /Filters/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Finished" }));
+    expect(screen.getByText("Finished Bottle")).toBeInTheDocument();
+    expect(screen.queryByText("Open Bottle")).not.toBeInTheDocument();
+  });
+
+  it("treats an owned row without a status as sealed in the panel filter", () => {
     renderShelf([{ ...bottleRow("legacy", "Legacy Bottle", "own", {}), status: null } as Row]);
-    fireEvent.click(screen.getByRole("button", { name: "Sealed" }));
+    fireEvent.click(screen.getByRole("button", { name: /Filters/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Sealed" }));
     expect(screen.getByText("Legacy Bottle")).toBeInTheDocument();
   });
 
-  it("shows the wishlist through its pill", () => {
-    renderShelf();
-    fireEvent.click(screen.getByRole("button", { name: "Wishlist" }));
-    expect(screen.getByText("Wished Bottle")).toBeInTheDocument();
-    expect(screen.queryByText("Open Bottle")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Wishlist" })).toHaveAttribute("aria-pressed", "true");
-  });
-
-  it("gives an empty pill one quiet line, not an illustration", () => {
-    renderShelf([{ ...bottleRow("open-row", "Open Bottle", "own", {}), status: "open" } as Row]);
-    fireEvent.click(screen.getByRole("button", { name: "Finished" }));
-    expect(screen.getByText("No finished bottles yet.")).toBeInTheDocument();
+  it("gives an empty Open pick one quiet line, not an illustration", () => {
+    renderShelf([{ ...bottleRow("sealed-row", "Sealed Bottle", "own", {}), status: "sealed" } as Row]);
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    expect(screen.getByText(/Nothing open right now/)).toBeInTheDocument();
     expect(screen.queryByText("Nothing matches")).not.toBeInTheDocument();
   });
 
@@ -1047,13 +1118,13 @@ describe("BarClient status pills", () => {
     expect(chips[0]).toHaveTextContent("Campfire smoke");
   });
 
-  it("clears the state pill when the panel moves to another collection", () => {
+  it("clears the Open pick when the panel moves to another collection", () => {
     renderShelf();
     fireEvent.click(screen.getByRole("button", { name: "Open" }));
-    pickCollection(/Tried/);
+    pickCollection(/Wishlist/);
     pickCollection(/My bar/);
     // Coming back shows the whole shelf, not a stale Open filter.
     expect(screen.getByText("Sealed Bottle")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Open" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: "Mine" })).toHaveAttribute("aria-pressed", "true");
   });
 });

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Check, ChevronDown, SlidersHorizontal } from "lucide-react";
 import {
   hasPublishedProducerFlavorNotes,
+  heatFromRows,
   type BarFlavorHeat,
   type BarRow,
   type FlavorCalibration,
@@ -80,37 +81,23 @@ const COLLECTIONS: { key: Collection; label: string }[] = [
   { key: "all", label: "Everything" },
 ];
 
-/** Collections the pill row can express; the rest live in the panel. */
-const QUICK_COLLECTIONS: Collection[] = ["own", "wishlist"];
+/** Collections the quick line can express; the rest live in the panel. */
+const QUICK_COLLECTIONS: Collection[] = ["own", "tried"];
 
 /**
- * The primary filter row under the header: bottle states plus the wishlist,
- * single-select, tap the active pill to clear it. "Tried" and "Everything"
- * remain a panel choice — they are collections, not bottle states.
+ * The quick picks on the filter line: the two shelves you actually live on,
+ * plus the one bottle state you reach for daily. Everything else — Sealed,
+ * Finished, Wishlist, Everything — is one tap deeper in the panel. The line
+ * sits ABOVE the stats and the wheel because it narrows all of them, not
+ * just the list.
  */
-type StatusPill = "open" | "sealed" | "wishlist" | "finished";
+type Quick = "mine" | "tried" | "open";
 
-const STATUS_PILLS: { key: StatusPill; label: string }[] = [
+const QUICKS: { key: Quick; label: string }[] = [
+  { key: "mine", label: "Mine" },
+  { key: "tried", label: "Tried" },
   { key: "open", label: "Open" },
-  { key: "sealed", label: "Sealed" },
-  { key: "wishlist", label: "Wishlist" },
-  { key: "finished", label: "Finished" },
 ];
-
-/** A sealed bottle may predate status tracking; null status on an owned row reads as sealed. */
-function matchesStatusPill(row: Row, pill: Exclude<StatusPill, "wishlist">): boolean {
-  if (pill === "open") return row.status === "open";
-  if (pill === "sealed") return row.status === "sealed" || row.status == null;
-  return row.status === "finished";
-}
-
-/** One quiet line per pill — an empty state, not an illustration. */
-const PILL_EMPTY_COPY: Record<StatusPill, string> = {
-  open: "Nothing open right now — crack a seal and log the first pour.",
-  sealed: "No sealed bottles waiting.",
-  wishlist: "Nothing on the wishlist yet — save bottles you're hunting.",
-  finished: "No finished bottles yet.",
-};
 
 /** What the wheel is describing, in the sentence under it. */
 const SCOPE_BLURB: Record<FlavorHeatScope, string> = {
@@ -203,8 +190,10 @@ function buildFilterGroups(
       label: "Bottle",
       options: [
         { id: "open", label: "Open", test: (r) => r.status === "open" },
-        { id: "sealed", label: "Sealed", test: (r) => r.status === "sealed" },
+        // A sealed bottle may predate status tracking; null reads as sealed.
+        { id: "sealed", label: "Sealed", test: (r) => r.status === "sealed" || r.status == null },
         { id: "low", label: "Running low", test: (r) => r.status === "open" && (r.fillLevel ?? 100) < 25 },
+        { id: "finished", label: "Finished", test: (r) => r.status === "finished" },
       ],
     });
   }
@@ -305,7 +294,7 @@ export function BarClient({
 }) {
   const [rows] = useState<Row[]>(initialRows);
   const [collection, setCollection] = useState<Collection>("own");
-  const [statusPill, setStatusPill] = useState<Exclude<StatusPill, "wishlist"> | null>(null);
+  const [statusPill, setStatusPill] = useState<"open" | null>(null);
   const [checks, setChecks] = useState<string[]>([]);
   const [lens, setLens] = useState<Lens>("mine");
   const [weightByRating, setWeightByRating] = useState(false);
@@ -316,19 +305,8 @@ export function BarClient({
   const wishlistRows = useMemo(() => rows.filter((r) => r.relationship === "wishlist"), [rows]);
   const triedRows = useMemo(() => rows.filter((r) => r.relationship === "tried"), [rows]);
 
-  const stats = useMemo(() => {
-    let totalSpent = 0;
-    let estValue = 0;
-    let openCount = 0;
-    for (const r of ownRows) {
-      const qty = r.quantity ?? 1;
-      if (r.purchasePrice != null) totalSpent += r.purchasePrice * qty;
-      const unit = r.estValue ?? r.bottle.avgPrice;
-      if (unit != null) estValue += unit * qty;
-      if (r.status === "open") openCount += 1;
-    }
-    return { bottleCount: ownRows.length, openCount, totalSpent, estValue };
-  }, [ownRows]);
+  // Filled in below from the FILTERED rows: the strip describes exactly the
+  // bottles in view, so narrowing the shelf narrows the numbers with it.
 
   const collectionRows = useMemo(
     () =>
@@ -347,12 +325,12 @@ export function BarClient({
     () => new Set(rows.flatMap((r) => Object.keys(r.personalFlavorTags))),
     [rows],
   );
-  // The pill narrows the owned shelf by bottle state before anything else
-  // sees it; the wishlist pill is a collection, handled by changePill.
+  // The quick "Open" pick narrows the owned shelf by state before anything
+  // else sees it.
   const pillRows = useMemo(
     () =>
       statusPill && collection === "own"
-        ? collectionRows.filter((row) => matchesStatusPill(row, statusPill))
+        ? collectionRows.filter((row) => row.status === "open")
         : collectionRows,
     [collectionRows, collection, statusPill],
   );
@@ -403,14 +381,24 @@ export function BarClient({
   // changeCollection normalizes the stored lens; this stays as the guard for
   // the paths that change the row set without a collection change.
   const effectiveLens: Lens = lensAvailable(lens, activeCalibration) ? lens : "mine";
-  // Compare paints the label's claim and lets agreement ride in the marks, so
-  // its fill is the producer heat.
+  // Mine and Label describe the FILTERED shelf — the wheel repaints as the
+  // filter line above it narrows the rows (activeRows: quick pick + panel
+  // checks, but never the wheel's own flavor selection, which would collapse
+  // the wheel onto itself). The palate weighting stays user-level, and
+  // Compare stays scope-level: its calibration is computed server-side over
+  // the whole shelf and its marks must not disagree with its fill.
+  const filteredHeat = useMemo(
+    () => heatFromRows(activeRows, effectiveLens === "label" ? "producer" : "personal"),
+    [activeRows, effectiveLens],
+  );
   const activeFlavorHeat =
     effectiveLens === "mine"
       ? weightByRating
         ? palateHeatMap
-        : flavorHeat[`personal:${flavorScope}`] ?? EMPTY_HEAT
-      : flavorHeat[`producer:${flavorScope}`] ?? EMPTY_HEAT;
+        : filteredHeat
+      : effectiveLens === "label"
+        ? filteredHeat
+        : flavorHeat[`producer:${flavorScope}`] ?? EMPTY_HEAT;
   const marks = useMemo(() => {
     if (effectiveLens !== "compare") return undefined;
     const out: Record<string, CalibrationMark> = {};
@@ -481,23 +469,23 @@ export function BarClient({
     setLens((current) => (lensAvailable(current, nextCalibration) ? current : "mine"));
   }
 
-  /** Single-select with an off state: tapping the active pill clears it. */
-  function changePill(pill: StatusPill) {
-    if (pill === "wishlist") {
-      if (collection === "wishlist") {
-        changeCollection("own");
-      } else {
-        changeCollection("wishlist");
-      }
+  function changeQuick(quick: Quick) {
+    if (quick === "tried") {
+      changeCollection("tried");
       return;
     }
-    const next = statusPill === pill ? null : pill;
+    if (quick === "mine") {
+      if (collection !== "own") changeCollection("own");
+      setStatusPill(null);
+      return;
+    }
+    // "Open": a state on top of Mine; tapping it again falls back to Mine.
     if (collection !== "own") changeCollection("own");
-    setStatusPill(next);
+    setStatusPill((cur) => (cur === "open" ? null : "open"));
   }
 
-  const activePill: StatusPill | null =
-    collection === "wishlist" ? "wishlist" : collection === "own" ? statusPill : null;
+  const activeQuick: Quick | null =
+    collection === "own" ? (statusPill === "open" ? "open" : "mine") : collection === "tried" ? "tried" : null;
 
   function clearFilters() {
     setChecks([]);
@@ -521,9 +509,29 @@ export function BarClient({
 
   const shelfTotal = ownRows.length + triedRows.length + wishlistRows.length;
 
+  // The stats strip describes the rows in view — every filter above narrows
+  // it. Money still only ever describes bottles the viewer owns.
+  const filteredOwn = useMemo(
+    () => filteredRows.filter((r) => r.relationship === "own"),
+    [filteredRows],
+  );
+  const stats = useMemo(() => {
+    let totalSpent = 0;
+    let estValue = 0;
+    let openCount = 0;
+    for (const r of filteredOwn) {
+      const qty = r.quantity ?? 1;
+      if (r.purchasePrice != null) totalSpent += r.purchasePrice * qty;
+      const unit = r.estValue ?? r.bottle.avgPrice;
+      if (unit != null) estValue += unit * qty;
+      if (r.status === "open") openCount += 1;
+    }
+    return { bottleCount: filteredOwn.length, openCount, totalSpent, estValue };
+  }, [filteredOwn]);
+
   return (
     <div className="px-4 pt-5 pb-10 flex flex-col gap-6">
-      <div className="flex flex-col gap-3.5">
+      <div className="flex flex-col gap-3">
         <header className="flex items-baseline justify-between">
           <h1 className="font-display text-[27px] leading-tight font-semibold">My bar</h1>
           <span className="font-mono text-sm text-muted tabular-nums" aria-label={`${shelfTotal} bottles`}>
@@ -531,27 +539,28 @@ export function BarClient({
           </span>
         </header>
 
-        {/* The primary filter, directly under the header: bottle states plus
-            the wishlist, one line at 390px, tap the active pill to clear it. */}
-        <div role="group" aria-label="Bottle state" className="flex gap-1.5">
-          {STATUS_PILLS.map((pill) => {
-            const active = activePill === pill.key;
-            return (
-              <button
-                key={pill.key}
-                type="button"
-                aria-pressed={active}
-                onClick={() => changePill(pill.key)}
-                className={`tap-target inline-flex min-h-9 flex-1 items-center justify-center rounded-full border px-2 text-[12.5px] font-medium transition-colors ${
-                  active ? "chip-active" : "text-muted hover:text-foreground"
-                }`}
-                style={active ? undefined : { borderColor: "#2e2519" }}
-              >
-                {pill.label}
-              </button>
-            );
-          })}
-        </div>
+        {/* ALL filtering starts here, on one slim line, because everything
+            below it — stats, wheel, list — narrows to what it selects. */}
+        <FilterBar
+          quick={activeQuick}
+          onQuickChange={changeQuick}
+          collection={collection}
+          onCollectionChange={changeCollection}
+          counts={{
+            own: ownRows.length,
+            tried: triedRows.length,
+            wishlist: wishlistRows.length,
+            all: ownRows.length + triedRows.length,
+          }}
+          groups={filterGroups}
+          checks={activeChecks}
+          onToggleCheck={toggleCheck}
+          flavorIds={selectedFlavorIds}
+          onRemoveFlavor={(id) => setSelectedFlavorIds((ids) => ids.filter((f) => f !== id))}
+          onClear={clearFilters}
+          shownCount={filteredRows.length}
+          totalCount={collectionRows.length}
+        />
       </div>
 
       {collection === "own" && (
@@ -565,9 +574,8 @@ export function BarClient({
         </section>
       )}
 
-      {/* The wheel reads first and filters the list further down: a tap lands
-          as a removable token in the FilterBar directly above that list, so the
-          feedback sits adjacent to what it narrows. */}
+      {/* Below the filter line so it inherits the narrowed rows; taps on the
+          wheel still land as removable tokens on that line. */}
       {flavorFilterable && (
         <FlavorMapSection
           heat={activeFlavorHeat}
@@ -591,29 +599,12 @@ export function BarClient({
         />
       )}
 
-      <FilterBar
-        collection={collection}
-        onCollectionChange={changeCollection}
-        counts={{
-          own: ownRows.length,
-          tried: triedRows.length,
-          wishlist: wishlistRows.length,
-          all: ownRows.length + triedRows.length,
-        }}
-        groups={filterGroups}
-        checks={activeChecks}
-        onToggleCheck={toggleCheck}
-        flavorIds={selectedFlavorIds}
-        onRemoveFlavor={(id) => setSelectedFlavorIds((ids) => ids.filter((f) => f !== id))}
-        onClear={clearFilters}
-        shownCount={filteredRows.length}
-        totalCount={collectionRows.length}
-      />
-
       {filteredRows.length === 0 ? (
-        activePill && pillRows.length === 0 ? (
-          // Per-pill empty state: one quiet line, no illustration.
-          <p className="px-1 text-sm text-muted">{PILL_EMPTY_COPY[activePill]}</p>
+        statusPill === "open" && pillRows.length === 0 ? (
+          // The quick pick's empty state: one quiet line, no illustration.
+          <p className="px-1 text-sm text-muted">
+            Nothing open right now — crack a seal and log the first pour.
+          </p>
         ) : collectionRows.length > 0 ? (
           // A shelf with bottles on it is never "waiting" — if nothing shows,
           // the filters are too narrow, and the way out is to widen them.
@@ -1030,6 +1021,8 @@ function Stat({ value, label }: { value: string; label: string }) {
  * filter system with its own clear button buried under the chart.
  */
 function FilterBar({
+  quick,
+  onQuickChange,
   collection,
   onCollectionChange,
   counts,
@@ -1042,6 +1035,8 @@ function FilterBar({
   shownCount,
   totalCount,
 }: {
+  quick: Quick | null;
+  onQuickChange: (quick: Quick) => void;
   collection: Collection;
   onCollectionChange: (next: Collection) => void;
   counts: Record<Collection, number>;
@@ -1063,10 +1058,22 @@ function FilterBar({
 
   return (
     <div className="rounded-2xl border border-border-subtle bg-surface">
-      <div className="flex items-center justify-between gap-2 p-1.5">
-        <span className="px-2.5 text-xs text-muted tabular-nums">
-          {shownCount} of {totalCount}
-        </span>
+      <div className="flex items-center justify-between gap-1 p-1">
+        <div role="group" aria-label="Quick filters" className="flex min-w-0 flex-1 gap-1">
+          {QUICKS.map((q) => (
+            <button
+              key={q.key}
+              type="button"
+              aria-pressed={quick === q.key}
+              onClick={() => onQuickChange(q.key)}
+              className={`tap-target inline-flex min-h-9 flex-1 items-center justify-center rounded-full px-2 text-[12.5px] font-medium transition-colors ${
+                quick === q.key ? "chip-active" : "text-muted hover:text-foreground"
+              }`}
+            >
+              {q.label}
+            </button>
+          ))}
+        </div>
         <button
           onClick={() => setOpen((o) => !o)}
           aria-expanded={open}
@@ -1162,6 +1169,10 @@ function FilterBar({
               </div>
             </div>
           ))}
+          <p className="border-t border-border-subtle pt-2.5 text-[11px] text-muted">
+            Showing <span className="stat-number text-foreground">{shownCount}</span> of{" "}
+            <span className="stat-number text-foreground">{totalCount}</span>
+          </p>
         </div>
       )}
     </div>
