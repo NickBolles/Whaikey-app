@@ -7,6 +7,7 @@ import {
   leafLabel,
   matchLeafIds,
   rollUpToWedges,
+  topFlavorTags,
   wedgeForLeaf,
 } from "./flavor-wheel";
 
@@ -122,5 +123,29 @@ describe("matchLeafIds", () => {
     for (const id of matchLeafIds("vanilla oak cherry brine campfire")) {
       expect(isValidLeaf(id)).toBe(true);
     }
+  });
+});
+
+describe("topFlavorTags", () => {
+  it("sorts by intensity descending with wheel order as the tiebreak", () => {
+    expect(topFlavorTags({ vanilla: 1, campfire: 3, brine: 2, toffee: 2 })).toEqual([
+      { leafId: "campfire", intensity: 3 },
+      // toffee (Sweet) precedes brine (Peaty) on the wheel at equal intensity
+      { leafId: "toffee", intensity: 2 },
+      { leafId: "brine", intensity: 2 },
+    ]);
+  });
+
+  it("caps at the limit and drops unknown ids and zero intensities", () => {
+    const tags = { vanilla: 1, oak: 2, cherry: 3, honey: 2, mystery: 3, ash: 0 };
+    const top = topFlavorTags(tags, 3);
+    expect(top).toHaveLength(3);
+    expect(top.map((t) => t.leafId)).not.toContain("mystery");
+    expect(top.map((t) => t.leafId)).not.toContain("ash");
+  });
+
+  it("handles null and empty records", () => {
+    expect(topFlavorTags(null)).toEqual([]);
+    expect(topFlavorTags({})).toEqual([]);
   });
 });
