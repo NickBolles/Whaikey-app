@@ -2,10 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ChevronDown, ChevronUp, CloudOff, GlassWater, ScanLine, Search, Star } from "lucide-react";
+import { CloudOff, GlassWater, ScanLine, Search, Star } from "lucide-react";
 import { SERVING_STYLES, type ServingStyle } from "@/db/schema";
 import { StarRating } from "@/components/star-rating";
 import { FlavorWheelInput } from "@/components/flavor-wheel-input";
+import { PourSizePicker } from "@/components/pour-size-picker";
 import { NoteCapture, type ExtractedTastingNote } from "@/components/note-capture";
 import { enqueuePour } from "@/lib/native/offline-queue";
 
@@ -22,8 +23,6 @@ interface SearchResult {
   distillery?: string | { name?: string } | null;
   category?: string | null;
 }
-
-const POUR_SIZES = [30, 45, 60] as const;
 
 function distilleryName(d: SearchResult["distillery"]): string | null {
   if (!d) return null;
@@ -207,7 +206,6 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
   const [rating, setRating] = useState<number | null>(null);
   const [servingStyle, setServingStyle] = useState<ServingStyle | null>(null);
   const [amountMl, setAmountMl] = useState<number>(45);
-  const [notesOpen, setNotesOpen] = useState(true);
   const [nose, setNose] = useState("");
   const [palate, setPalate] = useState("");
   const [finish, setFinish] = useState("");
@@ -227,7 +225,6 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
     setRating(null);
     setServingStyle(null);
     setAmountMl(45);
-    setNotesOpen(true);
     setNose("");
     setPalate("");
     setFinish("");
@@ -247,14 +244,6 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
     if (Object.keys(r.flavorTags).length > 0) {
       setFlavorTags((cur) => ({ ...r.flavorTags, ...cur }));
     }
-    // Anything that landed in the collapsed section is opened for review —
-    // applied values the user can't see are values they can't correct.
-    const filledDetails =
-      (r.nose && !nose.trim()) ||
-      (r.palate && !palate.trim()) ||
-      (r.finish && !finish.trim()) ||
-      Object.keys(r.flavorTags).length > 0;
-    if (filledDetails) setNotesOpen(true);
     if (r.suggestedRating != null && rating == null) setRating(r.suggestedRating);
     if (
       r.servingStyle &&
@@ -422,73 +411,42 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
                 </button>
               ))}
             </div>
-            <div className="flex gap-2" role="group" aria-label="Pour size">
-              {POUR_SIZES.map((ml) => (
-                <button
-                  key={ml}
-                  type="button"
-                  aria-pressed={amountMl === ml}
-                  onClick={() => setAmountMl(ml)}
-                  className={`chip min-h-11 px-4 text-sm ${
-                    amountMl === ml ? "chip-active font-medium" : "hover:bg-surface-raised"
-                  }`}
-                >
-                  {ml} ml
-                </button>
-              ))}
-            </div>
+            <PourSizePicker value={amountMl} onChange={setAmountMl} />
           </section>
 
           <section aria-label="Tasting notes" className="flex flex-col gap-3">
-            <button
-              type="button"
-              onClick={() => setNotesOpen((o) => !o)}
-              aria-expanded={notesOpen}
-              className="card flex items-center justify-between p-4 hover:brightness-110 transition-[filter]"
-            >
-              <span className="font-medium text-sm">
-                Tasting notes <span className="text-muted font-normal">(optional)</span>
-              </span>
-              {notesOpen ? (
-                <ChevronUp size={18} strokeWidth={1.8} className="text-muted" aria-hidden />
-              ) : (
-                <ChevronDown size={18} strokeWidth={1.8} className="text-muted" aria-hidden />
-              )}
-            </button>
+            <h2 className="section-label">Tasting notes</h2>
+            <div className="flex flex-col gap-4">
+              {(
+                [
+                  ["Nose", nose, setNose],
+                  ["Palate", palate, setPalate],
+                  ["Finish", finish, setFinish],
+                ] as const
+              ).map(([label, val, set]) => (
+                <label key={label} className="flex flex-col gap-1.5">
+                  <span className="section-label">{label}</span>
+                  <textarea
+                    value={val}
+                    onChange={(e) => set(e.target.value)}
+                    rows={2}
+                    placeholder={
+                      label === "Nose"
+                        ? "What do you smell?"
+                        : label === "Palate"
+                          ? "What do you taste?"
+                          : "How does it linger?"
+                    }
+                    className="rounded-xl bg-surface border border-border-subtle p-3 text-sm placeholder:text-muted focus:outline-none focus:border-accent focus-visible:ring-2 focus-visible:ring-accent/60 resize-y"
+                  />
+                </label>
+              ))}
 
-            {notesOpen && (
-              <div className="flex flex-col gap-4">
-                {(
-                  [
-                    ["Nose", nose, setNose],
-                    ["Palate", palate, setPalate],
-                    ["Finish", finish, setFinish],
-                  ] as const
-                ).map(([label, val, set]) => (
-                  <label key={label} className="flex flex-col gap-1.5">
-                    <span className="section-label">{label}</span>
-                    <textarea
-                      value={val}
-                      onChange={(e) => set(e.target.value)}
-                      rows={2}
-                      placeholder={
-                        label === "Nose"
-                          ? "What do you smell?"
-                          : label === "Palate"
-                            ? "What do you taste?"
-                            : "How does it linger?"
-                      }
-                      className="rounded-xl bg-surface border border-border-subtle p-3 text-sm placeholder:text-muted focus:outline-none focus:border-accent focus-visible:ring-2 focus-visible:ring-accent/60 resize-y"
-                    />
-                  </label>
-                ))}
-
-                <div className="flex flex-col gap-1.5">
-                  <span className="section-label">Flavor wheel</span>
-                  <FlavorWheelInput value={flavorTags} onChange={setFlavorTags} />
-                </div>
+              <div className="flex flex-col gap-1.5">
+                <span className="section-label">Flavor wheel</span>
+                <FlavorWheelInput value={flavorTags} onChange={setFlavorTags} />
               </div>
-            )}
+            </div>
           </section>
 
           {submitError && (
