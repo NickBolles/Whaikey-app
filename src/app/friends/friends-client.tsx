@@ -1,17 +1,23 @@
 "use client";
 
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { AtSign, Check, ShieldOff, UserMinus, UserPlus, UserX, X } from "lucide-react";
 import { ProfileSummaryRow } from "@/components/profile-summary-row";
+import { FriendQr } from "@/components/friend-qr";
+import { QrScanButton } from "@/components/qr-scan-button";
 import type { FollowState } from "@/db/schema";
 import type { ProfileSummary } from "@/lib/social";
-import { FriendFinderCard } from "./friend-finder-card";
+import { DiscoveryPanel } from "./discovery-settings";
 
 type FollowingRow = ProfileSummary & { state: FollowState; mutual: boolean };
 
+type PeopleTab = "following" | "followers" | "blocked";
+
+type FindFace = "people" | "discovery";
+
 export interface FriendsClientProps {
-  /** The signed-in user's own handle, for the "How friends find you" card. */
+  /** The signed-in user's own handle, for the Find friends card's QR code. */
   handle: string;
   phoneLast2: string | null;
   phoneDiscoverable: boolean;
@@ -21,7 +27,12 @@ export interface FriendsClientProps {
   blocked: ProfileSummary[];
 }
 
-/** US-5/US-10: follow request/following/followers/blocked management, plus the handle-or-phone "Add a friend" form. */
+/**
+ * US-5/US-10: the /friends body — requests first, then the Find friends card
+ * (the page's single social hub and its one accent moment: finding people AND
+ * how you're found live behind a segmented control inside it), then the people
+ * lists behind their own segmented control. Nothing lives below People.
+ */
 export function FriendsClient({
   handle,
   phoneLast2,
@@ -37,6 +48,7 @@ export function FriendsClient({
   const [blockedRows, setBlockedRows] = useState(blocked);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [sectionError, setSectionError] = useState<string | null>(null);
+  const [peopleTab, setPeopleTab] = useState<PeopleTab>("following");
 
   // Server refreshes (router.refresh() after a follow) re-send props; the
   // optimistic row state must follow them or the page shows stale lists.
@@ -109,29 +121,33 @@ export function FriendsClient({
     await run(userId, async () => {
       const res = await fetch(`/api/social/blocks/${userId}`, { method: "DELETE" });
       if (!res.ok) return false;
+      // The Blocked tab vanishes with its last row — move the selection to
+      // Following explicitly so a later prop resync (someone newly blocked
+      // elsewhere) doesn't snap the panel back to Blocked unprompted. Reading
+      // the render-time rows is safe: busyId serializes these actions.
+      if (blockedRows.filter((r) => r.userId !== userId).length === 0) setPeopleTab("following");
       setBlockedRows((rows) => rows.filter((r) => r.userId !== userId));
       return true;
     });
   }
 
+  // The Blocked tab exists only while there's someone to show — when the last
+  // unblock empties it the control falls back to Following rather than
+  // pointing at a vanished tab.
+  const showBlockedTab = blockedRows.length > 0;
+  const activeTab: PeopleTab = peopleTab === "blocked" && !showBlockedTab ? "following" : peopleTab;
+
+  const tabs: Array<{ key: PeopleTab; label: string; count: number }> = [
+    { key: "following", label: "Following", count: followingRows.length },
+    { key: "followers", label: "Followers", count: followerRows.length },
+    ...(showBlockedTab ? [{ key: "blocked" as const, label: "Blocked", count: blockedRows.length }] : []),
+  ];
+
   return (
-    <div className="flex flex-col gap-8">
-      <FriendFinderCard
-        handle={handle}
-        initialPhoneLast2={phoneLast2}
-        initialPhoneDiscoverable={phoneDiscoverable}
-      />
-
-      <AddFriendForm />
-
-      {sectionError && (
-        <p role="alert" className="text-sm text-danger">
-          {sectionError}
-        </p>
-      )}
-
+    <div className="flex flex-col gap-6">
       {requestRows.length > 0 && (
-        <FriendSection title="Requests">
+        <section className="flex flex-col gap-2">
+          <h2 className="section-label">Requests ({requestRows.length})</h2>
           <ul className="flex flex-col gap-2">
             {requestRows.map((row) => (
               <ProfileSummaryRow
@@ -162,95 +178,122 @@ export function FriendsClient({
               />
             ))}
           </ul>
-        </FriendSection>
+        </section>
       )}
 
-      <FriendSection title="Following" empty="Not following anyone yet.">
-        {followingRows.length > 0 && (
-          <ul className="flex flex-col gap-2">
-            {followingRows.map((row) => (
-              <ProfileSummaryRow
-                key={row.userId}
-                profile={row}
-                subtitle={
-                  row.mutual ? (
-                    <span className="chip chip-active px-2 py-0.5 text-[10px]">Friends</span>
-                  ) : row.state === "pending" ? (
-                    <span className="text-[10px] text-muted">Requested</span>
-                  ) : null
-                }
-                right={
-                  <button
-                    type="button"
-                    onClick={() => unfollow(row.userId)}
-                    disabled={busyId === row.userId}
-                    className="tap-target inline-flex items-center gap-1.5 rounded-xl border border-border-subtle px-3 py-2 text-xs text-muted transition-colors hover:border-danger/60 hover:text-danger disabled:opacity-60"
-                  >
-                    <UserMinus size={14} strokeWidth={1.8} aria-hidden /> {row.state === "pending" ? "Cancel" : "Unfollow"}
-                  </button>
-                }
-              />
-            ))}
-          </ul>
-        )}
-      </FriendSection>
+      <FindFriendsCard handle={handle} phoneLast2={phoneLast2} phoneDiscoverable={phoneDiscoverable} />
 
-      <FriendSection title="Followers" empty="No followers yet.">
-        {followerRows.length > 0 && (
-          <ul className="flex flex-col gap-2">
-            {followerRows.map((row) => (
-              <ProfileSummaryRow
-                key={row.userId}
-                profile={row}
-                right={
-                  <button
-                    type="button"
-                    onClick={() => removeFollower(row.userId)}
-                    disabled={busyId === row.userId}
-                    className="tap-target inline-flex items-center gap-1.5 rounded-xl border border-border-subtle px-3 py-2 text-xs text-muted transition-colors hover:border-danger/60 hover:text-danger disabled:opacity-60"
-                  >
-                    <UserX size={14} strokeWidth={1.8} aria-hidden /> Remove
-                  </button>
-                }
-              />
-            ))}
-          </ul>
-        )}
-      </FriendSection>
-
-      {blockedRows.length > 0 && (
-        <FriendSection title="Blocked">
-          <ul className="flex flex-col gap-2">
-            {blockedRows.map((row) => (
-              <ProfileSummaryRow
-                key={row.userId}
-                profile={row}
-                right={
-                  <button
-                    type="button"
-                    onClick={() => unblock(row.userId)}
-                    disabled={busyId === row.userId}
-                    className="tap-target inline-flex items-center gap-1.5 rounded-xl border border-border-subtle px-3 py-2 text-xs text-muted transition-colors hover:border-accent/60 hover:text-foreground disabled:opacity-60"
-                  >
-                    <ShieldOff size={14} strokeWidth={1.8} aria-hidden /> Unblock
-                  </button>
-                }
-              />
-            ))}
-          </ul>
-        </FriendSection>
+      {sectionError && (
+        <p role="alert" className="text-sm text-danger">
+          {sectionError}
+        </p>
       )}
+
+      <section className="flex flex-col gap-3">
+        <h2 className="section-label">People</h2>
+        <div
+          role="tablist"
+          aria-label="People"
+          className="inline-flex self-start rounded-full border border-border-subtle bg-background p-1 gap-0.5"
+        >
+          {tabs.map((tab) => (
+            <button
+              key={tab.key}
+              role="tab"
+              id={`people-tab-${tab.key}`}
+              aria-selected={activeTab === tab.key}
+              aria-controls="people-panel"
+              onClick={() => setPeopleTab(tab.key)}
+              className={`tap-target inline-flex min-h-10 items-center rounded-full px-3.5 text-[13px] font-medium transition-colors ${
+                activeTab === tab.key ? "chip-active" : "text-muted hover:text-foreground"
+              }`}
+            >
+              {tab.label}
+              <span className="ml-1.5 text-[10.5px] opacity-60 tabular-nums">{tab.count}</span>
+            </button>
+          ))}
+        </div>
+
+        <div role="tabpanel" id="people-panel" aria-labelledby={`people-tab-${activeTab}`}>
+          {activeTab === "following" &&
+            (followingRows.length === 0 ? (
+              <p className="text-sm text-muted">Not following anyone yet.</p>
+            ) : (
+              <ul className="flex flex-col gap-2">
+                {followingRows.map((row) => (
+                  <ProfileSummaryRow
+                    key={row.userId}
+                    profile={row}
+                    subtitle={
+                      row.mutual ? (
+                        <span className="chip chip-active px-2 py-0.5 text-[10px]">Friends</span>
+                      ) : row.state === "pending" ? (
+                        <span className="text-[10px] text-muted">Requested</span>
+                      ) : null
+                    }
+                    right={
+                      <button
+                        type="button"
+                        onClick={() => unfollow(row.userId)}
+                        disabled={busyId === row.userId}
+                        className="tap-target inline-flex items-center gap-1.5 rounded-xl border border-border-subtle px-3 py-2 text-xs text-muted transition-colors hover:border-danger/60 hover:text-danger disabled:opacity-60"
+                      >
+                        <UserMinus size={14} strokeWidth={1.8} aria-hidden />{" "}
+                        {row.state === "pending" ? "Cancel" : "Unfollow"}
+                      </button>
+                    }
+                  />
+                ))}
+              </ul>
+            ))}
+
+          {activeTab === "followers" &&
+            (followerRows.length === 0 ? (
+              <p className="text-sm text-muted">No followers yet.</p>
+            ) : (
+              <ul className="flex flex-col gap-2">
+                {followerRows.map((row) => (
+                  <ProfileSummaryRow
+                    key={row.userId}
+                    profile={row}
+                    right={
+                      <button
+                        type="button"
+                        onClick={() => removeFollower(row.userId)}
+                        disabled={busyId === row.userId}
+                        className="tap-target inline-flex items-center gap-1.5 rounded-xl border border-border-subtle px-3 py-2 text-xs text-muted transition-colors hover:border-danger/60 hover:text-danger disabled:opacity-60"
+                      >
+                        <UserX size={14} strokeWidth={1.8} aria-hidden /> Remove
+                      </button>
+                    }
+                  />
+                ))}
+              </ul>
+            ))}
+
+          {activeTab === "blocked" && (
+            <ul className="flex flex-col gap-2">
+              {blockedRows.map((row) => (
+                <ProfileSummaryRow
+                  key={row.userId}
+                  profile={row}
+                  right={
+                    <button
+                      type="button"
+                      onClick={() => unblock(row.userId)}
+                      disabled={busyId === row.userId}
+                      className="tap-target inline-flex items-center gap-1.5 rounded-xl border border-border-subtle px-3 py-2 text-xs text-muted transition-colors hover:border-accent/60 hover:text-foreground disabled:opacity-60"
+                    >
+                      <ShieldOff size={14} strokeWidth={1.8} aria-hidden /> Unblock
+                    </button>
+                  }
+                />
+              ))}
+            </ul>
+          )}
+        </div>
+      </section>
     </div>
-  );
-}
-
-function FriendSection({ title, empty, children }: { title: string; empty?: string; children: ReactNode }) {
-  const hasContent = Array.isArray(children) ? children.some(Boolean) : Boolean(children);
-  return (
-    <section className="flex flex-col gap-2">
-      <h2 className="section-label">{title}</h2>
-      {hasContent ? children : empty ? <p className="text-sm text-muted">{empty}</p> : null}
-    </section>
   );
 }
 
@@ -267,11 +310,31 @@ function looksLikePhone(input: string): boolean {
 }
 
 /**
- * Single input for @handle or phone number. Both paths land on
- * /add/[handle] — nothing follows on lookup alone (docs/SOCIAL.md §7.2).
+ * The page's single social hub, with two faces behind a small segmented
+ * control:
+ *
+ * - "Find people" (default, the one accent moment): a single input for
+ *   @handle or phone number with the primary Add button, plus the QR
+ *   show/scan pair beneath. Both text paths land on /add/[handle] — nothing
+ *   follows on lookup alone (docs/SOCIAL.md §7.2).
+ * - "How you're found": the phone-discovery settings (DiscoveryPanel),
+ *   promoted here from the old bottom-of-page disclosure so discoverability
+ *   is never buried.
+ *
+ * Both faces stay mounted (the inactive one carries `hidden`) so a phone
+ * save isn't forgotten when the user flips back to Find people.
  */
-function AddFriendForm() {
+function FindFriendsCard({
+  handle,
+  phoneLast2,
+  phoneDiscoverable,
+}: {
+  handle: string;
+  phoneLast2: string | null;
+  phoneDiscoverable: boolean;
+}) {
   const router = useRouter();
+  const [face, setFace] = useState<FindFace>("people");
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
@@ -328,34 +391,82 @@ function AddFriendForm() {
     }
   }
 
+  const faces: Array<{ key: FindFace; label: string }> = [
+    { key: "people", label: "Find people" },
+    { key: "discovery", label: "How you're found" },
+  ];
+
   return (
-    <form onSubmit={handleSubmit} className="card flex flex-col gap-3 p-4">
-      <p className="section-label">Add a friend</p>
-      <div className="flex items-center gap-2">
-        <div className="flex min-h-11 flex-1 items-center gap-1.5 rounded-xl border border-border-subtle bg-surface px-3">
-          <AtSign size={16} strokeWidth={1.8} className="shrink-0 text-muted" aria-hidden />
-          <input
-            value={value}
-            onChange={(event) => setValue(event.target.value)}
-            maxLength={32}
-            placeholder="@handle or phone number"
-            aria-label="Handle or phone number to add"
-            className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted"
-          />
-        </div>
-        <button
-          type="submit"
-          disabled={busy || !value.trim()}
-          className="btn-primary tap-target inline-flex min-h-11 items-center gap-1.5 px-4 text-sm disabled:opacity-60"
-        >
-          <UserPlus size={16} strokeWidth={1.8} aria-hidden /> {busy ? "…" : "Add"}
-        </button>
+    <section className="card flex flex-col gap-3 p-5">
+      <h2 className="section-label">Find friends</h2>
+      <div
+        role="tablist"
+        aria-label="Find friends"
+        className="inline-flex self-start rounded-full border border-border-subtle bg-background p-1 gap-0.5"
+      >
+        {faces.map((f) => (
+          <button
+            key={f.key}
+            role="tab"
+            id={`find-tab-${f.key}`}
+            aria-selected={face === f.key}
+            aria-controls={`find-panel-${f.key}`}
+            onClick={() => setFace(f.key)}
+            className={`tap-target inline-flex min-h-10 items-center rounded-full px-3.5 text-[13px] font-medium transition-colors ${
+              face === f.key ? "chip-active" : "text-muted hover:text-foreground"
+            }`}
+          >
+            {f.label}
+          </button>
+        ))}
       </div>
-      {status && (
-        <p role="status" className={`text-xs ${isError ? "text-danger" : "text-muted"}`}>
-          {status}
-        </p>
-      )}
-    </form>
+
+      <div
+        role="tabpanel"
+        id="find-panel-people"
+        aria-labelledby="find-tab-people"
+        hidden={face !== "people"}
+        className="flex flex-col gap-3"
+      >
+        <form onSubmit={handleSubmit} className="flex items-center gap-2">
+          <div className="flex min-h-11 flex-1 items-center gap-1.5 rounded-xl border border-border-subtle bg-surface px-3 focus-within:ring-2 focus-within:ring-accent/60">
+            <AtSign size={16} strokeWidth={1.8} className="shrink-0 text-muted" aria-hidden />
+            <input
+              value={value}
+              onChange={(event) => setValue(event.target.value)}
+              maxLength={32}
+              placeholder="@handle or phone number"
+              aria-label="Handle or phone number to add"
+              className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted"
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={busy || !value.trim()}
+            className="btn-primary tap-target inline-flex min-h-11 items-center gap-1.5 px-4 text-sm disabled:opacity-60"
+          >
+            <UserPlus size={16} strokeWidth={1.8} aria-hidden /> {busy ? "…" : "Add"}
+          </button>
+        </form>
+        {status && (
+          <p role="status" className={`text-xs ${isError ? "text-danger" : "text-muted"}`}>
+            {status}
+          </p>
+        )}
+        <div className="flex flex-wrap gap-2 border-t border-border-subtle pt-3">
+          <FriendQr handle={handle} />
+          <QrScanButton />
+        </div>
+      </div>
+
+      <div
+        role="tabpanel"
+        id="find-panel-discovery"
+        aria-labelledby="find-tab-discovery"
+        hidden={face !== "discovery"}
+      >
+        <DiscoveryPanel initialPhoneLast2={phoneLast2} initialPhoneDiscoverable={phoneDiscoverable} />
+      </div>
+    </section>
   );
 }

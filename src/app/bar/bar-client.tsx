@@ -19,7 +19,6 @@ import {
 } from "@/components/bar-flavor-wheel";
 import { FillGauge } from "@/components/fill-gauge";
 import { FlavorHeatLegend } from "@/components/flavor-wheel";
-import { RecommendationRail } from "@/components/recommendation-rail";
 import { FlavorRadar } from "@/components/flavor-radar";
 
 /** BarRow with dates possibly serialized to strings (API JSON responses). */
@@ -583,40 +582,20 @@ export function BarClient({
         </Link>
       </header>
 
-      <FilterBar
-        collection={collection}
-        onCollectionChange={changeCollection}
-        counts={{
-          own: ownRows.length,
-          tried: triedRows.length,
-          wishlist: wishlistRows.length,
-          all: ownRows.length + triedRows.length,
-        }}
-        groups={filterGroups}
-        checks={activeChecks}
-        onToggleCheck={toggleCheck}
-        flavorIds={selectedFlavorIds}
-        onRemoveFlavor={(id) => setSelectedFlavorIds((ids) => ids.filter((f) => f !== id))}
-        onClear={clearFilters}
-        shownCount={filteredRows.length}
-        totalCount={collectionRows.length}
-      />
-
-      {error && (
-        <div className="rounded-xl border border-danger/40 bg-danger/10 text-danger text-sm p-3">
-          {error}
-        </div>
-      )}
-
       {collection === "own" && (
-        <section aria-label="Bar stats" className="grid grid-cols-4 gap-2">
-          <StatCard value={String(stats.bottleCount)} label="bottles" />
-          <StatCard value={String(stats.openCount)} label="open" />
-          <StatCard value={money(stats.totalSpent)} label="spent" />
-          <StatCard value={money(stats.estValue)} label="est. value" />
+        /* The only money surface on this page: spend and est. value stay inside
+           the owner's own-collection view and never join a social projection. */
+        <section aria-label="Bar stats" className="card-flat flex divide-x divide-border-subtle">
+          <Stat value={String(stats.bottleCount)} label="bottles" />
+          <Stat value={String(stats.openCount)} label="open" />
+          <Stat value={money(stats.totalSpent)} label="spent" />
+          <Stat value={money(stats.estValue)} label="est. value" />
         </section>
       )}
 
+      {/* The wheel reads first and filters the list further down: a tap lands
+          as a removable token in the FilterBar directly above that list, so the
+          feedback sits adjacent to what it narrows. */}
       {flavorFilterable && (
         <FlavorMapSection
           heat={activeFlavorHeat}
@@ -640,11 +619,29 @@ export function BarClient({
         />
       )}
 
-      {collection === "own" && (
-        <>
-          <RecommendationRail mode="tonight" title="What to pour tonight" />
-          <RecommendationRail mode="discovery" title="For your palate" />
-        </>
+      <FilterBar
+        collection={collection}
+        onCollectionChange={changeCollection}
+        counts={{
+          own: ownRows.length,
+          tried: triedRows.length,
+          wishlist: wishlistRows.length,
+          all: ownRows.length + triedRows.length,
+        }}
+        groups={filterGroups}
+        checks={activeChecks}
+        onToggleCheck={toggleCheck}
+        flavorIds={selectedFlavorIds}
+        onRemoveFlavor={(id) => setSelectedFlavorIds((ids) => ids.filter((f) => f !== id))}
+        onClear={clearFilters}
+        shownCount={filteredRows.length}
+        totalCount={collectionRows.length}
+      />
+
+      {error && (
+        <div className="rounded-xl border border-danger/40 bg-danger/10 text-danger text-sm p-3">
+          {error}
+        </div>
       )}
 
       {filteredRows.length === 0 ? (
@@ -1088,11 +1085,12 @@ function bottleCount(n: number): string {
   return `${n} bottle${n === 1 ? "" : "s"}`;
 }
 
-function StatCard({ value, label }: { value: string; label: string }) {
+/** One figure in the slim stats strip: a display numeral over an 11px label. */
+function Stat({ value, label }: { value: string; label: string }) {
   return (
-    <div className="card p-3">
-      <div className="stat-number text-[1.35rem] leading-none text-accent">{value}</div>
-      <div className="text-[10px] text-muted mt-2">{label}</div>
+    <div className="min-w-0 flex-1 px-2 py-3 text-center">
+      <div className="stat-number truncate text-lg leading-none">{value}</div>
+      <div className="mt-1 text-[11px] text-muted">{label}</div>
     </div>
   );
 }
@@ -1355,6 +1353,12 @@ function EmptyState({ collection }: { collection: Collection }) {
           </Link>
           <Link href="/import" className="text-sm text-muted hover:text-foreground transition-colors">
             or import a spreadsheet / app export
+          </Link>
+          <Link
+            href="/welcome"
+            className="text-xs text-muted/80 hover:text-foreground transition-colors"
+          >
+            New here? Take the tour
           </Link>
         </>
       ) : (

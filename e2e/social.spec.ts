@@ -116,31 +116,37 @@ test.describe("social: signed in as Jordan (the demo user)", () => {
     await expect(page.getByLabel("Handle or phone number to add")).toBeVisible();
     await expect(page.getByRole("button", { name: "Add", exact: true })).toBeVisible();
 
-    const followingSection = page.locator("section", {
-      has: page.getByRole("heading", { name: "Following", exact: true }),
-    });
-    await expect(followingSection.getByText("@sasha")).toBeVisible();
-    await expect(followingSection.getByText("Friends", { exact: true })).toBeVisible();
+    // Following/Followers are a tab pair now, not stacked sections.
+    await page.getByRole("tab", { name: /Following/ }).click();
+    await expect(page.getByText("@sasha")).toBeVisible();
+    // Scoped to Sasha's row: the page h1 is also exactly "Friends".
+    await expect(
+      page.getByRole("link", { name: /Sasha Glen/ }).getByText("Friends", { exact: true }),
+    ).toBeVisible();
 
-    const followersSection = page.locator("section", {
-      has: page.getByRole("heading", { name: "Followers", exact: true }),
-    });
-    await expect(followersSection.getByText("@sasha")).toBeVisible();
+    await page.getByRole("tab", { name: /Followers/ }).click();
+    await expect(page.getByText("@sasha")).toBeVisible();
   });
 
-  test("/friends' How friends find you card shows the handle, a phone section, and Show my code reveals a QR", async ({
+  test("/friends shows identity up top and the Find friends card with both faces", async ({
     page,
   }) => {
     await page.goto("/friends");
 
-    const finderCard = page.locator("section", { hasText: "How friends find you" });
-    await expect(finderCard.getByText("@jordan")).toBeVisible();
-    await expect(finderCard.getByText(/Phone number/)).toBeVisible();
+    // Identity header card carries the handle now.
+    await expect(page.getByText("@jordan").first()).toBeVisible();
 
-    await finderCard.getByRole("button", { name: "Show my code" }).click();
-    const qr = finderCard.getByRole("img", { name: "QR code to add @jordan on Whaikey" });
+    // Default face ("Find people"): the add form and the QR pair.
+    await page.getByRole("button", { name: "Show my code" }).click();
+    const qr = page.getByRole("img", { name: "QR code to add @jordan on Whaikey" });
     await expect(qr).toBeVisible();
     await expect(qr).toHaveAttribute("src", /^data:image\/png;base64,/);
+
+    // Second face: phone-discovery settings live inside the same card.
+    await page.getByRole("tab", { name: "How you're found" }).click();
+    // exact: the add-friend input's label also contains "phone number".
+    await expect(page.getByLabel("Phone number", { exact: true })).toBeVisible();
+    await expect(page.getByRole("switch", { name: "Let people find me by phone" })).toBeVisible();
   });
 
   test("typing a handle in the finder lands on /add/sasha showing her identity and Following state", async ({
@@ -159,8 +165,9 @@ test.describe("social: signed in as Jordan (the demo user)", () => {
     // Not anchored/exact: the chip ("Friends") and the state pill ("Following")
     // sit as adjacent inline spans, so the accessibility tree can merge their
     // text into one node — a substring match is robust to that either way.
-    await expect(page.getByText("Friends", { exact: true })).toBeVisible();
-    await expect(page.getByText(/Following/)).toBeVisible();
+    // Scoped to main: the bottom nav's Friends tab also carries this text.
+    await expect(page.getByRole("main").getByText("Friends", { exact: true })).toBeVisible();
+    await expect(page.getByRole("main").getByText(/Following/)).toBeVisible();
   });
 
   test("typing Sasha's seeded phone number looks her up and lands on /add/sasha", async ({ page }) => {
@@ -303,16 +310,23 @@ test.describe("social: phone discovery settings", () => {
       await claimButton.click();
       // Generous timeout: on a cold dev server the post-claim refresh compiles
       // /friends from scratch and can outlast the default 5s.
-      await expect(page.getByText("How friends find you")).toBeVisible({ timeout: 15000 });
+      await expect(page.getByRole("tab", { name: "How you're found" })).toBeVisible({
+        timeout: 15000,
+      });
     }
 
-    const finderCard = page.locator("section", { hasText: "How friends find you" });
+    // Phone settings are the second face of the Find friends card — switch to
+    // it before driving the phone flow. (Face selection resets per page load,
+    // so retries switch again.)
+    await page.getByRole("tab", { name: "How you're found" }).click();
+    const finderCard = page.locator("section", { hasText: "Find friends" });
     await expect(finderCard).toBeVisible();
 
     // No number yet (or a fresh claim): the add form is showing. Discovery is
     // never preselected (docs/SOCIAL.md D8 as amended), so opting in is an
     // explicit tap before saving.
-    const phoneInput = finderCard.getByLabel("Phone number");
+    // exact: the add-friend input's label also contains "phone number".
+    const phoneInput = finderCard.getByLabel("Phone number", { exact: true });
     if (await phoneInput.isVisible().catch(() => false)) {
       await phoneInput.fill("+15551230099");
       const optIn = finderCard.getByRole("switch", { name: "Let people find me by phone" });

@@ -1,10 +1,9 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import Link from "next/link";
 import { Phone, Trash2 } from "lucide-react";
 import { ToggleSwitch } from "@/components/toggle-switch";
-import { FriendQr } from "@/components/friend-qr";
-import { QrScanButton } from "@/components/qr-scan-button";
 
 interface PhoneSaveResponse {
   phoneLast2?: string;
@@ -13,15 +12,16 @@ interface PhoneSaveResponse {
 }
 
 /**
- * "How friends find you" (docs/SOCIAL.md §7.2): show/scan the QR add-me
- * code, plus opt-in phone discovery. Only rendered once a profile exists.
+ * "How you're found" — the phone-discovery face of the Find friends card
+ * (docs/SOCIAL.md §7.2, D8 as amended): save/replace/remove a number plus the
+ * never-pre-selected "find me by phone" opt-in, and the pointer to /sharing.
+ * Rendered inside the card's tabpanel, so it brings no card chrome of its own;
+ * the card keeps it mounted across face switches so saves aren't forgotten.
  */
-export function FriendFinderCard({
-  handle,
+export function DiscoveryPanel({
   initialPhoneLast2,
   initialPhoneDiscoverable,
 }: {
-  handle: string;
   initialPhoneLast2: string | null;
   initialPhoneDiscoverable: boolean;
 }) {
@@ -127,18 +127,8 @@ export function FriendFinderCard({
   }
 
   return (
-    <section className="card flex flex-col gap-4 p-5">
-      <div>
-        <p className="section-label">How friends find you</p>
-        <p className="mt-1 text-sm text-muted">@{handle}</p>
-      </div>
-
-      <div className="flex flex-wrap gap-2">
-        <FriendQr handle={handle} />
-        <QrScanButton />
-      </div>
-
-      <div className="flex flex-col gap-2 border-t border-border-subtle pt-4">
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-2">
         <p className="flex items-center gap-1.5 text-sm font-medium">
           <Phone size={16} strokeWidth={1.8} className="text-muted" aria-hidden /> Phone number
         </p>
@@ -194,7 +184,7 @@ export function FriendFinderCard({
               <button
                 type="submit"
                 disabled={busy || !phoneInput.trim()}
-                className="btn-primary tap-target px-4 text-sm disabled:opacity-60"
+                className="btn-secondary tap-target px-4 text-sm disabled:opacity-60"
               >
                 {busy ? "Saving…" : "Save"}
               </button>
@@ -226,6 +216,13 @@ export function FriendFinderCard({
           </p>
         )}
       </div>
-    </section>
+
+      <Link
+        href="/sharing"
+        className="self-start text-sm text-muted transition-colors hover:text-foreground"
+      >
+        Privacy &amp; sharing →
+      </Link>
+    </div>
   );
 }

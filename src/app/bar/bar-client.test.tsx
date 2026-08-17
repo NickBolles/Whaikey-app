@@ -877,6 +877,60 @@ describe("BarClient keeps server-derived data honest", () => {
   });
 });
 
+describe("BarClient analytics-first layout", () => {
+  it("reads stats and flavor map above the bottle list, with no Insights zone", () => {
+    const rows = [bottleRow("owned-row", "Owned Bottle", "own", {})];
+    render(<BarClient initialRows={rows} flavorHeat={heatMatrix()}
+        calibration={calibrationMatrix()} palate={palate} />);
+
+    // Analytics lead the page again: the map is primary content, not a demoted
+    // "Insights" appendix under the shelf.
+    const map = screen.getByRole("region", { name: "Flavor map" });
+    const bottle = screen.getByText("Owned Bottle");
+    expect(map.compareDocumentPosition(bottle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Insights" })).not.toBeInTheDocument();
+
+    // The stats strip stays above the map.
+    const stats = screen.getByRole("region", { name: "Bar stats" });
+    expect(stats.compareDocumentPosition(map) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("shows one slim stats strip on the own shelf only — the sole money surface", () => {
+    const rows = [
+      { ...bottleRow("owned-row", "Owned Bottle", "own", {}), purchasePrice: 50 } as Row,
+      bottleRow("tried-row", "Tried Bottle", "tried", {}),
+    ];
+    render(<BarClient initialRows={rows} flavorHeat={heatMatrix()}
+        calibration={calibrationMatrix()} palate={palate} />);
+
+    const stats = screen.getByRole("region", { name: "Bar stats" });
+    expect(stats).toHaveTextContent("spent");
+    expect(stats).toHaveTextContent("est. value");
+
+    // Money never describes bottles that are not the owner's own collection.
+    fireEvent.click(screen.getByRole("tab", { name: /Tried/ }));
+    expect(screen.queryByRole("region", { name: "Bar stats" })).not.toBeInTheDocument();
+  });
+
+  it("hosts no recommendation rails — both moved to Home", () => {
+    render(<BarClient initialRows={[]} flavorHeat={heatMatrix()}
+        calibration={calibrationMatrix()} palate={palate} />);
+
+    expect(screen.queryByRole("heading", { name: "For your palate" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/pour tonight/i)).not.toBeInTheDocument();
+  });
+
+  it("offers the tour as a quiet fourth rung of the empty own shelf", () => {
+    render(<BarClient initialRows={[]} flavorHeat={heatMatrix()}
+        calibration={calibrationMatrix()} palate={palate} />);
+
+    expect(screen.getByRole("link", { name: /take the tour/i })).toHaveAttribute(
+      "href",
+      "/welcome",
+    );
+  });
+});
+
 describe("BarClient descriptor detail copy", () => {
   it("explains a blind spot that only an unpoured label names", () => {
     // Cinnamon is blind because a label names it — on a bottle never poured.

@@ -16,10 +16,9 @@ async function settle(page: Page) {
   // captured mid-fetch is ~400px shorter than the settled page and fails
   // wherever the fetch wins the race — which is how CI renders it. Resolves
   // immediately on pages that have no rails.
-  await page
-    .getByText("Finding bottles…")
-    .first()
-    .waitFor({ state: "detached", timeout: 15_000 });
+  // Home renders two rails (hero + discovery) that both show this copy, so
+  // wait for every instance to clear, not just the first.
+  await expect(page.getByText("Finding bottles…")).toHaveCount(0, { timeout: 15_000 });
   await page.waitForLoadState("networkidle");
   await page.evaluate(() => document.fonts.ready);
   // Sticky bars get painted at scroll seams in fullPage captures — pin them
@@ -120,7 +119,10 @@ test.describe("signed in (demo collector)", () => {
   test("home dashboard", async ({ page }) => {
     await page.goto("/");
     await expect(page.getByText(/Welcome back/i)).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Ask your bar" })).toBeVisible();
+    // The hero IS tonight's pick now; its heading is the pinned-clock guard
+    // that used to sit on the /bar shots — if the fixed time stops taking,
+    // this names the cause instead of leaving a 20px reflow to a pixel diff.
+    await expect(page.getByRole("heading", { name: "Tonight’s pour" })).toBeVisible();
     await settle(page);
     await expect(page).toHaveScreenshot(shot("home-dashboard"), { fullPage: true });
   });
@@ -128,7 +130,7 @@ test.describe("signed in (demo collector)", () => {
   test("my bar", async ({ page }) => {
     await page.goto("/bar");
     await expect(page.getByText(/Eagle Rare/i).first()).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Tonight’s pour" })).toBeVisible();
+    await expect(page.getByRole("region", { name: /flavor map/i })).toBeVisible();
     await settle(page);
     await expect(page).toHaveScreenshot(shot("bar-own"), { fullPage: true });
   });
@@ -201,9 +203,7 @@ test.describe("signed in (demo collector)", () => {
     await expect(page.getByRole("button", { name: "Remove Open filter" })).toBeVisible();
     await settle(page);
     await expect(page.getByLabel("Active filters")).toBeVisible();
-    // Same guard as "my bar": if the pinned clock ever stops taking, this
-    // names the cause instead of leaving a 20px reflow to be read off a diff.
-    await expect(page.getByRole("heading", { name: "Tonight’s pour" })).toBeVisible();
+    await expect(page.getByRole("region", { name: /flavor map/i })).toBeVisible();
     await expect(page).toHaveScreenshot(shot("bar-filter-panel"), { fullPage: true });
   });
 
@@ -278,9 +278,12 @@ test.describe("signed in (demo collector)", () => {
 
   test("friends: following, followers, and a mutual", async ({ page }) => {
     await page.goto("/friends");
-    await expect(page.getByRole("heading", { name: "Friends" })).toBeVisible();
+    // exact: the redesigned page adds a "Find friends" h2 alongside the h1.
+    await expect(page.getByRole("heading", { name: "Friends", exact: true })).toBeVisible();
     await expect(page.getByText("Sasha Glen").first()).toBeVisible();
-    await expect(page.getByText("Friends", { exact: true }).last()).toBeVisible();
+    // Scoped to main (the bottom nav's Friends tab matches too); .last() is
+    // the mutual chip rather than the page h1.
+    await expect(page.getByRole("main").getByText("Friends", { exact: true }).last()).toBeVisible();
     await settle(page);
     await expect(page).toHaveScreenshot(shot("friends"), { fullPage: true });
   });
@@ -288,7 +291,8 @@ test.describe("signed in (demo collector)", () => {
   test("add-confirm: Sasha's identity preview with the Following state", async ({ page }) => {
     await page.goto("/add/sasha");
     await expect(page.getByRole("heading", { name: "Sasha Glen" })).toBeVisible();
-    await expect(page.getByText("Friends", { exact: true })).toBeVisible();
+    // Scoped to main: the bottom nav's Friends tab also carries this text.
+    await expect(page.getByRole("main").getByText("Friends", { exact: true })).toBeVisible();
     await settle(page);
     await expect(page).toHaveScreenshot(shot("add-confirm"), { fullPage: true });
   });
@@ -326,5 +330,43 @@ test.describe("signed in (demo collector)", () => {
     await expect(page.getByRole("heading", { name: "Comments" })).toBeVisible();
     await settle(page);
     await expect(page).toHaveScreenshot(shot("share-comparison"), { fullPage: true });
+  });
+
+  // Onboarding wizard (/welcome). The demo collector already has a profile,
+  // so the profile step renders its claimed state — that's a real state the
+  // wizard supports and it keeps these shots deterministic with one seed.
+
+  test("welcome: the tour intro", async ({ page }) => {
+    await page.goto("/welcome");
+    await expect(page.getByRole("button", { name: "Set me up" })).toBeVisible();
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("welcome-intro"), { fullPage: true });
+  });
+
+  test("welcome: profile step", async ({ page }) => {
+    await page.goto("/welcome");
+    await page.getByRole("button", { name: "Set me up" }).click();
+    await expect(page.getByRole("heading", { name: "Your profile" })).toBeVisible();
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("welcome-profile"), { fullPage: true });
+  });
+
+  test("welcome: find your friends step", async ({ page }) => {
+    await page.goto("/welcome");
+    await page.getByRole("button", { name: "Set me up" }).click();
+    await page.getByRole("button", { name: "Continue" }).click();
+    await expect(page.getByRole("heading", { name: "Find your friends" })).toBeVisible();
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("welcome-friends"), { fullPage: true });
+  });
+
+  test("welcome: first bottle step", async ({ page }) => {
+    await page.goto("/welcome");
+    await page.getByRole("button", { name: "Set me up" }).click();
+    await page.getByRole("button", { name: "Continue" }).click();
+    await page.getByRole("button", { name: "Continue" }).click();
+    await expect(page.getByRole("heading", { name: "Your first bottle" })).toBeVisible();
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("welcome-bottle"), { fullPage: true });
   });
 });

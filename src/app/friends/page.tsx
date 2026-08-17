@@ -5,6 +5,7 @@ import * as schema from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
 import { getOwnProfile, listBlocked, listFollowRequests, listFollowers, listFollowing } from "@/lib/social";
 import { ProfileClaim } from "@/components/profile-claim";
+import { UserAvatar } from "@/components/user-avatar";
 import { FriendsClient } from "./friends-client";
 
 export const dynamic = "force-dynamic";
@@ -45,9 +46,15 @@ export default async function FriendsPage() {
       <div className="mx-auto flex max-w-lg flex-col gap-6 px-4 pb-24 pt-8">
         <header>
           <h1 className="font-display text-[2rem] font-semibold leading-tight">Friends</h1>
-          <p className="mt-1 text-sm text-muted">Claim a handle to start following people and being followed.</p>
+          <p className="mt-1 text-sm text-muted">Set up a profile to start following people and being followed.</p>
         </header>
-        <ProfileClaim suggestedHandle={suggestHandle(user.name)} />
+        <ProfileClaim suggestedHandle={suggestHandle(user.name)} suggestedDisplayName={user.name} />
+        <Link
+          href="/welcome"
+          className="self-center text-sm text-muted transition-colors hover:text-foreground"
+        >
+          Prefer the guided tour? →
+        </Link>
       </div>
     );
   }
@@ -70,9 +77,23 @@ export default async function FriendsPage() {
 
   return (
     <div className="mx-auto flex max-w-lg flex-col gap-6 px-4 pb-24 pt-8">
-      <header>
+      <header className="flex flex-col gap-4">
         <h1 className="font-display text-[2rem] font-semibold leading-tight">Friends</h1>
-        <p className="mt-1 text-sm text-muted">@{profile.handle}</p>
+        <div className="card flex items-center gap-3 p-4">
+          <UserAvatar name={profile.displayName || profile.handle} image={profile.avatarUrl} size={48} />
+          <div className="min-w-0 flex-1">
+            <p className="truncate font-display text-lg font-semibold leading-tight">
+              {profile.displayName || `@${profile.handle}`}
+            </p>
+            <p className="truncate text-sm text-muted">@{profile.handle}</p>
+          </div>
+          <Link
+            href={`/u/${profile.handle}`}
+            className="tap-target shrink-0 text-sm text-accent transition-opacity hover:opacity-80"
+          >
+            View profile →
+          </Link>
+        </div>
       </header>
       <FriendsClient
         handle={profile.handle}

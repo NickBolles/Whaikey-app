@@ -11,23 +11,33 @@ import type { SocialProfile } from "@/lib/social";
 const HANDLE_RE = /^[a-z0-9_]{3,20}$/;
 
 /**
- * Reusable handle-claim flow: POST /api/social/profile. Used by /friends
- * (first social action) and available to any other surface that needs to
- * claim a handle before writing (comments, cheers, follows).
+ * Reusable profile-claim flow: POST /api/social/profile with a handle and an
+ * optional display name. Used by /friends (first social action) and the
+ * /add/[handle] inline claim, and available to any other surface that needs a
+ * profile before writing (comments, cheers, follows).
+ *
+ * Display-name collection is on by default but optional to fill in: an empty
+ * field is simply omitted from the POST and the server falls back to the
+ * account name — so existing call sites that pass no `suggestedDisplayName`
+ * keep working unchanged.
  */
 export function ProfileClaim({
   suggestedHandle = "",
+  suggestedDisplayName = "",
   title = "Claim your handle",
-  description = "Handles are claimed the first time you do something social — following, commenting, sharing a profile. Pick one now, or later from here.",
+  description = "A profile unlocks the social side — following friends, comparing tasting notes, sharing your palate. Private by default.",
   onClaimed,
 }: {
   suggestedHandle?: string;
+  /** Pre-fills the display-name field (e.g. the account name). Optional — the server falls back to the account name when blank. */
+  suggestedDisplayName?: string;
   title?: string;
   description?: string;
   onClaimed?: (profile: SocialProfile) => void;
 }) {
   const router = useRouter();
   const [handle, setHandle] = useState(suggestedHandle);
+  const [displayName, setDisplayName] = useState(suggestedDisplayName);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [claimed, setClaimed] = useState<SocialProfile | null>(null);
@@ -41,10 +51,14 @@ export function ProfileClaim({
     setBusy(true);
     setError(null);
     try {
+      const trimmedName = displayName.trim();
       const res = await fetch("/api/social/profile", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ handle: normalized }),
+        // An empty display name is omitted, not sent: the API's zod schema
+        // requires min(1) when present, and the server already defaults the
+        // display name to the account name.
+        body: JSON.stringify({ handle: normalized, ...(trimmedName ? { displayName: trimmedName } : {}) }),
       });
       const body = (await res.json().catch(() => null)) as (SocialProfile & { error?: string }) | null;
       if (res.status === 409) {
@@ -86,6 +100,18 @@ export function ProfileClaim({
         <h2 className="mt-1 font-display text-xl font-semibold">{title}</h2>
         <p className="mt-1 text-sm text-muted">{description}</p>
       </div>
+      <label className="flex flex-col gap-1.5">
+        <span className="text-xs text-muted">Display name</span>
+        <input
+          value={displayName}
+          onChange={(event) => setDisplayName(event.target.value)}
+          maxLength={80}
+          placeholder="Your name"
+          aria-label="Display name"
+          className="min-h-11 rounded-xl border border-border-subtle bg-surface px-3 text-sm outline-none placeholder:text-muted focus-visible:ring-2 focus-visible:ring-accent/60"
+        />
+        <span className="text-xs text-muted">How you appear to friends. Leave blank to use your account name.</span>
+      </label>
       <label className="flex flex-col gap-1.5">
         <span className="text-xs text-muted">Handle</span>
         <div className="flex min-h-11 items-center gap-1.5 rounded-xl border border-border-subtle bg-surface px-3 focus-within:ring-2 focus-within:ring-accent/60">

@@ -34,7 +34,7 @@ test.describe("signed-out smoke", () => {
   test("bottom nav keeps destinations focused and exposes quick actions", async ({ page }) => {
     await page.goto("/");
     const nav = page.getByRole("navigation", { name: "Primary" });
-    for (const label of ["Home", "My Bar", "Search", "Chat"]) {
+    for (const label of ["Home", "My Bar", "Friends", "Chat"]) {
       await expect(nav.getByText(label)).toBeVisible();
     }
     await nav.getByRole("button", { name: "Open quick actions" }).click();
