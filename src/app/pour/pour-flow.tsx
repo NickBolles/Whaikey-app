@@ -7,6 +7,7 @@ import { SERVING_STYLES, type PourVisibility, type ServingStyle } from "@/db/sch
 import { matchLeafIds } from "@/lib/flavor-wheel";
 import { StarRating } from "@/components/star-rating";
 import { FlavorWheelInput } from "@/components/flavor-wheel-input";
+import { PourSizePicker } from "@/components/pour-size-picker";
 import { NoteCapture, type ExtractedTastingNote } from "@/components/note-capture";
 import { VisibilityChips } from "@/components/visibility-chips";
 import { enqueuePour } from "@/lib/native/offline-queue";
@@ -24,8 +25,6 @@ interface SearchResult {
   distillery?: string | { name?: string } | null;
   category?: string | null;
 }
-
-const POUR_SIZES = [30, 45, 60] as const;
 
 /** The three places a note can land; one persistent wheel serves them all. */
 const NOTE_SECTIONS = [
@@ -499,21 +498,7 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
                 <UserPlus size={14} strokeWidth={1.8} aria-hidden /> People
               </button>
             </div>
-            <div className="flex gap-2" role="group" aria-label="Pour size">
-              {POUR_SIZES.map((ml) => (
-                <button
-                  key={ml}
-                  type="button"
-                  aria-pressed={amountMl === ml}
-                  onClick={() => setAmountMl(ml)}
-                  className={`chip min-h-11 px-4 text-sm ${
-                    amountMl === ml ? "chip-active font-medium" : "hover:bg-surface-raised"
-                  }`}
-                >
-                  {ml} ml
-                </button>
-              ))}
-            </div>
+            <PourSizePicker value={amountMl} onChange={setAmountMl} />
             {peopleOpen && (
               <label className="flex flex-col gap-1.5">
                 <span className="sr-only">Who you shared it with</span>
