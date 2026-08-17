@@ -1239,6 +1239,10 @@ export interface FriendBottleNote {
   rating: number | null;
   createdAt: Date;
   flavorTags: Record<string, number> | null;
+  nose: string | null;
+  palate: string | null;
+  finish: string | null;
+  freeform: string | null;
 }
 
 /** Same Dram source: one entry per followee (their latest note on this bottle), visibility+block enforced. */
@@ -1277,6 +1281,10 @@ export async function getFriendNotesForBottle(db: DB, viewerId: string, bottleId
       rating: schema.pours.rating,
       createdAt: schema.pours.createdAt,
       flavorTags: schema.tastingNotes.flavorTags,
+      nose: schema.tastingNotes.nose,
+      palate: schema.tastingNotes.palate,
+      finish: schema.tastingNotes.finish,
+      freeform: schema.tastingNotes.freeform,
     })
     .from(schema.pours)
     .innerJoin(schema.userProfiles, eq(schema.userProfiles.userId, schema.pours.userId))
@@ -1320,6 +1328,10 @@ export async function getFriendNotesForBottle(db: DB, viewerId: string, bottleId
     rating: row.rating,
     createdAt: row.createdAt,
     flavorTags: row.flavorTags,
+    nose: row.nose,
+    palate: row.palate,
+    finish: row.finish,
+    freeform: row.freeform,
   }));
 }
 

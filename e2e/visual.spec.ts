@@ -217,6 +217,24 @@ test.describe("signed in (demo collector)", () => {
     await expect(page).toHaveScreenshot(shot("bottle-detail-owned"), { fullPage: true });
   });
 
+  test("your note, compared: friends reference", async ({ page }) => {
+    await page.goto("/bottles/lagavulin-16/compare");
+    await expect(page.getByRole("heading", { name: "Your note, compared" })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Distillery note" })).toBeVisible();
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("compare-friends"), { fullPage: true });
+  });
+
+  test("your note, compared: professional reference, same screen", async ({ page }) => {
+    await page.goto("/bottles/lagavulin-16/compare");
+    await page.getByRole("tab", { name: "Professional" }).click();
+    await expect(page.getByText("The Malt Journal")).toBeVisible();
+    // The distillery card is the fixed reference — still visible here.
+    await expect(page.getByRole("region", { name: "Distillery note" })).toBeVisible();
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("compare-professional"), { fullPage: true });
+  });
+
   test("pour flow: bottle picker", async ({ page }) => {
     await page.goto("/pour");
     await settle(page);

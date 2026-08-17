@@ -99,6 +99,13 @@
       "when": 1786743103348,
       "tag": "0013_peaceful_swordsman",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1786975365109,
+      "tag": "0014_faulty_thundra",
+      "breakpoints": true
     }
   ]
 }

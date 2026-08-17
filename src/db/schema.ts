@@ -199,6 +199,34 @@ export const bottleUpcs = pgTable(
   ],
 );
 
+/**
+ * Published critic reviews on file for a bottle — the second half of the
+ * comparison screen's "Professional" reference (the producer's own note lives
+ * on `bottles.producerFlavorTags`). Like producer claims, a critic note is
+ * only displayable with source attribution, and it is one opinion, never an
+ * answer key. `score` and `scoreScale` are shown verbatim ("91", "/100") —
+ * critic scales differ and we never convert between them.
+ */
+export const criticNotes = pgTable(
+  "critic_notes",
+  {
+    id: id(),
+    bottleId: text("bottle_id")
+      .notNull()
+      .references(() => bottles.id, { onDelete: "cascade" }),
+    publication: text("publication").notNull(),
+    score: text("score"),
+    scoreScale: text("score_scale"),
+    note: text("note").notNull(),
+    /** Canonical leaf-id tags (1-3) extracted from the note, for agreement bars. */
+    flavorTags: jsonb("flavor_tags").$type<Record<string, number>>(),
+    sourceUrl: text("source_url").notNull(),
+    retrievedAt: timestamp("retrieved_at", { withTimezone: true, mode: "date" }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("critic_notes_bottle_idx").on(t.bottleId)],
+);
+
 export const RELATIONSHIPS = ["own", "tried", "wishlist"] as const;
 export type Relationship = (typeof RELATIONSHIPS)[number];
 export const BOTTLE_STATUSES = ["sealed", "open", "finished", "sold", "traded", "gifted"] as const;
@@ -892,6 +920,7 @@ export type Bottle = typeof bottles.$inferSelect;
 export type NewBottle = typeof bottles.$inferInsert;
 export type UserBottle = typeof userBottles.$inferSelect;
 export type Pour = typeof pours.$inferSelect;
+export type CriticNote = typeof criticNotes.$inferSelect;
 export type TastingNote = typeof tastingNotes.$inferSelect;
 export type Pairing = typeof pairings.$inferSelect;
 export type ChatSession = typeof chatSessions.$inferSelect;

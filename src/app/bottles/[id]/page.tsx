@@ -222,12 +222,22 @@ export default async function BottleDetailPage({
       </section>
 
       {sameDram && (
-        <SameDram
-          viewerTags={sameDram.viewerTags}
-          producer={producer}
-          friends={sameDram.friends}
-          hasViewerNotes={sameDram.hasViewerNotes}
-        />
+        <>
+          <SameDram
+            viewerTags={sameDram.viewerTags}
+            producer={producer}
+            friends={sameDram.friends}
+            hasViewerNotes={sameDram.hasViewerNotes}
+          />
+          {sameDram.hasViewerNotes && (
+            <Link
+              href={`/bottles/${bottle.id}/compare`}
+              className="btn-secondary flex min-h-11 items-center justify-center px-4 text-sm font-medium"
+            >
+              Your note, compared →
+            </Link>
+          )}
+        </>
       )}
 
       {/* Your shelf */}
