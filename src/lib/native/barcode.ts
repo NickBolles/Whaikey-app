@@ -33,6 +33,11 @@ export interface NativeScanOptions {
   facing?: "back" | "front";
   /** Non-fatal scan errors, for surfacing guidance to the user. */
   onError?: (message: string) => void;
+  /**
+   * What to look for. "product" (default) keeps the bottle-scanning behavior;
+   * "qr" is for friend codes and other app-generated QR links.
+   */
+  formats?: "product" | "qr";
 }
 
 /**
@@ -123,12 +128,10 @@ export async function startNativeScan(
     document.documentElement.classList.add(SCANNING_CLASS);
 
     await BarcodeScanner.startScan({
-      formats: [
-        BarcodeFormat.UpcA,
-        BarcodeFormat.UpcE,
-        BarcodeFormat.Ean13,
-        BarcodeFormat.Ean8,
-      ],
+      formats:
+        options.formats === "qr"
+          ? [BarcodeFormat.QrCode]
+          : [BarcodeFormat.UpcA, BarcodeFormat.UpcE, BarcodeFormat.Ean13, BarcodeFormat.Ean8],
       lensFacing: options.facing === "front" ? LensFacing.Front : LensFacing.Back,
     });
 

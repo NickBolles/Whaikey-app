@@ -13,9 +13,13 @@ describe("AppNav", () => {
     render(<AppNav />);
 
     const nav = within(screen.getByRole("navigation", { name: "Primary" }));
-    for (const label of ["Home", "My Bar", "Search", "Chat"]) {
+    for (const label of ["Home", "My Bar", "Friends", "Chat"]) {
       expect(nav.getByText(label)).toBeInTheDocument();
     }
+    expect(nav.getByRole("link", { name: /Friends/ })).toHaveAttribute("href", "/friends");
+    // Search left the tab bar in the 2026-08 IA redesign — it lives in the
+    // global header and the quick-actions sheet.
+    expect(nav.queryByText("Search")).not.toBeInTheDocument();
     expect(nav.queryByText("Pour")).not.toBeInTheDocument();
     expect(nav.queryByText("Scan")).not.toBeInTheDocument();
 

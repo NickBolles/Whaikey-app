@@ -59,10 +59,14 @@ export function NativeShell() {
           // A full navigation, not router.push: the point of this request is the
           // Set-Cookie it comes back with, and that only lands in the WebView's
           // cookie store if the WebView itself made the request.
-          window.location.assign(exchangeUrl(callback.code));
+          window.location.assign(exchangeUrl(callback.code, callback.next));
         } else {
           const message = describeNativeAuthError(callback.error);
-          router.push(`/sign-in?error=${encodeURIComponent(message ?? "Sign-in failed.")}`);
+          const retry = new URLSearchParams({ error: message ?? "Sign-in failed." });
+          // Keep the return target on the retry, so trying again still lands
+          // on the scanned page (the sign-in page re-validates it).
+          if (callback.next) retry.set("next", callback.next);
+          router.push(`/sign-in?${retry.toString()}`);
         }
         return;
       }

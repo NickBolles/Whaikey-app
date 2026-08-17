@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isNativeProvider } from "@/lib/native-auth";
+import { isNativeProvider, safeReturnPath } from "@/lib/native-auth";
 
 /**
  * Step 1 of native sign-in (docs/NATIVE_APP.md §2.3).
@@ -22,6 +22,9 @@ export async function GET(request: NextRequest) {
   }
 
   const { auth } = await import("@/lib/auth");
+  // Optional validated return path (e.g. a scanned /add/<handle> code) that
+  // rides the whole flow so the app can land back where the user started.
+  const next = safeReturnPath(request.nextUrl.searchParams.get("next"));
 
   try {
     const { url } = await auth.api.signInSocial({
@@ -29,7 +32,7 @@ export async function GET(request: NextRequest) {
         provider,
         // Relative to the auth baseURL. After OAuth resolves, the browser lands
         // here already carrying the session cookie.
-        callbackURL: "/api/auth/native/complete",
+        callbackURL: `/api/auth/native/complete${next ? `?next=${encodeURIComponent(next)}` : ""}`,
         // Sign-in must not silently become sign-up-less: a first-time native
         // user should get an account exactly as they would on the web.
         disableRedirect: true,

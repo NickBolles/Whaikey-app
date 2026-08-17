@@ -23,6 +23,11 @@ export const CODE_TTL_MS = 60_000;
 /** The scheme registered in Info.plist and AndroidManifest.xml. */
 export const NATIVE_CALLBACK_SCHEME = "whaikey";
 
+// Shared with the client-side sign-in page — the validation itself lives in
+// the dependency-free return-path module; re-exported here so server callers
+// keep their import path.
+export { safeReturnPath } from "@/lib/return-path";
+
 export function hashCode(code: string): string {
   return createHash("sha256").update(code).digest("hex");
 }

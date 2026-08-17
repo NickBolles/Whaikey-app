@@ -34,7 +34,7 @@ test.describe("signed-out smoke", () => {
   test("bottom nav keeps destinations focused and exposes quick actions", async ({ page }) => {
     await page.goto("/");
     const nav = page.getByRole("navigation", { name: "Primary" });
-    for (const label of ["Home", "My Bar", "Search", "Chat"]) {
+    for (const label of ["Home", "My Bar", "Friends", "Chat"]) {
       await expect(nav.getByText(label)).toBeVisible();
     }
     await nav.getByRole("button", { name: "Open quick actions" }).click();
@@ -64,7 +64,9 @@ test.describe("signed-in scan flow", () => {
 
     await input.fill("080244009960"); // seeded: Buffalo Trace
     await page.getByRole("button", { name: "Scan" }).click();
-    await expect(page.getByRole("status")).toContainText(/Added Buffalo Trace/i);
+    // Filtered: a lingering "Starting camera…" status can coexist under load,
+    // and bare getByRole("status") strict-mode-collides with it.
+    await expect(page.getByRole("status").filter({ hasText: /Added/i })).toContainText(/Added Buffalo Trace/i);
     await expect(page.getByText(/Scanned this session \(1\)/i)).toBeVisible();
 
     await input.fill("096749001613"); // seeded: Elijah Craig Small Batch
@@ -100,7 +102,8 @@ test.describe("signed-in scan flow", () => {
     await expect(page.getByRole("heading", { name: "Poured." })).toBeVisible();
 
     await page.goto("/bar");
-    await page.getByRole("tab", { name: /Tried/ }).click();
+    // Tried is a quick pick on the filter line.
+    await page.getByRole("button", { name: "Tried", exact: true }).click();
     await expect(page.getByText(/Glenfarclas 105/i).first()).toBeVisible();
   });
 

@@ -34,19 +34,27 @@ export function describeNativeAuthError(code: string | null): string | null {
  */
 export function parseAuthCallback(
   url: string,
-): { code: string } | { error: string } | null {
+): { code: string; next?: string } | { error: string; next?: string } | null {
   const path = deepLinkPath(url);
   if (!path || !path.startsWith("/auth/callback")) return null;
 
   const params = new URLSearchParams(path.slice(path.indexOf("?") + 1));
   const code = params.get("code");
-  if (code) return { code };
-  return { error: params.get("error") ?? "unknown" };
+  const next = params.get("next") ?? undefined;
+  if (code) {
+    return next ? { code, next } : { code };
+  }
+  // Errors keep the return target too: the retry sign-in should still land on
+  // the scanned page rather than sending the person back to their camera.
+  const error = params.get("error") ?? "unknown";
+  return next ? { error, next } : { error };
 }
 
 /** The in-WebView URL that turns an exchange code into a session cookie. */
-export function exchangeUrl(code: string): string {
-  return `/api/auth/native/exchange?code=${encodeURIComponent(code)}`;
+export function exchangeUrl(code: string, next?: string): string {
+  const base = `/api/auth/native/exchange?code=${encodeURIComponent(code)}`;
+  // The server re-validates `next` (safeReturnPath) before redirecting to it.
+  return next ? `${base}&next=${encodeURIComponent(next)}` : base;
 }
 
 /**
@@ -55,7 +63,10 @@ export function exchangeUrl(code: string): string {
  * Returns "unavailable" on the web so the caller falls back to the normal
  * in-page Better Auth flow — the browser has no WebView problem to work around.
  */
-export async function startNativeSignIn(provider: "google" | "apple"): Promise<NativeSignInResult> {
+export async function startNativeSignIn(
+  provider: "google" | "apple",
+  next?: string,
+): Promise<NativeSignInResult> {
   const plugin = await loadPlugin(() => import("@capacitor/browser"));
   if (!plugin) return { status: "unavailable" };
 
@@ -63,7 +74,9 @@ export async function startNativeSignIn(provider: "google" | "apple"): Promise<N
     await plugin.Browser.open({
       // Absolute: the system browser has no notion of the WebView's base URL.
       // The WebView is served from the app origin, so this is the deployed site.
-      url: `${window.location.origin}/api/auth/native/start?provider=${provider}`,
+      // `next` rides along so a scanned /add link survives the OAuth round
+      // trip; every server hop re-validates it as a same-origin path.
+      url: `${window.location.origin}/api/auth/native/start?provider=${provider}${next ? `&next=${encodeURIComponent(next)}` : ""}`,
       // ASWebAuthenticationSession / Chrome Custom Tabs: a real browser as far as
       // Google is concerned, but presented inside the app.
       presentationStyle: "popover",

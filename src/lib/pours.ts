@@ -2,12 +2,16 @@ import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
-import { SERVING_STYLES, type Pour, type TastingNote } from "@/db/schema";
+import { POUR_VISIBILITIES, SERVING_STYLES, type Pour, type PourVisibility, type TastingNote } from "@/db/schema";
 import { isValidLeaf } from "@/lib/flavor-wheel";
 import { refreshUserPalate } from "@/lib/palate-store";
+import { getSocialPrefs } from "@/lib/social";
 
 /** Standard pour when the user doesn't specify an amount. */
 export const DEFAULT_POUR_ML = 45;
+
+/** docs/SOCIAL.md §11: cap on cross-user-visible pour writes per hour; past it, pours still log — as private. */
+export const VISIBLE_POUR_LIMIT_PER_HOUR = 30;
 
 export class BottleNotFoundError extends Error {
   constructor(bottleId: string) {
@@ -59,6 +63,7 @@ export const pourInputSchema = z.object({
       flavorTags: flavorTagsSchema.optional(),
     })
     .optional(),
+  visibility: z.enum(POUR_VISIBILITIES).optional(),
 });
 
 export type PourInput = z.infer<typeof pourInputSchema>;
@@ -89,7 +94,8 @@ function noteHasContent(note: NonNullable<PourInput["note"]>): boolean {
  * linked to the user's shelf row for that bottle, creating a "tried" row when
  * none exists, and when that row is an "open" bottle with a fill level, the
  * fill is decremented ~3% per 30ml poured (floored at 0). An optional tasting
- * note is stored 1:1 with the pour.
+ * note is stored 1:1 with the pour. Visibility is `input.visibility` when
+ * given, else the user's `defaultPourVisibility` social pref, else "private".
  */
 export async function logPour(db: DB, userId: string, input: PourInput): Promise<LoggedPour> {
   const parsed = pourInputSchema.parse(input);
@@ -100,7 +106,44 @@ export async function logPour(db: DB, userId: string, input: PourInput): Promise
   if (!bottle) throw new BottleNotFoundError(parsed.bottleId);
 
   const amountMl = parsed.amountMl ?? DEFAULT_POUR_ML;
+  let visibility: PourVisibility =
+    parsed.visibility ?? (await getSocialPrefs(db, userId)).defaultPourVisibility;
   const { pour, note } = await db.transaction(async (tx) => {
+    if (visibility !== "private") {
+      // Everything below runs under the same per-user advisory lock as
+      // makeEverythingPrivate, so a visible write can't slip past a
+      // concurrent US-11 reset and land after it with stale visibility.
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`social-reset:${userId}`}))`);
+
+      // A stepped-back user's new pours are always private, even when the
+      // write carries an explicit visibility — an offline-queued pour minted
+      // before "make everything private" must not resurface as visible on
+      // replay (US-11). Re-enabling social restores nothing implicitly.
+      const profile = await tx.query.userProfiles.findFirst({
+        columns: { socialEnabled: true },
+        where: eq(schema.userProfiles.userId, userId),
+      });
+      if (profile && !profile.socialEnabled) visibility = "private";
+    }
+    if (visibility !== "private") {
+      // docs/SOCIAL.md §11: notes are user-generated text and cross-user
+      // writes are rate-limited. Logging itself must never block (the private
+      // journal is the core loop), so past the cap the pour still lands — as
+      // private. Counting inside the locked transaction means concurrent
+      // requests can't all read a below-limit count before any commits.
+      const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
+      const recentVisible = await tx
+        .select({ n: sql<number>`count(*)` })
+        .from(schema.pours)
+        .where(
+          and(
+            eq(schema.pours.userId, userId),
+            sql`${schema.pours.visibility} <> 'private'`,
+            sql`${schema.pours.createdAt} > ${hourAgo}`,
+          ),
+        );
+      if (Number(recentVisible[0]?.n ?? 0) >= VISIBLE_POUR_LIMIT_PER_HOUR) visibility = "private";
+    }
     let userBottle = await tx.query.userBottles.findFirst({
       where: and(eq(schema.userBottles.userId, userId), eq(schema.userBottles.bottleId, parsed.bottleId)),
     });
@@ -124,6 +167,7 @@ export async function logPour(db: DB, userId: string, input: PourInput): Promise
       .values({
         id: crypto.randomUUID(), userId, bottleId: parsed.bottleId, userBottleId: userBottle?.id ?? null,
         rating: parsed.rating ?? null, servingStyle: parsed.servingStyle ?? null, amountMl, context: parsed.context ?? null,
+        visibility,
       })
       .returning();
     if (userBottle?.status === "open" && userBottle.fillLevel != null) {
@@ -213,6 +257,46 @@ export async function getPour(
   const row = rows[0];
   if (!row) return null;
   return { pour: row.pour, bottleName: row.bottleName, note: row.note ?? null };
+}
+
+export class SocialDisabledError extends Error {
+  constructor() {
+    super("Social is turned off");
+    this.name = "SocialDisabledError";
+  }
+}
+
+/**
+ * Update a pour's social visibility. Owner-scoped; returns null for
+ * missing/others'. While the owner is stepped back (socialEnabled=false),
+ * non-private updates are rejected — otherwise a stale History tab could
+ * re-expose a pour that "make everything private" just hid, with the change
+ * surfacing only when social is re-enabled (docs/SOCIAL.md US-11).
+ */
+export async function updatePourVisibility(
+  db: DB,
+  userId: string,
+  pourId: string,
+  visibility: PourVisibility,
+): Promise<Pour | null> {
+  return db.transaction(async (tx) => {
+    if (visibility !== "private") {
+      // Same lock as makeEverythingPrivate: the check and the write are
+      // atomic w.r.t. a concurrent US-11 reset.
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`social-reset:${userId}`}))`);
+      const profile = await tx.query.userProfiles.findFirst({
+        columns: { socialEnabled: true },
+        where: eq(schema.userProfiles.userId, userId),
+      });
+      if (profile && !profile.socialEnabled) throw new SocialDisabledError();
+    }
+    const rows = await tx
+      .update(schema.pours)
+      .set({ visibility })
+      .where(and(eq(schema.pours.id, pourId), eq(schema.pours.userId, userId)))
+      .returning();
+    return rows[0] ?? null;
+  });
 }
 
 /** Delete a pour (tasting note cascades). Returns false for missing/others'. */

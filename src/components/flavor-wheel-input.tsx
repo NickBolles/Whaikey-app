@@ -57,6 +57,7 @@ export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
   const gestureLeafIdRef = useRef<string | null>(null);
   const [gestureIntensity, setGestureIntensity] = useState<1 | 2 | 3>(1);
   const gestureIntensityRef = useRef<1 | 2 | 3>(1);
+  const [holdState, setHoldState] = useState<"idle" | "filling" | "ready" | "active">("idle");
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const activeGesture = useRef(false);
   const holdElapsed = useRef(false);
@@ -126,6 +127,7 @@ export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
     gestureWedgeId.current = null;
     hapticCategoryId.current = null;
     hapticIntensity.current = null;
+    setHoldState("idle");
     gestureLeafIdRef.current = null;
     setGestureLeafId(null);
   };
@@ -133,6 +135,8 @@ export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
   const updateGestureLeaf = (event: PointerEvent<SVGSVGElement>, wedgeId: string) => {
     const wedge = FLAVOR_WHEEL.find((item) => item.id === wedgeId);
     if (!wedge) return;
+    if (hapticCategoryId.current !== wedge.id) haptic("category");
+    hapticCategoryId.current = wedge.id;
     const point = wheelPointFromPointer(event, SIZE);
     if (point.radius < R_LEAF_IN) {
       gestureLeafIdRef.current = null;
@@ -142,7 +146,7 @@ export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
     const leaf = wedge.leaves[wheelIndex(point.angle, wedge.leaves.length)];
     const intensity = intensityForRadius(point.radius);
     if (intensity > (hapticIntensity.current ?? 0)) {
-      haptic(({ 1: "intensity-1", 2: "intensity-2", 3: "intensity-3" } as const)[intensity]);
+      haptic(INTENSITY_HAPTIC[intensity]);
     }
     hapticIntensity.current = intensity;
     gestureLeafIdRef.current = leaf.id;
@@ -173,11 +177,13 @@ export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
     const wedge = FLAVOR_WHEEL[wheelIndex(point.angle, FLAVOR_WHEEL.length)];
     activePointerId.current = event.pointerId;
     activationStart.current = { clientX: event.clientX, clientY: event.clientY };
-    hapticCategoryId.current = wedge.id;
+    hapticCategoryId.current = null;
     hapticIntensity.current = null;
     gestureWedgeId.current = wedge.id;
+    setHoldState("filling");
     holdTimer.current = setTimeout(() => {
       holdElapsed.current = true;
+      setHoldState("ready");
     }, WHEEL_HOLD_MS);
   };
 
@@ -187,6 +193,7 @@ export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
       const start = activationStart.current;
       if (!holdElapsed.current || !start || !shouldActivateWheelGesture(start, event)) return;
       activeGesture.current = true;
+      setHoldState("active");
       event.currentTarget.setPointerCapture?.(event.pointerId);
       haptic("lock");
     }
@@ -363,6 +370,46 @@ export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
             );
           })}
 
+        {/* The center acts as a quiet touch affordance: it fills while holding,
+            then changes copy once the wheel is ready to sweep. */}
+        {holdState !== "idle" && (
+          <>
+            <circle
+              cx={C}
+              cy={C}
+              r={31}
+              fill="var(--accent)"
+              fillOpacity={holdState === "active" ? 0.2 : 0.1}
+              pointerEvents="none"
+              style={{
+                transformOrigin: `${C}px ${C}px`,
+                animation:
+                  holdState === "filling"
+                    ? `wheel-hold-fill ${WHEEL_HOLD_MS}ms linear forwards`
+                    : undefined,
+                transform: holdState === "filling" ? "scale(0)" : "scale(1)",
+              }}
+            />
+            <circle
+              cx={C}
+              cy={C}
+              r={31}
+              fill="none"
+              stroke="var(--accent)"
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeDasharray="195"
+              strokeDashoffset={holdState === "filling" ? 195 : 0}
+              pointerEvents="none"
+              style={{
+                transform: `rotate(-90deg)`,
+                transformOrigin: `${C}px ${C}px`,
+                transition: `stroke-dashoffset ${WHEEL_HOLD_MS}ms linear`,
+              }}
+            />
+          </>
+        )}
+        <style>{`@keyframes wheel-hold-fill { to { transform: scale(1); } }`}</style>
         {/* Center label — serif, like a label on aged glass */}
         <text
           x={C}
@@ -384,7 +431,15 @@ export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
           fill="var(--muted)"
           pointerEvents="none"
         >
-          {selectedWedge ? "tap a flavor to set intensity" : "tap a category"}
+          {holdState === "filling"
+            ? "hold to taste"
+            : holdState === "ready"
+              ? "sweep to taste"
+              : holdState === "active"
+                ? "release to save"
+                : selectedWedge
+                  ? "tap a flavor to set intensity"
+                  : "tap a category"}
         </text>
         {chips.length > 0 && (
           <text

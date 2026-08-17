@@ -199,6 +199,34 @@ export const bottleUpcs = pgTable(
   ],
 );
 
+/**
+ * Published critic reviews on file for a bottle — the second half of the
+ * comparison screen's "Professional" reference (the producer's own note lives
+ * on `bottles.producerFlavorTags`). Like producer claims, a critic note is
+ * only displayable with source attribution, and it is one opinion, never an
+ * answer key. `score` and `scoreScale` are shown verbatim ("91", "/100") —
+ * critic scales differ and we never convert between them.
+ */
+export const criticNotes = pgTable(
+  "critic_notes",
+  {
+    id: id(),
+    bottleId: text("bottle_id")
+      .notNull()
+      .references(() => bottles.id, { onDelete: "cascade" }),
+    publication: text("publication").notNull(),
+    score: text("score"),
+    scoreScale: text("score_scale"),
+    note: text("note").notNull(),
+    /** Canonical leaf-id tags (1-3) extracted from the note, for agreement bars. */
+    flavorTags: jsonb("flavor_tags").$type<Record<string, number>>(),
+    sourceUrl: text("source_url").notNull(),
+    retrievedAt: timestamp("retrieved_at", { withTimezone: true, mode: "date" }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("critic_notes_bottle_idx").on(t.bottleId)],
+);
+
 export const RELATIONSHIPS = ["own", "tried", "wishlist"] as const;
 export type Relationship = (typeof RELATIONSHIPS)[number];
 export const BOTTLE_STATUSES = ["sealed", "open", "finished", "sold", "traded", "gifted"] as const;
@@ -237,6 +265,16 @@ export const userBottles = pgTable(
 export const SERVING_STYLES = ["neat", "rocks", "splash", "cocktail", "highball"] as const;
 export type ServingStyle = (typeof SERVING_STYLES)[number];
 
+/**
+ * Per-pour social visibility (docs/SOCIAL.md §8). "private" is the immovable
+ * default; no system action ever raises the visibility of existing data —
+ * only the owner can, explicitly. "friends" = mutual follows; "followers" =
+ * anyone with an accepted follow; "public" = any signed-in viewer via social
+ * surfaces (share links remain a separate bearer-token mechanism).
+ */
+export const POUR_VISIBILITIES = ["private", "friends", "followers", "public"] as const;
+export type PourVisibility = (typeof POUR_VISIBILITIES)[number];
+
 export const pours = pgTable(
   "pours",
   {
@@ -253,6 +291,7 @@ export const pours = pgTable(
     servingStyle: text("serving_style").$type<ServingStyle>(),
     amountMl: integer("amount_ml"),
     context: jsonb("context").$type<{ setting?: string; companions?: string; glassware?: string }>(),
+    visibility: text("visibility").$type<PourVisibility>().notNull().default("private"),
     createdAt: createdAt(),
   },
   (t) => [index("pours_user_idx").on(t.userId), index("pours_bottle_idx").on(t.bottleId)],
@@ -296,9 +335,226 @@ export const pourShares = pgTable(
     code: text("code").notNull().unique(),
     /** An opt-in share-only place label; never inferred from a device location. */
     locationLabel: text("location_label"),
+    /**
+     * Revocation tombstone: a non-null value makes the code 404 immediately.
+     * Re-sharing the pour reuses this row with a FRESH code and clears it —
+     * a revoked code must never come back to life (docs/SOCIAL.md §16.2).
+     */
+    revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "date" }),
     createdAt: createdAt(),
   },
   (t) => [index("pour_shares_user_idx").on(t.userId)],
+);
+
+// ---------------------------------------------------------------------------
+// Social (docs/SOCIAL.md — binding). Read paths NEVER select money columns
+// (purchasePrice, estValue, msrp/avgPrice aggregates of a user's own shelf);
+// social reads go through explicit projections in src/lib/social.ts that pick
+// columns individually, mirroring getPublicPourShare().
+// ---------------------------------------------------------------------------
+
+/**
+ * Social identity, created lazily at the user's first social action — never at
+ * signup. The profile IS the palate card (docs/SOCIAL.md §7.1): social
+ * surfaces render palate data, never spend, value, or pour counts.
+ */
+export const userProfiles = pgTable("user_profiles", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => user.id, { onDelete: "cascade" }),
+  /** Lowercase [a-z0-9_]{3,20}; uniqueness is case-insensitive by normalizing on write. */
+  handle: text("handle").notNull().unique(),
+  displayName: text("display_name").notNull(),
+  avatarUrl: text("avatar_url"),
+  bio: text("bio"),
+  homeRegion: text("home_region"),
+  /** Public profiles are viewable by any signed-in user; private ones only by accepted followers (and always by their owner). */
+  isPublic: boolean("is_public").notNull().default(false),
+  /** When false the profile is reachable only by exact handle, never suggested. */
+  discoverable: boolean("discoverable").notNull().default(true),
+  /**
+   * The US-11 "step back" switch: false hides every social surface (profile,
+   * feed presence, friend notes) without deleting anything. Reversible.
+   */
+  socialEnabled: boolean("social_enabled").notNull().default(true),
+  /**
+   * Phone discovery (docs/SOCIAL.md §7.2, D8 as amended): the raw number is
+   * NEVER stored — only an HMAC (keyed by a server secret) for exact-match
+   * lookup, plus the last two digits so the owner can recognize which number
+   * they registered. Discovery is double-opt-in: the owner must both set a
+   * number and flip phoneDiscoverable (default OFF). Contact-book import
+   * remains banned; this is single-number exact lookup only.
+   */
+  phoneHash: text("phone_hash").unique(),
+  phoneLast2: text("phone_last2"),
+  phoneDiscoverable: boolean("phone_discoverable").notNull().default(false),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+
+/**
+ * One row per phone lookup, kept solely to rate-limit them durably — an
+ * unthrottled endpoint would let an account iterate numbers and map who is
+ * on the app. Only the requester is recorded; never the number queried.
+ */
+export const phoneLookups = pgTable(
+  "phone_lookups",
+  {
+    id: id(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("phone_lookups_user_idx").on(t.userId),
+    // The retention sweep (recordPhoneProbe) deletes by age across all users;
+    // without this index every probe would seq-scan the whole table.
+    index("phone_lookups_created_at_idx").on(t.createdAt),
+  ],
+);
+
+export const FOLLOW_STATES = ["pending", "accepted"] as const;
+export type FollowState = (typeof FOLLOW_STATES)[number];
+
+/**
+ * Asymmetric follow graph (docs/SOCIAL.md D1). Mutual accepted follows derive
+ * "friends"; follows of private profiles start as "pending" requests.
+ */
+export const follows = pgTable(
+  "follows",
+  {
+    id: id(),
+    followerId: text("follower_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    followeeId: text("followee_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    state: text("state").$type<FollowState>().notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("follows_follower_followee_uq").on(t.followerId, t.followeeId),
+    index("follows_followee_idx").on(t.followeeId),
+  ],
+);
+
+/**
+ * Checked on EVERY social read path, in both directions — blocked users are
+ * mutually invisible everywhere, immediately (docs/SOCIAL.md §11). Blocking
+ * also deletes any follow rows between the pair.
+ */
+export const blocks = pgTable(
+  "blocks",
+  {
+    id: id(),
+    blockerId: text("blocker_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    blockedId: text("blocked_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("blocks_blocker_blocked_uq").on(t.blockerId, t.blockedId),
+    index("blocks_blocked_idx").on(t.blockedId),
+  ],
+);
+
+/**
+ * Per-user social preferences. `defaultPourVisibility` seeds the pour sheet's
+ * selector and ships as "private" (docs/SOCIAL.md D2); changing it never
+ * touches existing pours.
+ */
+export const userSocialPrefs = pgTable("user_social_prefs", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => user.id, { onDelete: "cascade" }),
+  defaultPourVisibility: text("default_pour_visibility").$type<PourVisibility>().notNull().default("private"),
+  /** Whether others may comment on this user's visible notes. */
+  allowComments: boolean("allow_comments").notNull().default(true),
+  notifyPrefs: jsonb("notify_prefs").$type<Record<string, boolean>>(),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+
+export const REACTION_KINDS = ["cheers"] as const;
+export type ReactionKind = (typeof REACTION_KINDS)[number];
+
+/**
+ * One-tap positive-only reactions on a visible pour/note (docs/SOCIAL.md
+ * §7.5). Counts render on the object only — never aggregated into any
+ * person-level score, rank, or leaderboard (§3.3).
+ */
+export const reactions = pgTable(
+  "reactions",
+  {
+    id: id(),
+    pourId: text("pour_id")
+      .notNull()
+      .references(() => pours.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    kind: text("kind").$type<ReactionKind>().notNull().default("cheers"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("reactions_pour_user_kind_uq").on(t.pourId, t.userId, t.kind),
+    index("reactions_pour_idx").on(t.pourId),
+  ],
+);
+
+/**
+ * Threaded comments under a visible note (docs/SOCIAL.md US-12). Soft delete
+ * via deletedAt (body is blanked on delete); replies keep rendering under a
+ * deleted parent tombstone. Plain text only, escaped on render.
+ */
+export const comments = pgTable(
+  "comments",
+  {
+    id: id(),
+    pourId: text("pour_id")
+      .notNull()
+      .references(() => pours.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    parentId: text("parent_id"),
+    body: text("body").notNull(),
+    createdAt: createdAt(),
+    editedAt: timestamp("edited_at", { withTimezone: true, mode: "date" }),
+    deletedAt: timestamp("deleted_at", { withTimezone: true, mode: "date" }),
+  },
+  (t) => [index("comments_pour_idx").on(t.pourId)],
+);
+
+export const REPORT_STATES = ["open", "resolved", "dismissed"] as const;
+export type ReportState = (typeof REPORT_STATES)[number];
+export const REPORT_SUBJECT_TYPES = ["comment", "pour", "profile"] as const;
+export type ReportSubjectType = (typeof REPORT_SUBJECT_TYPES)[number];
+
+/**
+ * Abuse reports (docs/SOCIAL.md §11). Deliberately polymorphic and without a
+ * subject FK so a report survives the reported content's deletion; the queue
+ * UI comes later — this is the durable record.
+ */
+export const reports = pgTable(
+  "reports",
+  {
+    id: id(),
+    subjectType: text("subject_type").$type<ReportSubjectType>().notNull(),
+    subjectId: text("subject_id").notNull(),
+    reporterId: text("reporter_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    reason: text("reason").notNull(),
+    state: text("state").$type<ReportState>().notNull().default("open"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("reports_state_idx").on(t.state)],
 );
 
 export const pairings = pgTable(
@@ -664,6 +920,7 @@ export type Bottle = typeof bottles.$inferSelect;
 export type NewBottle = typeof bottles.$inferInsert;
 export type UserBottle = typeof userBottles.$inferSelect;
 export type Pour = typeof pours.$inferSelect;
+export type CriticNote = typeof criticNotes.$inferSelect;
 export type TastingNote = typeof tastingNotes.$inferSelect;
 export type Pairing = typeof pairings.$inferSelect;
 export type ChatSession = typeof chatSessions.$inferSelect;

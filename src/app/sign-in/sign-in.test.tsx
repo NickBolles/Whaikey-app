@@ -96,7 +96,35 @@ describe("SignInPage", () => {
 
     // Google rejects OAuth from an embedded WebView, so the in-page flow must
     // not run at all once the native handoff has taken over.
-    expect(startNativeSignIn).toHaveBeenCalledWith("google");
+    expect(startNativeSignIn).toHaveBeenCalledWith("google", undefined);
     expect(social).not.toHaveBeenCalled();
+  });
+});
+
+describe("return path (?next=)", () => {
+  it("passes a same-origin next path through as the OAuth callbackURL", async () => {
+    social.mockResolvedValue(undefined);
+    searchParams.value = new URLSearchParams("next=%2Fadd%2Fsasha");
+    render(<SignInPage />);
+    await userEvent.click(screen.getByRole("button", { name: /Continue with Google/i }));
+    await waitFor(() =>
+      expect(social).toHaveBeenCalledWith(expect.objectContaining({ callbackURL: "/add/sasha" })),
+    );
+  });
+
+  it("falls back to '/' for absolute or protocol-relative next values (no open redirect)", async () => {
+    // "/\t/evil.example" and "/\evil.example" matter here: WHATWG URL parsing
+    // strips tabs and treats "\" as "/", so either would resolve off-origin.
+    for (const evil of ["https://evil.example/x", "//evil.example/x", "/\\evil.example/x", "/\t/evil.example"]) {
+      social.mockReset();
+      social.mockResolvedValue(undefined);
+      searchParams.value = new URLSearchParams([["next", evil]]);
+      const { unmount } = render(<SignInPage />);
+      await userEvent.click(screen.getByRole("button", { name: /Continue with Google/i }));
+      await waitFor(() =>
+        expect(social).toHaveBeenCalledWith(expect.objectContaining({ callbackURL: "/" })),
+      );
+      unmount();
+    }
   });
 });

@@ -1,39 +1,35 @@
 import Link from "next/link";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
+import { desc, eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { getSessionUser } from "@/lib/session";
 import { isAiConfigured } from "@/lib/ai/client";
+import { ONBOARDING_COOKIE, needsOnboarding } from "@/lib/onboarding";
+import { getFriendFeed, getOwnProfile, listFollowing } from "@/lib/social";
+import { appNow } from "@/lib/clock";
+import { getDashboard } from "@/lib/dashboard";
+import { Dashboard } from "@/components/dashboard";
 import { HomeConcierge } from "@/components/home-concierge";
-import {
-  Search,
-  ScanLine,
-  Wine,
-  GlassWater,
-  GraduationCap,
-  ChevronRight,
-  Star,
-} from "lucide-react";
+import { HomeHero } from "@/components/home-hero";
+import { QuickPourButton } from "@/components/quick-pour-button";
+import { RecommendationRail } from "@/components/recommendation-rail";
+import { FriendsModule, type FriendFeedItem } from "@/components/friends-module";
+import { ChevronRight, GraduationCap, Star } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
-function Wordmark() {
-  return (
-    <div className="flex items-center gap-2 text-muted">
-      <span aria-hidden className="text-base leading-none">🥃</span>
-      <span className="font-display text-sm tracking-wide">Whaikey</span>
-    </div>
-  );
-}
-
 function SignedOutHero() {
   return (
-    <div className="flex flex-col items-center justify-center min-h-[78dvh] px-6 text-center gap-7">
-      <div aria-hidden className="text-6xl drop-shadow-[0_0_24px_rgba(232,161,60,0.25)]">🥃</div>
+    <div className="flex min-h-[78dvh] flex-col items-center justify-center gap-7 px-6 text-center">
+      <div aria-hidden className="text-6xl drop-shadow-[0_0_24px_rgba(232,161,60,0.25)]">
+        🥃
+      </div>
       <div>
         <h1 className="font-display text-5xl font-semibold tracking-tight text-gradient-amber">
           Whaikey
         </h1>
-        <p className="text-muted mt-4 max-w-sm leading-relaxed">
+        <p className="mx-auto mt-4 max-w-sm leading-relaxed text-muted">
           Track your bottles, log your pours, map your palate — and ask the AI concierge anything
           about whiskey or your own bar.
         </p>
@@ -46,23 +42,30 @@ function SignedOutHero() {
   );
 }
 
+/**
+ * Deterministic (no clock, no locale surprises) date label for journal rows,
+ * so server-rendered output stays stable under the pinned-clock visual suite.
+ */
+function pourDateLabel(date: Date): string {
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+}
+
 export default async function HomePage() {
   const user = await getSessionUser();
   if (!user) return <SignedOutHero />;
 
   const db = getDb();
-  const [owned] = await db
-    .select({
-      count: sql<number>`count(*)`,
-      spent: sql<number>`coalesce(sum(${schema.userBottles.purchasePrice} * ${schema.userBottles.quantity}), 0)`,
-    })
-    .from(schema.userBottles)
-    .where(and(eq(schema.userBottles.userId, user.id), eq(schema.userBottles.relationship, "own")));
 
-  const [pourStats] = await db
-    .select({ count: sql<number>`count(*)` })
-    .from(schema.pours)
-    .where(eq(schema.pours.userId, user.id));
+  // First-run handoff: the /welcome tour owns brand-new accounts. The cookie
+  // (set by /welcome on finish or skip) short-circuits the DB check.
+  const cookieStore = await cookies();
+  if (!cookieStore.get(ONBOARDING_COOKIE) && (await needsOnboarding(db, user.id))) {
+    redirect("/welcome");
+  }
+
+  // The dashboard's month-in-review also carries the shelf total and lifetime
+  // pour count, so the hero reuses them instead of re-counting.
+  const dashboard = await getDashboard(db, user.id, appNow());
 
   const recentPours = await db
     .select({
@@ -76,78 +79,107 @@ export default async function HomePage() {
     .innerJoin(schema.bottles, eq(schema.pours.bottleId, schema.bottles.id))
     .where(eq(schema.pours.userId, user.id))
     .orderBy(desc(schema.pours.createdAt))
-    .limit(5);
+    .limit(3);
 
+  // US-7: the "From your friends" Home module (docs/SOCIAL.md §7.3). A profile
+  // and at least one accepted follow are prerequisites for the graph to have
+  // anything to show — checked separately from the feed query so the empty
+  // states can tell "no friends yet" apart from "friends, quiet week".
+  const [ownProfile, following] = await Promise.all([
+    getOwnProfile(db, user.id),
+    listFollowing(db, user.id),
+  ]);
+  const hasProfile = Boolean(ownProfile?.socialEnabled);
+  const hasFollows = following.some((f) => f.state === "accepted");
+  const friendFeedRaw = hasFollows ? await getFriendFeed(db, user.id, { limit: 3 }) : [];
+  const friendFeedItems: FriendFeedItem[] = friendFeedRaw.map((f) => ({
+    pourId: f.pourId,
+    bottleId: f.bottleId,
+    bottleName: f.bottleName,
+    author: f.author,
+    rating: f.rating,
+    servingStyle: f.servingStyle,
+    createdAt: f.createdAt.toISOString(),
+    nose: f.nose,
+    palate: f.palate,
+    finish: f.finish,
+    freeform: f.freeform,
+    flavorTags: f.flavorTags,
+    cheersCount: f.cheersCount,
+    commentCount: f.commentCount,
+    viewerTags: f.viewerTags,
+    viewerBottleRelationship: f.viewerBottleRelationship,
+  }));
 
-  const firstName = user.name?.split(" ")[0] ?? "there";
-  const stats = [
-    { value: String(owned?.count ?? 0), label: "bottles owned" },
-    { value: String(pourStats?.count ?? 0), label: "pours logged" },
-    { value: `$${Math.round(owned?.spent ?? 0).toLocaleString()}`, label: "total spent" },
-  ];
+  const bottleCount = dashboard.shelfTotal;
+  const pourCount = dashboard.totalPours;
 
   return (
-    <div className="px-4 pt-5 flex flex-col gap-7">
-      <Wordmark />
+    <div className="flex flex-col gap-7 px-4 pt-5">
+      {/* Home's upper half is the month in review — greyed skeleton and all,
+          it renders for everyone; the skeleton is what motivates the first log. */}
+      <Dashboard data={dashboard} userName={user.name} userImage={user.image} />
 
-      <header>
-        <h1 className="font-display text-[2rem] leading-tight font-semibold">Welcome back, {firstName}</h1>
-        <p className="text-muted mt-1">Your shelf, your next pour, and a concierge when you want one.</p>
-      </header>
+      <HomeHero bottleCount={bottleCount} pourCount={pourCount} />
 
-      <section aria-label="Your bar" className="card p-5">
-        <div className="flex items-start justify-between gap-4"><div><p className="section-label">Start with your shelf</p><h2 className="font-display mt-1 text-xl font-semibold">Choose a bottle from My Bar</h2><p className="mt-1 text-sm text-muted">Pick a bottle first, then log the pour — no extra hunt.</p></div><Wine size={28} className="shrink-0 text-accent" aria-hidden /></div>
-        <div className="mt-4 grid grid-cols-2 gap-2"><Link href="/bar" className="btn-primary flex items-center justify-center gap-2 px-3 py-3 text-sm"><Wine size={16} aria-hidden /> My Bar</Link><Link href="/pour" className="btn-secondary flex items-center justify-center gap-2 px-3 py-3 text-sm"><GlassWater size={16} aria-hidden /> Pick any bottle</Link></div>
-      </section>
+      {/* Discovery pairs with tonight's pick: both answer "what's next?" —
+          which is Home's job. My Bar stays about the bottles you own. */}
+      {bottleCount > 0 && <RecommendationRail mode="discovery" title="For your palate" />}
 
-      <section aria-label="Your stats" className="grid grid-cols-3 gap-3">{stats.map((s) => <div key={s.label} className="card p-4"><div className="stat-number text-[1.7rem] leading-none text-accent">{s.value}</div><div className="text-[11px] text-muted mt-2">{s.label}</div></div>)}</section>
-
-      <HomeConcierge aiConfigured={isAiConfigured()} />
-
-      <section aria-label="Quick actions" className="grid grid-cols-2 gap-3">
-        {[{ href: "/search", label: "Find a bottle", icon: Search }, { href: "/scan", label: "Scan bottles", icon: ScanLine }].map(({ href, label, icon: Icon }) => <Link key={href} href={href} className="card flex items-center gap-3 p-4 text-sm hover:brightness-110 transition-[filter]"><Icon size={20} className="text-accent" aria-hidden />{label}</Link>)}
-      </section>
-
-      <section aria-label="Whiskey School">
-        <h2 className="section-label mb-3">Whiskey School</h2>
-        <Link
-          href="/learn"
-          className="card flex items-center gap-4 p-5 hover:brightness-110 transition-[filter]"
-        >
-          <GraduationCap size={22} strokeWidth={1.8} className="text-accent shrink-0" aria-hidden />
-          <span className="flex-1 min-w-0">
-            <span className="font-display text-lg font-semibold block">Learn as you sip</span>
-            <span className="text-sm text-muted block mt-0.5">
-              Short lessons on styles, casks, and the flavor wheel.
-            </span>
-          </span>
-          <ChevronRight size={18} strokeWidth={1.8} className="text-muted shrink-0" aria-hidden />
-        </Link>
-      </section>
+      <FriendsModule items={friendFeedItems} hasProfile={hasProfile} hasFollows={hasFollows} />
 
       {recentPours.length > 0 && (
-        <section aria-label="Recent pours">
-          <h2 className="section-label mb-3">Recent pours</h2>
+        <section aria-label="Your journal">
+          <div className="mb-3 flex items-baseline justify-between">
+            <h2 className="section-label">Your journal</h2>
+            <Link
+              href="/history"
+              className="tap-target text-sm text-muted transition-colors hover:text-foreground"
+            >
+              See all →
+            </Link>
+          </div>
           <ul className="flex flex-col gap-2.5">
             {recentPours.map((p) => (
-              <li key={p.id}>
+              <li key={p.id} className="card-flat flex items-center gap-3 p-4">
                 <Link
                   href={`/bottles/${p.bottleId}`}
-                  className="card-flat flex items-center justify-between p-4 hover:bg-surface-raised transition-colors"
+                  className="flex min-w-0 flex-1 items-center justify-between gap-3"
                 >
-                  <span className="font-medium">{p.bottleName}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-medium">{p.bottleName}</span>
+                    <span className="mt-0.5 block text-xs text-muted">
+                      {pourDateLabel(p.createdAt)}
+                    </span>
+                  </span>
                   {p.rating != null && (
-                    <span className="flex items-center gap-1.5 text-accent">
+                    <span className="flex shrink-0 items-center gap-1.5 text-accent">
                       <Star size={14} fill="currentColor" aria-hidden />
                       <span className="stat-number text-lg leading-none">{p.rating.toFixed(1)}</span>
                     </span>
                   )}
                 </Link>
+                {/* One tap re-logs the same dram — zero notes, zero score. */}
+                <QuickPourButton bottleId={p.bottleId} bottleName={p.bottleName} />
               </li>
             ))}
           </ul>
         </section>
       )}
+
+      <section aria-label="More from Whaikey" className="flex flex-col gap-2.5">
+        <Link
+          href="/learn"
+          className="card-flat flex min-h-11 items-center gap-3 px-4 py-3 transition-colors hover:bg-surface-raised"
+        >
+          <GraduationCap size={18} strokeWidth={1.8} className="shrink-0 text-muted" aria-hidden />
+          <span className="min-w-0 flex-1 truncate text-sm">
+            Whiskey School — short lessons on styles, casks, and the flavor wheel.
+          </span>
+          <ChevronRight size={18} strokeWidth={1.8} className="shrink-0 text-muted" aria-hidden />
+        </Link>
+        <HomeConcierge aiConfigured={isAiConfigured()} />
+      </section>
     </div>
   );
 }
