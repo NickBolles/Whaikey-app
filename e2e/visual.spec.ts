@@ -118,7 +118,9 @@ test.describe("signed in (demo collector)", () => {
 
   test("home dashboard", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByText(/Welcome back/i)).toBeVisible();
+    // Month-in-review header: pinned server clock (WHAIKEY_FAKE_NOW) = July.
+    await expect(page.getByText("JULY", { exact: true })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Your month" })).toBeVisible();
     // The hero IS tonight's pick now; its heading is the pinned-clock guard
     // that used to sit on the /bar shots — if the fixed time stops taking,
     // this names the cause instead of leaving a 20px reflow to a pixel diff.

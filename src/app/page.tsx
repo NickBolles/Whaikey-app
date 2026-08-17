@@ -1,14 +1,18 @@
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { getSessionUser } from "@/lib/session";
 import { isAiConfigured } from "@/lib/ai/client";
 import { ONBOARDING_COOKIE, needsOnboarding } from "@/lib/onboarding";
 import { getFriendFeed, getOwnProfile, listFollowing } from "@/lib/social";
+import { appNow } from "@/lib/clock";
+import { getDashboard } from "@/lib/dashboard";
+import { Dashboard } from "@/components/dashboard";
 import { HomeConcierge } from "@/components/home-concierge";
 import { HomeHero } from "@/components/home-hero";
+import { QuickPourButton } from "@/components/quick-pour-button";
 import { RecommendationRail } from "@/components/recommendation-rail";
 import { FriendsModule, type FriendFeedItem } from "@/components/friends-module";
 import { ChevronRight, GraduationCap, Star } from "lucide-react";
@@ -46,13 +50,6 @@ function pourDateLabel(date: Date): string {
   return date.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
 }
 
-/** One state-aware line under the greeting; qualitative so it never repeats the hero's counts. */
-function greetingSubtitle(bottleCount: number, pourCount: number): string {
-  if (bottleCount === 0 && pourCount === 0) return "Let’s get the first bottle on your shelf.";
-  if (pourCount === 0) return "Your shelf is stocked — the journal starts with a pour.";
-  return "Your bar, your journal, and a concierge when you want one.";
-}
-
 export default async function HomePage() {
   const user = await getSessionUser();
   if (!user) return <SignedOutHero />;
@@ -66,15 +63,9 @@ export default async function HomePage() {
     redirect("/welcome");
   }
 
-  const [owned] = await db
-    .select({ count: sql<number>`count(*)` })
-    .from(schema.userBottles)
-    .where(and(eq(schema.userBottles.userId, user.id), eq(schema.userBottles.relationship, "own")));
-
-  const [pourStats] = await db
-    .select({ count: sql<number>`count(*)` })
-    .from(schema.pours)
-    .where(eq(schema.pours.userId, user.id));
+  // The dashboard's month-in-review also carries the shelf total and lifetime
+  // pour count, so the hero reuses them instead of re-counting.
+  const dashboard = await getDashboard(db, user.id, appNow());
 
   const recentPours = await db
     .select({
@@ -120,18 +111,14 @@ export default async function HomePage() {
     viewerBottleRelationship: f.viewerBottleRelationship,
   }));
 
-  const firstName = user.name?.split(" ")[0] || "there";
-  const bottleCount = owned?.count ?? 0;
-  const pourCount = pourStats?.count ?? 0;
+  const bottleCount = dashboard.shelfTotal;
+  const pourCount = dashboard.totalPours;
 
   return (
     <div className="flex flex-col gap-7 px-4 pt-5">
-      <header>
-        <h1 className="font-display text-[2rem] font-semibold leading-tight">
-          Welcome back, {firstName}
-        </h1>
-        <p className="mt-1 text-muted">{greetingSubtitle(bottleCount, pourCount)}</p>
-      </header>
+      {/* Home's upper half is the month in review — greyed skeleton and all,
+          it renders for everyone; the skeleton is what motivates the first log. */}
+      <Dashboard data={dashboard} userName={user.name} userImage={user.image} />
 
       <HomeHero bottleCount={bottleCount} pourCount={pourCount} />
 
@@ -154,10 +141,10 @@ export default async function HomePage() {
           </div>
           <ul className="flex flex-col gap-2.5">
             {recentPours.map((p) => (
-              <li key={p.id}>
+              <li key={p.id} className="card-flat flex items-center gap-3 p-4">
                 <Link
                   href={`/bottles/${p.bottleId}`}
-                  className="card-flat flex items-center justify-between gap-3 p-4 transition-colors hover:bg-surface-raised"
+                  className="flex min-w-0 flex-1 items-center justify-between gap-3"
                 >
                   <span className="min-w-0 flex-1">
                     <span className="block truncate font-medium">{p.bottleName}</span>
@@ -172,6 +159,8 @@ export default async function HomePage() {
                     </span>
                   )}
                 </Link>
+                {/* One tap re-logs the same dram — zero notes, zero score. */}
+                <QuickPourButton bottleId={p.bottleId} bottleName={p.bottleName} />
               </li>
             ))}
           </ul>
