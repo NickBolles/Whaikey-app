@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { vi } from "vitest";
 
 const refresh = vi.fn();
@@ -17,6 +17,18 @@ afterEach(() => {
   cleanup();
   refresh.mockClear();
 });
+
+/**
+ * Choose a collection from the filter panel (the quick tabs are gone — the
+ * pill row under the header carries bottle states, not collections), opening
+ * the panel if it isn't already.
+ */
+function pickCollection(name: RegExp) {
+  if (!screen.queryByRole("radio", { name })) {
+    fireEvent.click(screen.getByRole("button", { name: /Filters/ }));
+  }
+  fireEvent.click(screen.getByRole("radio", { name }));
+}
 
 const sweetHeat = {
   wedges: { sweet: 1 },
@@ -87,6 +99,7 @@ function bottleRow(
 ): Row {
   return {
     id,
+    bottleId: `${id}-bottle`,
     relationship,
     quantity: 1,
     status: relationship === "own" ? "sealed" : null,
@@ -185,7 +198,7 @@ describe("BarClient collection bar", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Filter by Vanilla" })[0]);
     expect(screen.getByLabelText("Active flavor filters")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("tab", { name: /Tried/ }));
+    pickCollection(/Tried/);
     expect(screen.queryByLabelText("Active flavor filters")).not.toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "Filter by Oak" }).length).toBeGreaterThan(0);
   });
@@ -206,7 +219,7 @@ describe("BarClient collection bar", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("tab", { name: /Tried/ }));
+    pickCollection(/Tried/);
     expect(screen.getByText("Tried Oak Bottle")).toBeInTheDocument();
     expect(screen.getByText("Tried Fruity Bottle")).toBeInTheDocument();
 
@@ -234,10 +247,8 @@ describe("BarClient collection bar", () => {
     expect(screen.getByText("Owned Bottle")).toBeInTheDocument();
     expect(screen.getByText("Tried Bottle")).toBeInTheDocument();
 
-    // Neither quick slot may claim to be selected once the panel moves off them.
-    for (const name of [/My bar/, /Tried/]) {
-      expect(screen.getByRole("tab", { name })).toHaveAttribute("aria-selected", "false");
-    }
+    // The panel radio is now the one control claiming the selection.
+    expect(screen.getByRole("radio", { name: /Everything/ })).toHaveAttribute("aria-checked", "true");
   });
 
   it("shows no flavor map on the wishlist, which is untasted by definition", () => {
@@ -322,7 +333,7 @@ describe("BarClient filter panel", () => {
 
     // Tried bottles have no fill state, so "Open" has no control there — and a
     // filter with no visible control would empty the list from nowhere.
-    fireEvent.click(screen.getByRole("tab", { name: /Tried/ }));
+    pickCollection(/Tried/);
     expect(screen.getByText("Tried Bottle")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Filters/ })).not.toHaveTextContent("1");
   });
@@ -548,7 +559,7 @@ describe("BarClient compare lens", () => {
     expect(screen.getByLabelText("Calibration summary")).toBeInTheDocument();
 
     // The tried shelf has no published notes, so Compare cannot describe it.
-    fireEvent.click(screen.getByRole("tab", { name: /Tried/ }));
+    pickCollection(/Tried/);
     expect(screen.queryByLabelText("Calibration summary")).not.toBeInTheDocument();
   });
 });
@@ -644,8 +655,8 @@ describe("BarClient filter correctness", () => {
     expect(screen.queryByText("Sealed Bottle")).not.toBeInTheDocument();
 
     // Tried bottles have no fill state, so "Open" has no control there.
-    fireEvent.click(screen.getByRole("tab", { name: /Tried/ }));
-    fireEvent.click(screen.getByRole("tab", { name: /My bar/ }));
+    pickCollection(/Tried/);
+    pickCollection(/My bar/);
 
     // Coming back must not reinstate a filter the UI said was gone.
     expect(screen.getByText("Sealed Bottle")).toBeInTheDocument();
@@ -720,11 +731,11 @@ describe("BarClient lens across collections", () => {
 
     // Tried has no published notes, so Compare is not offered there and the
     // control shows Mine as selected.
-    fireEvent.click(screen.getByRole("tab", { name: /Tried/ }));
+    pickCollection(/Tried/);
     expect(screen.queryByRole("tab", { name: "Compare" })).not.toBeInTheDocument();
 
     // Coming back must not contradict what that screen said was selected.
-    fireEvent.click(screen.getByRole("tab", { name: /My bar/ }));
+    pickCollection(/My bar/);
     expect(screen.getByRole("tab", { name: "Compare" })).toHaveAttribute("aria-selected", "false");
     expect(screen.getByRole("tab", { name: "Mine" })).toHaveAttribute("aria-selected", "true");
   });
@@ -856,27 +867,6 @@ describe("BarClient filter/summary agreement", () => {
   });
 });
 
-describe("BarClient keeps server-derived data honest", () => {
-  it("refetches after removing a bottle, so Compare stops counting it", async () => {
-    const rows = [
-      { ...bottleRow("gone", "Doomed Bottle", "own", {}), status: "open" } as Row,
-    ];
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
-    vi.stubGlobal("fetch", fetchMock);
-
-    render(<BarClient initialRows={rows} flavorHeat={heatMatrix()}
-        calibration={calibrationMatrix()} palate={palate} />);
-
-    fireEvent.click(screen.getByRole("button", { name: /Doomed Bottle/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
-
-    // The flavor heat and calibration are computed server-side over the whole
-    // shelf, so dropping the row locally is not enough.
-    await waitFor(() => expect(refresh).toHaveBeenCalled());
-    vi.unstubAllGlobals();
-  });
-});
-
 describe("BarClient analytics-first layout", () => {
   it("reads stats and flavor map above the bottle list, with no Insights zone", () => {
     const rows = [bottleRow("owned-row", "Owned Bottle", "own", {})];
@@ -908,7 +898,7 @@ describe("BarClient analytics-first layout", () => {
     expect(stats).toHaveTextContent("est. value");
 
     // Money never describes bottles that are not the owner's own collection.
-    fireEvent.click(screen.getByRole("tab", { name: /Tried/ }));
+    pickCollection(/Tried/);
     expect(screen.queryByRole("region", { name: "Bar stats" })).not.toBeInTheDocument();
   });
 
@@ -989,5 +979,81 @@ describe("BarClient descriptor detail copy", () => {
 
     expect(screen.getByText(/haven’t poured yet/)).toBeInTheDocument();
     expect(screen.queryByText(/on 0 bottles/)).not.toBeInTheDocument();
+  });
+});
+
+describe("BarClient status pills", () => {
+  const shelf = () => [
+    { ...bottleRow("open-row", "Open Bottle", "own", {}), status: "open", fillLevel: 60 } as Row,
+    { ...bottleRow("sealed-row", "Sealed Bottle", "own", {}), status: "sealed" } as Row,
+    { ...bottleRow("fin-row", "Finished Bottle", "own", {}), status: "finished", fillLevel: 0 } as Row,
+    bottleRow("wish-row", "Wished Bottle", "wishlist", {}),
+  ];
+
+  function renderShelf(rows: Row[] = shelf()) {
+    render(<BarClient initialRows={rows} flavorHeat={heatMatrix()}
+        calibration={calibrationMatrix()} palate={palate} />);
+  }
+
+  it("filters the owned shelf by bottle state, and tapping again clears it", () => {
+    renderShelf();
+
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    expect(screen.getByText("Open Bottle")).toBeInTheDocument();
+    expect(screen.queryByText("Sealed Bottle")).not.toBeInTheDocument();
+    expect(screen.queryByText("Finished Bottle")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    expect(screen.getByText("Sealed Bottle")).toBeInTheDocument();
+    expect(screen.getByText("Finished Bottle")).toBeInTheDocument();
+  });
+
+  it("treats an owned row without a status as sealed", () => {
+    renderShelf([{ ...bottleRow("legacy", "Legacy Bottle", "own", {}), status: null } as Row]);
+    fireEvent.click(screen.getByRole("button", { name: "Sealed" }));
+    expect(screen.getByText("Legacy Bottle")).toBeInTheDocument();
+  });
+
+  it("shows the wishlist through its pill", () => {
+    renderShelf();
+    fireEvent.click(screen.getByRole("button", { name: "Wishlist" }));
+    expect(screen.getByText("Wished Bottle")).toBeInTheDocument();
+    expect(screen.queryByText("Open Bottle")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Wishlist" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("gives an empty pill one quiet line, not an illustration", () => {
+    renderShelf([{ ...bottleRow("open-row", "Open Bottle", "own", {}), status: "open" } as Row]);
+    fireEvent.click(screen.getByRole("button", { name: "Finished" }));
+    expect(screen.getByText("No finished bottles yet.")).toBeInTheDocument();
+    expect(screen.queryByText("Nothing matches")).not.toBeInTheDocument();
+  });
+
+  it("renders each bottle as one link to its detail page, with fill and score", () => {
+    renderShelf();
+    const links = screen.getAllByTestId("bottle-list-row");
+    expect(links[0]).toHaveAttribute("href", "/bottles/open-row-bottle");
+    // Own rows carry the fill spine; only the open one reports what's left.
+    expect(screen.getAllByTestId("fill-spine").length).toBe(3);
+    expect(screen.getByText("60% left")).toBeInTheDocument();
+  });
+
+  it("shows the drinker's own top flavor chips on a noted bottle", () => {
+    renderShelf([
+      bottleRow("noted", "Noted Bottle", "own", {}, { campfire: 3, brine: 2, vanilla: 1, oak: 1 }),
+    ]);
+    const chips = screen.getAllByTestId("flavor-chip");
+    expect(chips).toHaveLength(3);
+    expect(chips[0]).toHaveTextContent("Campfire smoke");
+  });
+
+  it("clears the state pill when the panel moves to another collection", () => {
+    renderShelf();
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    pickCollection(/Tried/);
+    pickCollection(/My bar/);
+    // Coming back shows the whole shelf, not a stale Open filter.
+    expect(screen.getByText("Sealed Bottle")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open" })).toHaveAttribute("aria-pressed", "false");
   });
 });

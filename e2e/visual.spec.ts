@@ -176,21 +176,23 @@ test.describe("signed in (demo collector)", () => {
     await expect(map).toHaveScreenshot(shot("bar-compare-blind-spot"));
   });
 
-  test("tried: one control now picks the shelf and scopes the wheel", async ({ page }) => {
+  test("tried: a panel-chosen collection scopes the wheel", async ({ page }) => {
     await page.goto("/bar");
-    await page.getByRole("tab", { name: /Tried/ }).click();
-    await expect(page.getByRole("tab", { name: /Tried/ })).toHaveAttribute(
-      "aria-selected",
+    await page.getByRole("button", { name: /Filters/ }).click();
+    await page.getByRole("radio", { name: /Tried/ }).click();
+    await expect(page.getByRole("radio", { name: /Tried/ })).toHaveAttribute(
+      "aria-checked",
       "true",
     );
+    // Close the panel so the shot is about the tried shelf, not the panel.
+    await page.getByRole("button", { name: /Filters/ }).click();
     await settle(page);
     await expect(page).toHaveScreenshot(shot("bar-tried"), { fullPage: true });
   });
 
-  test("wishlist, chosen from the filter panel", async ({ page }) => {
+  test("wishlist, one pill away", async ({ page }) => {
     await page.goto("/bar");
-    await page.getByRole("button", { name: /Filters/ }).click();
-    await page.getByRole("radio", { name: /Wishlist/ }).click();
+    await page.getByRole("button", { name: "Wishlist" }).click();
     await expect(page.getByText(/Yamazaki/i).first()).toBeVisible();
     await settle(page);
     await expect(page).toHaveScreenshot(shot("bar-wishlist"), { fullPage: true });

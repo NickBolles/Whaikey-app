@@ -14,6 +14,7 @@ import { CategoryChip } from "@/components/category-chip";
 import { FlavorRadar } from "@/components/flavor-radar";
 import { SameDram, type SameDramFriendNote, type SameDramProducer } from "@/components/same-dram";
 import { ShelfActions } from "./shelf-actions";
+import { ShelfDetails } from "./shelf-details";
 
 export const dynamic = "force-dynamic";
 
@@ -246,6 +247,19 @@ export default async function BottleDetailPage({
                 <Link href={`/history?bottleId=${bottle.id}`} className="btn-secondary flex min-h-11 items-center justify-center px-4 text-sm font-medium">View your pours for this bottle</Link>
                 <ShelfActions bottleId={bottle.id} current={userBottle?.relationship ?? null} />
               </div>
+              {userBottle?.relationship === "own" && (
+                <ShelfDetails
+                  row={{
+                    id: userBottle.id,
+                    status: userBottle.status,
+                    fillLevel: userBottle.fillLevel,
+                    purchasePrice: userBottle.purchasePrice,
+                    store: userBottle.store,
+                    location: userBottle.location,
+                    notes: userBottle.notes,
+                  }}
+                />
+              )}
             </>
           ) : (
             <p className="text-sm text-muted">
