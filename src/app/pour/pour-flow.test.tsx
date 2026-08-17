@@ -67,6 +67,23 @@ describe("PourFlow — visibility (US-6)", () => {
     const body = JSON.parse((pourCall![1] as RequestInit).body as string);
     expect(body.visibility).toBe("public");
   });
+
+  it("leaves an untouched visibility to the server so a fast save uses the saved default", async () => {
+    const fetchMock = stubFetch(async (url) => {
+      if (String(url).includes("/api/social/prefs")) {
+        return { ok: true, json: async () => ({ defaultPourVisibility: "friends" }) } as Response;
+      }
+      return { ok: true, json: async () => ({ pour: { id: "p1", visibility: "friends" } }) } as Response;
+    });
+    render(<PourFlow initialBottle={{ id: "b1", name: "Test Bourbon" }} />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /save pour/i }));
+    });
+
+    const pourCall = fetchMock.mock.calls.find(([url]) => String(url).includes("/api/pours") && !String(url).includes("prefs"));
+    expect(JSON.parse((pourCall![1] as RequestInit).body as string).visibility).toBeUndefined();
+  });
 });
 
 describe("PourFlow — one sheet, no wizard", () => {
@@ -158,5 +175,30 @@ describe("PourFlow — one sheet, no wizard", () => {
     );
     const body = JSON.parse((pourCall![1] as RequestInit).body as string);
     expect(body.context).toEqual({ companions: "Sasha" });
+  });
+
+  it("offers a conversation handoff for friends' latest notes after saving", async () => {
+    stubFetch(async (url) => {
+      const href = String(url);
+      if (href.includes("/api/social/bottles/b1/friends")) {
+        return {
+          ok: true,
+          json: async () => ({ notes: [{ pourId: "friend-pour", author: { handle: "sasha", displayName: "Sasha" } }] }),
+        } as Response;
+      }
+      if (href.includes("/api/pours") && !href.includes("prefs")) {
+        return { ok: true, json: async () => ({ pour: { id: "my-pour", visibility: "friends" } }) } as Response;
+      }
+      return { ok: true, json: async () => ({}) } as Response;
+    });
+    render(<PourFlow initialBottle={{ id: "b1", name: "Test Bourbon" }} />);
+    await act(async () => {});
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /save pour/i }));
+    });
+
+    const comment = await screen.findByRole("link", { name: "Comment on @sasha's note" });
+    expect(comment).toHaveAttribute("href", "/notes/friend-pour?replyFrom=my-pour");
   });
 });

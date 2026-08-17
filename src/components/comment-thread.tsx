@@ -74,10 +74,11 @@ interface ComposerProps {
   onSubmit: (body: string) => Promise<boolean>;
   onCancel?: () => void;
   autoFocus?: boolean;
+  initialValue?: string;
 }
 
-function Composer({ placeholder, busy, onSubmit, onCancel, autoFocus }: ComposerProps) {
-  const [value, setValue] = useState("");
+function Composer({ placeholder, busy, onSubmit, onCancel, autoFocus, initialValue = "" }: ComposerProps) {
+  const [value, setValue] = useState(initialValue);
   const trimmed = value.trim();
   const overLimit = value.length > COMMENT_MAX_LENGTH;
   const canSubmit = trimmed.length > 0 && !overLimit && !busy;
@@ -133,6 +134,24 @@ function ClaimHandleHint() {
       <Link href="/friends" className="text-accent transition-[filter] hover:brightness-110">
         Claim a handle to join in
       </Link>
+    </p>
+  );
+}
+
+/** Only app-local note paths become links; all other comment text stays plain escaped text. */
+function CommentBody({ body }: { body: string | null }) {
+  const parts = (body ?? "").split(/(\/notes\/[A-Za-z0-9_-]+)/g);
+  return (
+    <p className="mt-0.5 whitespace-pre-wrap text-sm text-foreground/90">
+      {parts.map((part, index) =>
+        /^\/notes\/[A-Za-z0-9_-]+$/.test(part) ? (
+          <Link key={`${part}-${index}`} href={part} className="text-accent underline-offset-2 hover:underline">
+            View linked pour
+          </Link>
+        ) : (
+          part
+        ),
+      )}
     </p>
   );
 }
@@ -228,7 +247,7 @@ function CommentRow(props: CommentRowProps) {
               />
             </div>
           ) : (
-            <p className="mt-0.5 whitespace-pre-wrap text-sm text-foreground/90">{comment.body}</p>
+            <CommentBody body={comment.body} />
           )}
 
           {editingId !== comment.id && (
@@ -363,6 +382,8 @@ export interface CommentThreadProps {
   isOwner: boolean;
   /** Used only to hide the Report action on the viewer's own comments. */
   viewerUserId?: string | null;
+  /** A validated client-entry draft, used by the post-pour conversation handoff. */
+  initialDraft?: string;
 }
 
 /**
@@ -370,7 +391,7 @@ export interface CommentThreadProps {
  * replies, plain text (React escaping — never dangerouslySetInnerHTML), edit
  * window, soft delete leaves a tombstone while replies keep rendering.
  */
-export function CommentThread({ pourId, initialComments, viewerSignedIn, viewerCanComment, isOwner, viewerUserId = null }: CommentThreadProps) {
+export function CommentThread({ pourId, initialComments, viewerSignedIn, viewerCanComment, isOwner, viewerUserId = null, initialDraft = "" }: CommentThreadProps) {
   const [comments, setComments] = useState<SerializedComment[]>(initialComments);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [replyOpenId, setReplyOpenId] = useState<string | null>(null);
@@ -543,7 +564,7 @@ export function CommentThread({ pourId, initialComments, viewerSignedIn, viewerC
         </p>
       ) : (
         <div className="flex flex-col gap-1.5 border-t border-border-subtle pt-4">
-          <Composer placeholder="Add a comment…" busy={rootBusy} onSubmit={handleRootSubmit} />
+          <Composer placeholder="Add a comment…" busy={rootBusy} onSubmit={handleRootSubmit} initialValue={initialDraft} />
           {composerHint === "profile_required" && <ClaimHandleHint />}
           {composerHint === "error" && (
             <p role="alert" className="text-xs text-danger">

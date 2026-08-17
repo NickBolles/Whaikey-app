@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { CloudOff, GlassWater, ScanLine, Search, Star, UserPlus } from "lucide-react";
+import { CloudOff, GlassWater, MessageCircle, ScanLine, Search, Star, UserPlus } from "lucide-react";
 import { SERVING_STYLES, type PourVisibility, type ServingStyle } from "@/db/schema";
 import { matchLeafIds } from "@/lib/flavor-wheel";
 import { StarRating } from "@/components/star-rating";
@@ -16,6 +16,11 @@ export interface BottlePick {
   name: string;
   distillery?: string | null;
   category?: string | null;
+}
+
+interface FriendNoteTarget {
+  pourId: string;
+  author: { handle: string; displayName: string };
 }
 
 interface SearchResult {
@@ -237,11 +242,16 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [done, setDone] = useState<{
+    bottleId: string;
     bottleName: string;
+    pourId: string;
+    /** Server-confirmed visibility; never assume a requested social tier stuck. */
+    canAttachToComment: boolean;
     rating: number | null;
     /** Saved locally because the network was gone; it syncs on reconnect. */
     queued: boolean;
   } | null>(null);
+  const [friendNotes, setFriendNotes] = useState<FriendNoteTarget[] | null>(null);
 
   // US-6: the visibility selector defaults to the user's saved preference,
   // never a new tap — a failed/401 fetch just leaves it at "Only me".
@@ -279,6 +289,7 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
     setSubmitting(false);
     setSubmitError(null);
     setDone(null);
+    setFriendNotes(null);
   };
 
   // Merge an AI extraction into the user's in-progress note WITHOUT clobbering
@@ -328,7 +339,10 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
       amountMl,
       context: companions.trim() ? { companions: companions.trim() } : undefined,
       note: hasNote ? noteFields : undefined,
-      visibility,
+      // Server remains the source of truth for an untouched saved preference;
+      // a quick Save must not race the async prefs read and accidentally turn a
+      // user's Friends default into Only me.
+      visibility: visibilityDirtyRef.current ? visibility : undefined,
     };
 
     try {
@@ -341,7 +355,15 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
         const data = await res.json().catch(() => null);
         throw new Error(data?.error ?? "Something went wrong saving your pour.");
       }
-      setDone({ bottleName: bottle.name, rating: bare ? null : rating, queued: false });
+      const data = (await res.json()) as { pour: { id: string; visibility: PourVisibility } };
+      setDone({
+        bottleId: bottle.id,
+        bottleName: bottle.name,
+        pourId: data.pour.id,
+        canAttachToComment: data.pour.visibility !== "private",
+        rating: bare ? null : rating,
+        queued: false,
+      });
     } catch (err) {
       // A pour is logged where the whiskey is, and that is routinely somewhere
       // with no signal (PLAN.md §4.2). Losing the note the user just wrote is a
@@ -349,7 +371,7 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
       // instead of erroring. A server that answered and said no is a real error.
       if (err instanceof TypeError) {
         await enqueuePour({ body: payload, bottleName: bottle.name });
-        setDone({ bottleName: bottle.name, rating: bare ? null : rating, queued: true });
+        setDone({ bottleId: bottle.id, bottleName: bottle.name, pourId: "", canAttachToComment: false, rating: bare ? null : rating, queued: true });
       } else {
         setSubmitError(err instanceof Error ? err.message : "Something went wrong.");
       }
@@ -357,6 +379,22 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
       setSubmitting(false);
     }
   };
+
+  useEffect(() => {
+    if (!done || done.queued || friendNotes !== null) return;
+    let cancelled = false;
+    fetch(`/api/social/bottles/${encodeURIComponent(done.bottleId)}/friends`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { notes?: FriendNoteTarget[] } | null) => {
+        if (!cancelled) setFriendNotes(Array.isArray(data?.notes) ? data.notes : []);
+      })
+      .catch(() => {
+        if (!cancelled) setFriendNotes([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [done, friendNotes]);
 
   if (done) {
     return (
@@ -384,6 +422,32 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
             </p>
           )}
         </div>
+        {!done.queued && friendNotes && friendNotes.length > 0 && (
+          <section aria-label="Friends' notes" className="card w-full max-w-md p-4 text-left">
+            <p className="section-label">Same bottle, different takes</p>
+            <h2 className="mt-1 font-display text-xl font-semibold">Your friends left tasting notes</h2>
+            <p className="mt-1 text-sm text-muted">Start with their latest note and attach yours to the conversation.</p>
+            <ul className="mt-3 flex flex-col gap-2">
+              {friendNotes.map((friend) => (
+                <li key={friend.pourId}>
+                  <Link
+                    href={`/notes/${friend.pourId}${done.canAttachToComment ? `?replyFrom=${encodeURIComponent(done.pourId)}` : ""}`}
+                    className="btn-secondary flex min-h-11 w-full items-center justify-between gap-3 px-3 text-sm font-medium"
+                  >
+                    <span>{done.canAttachToComment ? "Comment on" : "Read"} @{friend.author.handle}&apos;s note</span>
+                    <MessageCircle size={16} strokeWidth={1.8} aria-hidden />
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+        {!done.queued && friendNotes?.length === 0 && (
+          <p className="max-w-sm text-sm text-muted">No friends have shared a note for this bottle yet. Their shelves stay private unless they choose to share.</p>
+        )}
+        {!done.queued && friendNotes && friendNotes.length > 0 && !done.canAttachToComment && (
+          <p className="max-w-sm text-sm text-muted">Your pour is private, so it won&apos;t be attached to a comment. You can still read their notes.</p>
+        )}
         <div className="flex gap-3">
           <button type="button" onClick={reset} className="btn-primary px-7 py-3">
             Log another

@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { SCAN_SESSION_TOKEN, signIn } from "./fixtures";
+import { DEMO_SESSION_TOKEN, SCAN_SESSION_TOKEN, signIn } from "./fixtures";
 
 test.describe("signed-out smoke", () => {
   test("home shows the hero with a sign-in CTA", async ({ page }) => {
@@ -107,6 +107,18 @@ test.describe("signed-in scan flow", () => {
     await page.getByRole("button", { name: /Filters/ }).click();
     await page.getByRole("radio", { name: /Tried/ }).click();
     await expect(page.getByText(/Glenfarclas 105/i).first()).toBeVisible();
+  });
+
+  test("a saved pour offers a mutual friend's latest note and preloads a linked reply", async ({ page, context, baseURL }) => {
+    // This is the intentionally social fixture; the scan user is isolated and
+    // has no graph edges by design.
+    await signIn(context, baseURL!, DEMO_SESSION_TOKEN);
+    await page.goto("/pour?bottleId=lagavulin-16");
+    await page.getByRole("button", { name: "Save pour" }).click();
+    const handoff = page.getByRole("link", { name: "Comment on @sasha's note" });
+    await expect(handoff).toBeVisible();
+    await Promise.all([page.waitForURL(/\/notes\//), handoff.click()]);
+    await expect(page.getByPlaceholder("Add a comment…")).toHaveValue(/I just logged my take too: \/notes\//);
   });
 
   test("an unknown barcode can be taught via catalog search", async ({ page }) => {

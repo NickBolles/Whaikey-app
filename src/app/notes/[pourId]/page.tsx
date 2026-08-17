@@ -7,6 +7,7 @@ import { getDb } from "@/db";
 import * as schema from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
 import { getSocialNote, getSocialPrefs, listComments } from "@/lib/social";
+import { getPour } from "@/lib/pours";
 import { FLAVOR_WHEEL, leafLabel, wedgeForLeaf } from "@/lib/flavor-wheel";
 import { UserAvatar } from "@/components/user-avatar";
 import { ShareComparison } from "@/components/share-comparison";
@@ -15,7 +16,7 @@ import { CommentThread, type SerializedComment } from "@/components/comment-thre
 
 export const dynamic = "force-dynamic";
 
-type Props = { params: Promise<{ pourId: string }> };
+type Props = { params: Promise<{ pourId: string }>; searchParams: Promise<{ replyFrom?: string }> };
 
 const wedgeColor = new Map(FLAVOR_WHEEL.map((w) => [w.id, w.color]));
 
@@ -42,8 +43,9 @@ function formatDate(date: Date): string {
  * visible pour. Signed-out visitors get a sign-in hero — never a fetch — so
  * a shared link can't be used to probe whether a pour exists.
  */
-export default async function NotePage({ params }: Props) {
+export default async function NotePage({ params, searchParams }: Props) {
   const { pourId } = await params;
+  const { replyFrom } = await searchParams;
   const viewer = await getSessionUser();
 
   if (!viewer) {
@@ -68,6 +70,11 @@ export default async function NotePage({ params }: Props) {
   if (!note) notFound();
 
   const isOwner = note.author.userId === viewer.id;
+  // A post-pour handoff may reference only the viewer's own pour of this same
+  // bottle. This protects the comment composer from becoming a way to attach
+  // another person's private journal entry.
+  const ownPour = replyFrom ? await getPour(db, viewer.id, replyFrom) : null;
+  const initialDraft = ownPour && ownPour.pour.bottleId === note.bottleId ? `I just logged my take too: /notes/${ownPour.pour.id}` : "";
 
   // Same query pattern as src/app/s/[code]/page.tsx: union the viewer's own
   // flavor tags across every pour they've logged on this bottle.
@@ -198,6 +205,7 @@ export default async function NotePage({ params }: Props) {
         viewerCanComment={authorPrefs.allowComments}
         isOwner={isOwner}
         viewerUserId={viewer.id}
+        initialDraft={initialDraft}
       />
     </div>
   );

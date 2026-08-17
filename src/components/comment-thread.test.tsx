@@ -87,6 +87,29 @@ describe("CommentThread", () => {
     expect(await screen.findByText("New note")).toBeInTheDocument();
   });
 
+  it("keeps a post-pour draft and renders its local note reference as a link", async () => {
+    const created = makeComment({ id: "c-linked", body: "I just logged my take too: /notes/my-pour" });
+    const fetchMock = mockFetchOnce({ ok: true, status: 201, body: created });
+    render(
+      <CommentThread
+        pourId="p1"
+        initialComments={[]}
+        viewerSignedIn
+        viewerCanComment
+        isOwner={false}
+        initialDraft="I just logged my take too: /notes/my-pour"
+      />,
+    );
+
+    expect(screen.getByDisplayValue("I just logged my take too: /notes/my-pour")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /post/i }));
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/social/comments",
+      expect.objectContaining({ body: JSON.stringify({ pourId: "p1", body: "I just logged my take too: /notes/my-pour" }) }),
+    );
+    expect((await screen.findByRole("link", { name: "View linked pour" })).getAttribute("href")).toBe("/notes/my-pour");
+  });
+
   it("sets parentId when replying to a top-level comment", async () => {
     const top = makeComment({ id: "c1" });
     const created = makeComment({ id: "c-reply", parentId: "c1", body: "A reply" });
