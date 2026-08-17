@@ -391,6 +391,76 @@ export async function seedDemoUser(db: DB): Promise<void> {
     },
   ]);
 
+  // Critic notes on file for the comparison screen's Professional segment.
+  // FIXTURE data: a fictional publication on an example.com source, like the
+  // producer notes above.
+  await db.insert(schema.criticNotes).values([
+    {
+      id: "demo-critic-1",
+      bottleId: "lagavulin-16",
+      publication: "The Malt Journal",
+      score: "91",
+      scoreScale: "/100",
+      note: "A bonfire on a beach: tar, iodine and sweet peat smoke, with dried fig underneath and a finish that lasts minutes.",
+      flavorTags: { tar: 2, medicinal: 2, peat: 3, raisin: 1 },
+      sourceUrl: "https://example.com/reviews/lagavulin-16",
+      retrievedAt: D("2026-06-01T12:00:00Z"),
+      createdAt: D("2026-06-01T12:00:00Z"),
+    },
+    {
+      id: "demo-critic-2",
+      bottleId: "eagle-rare-10",
+      publication: "The Malt Journal",
+      score: "88",
+      scoreScale: "/100",
+      note: "Orange peel and toffee over classic oak; more herbal complexity than the price suggests.",
+      flavorTags: { "orange-peel": 2, toffee: 2, oak: 2, herbal: 1 },
+      sourceUrl: "https://example.com/reviews/eagle-rare-10",
+      retrievedAt: D("2026-06-01T12:00:00Z"),
+      createdAt: D("2026-06-01T12:00:00Z"),
+    },
+  ]);
+
+  // A third drinker whose public pour feeds the comparison screen's Community
+  // aggregate (opt-in via visibility, per docs/SOCIAL.md D6). Not followed by
+  // Jordan, so the Friends and Community reference sets stay distinct.
+  await db.insert(schema.user).values({
+    id: "demo-community",
+    name: "Riley Cask",
+    email: "community@whaikey.app",
+    emailVerified: true,
+    createdAt: D("2026-03-01T12:00:00Z"),
+    updatedAt: D("2026-03-01T12:00:00Z"),
+  });
+  await db.insert(schema.userProfiles).values({
+    userId: "demo-community",
+    handle: "rileycask",
+    displayName: "Riley Cask",
+    isPublic: true,
+    discoverable: true,
+    socialEnabled: true,
+    createdAt: D("2026-03-01T12:00:00Z"),
+    updatedAt: D("2026-03-01T12:00:00Z"),
+  });
+  await db.insert(schema.pours).values({
+    id: "demo-community-pour-1",
+    userId: "demo-community",
+    bottleId: "lagavulin-16",
+    rating: 4,
+    servingStyle: "rocks",
+    amountMl: 45,
+    visibility: "public",
+    createdAt: D("2026-07-10T21:00:00Z"),
+  });
+  await db.insert(schema.tastingNotes).values({
+    id: "demo-community-note-1",
+    pourId: "demo-community-pour-1",
+    palate: "Ash and sea spray, surprisingly gentle on ice.",
+    flavorTags: { ash: 2, brine: 2, campfire: 2 },
+    extractedBy: "user",
+    createdAt: D("2026-07-10T21:05:00Z"),
+  });
+
   await db.insert(schema.pairings).values([
     {
       id: "demo-pairing-1",

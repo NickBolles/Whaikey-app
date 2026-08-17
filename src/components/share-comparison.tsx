@@ -1,20 +1,13 @@
-import { FLAVOR_WHEEL, leafLabel } from "@/lib/flavor-wheel";
 import { compareFlavorNotes, type FlavorCompareGroup } from "@/lib/flavor-compare";
-
-const wedgeColor = new Map(FLAVOR_WHEEL.map((w) => [w.id, w.color]));
+import { FlavorChip } from "@/components/flavor-chip";
 
 function ChipList({ groups }: { groups: FlavorCompareGroup[] }) {
   return (
     <ul className="flex flex-wrap gap-1.5">
       {groups.flatMap((group) =>
         group.leafIds.map((leafId) => (
-          <li key={leafId} className="chip flex items-center gap-1.5 px-2.5 py-1 text-xs">
-            <span
-              className="inline-block h-1.5 w-1.5 rounded-full"
-              style={{ backgroundColor: wedgeColor.get(group.wedgeId) ?? "var(--muted)" }}
-              aria-hidden
-            />
-            <span className="text-foreground/90">{leafLabel(leafId) ?? leafId}</span>
+          <li key={leafId}>
+            <FlavorChip leafId={leafId} />
           </li>
         )),
       )}

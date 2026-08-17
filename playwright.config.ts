@@ -52,6 +52,10 @@ export default defineConfig({
       NEXT_PUBLIC_OAUTH_CONFIGURED: "false",
       // Keep scan-miss behavior deterministic: never call external UPC APIs.
       WHAIKEY_UPC_LOOKUP: "off",
+      // Server-side clock pin, matching the browser's page.clock fixed time in
+      // visual.spec.ts — the dashboard's month-in-review is computed on the
+      // server, where the browser pin can't reach (src/lib/clock.ts).
+      WHAIKEY_FAKE_NOW: "2026-07-19T19:30:00Z",
     },
     timeout: 120_000,
   },

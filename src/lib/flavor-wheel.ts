@@ -141,6 +141,32 @@ export function wedgeForLeaf(leafId: string): string | undefined {
   return leafToWedgeMap.get(leafId);
 }
 
+const leafOrderMap = new Map<string, number>();
+{
+  let order = 0;
+  for (const wedge of FLAVOR_WHEEL) {
+    for (const leaf of wedge.leaves) leafOrderMap.set(leaf.id, order++);
+  }
+}
+
+/**
+ * The strongest flavors in a tag record, for compact chip rows: intensity
+ * descending, wheel order as the stable tiebreak, unknown ids dropped.
+ */
+export function topFlavorTags(
+  tags: Record<string, number> | null | undefined,
+  limit = 3,
+): Array<{ leafId: string; intensity: number }> {
+  return Object.entries(tags ?? {})
+    .filter(([leafId, intensity]) => leafToWedgeMap.has(leafId) && intensity > 0)
+    .sort(
+      (a, b) =>
+        b[1] - a[1] || (leafOrderMap.get(a[0]) ?? 0) - (leafOrderMap.get(b[0]) ?? 0),
+    )
+    .slice(0, limit)
+    .map(([leafId, intensity]) => ({ leafId, intensity }));
+}
+
 export function leafLabel(leafId: string): string | undefined {
   return leafLabelMap.get(leafId);
 }

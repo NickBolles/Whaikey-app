@@ -1,19 +1,9 @@
 import Link from "next/link";
 import { Star } from "lucide-react";
+import { FlavorChip } from "@/components/flavor-chip";
 import { UserAvatar } from "@/components/user-avatar";
-import { FLAVOR_WHEEL, isValidLeaf, leafLabel, wedgeForLeaf } from "@/lib/flavor-wheel";
+import { isValidLeaf, leafLabel, wedgeForLeaf } from "@/lib/flavor-wheel";
 import { compareFlavorNotes, type FlavorCompareGroup } from "@/lib/flavor-compare";
-
-/** Nudge a wedge hue toward the warm brass palette (kept in sync with history-timeline.tsx). */
-function warmify(hex: string): string {
-  const warm = [185, 141, 79]; // brass midpoint (#b98d4f)
-  const n = parseInt(hex.slice(1), 16);
-  const rgb = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-  const mixed = rgb.map((c, i) => Math.round(c * 0.78 + warm[i] * 0.22));
-  return `#${mixed.map((c) => c.toString(16).padStart(2, "0")).join("")}`;
-}
-
-const wedgeColor = new Map(FLAVOR_WHEEL.map((w) => [w.id, warmify(w.color)]));
 
 /** docs/DESIGN.md's calibration buckets — never red/green, a reference point not an answer key. */
 const BUCKET_COLOR = {
@@ -43,14 +33,9 @@ function PlainChipList({ tags }: { tags: Record<string, number> }) {
   if (entries.length === 0) return null;
   return (
     <ul className="flex flex-wrap gap-1.5">
-      {entries.map(([leafId]) => (
-        <li key={leafId} className="chip flex items-center gap-1.5 px-2.5 py-1 text-xs">
-          <span
-            className="inline-block h-1.5 w-1.5 rounded-full"
-            style={{ backgroundColor: wedgeColor.get(wedgeForLeaf(leafId) ?? "") ?? "var(--muted)" }}
-            aria-hidden
-          />
-          <span className="text-foreground/90">{leafLabel(leafId) ?? leafId}</span>
+      {entries.map(([leafId, intensity]) => (
+        <li key={leafId}>
+          <FlavorChip leafId={leafId} intensity={intensity} />
         </li>
       ))}
     </ul>

@@ -2,10 +2,10 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { Check, ChevronDown, GlassWater, Plus, SlidersHorizontal } from "lucide-react";
+import { Check, ChevronDown, SlidersHorizontal } from "lucide-react";
 import {
   hasPublishedProducerFlavorNotes,
+  heatFromRows,
   type BarFlavorHeat,
   type BarRow,
   type FlavorCalibration,
@@ -17,9 +17,8 @@ import {
   type CalibrationMark,
   type FlavorSelection,
 } from "@/components/bar-flavor-wheel";
-import { FillGauge } from "@/components/fill-gauge";
+import { BottleListRow } from "@/components/bottle-list-row";
 import { FlavorHeatLegend } from "@/components/flavor-wheel";
-import { FlavorRadar } from "@/components/flavor-radar";
 
 /** BarRow with dates possibly serialized to strings (API JSON responses). */
 export type Row = Omit<BarRow, "createdAt" | "updatedAt" | "purchaseDate"> & {
@@ -82,8 +81,23 @@ const COLLECTIONS: { key: Collection; label: string }[] = [
   { key: "all", label: "Everything" },
 ];
 
-/** The two that earn a permanent slot; the rest live in the panel. */
+/** Collections the quick line can express; the rest live in the panel. */
 const QUICK_COLLECTIONS: Collection[] = ["own", "tried"];
+
+/**
+ * The quick picks on the filter line: the two shelves you actually live on,
+ * plus the one bottle state you reach for daily. Everything else — Sealed,
+ * Finished, Wishlist, Everything — is one tap deeper in the panel. The line
+ * sits ABOVE the stats and the wheel because it narrows all of them, not
+ * just the list.
+ */
+type Quick = "mine" | "tried" | "open";
+
+const QUICKS: { key: Quick; label: string }[] = [
+  { key: "mine", label: "Mine" },
+  { key: "tried", label: "Tried" },
+  { key: "open", label: "Open" },
+];
 
 /** What the wheel is describing, in the sentence under it. */
 const SCOPE_BLURB: Record<FlavorHeatScope, string> = {
@@ -109,8 +123,6 @@ const CATEGORY_LABELS: Record<string, string> = {
   canadian: "Canadian",
   world: "World",
 };
-
-const FILL_STEPS = [100, 75, 50, 25, 10];
 
 interface FilterOption {
   id: string;
@@ -178,8 +190,10 @@ function buildFilterGroups(
       label: "Bottle",
       options: [
         { id: "open", label: "Open", test: (r) => r.status === "open" },
-        { id: "sealed", label: "Sealed", test: (r) => r.status === "sealed" },
+        // A sealed bottle may predate status tracking; null reads as sealed.
+        { id: "sealed", label: "Sealed", test: (r) => r.status === "sealed" || r.status == null },
         { id: "low", label: "Running low", test: (r) => r.status === "open" && (r.fillLevel ?? 100) < 25 },
+        { id: "finished", label: "Finished", test: (r) => r.status === "finished" },
       ],
     });
   }
@@ -255,17 +269,6 @@ function money(n: number): string {
   return `$${Math.round(n).toLocaleString()}`;
 }
 
-function statusChipClass(status: string | null): string {
-  switch (status) {
-    case "open":
-      return "chip-active";
-    case "finished":
-      return "line-through opacity-70";
-    default:
-      return "";
-  }
-}
-
 const EMPTY_HEAT: BarFlavorHeat = { wedges: {}, leaves: {}, topWedgeIds: [], hasHeat: false };
 
 const EMPTY_CALIBRATION: FlavorCalibration = {
@@ -289,125 +292,21 @@ export function BarClient({
   calibration: CalibrationMatrix;
   palate: PalateHeat;
 }) {
-  const router = useRouter();
-  const [rows, setRows] = useState<Row[]>(initialRows);
+  const [rows] = useState<Row[]>(initialRows);
   const [collection, setCollection] = useState<Collection>("own");
+  const [statusPill, setStatusPill] = useState<"open" | null>(null);
   const [checks, setChecks] = useState<string[]>([]);
   const [lens, setLens] = useState<Lens>("mine");
   const [weightByRating, setWeightByRating] = useState(false);
   const [selectedFlavorIds, setSelectedFlavorIds] = useState<string[]>([]);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const flavorScope = scopeFor(collection);
 
   const ownRows = useMemo(() => rows.filter((r) => r.relationship === "own"), [rows]);
   const wishlistRows = useMemo(() => rows.filter((r) => r.relationship === "wishlist"), [rows]);
   const triedRows = useMemo(() => rows.filter((r) => r.relationship === "tried"), [rows]);
 
-  const stats = useMemo(() => {
-    let totalSpent = 0;
-    let estValue = 0;
-    let openCount = 0;
-    for (const r of ownRows) {
-      const qty = r.quantity ?? 1;
-      if (r.purchasePrice != null) totalSpent += r.purchasePrice * qty;
-      const unit = r.estValue ?? r.bottle.avgPrice;
-      if (unit != null) estValue += unit * qty;
-      if (r.status === "open") openCount += 1;
-    }
-    return { bottleCount: ownRows.length, openCount, totalSpent, estValue };
-  }, [ownRows]);
-
-  function fail(message: string) {
-    setError(message);
-    setTimeout(() => setError(null), 4000);
-  }
-
-  /**
-   * The flavor heat and the calibration are computed server-side over the whole
-   * shelf, so the optimistic row update alone leaves them describing a bottle
-   * that is no longer there — Compare would keep offering itself, and keep
-   * counting, after its last compared bottle was removed. Only the mutations
-   * that change which bottles are on the shelf need this; fill level and price
-   * do not move either one.
-   */
-  function refreshDerived() {
-    router.refresh();
-  }
-
-  async function patchRow(id: string, patch: Record<string, unknown>) {
-    const prev = rows;
-    // Optimistic: mirror the server's fill-level rules locally.
-    setRows((rs) =>
-      rs.map((r) => {
-        if (r.id !== id) return r;
-        const next = { ...r, ...patch } as Row;
-        if (patch.status === "finished") next.fillLevel = 0;
-        else if (
-          patch.status === "open" &&
-          patch.fillLevel === undefined &&
-          (r.status === "sealed" || r.status == null)
-        )
-          next.fillLevel = 100;
-        return next;
-      }),
-    );
-    const res = await fetch(`/api/user-bottles/${id}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(patch),
-    }).catch(() => null);
-    if (!res?.ok) {
-      setRows(prev);
-      fail("Update failed — try again.");
-      return;
-    }
-    const updated = (await res.json()) as Partial<Row>;
-    setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...updated, bottle: r.bottle } : r)));
-  }
-
-  async function removeRow(id: string) {
-    const prev = rows;
-    setRows((rs) => rs.filter((r) => r.id !== id));
-    setExpandedId(null);
-    const res = await fetch(`/api/user-bottles/${id}`, { method: "DELETE" }).catch(() => null);
-    if (!res?.ok) {
-      setRows(prev);
-      fail("Remove failed — try again.");
-      return;
-    }
-    refreshDerived();
-  }
-
-  async function moveToBar(row: Row) {
-    const answer = window.prompt("What did you pay for it? (optional, e.g. 59.99)", "");
-    if (answer === null) return;
-    const price = answer.trim() === "" ? undefined : Number.parseFloat(answer);
-    const body: Record<string, unknown> = { bottleId: row.bottleId, relationship: "own" };
-    if (price != null && Number.isFinite(price) && price >= 0) {
-      body.purchasePrice = price;
-      body.purchaseDate = new Date().toISOString();
-    }
-    const res = await fetch("/api/user-bottles", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    }).catch(() => null);
-    if (!res?.ok) {
-      fail("Could not move to bar — try again.");
-      return;
-    }
-    const updated = (await res.json()) as Partial<Row>;
-    setRows((rs) =>
-      rs.map((r) =>
-        r.id === row.id
-          ? { ...r, ...updated, relationship: "own", status: r.status ?? "sealed", bottle: r.bottle }
-          : r,
-      ),
-    );
-    setCollection("own");
-    refreshDerived();
-  }
+  // Filled in below from the FILTERED rows: the strip describes exactly the
+  // bottles in view, so narrowing the shelf narrows the numbers with it.
 
   const collectionRows = useMemo(
     () =>
@@ -426,6 +325,15 @@ export function BarClient({
     () => new Set(rows.flatMap((r) => Object.keys(r.personalFlavorTags))),
     [rows],
   );
+  // The quick "Open" pick narrows the owned shelf by state before anything
+  // else sees it.
+  const pillRows = useMemo(
+    () =>
+      statusPill && collection === "own"
+        ? collectionRows.filter((row) => row.status === "open")
+        : collectionRows,
+    [collectionRows, collection, statusPill],
+  );
   const filterGroups = useMemo(
     () =>
       buildFilterGroups(
@@ -442,14 +350,14 @@ export function BarClient({
     return checks.filter((id) => available.has(id));
   }, [checks, filterGroups]);
   const activeRows = useMemo(() => {
-    if (activeChecks.length === 0) return collectionRows;
-    return collectionRows.filter((row) =>
+    if (activeChecks.length === 0) return pillRows;
+    return pillRows.filter((row) =>
       filterGroups.every((group) => {
         const on = group.options.filter((o) => activeChecks.includes(o.id));
         return on.length === 0 || on.some((o) => o.test(row));
       }),
     );
-  }, [collectionRows, filterGroups, activeChecks]);
+  }, [pillRows, filterGroups, activeChecks]);
   // The palate describes the drinker, not a shelf, so it ignores scope entirely.
   const palateHeatMap: BarFlavorHeat = useMemo(
     () => ({
@@ -473,14 +381,24 @@ export function BarClient({
   // changeCollection normalizes the stored lens; this stays as the guard for
   // the paths that change the row set without a collection change.
   const effectiveLens: Lens = lensAvailable(lens, activeCalibration) ? lens : "mine";
-  // Compare paints the label's claim and lets agreement ride in the marks, so
-  // its fill is the producer heat.
+  // Mine and Label describe the FILTERED shelf — the wheel repaints as the
+  // filter line above it narrows the rows (activeRows: quick pick + panel
+  // checks, but never the wheel's own flavor selection, which would collapse
+  // the wheel onto itself). The palate weighting stays user-level, and
+  // Compare stays scope-level: its calibration is computed server-side over
+  // the whole shelf and its marks must not disagree with its fill.
+  const filteredHeat = useMemo(
+    () => heatFromRows(activeRows, effectiveLens === "label" ? "producer" : "personal"),
+    [activeRows, effectiveLens],
+  );
   const activeFlavorHeat =
     effectiveLens === "mine"
       ? weightByRating
         ? palateHeatMap
-        : flavorHeat[`personal:${flavorScope}`] ?? EMPTY_HEAT
-      : flavorHeat[`producer:${flavorScope}`] ?? EMPTY_HEAT;
+        : filteredHeat
+      : effectiveLens === "label"
+        ? filteredHeat
+        : flavorHeat[`producer:${flavorScope}`] ?? EMPTY_HEAT;
   const marks = useMemo(() => {
     if (effectiveLens !== "compare") return undefined;
     const out: Record<string, CalibrationMark> = {};
@@ -531,6 +449,7 @@ export function BarClient({
 
   function changeCollection(next: Collection) {
     setCollection(next);
+    if (next !== "own") setStatusPill(null);
     setSelectedFlavorIds([]);
     // Drop the checks the new collection has no control for, rather than only
     // hiding them: a filter that disappears from the bar and then resurrects
@@ -549,6 +468,24 @@ export function BarClient({
     const nextCalibration = calibration[scopeFor(next)] ?? EMPTY_CALIBRATION;
     setLens((current) => (lensAvailable(current, nextCalibration) ? current : "mine"));
   }
+
+  function changeQuick(quick: Quick) {
+    if (quick === "tried") {
+      changeCollection("tried");
+      return;
+    }
+    if (quick === "mine") {
+      if (collection !== "own") changeCollection("own");
+      setStatusPill(null);
+      return;
+    }
+    // "Open": a state on top of Mine; tapping it again falls back to Mine.
+    if (collection !== "own") changeCollection("own");
+    setStatusPill((cur) => (cur === "open" ? null : "open"));
+  }
+
+  const activeQuick: Quick | null =
+    collection === "own" ? (statusPill === "open" ? "open" : "mine") : collection === "tried" ? "tried" : null;
 
   function clearFilters() {
     setChecks([]);
@@ -570,17 +507,61 @@ export function BarClient({
     });
   }
 
+  const shelfTotal = ownRows.length + triedRows.length + wishlistRows.length;
+
+  // The stats strip describes the rows in view — every filter above narrows
+  // it. Money still only ever describes bottles the viewer owns.
+  const filteredOwn = useMemo(
+    () => filteredRows.filter((r) => r.relationship === "own"),
+    [filteredRows],
+  );
+  const stats = useMemo(() => {
+    let totalSpent = 0;
+    let estValue = 0;
+    let openCount = 0;
+    for (const r of filteredOwn) {
+      const qty = r.quantity ?? 1;
+      if (r.purchasePrice != null) totalSpent += r.purchasePrice * qty;
+      const unit = r.estValue ?? r.bottle.avgPrice;
+      if (unit != null) estValue += unit * qty;
+      if (r.status === "open") openCount += 1;
+    }
+    return { bottleCount: filteredOwn.length, openCount, totalSpent, estValue };
+  }, [filteredOwn]);
+
   return (
     <div className="px-4 pt-5 pb-10 flex flex-col gap-6">
-      <header className="flex items-end justify-between">
-        <h1 className="font-display text-[2rem] leading-tight font-semibold">My Bar</h1>
-        <Link
-          href="/search"
-          className="inline-flex items-center gap-1 min-h-11 px-1 text-sm font-medium text-accent hover:underline"
-        >
-          <Plus size={16} strokeWidth={1.8} aria-hidden /> Add bottle
-        </Link>
-      </header>
+      <div className="flex flex-col gap-3">
+        <header className="flex items-baseline justify-between">
+          <h1 className="font-display text-[27px] leading-tight font-semibold">My bar</h1>
+          <span className="font-mono text-sm text-muted tabular-nums" aria-label={`${shelfTotal} bottles`}>
+            {shelfTotal}
+          </span>
+        </header>
+
+        {/* ALL filtering starts here, on one slim line, because everything
+            below it — stats, wheel, list — narrows to what it selects. */}
+        <FilterBar
+          quick={activeQuick}
+          onQuickChange={changeQuick}
+          collection={collection}
+          onCollectionChange={changeCollection}
+          counts={{
+            own: ownRows.length,
+            tried: triedRows.length,
+            wishlist: wishlistRows.length,
+            all: ownRows.length + triedRows.length,
+          }}
+          groups={filterGroups}
+          checks={activeChecks}
+          onToggleCheck={toggleCheck}
+          flavorIds={selectedFlavorIds}
+          onRemoveFlavor={(id) => setSelectedFlavorIds((ids) => ids.filter((f) => f !== id))}
+          onClear={clearFilters}
+          shownCount={filteredRows.length}
+          totalCount={collectionRows.length}
+        />
+      </div>
 
       {collection === "own" && (
         /* The only money surface on this page: spend and est. value stay inside
@@ -593,9 +574,8 @@ export function BarClient({
         </section>
       )}
 
-      {/* The wheel reads first and filters the list further down: a tap lands
-          as a removable token in the FilterBar directly above that list, so the
-          feedback sits adjacent to what it narrows. */}
+      {/* Below the filter line so it inherits the narrowed rows; taps on the
+          wheel still land as removable tokens on that line. */}
       {flavorFilterable && (
         <FlavorMapSection
           heat={activeFlavorHeat}
@@ -619,113 +599,51 @@ export function BarClient({
         />
       )}
 
-      <FilterBar
-        collection={collection}
-        onCollectionChange={changeCollection}
-        counts={{
-          own: ownRows.length,
-          tried: triedRows.length,
-          wishlist: wishlistRows.length,
-          all: ownRows.length + triedRows.length,
-        }}
-        groups={filterGroups}
-        checks={activeChecks}
-        onToggleCheck={toggleCheck}
-        flavorIds={selectedFlavorIds}
-        onRemoveFlavor={(id) => setSelectedFlavorIds((ids) => ids.filter((f) => f !== id))}
-        onClear={clearFilters}
-        shownCount={filteredRows.length}
-        totalCount={collectionRows.length}
-      />
-
-      {error && (
-        <div className="rounded-xl border border-danger/40 bg-danger/10 text-danger text-sm p-3">
-          {error}
-        </div>
-      )}
-
       {filteredRows.length === 0 ? (
-        // A shelf with bottles on it is never "waiting" — if nothing shows, the
-        // filters are too narrow, and the way out is to widen them.
-        collectionRows.length > 0 ? (
+        statusPill === "open" && pillRows.length === 0 ? (
+          // The quick pick's empty state: one quiet line, no illustration.
+          <p className="px-1 text-sm text-muted">
+            Nothing open right now — crack a seal and log the first pour.
+          </p>
+        ) : collectionRows.length > 0 ? (
+          // A shelf with bottles on it is never "waiting" — if nothing shows,
+          // the filters are too narrow, and the way out is to widen them.
           <NoMatches onClear={clearFilters} />
         ) : (
           <EmptyState collection={collection} />
         )
       ) : (
-        <ul className="flex flex-col gap-2.5">
-          {filteredRows.map((row) => (
-            <li key={row.id} className="card-flat overflow-hidden">
-              {row.relationship === "own" ? (
-                <>
-                  <button
-                    className="w-full flex items-center gap-3.5 p-4 text-left hover:bg-surface-raised transition-colors"
-                    onClick={() => setExpandedId(expandedId === row.id ? null : row.id)}
-                    aria-expanded={expandedId === row.id}
-                  >
-                    <FillGauge level={row.fillLevel} className="h-12 w-5 shrink-0 text-muted" />
-                    <span className="flex-1 min-w-0">
-                      <span className="block font-medium leading-snug line-clamp-2">
-                        {row.bottle.name}
-                      </span>
-                      <span className="block text-xs text-muted truncate mt-0.5">
-                        {row.bottle.distilleryName ?? row.bottle.category}
-                        {row.quantity > 1 ? ` · ×${row.quantity}` : ""}
-                      </span>
-                      {row.notes && (
-                        <span className="block text-xs text-foreground/60 font-display italic truncate mt-1">
-                          “{row.notes}”
-                        </span>
-                      )}
-                    </span>
-                    <span className="flex flex-col items-end gap-1.5 shrink-0">
-                      <span className={`stat-number text-lg leading-none ${row.purchasePrice != null ? "" : "text-muted"}`}>{row.purchasePrice != null ? `$${row.purchasePrice.toFixed(0)}` : "—"}</span>
-                      {row.status && <span className={`chip px-2 py-0.5 text-[10px] font-medium ${statusChipClass(row.status)}`}>{row.status}</span>}
-                    </span>
-                  </button>
-                  <div className="flex justify-end border-t border-border-subtle px-3 py-2"><Link href={`/pour?bottleId=${row.bottleId}`} className="inline-flex min-h-9 items-center gap-1.5 px-2 text-xs font-medium text-accent hover:underline"><GlassWater size={14} aria-hidden /> Log this pour</Link></div>
-                  {expandedId === row.id && (
-                    <RowDetails
-                      key={row.id}
-                      row={row}
-                      onPatch={(patch) => patchRow(row.id, patch)}
-                      onRemove={() => removeRow(row.id)}
-                    />
-                  )}
-                </>
-              ) : (
-                <div className="flex items-center gap-3.5 p-4">
-                  <span className="flex-1 min-w-0">
-                    <span className="block font-medium leading-snug line-clamp-2">
-                      {row.bottle.name}
-                    </span>
-                    <span className="block text-xs text-muted truncate mt-0.5">
-                      {row.bottle.distilleryName ?? row.bottle.category}
-                    </span>
-                  </span>
-                  {row.relationship === "wishlist" ? (
-                    <span className="flex flex-col items-end gap-1.5 shrink-0">
-                      {row.bottle.avgPrice != null && (
-                        <span className="text-muted text-sm">
-                          ~<span className="stat-number">${row.bottle.avgPrice.toFixed(0)}</span>
-                        </span>
-                      )}
-                      <button
-                        onClick={() => moveToBar(row)}
-                        className="btn-primary text-[13px] px-3.5 py-2"
-                      >
-                        Move to bar
-                      </button>
-                    </span>
-                  ) : (
-                    <span className="chip px-2.5 py-1 text-[11px] capitalize shrink-0">
-                      {row.bottle.category}
-                    </span>
-                  )}
-                </div>
-              )}
-            </li>
-          ))}
+        <ul className="flex flex-col gap-[9px]">
+          {filteredRows.map((row) => {
+            const own = row.relationship === "own";
+            const meta = [
+              row.bottle.distilleryName ?? CATEGORY_LABELS[row.bottle.category] ?? row.bottle.category,
+              row.quantity > 1 ? `×${row.quantity}` : null,
+            ]
+              .filter(Boolean)
+              .join(" · ");
+            const level =
+              row.status === "finished" ? 0 : row.status === "open" ? row.fillLevel : 100;
+            return (
+              <li key={row.id}>
+                <BottleListRow
+                  href={`/bottles/${row.bottleId}`}
+                  name={row.bottle.name}
+                  score={row.personalRating}
+                  meta={meta}
+                  metaRight={
+                    own && row.status === "open" && row.fillLevel != null
+                      ? `${row.fillLevel}% left`
+                      : row.relationship === "wishlist" && row.bottle.avgPrice != null
+                        ? `~$${row.bottle.avgPrice.toFixed(0)}`
+                        : null
+                  }
+                  spine={own ? { level, bottleId: row.bottleId } : null}
+                  flavorTags={row.personalFlavorTags}
+                />
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>
@@ -1103,6 +1021,8 @@ function Stat({ value, label }: { value: string; label: string }) {
  * filter system with its own clear button buried under the chart.
  */
 function FilterBar({
+  quick,
+  onQuickChange,
   collection,
   onCollectionChange,
   counts,
@@ -1115,6 +1035,8 @@ function FilterBar({
   shownCount,
   totalCount,
 }: {
+  quick: Quick | null;
+  onQuickChange: (quick: Quick) => void;
   collection: Collection;
   onCollectionChange: (next: Collection) => void;
   counts: Record<Collection, number>;
@@ -1136,22 +1058,19 @@ function FilterBar({
 
   return (
     <div className="rounded-2xl border border-border-subtle bg-surface">
-      <div className="flex items-center justify-between gap-2 p-1.5">
-        <div role="tablist" aria-label="Collection" className="inline-flex rounded-full bg-background p-0.5 gap-0.5">
-          {QUICK_COLLECTIONS.map((key) => (
+      <div className="flex items-center justify-between gap-1 p-1">
+        <div role="group" aria-label="Quick filters" className="flex min-w-0 flex-1 gap-1">
+          {QUICKS.map((q) => (
             <button
-              key={key}
-              role="tab"
-              // A collection chosen in the panel leaves neither slot selected
-              // rather than showing the wrong one as active.
-              aria-selected={collection === key}
-              onClick={() => onCollectionChange(key)}
-              className={`tap-target inline-flex min-h-10 items-center rounded-full px-3.5 text-[13px] font-medium transition-colors ${
-                collection === key ? "chip-active" : "text-muted hover:text-foreground"
+              key={q.key}
+              type="button"
+              aria-pressed={quick === q.key}
+              onClick={() => onQuickChange(q.key)}
+              className={`tap-target inline-flex min-h-9 flex-1 items-center justify-center rounded-full px-2 text-[12.5px] font-medium transition-colors ${
+                quick === q.key ? "chip-active" : "text-muted hover:text-foreground"
               }`}
             >
-              {COLLECTIONS.find((c) => c.key === key)?.label}
-              <span className="ml-1.5 text-[10.5px] opacity-60 tabular-nums">{counts[key]}</span>
+              {q.label}
             </button>
           ))}
         </div>
@@ -1366,154 +1285,6 @@ function EmptyState({ collection }: { collection: Collection }) {
           {copy.action}
         </Link>
       )}
-    </div>
-  );
-}
-
-function RowDetails({
-  row,
-  onPatch,
-  onRemove,
-}: {
-  row: Row;
-  onPatch: (patch: Record<string, unknown>) => void;
-  onRemove: () => void;
-}) {
-  const [price, setPrice] = useState(row.purchasePrice?.toString() ?? "");
-  const [store, setStore] = useState(row.store ?? "");
-  const [location, setLocation] = useState(row.location ?? "");
-  const [notes, setNotes] = useState(row.notes ?? "");
-
-  function saveDetails() {
-    const parsed = price.trim() === "" ? null : Number.parseFloat(price);
-    onPatch({
-      purchasePrice: parsed != null && Number.isFinite(parsed) && parsed >= 0 ? parsed : null,
-      store: store.trim() === "" ? null : store.trim(),
-      location: location.trim() === "" ? null : location.trim(),
-      notes: notes.trim() === "" ? null : notes.trim(),
-    });
-  }
-
-  const hasProfile =
-    row.bottle.flavorProfile != null && Object.keys(row.bottle.flavorProfile).length > 0;
-
-  const inputClass =
-    "rounded-xl bg-surface-raised/70 border border-border-subtle px-3 py-2.5 text-sm w-full";
-
-  return (
-    <div className="border-t border-border-subtle p-4 flex flex-col gap-4 bg-surface-raised/30">
-      <div className="flex flex-wrap items-center gap-2">
-        {row.status !== "open" && row.status !== "finished" && (
-          <button
-            onClick={() => onPatch({ status: "open" })}
-            className="btn-secondary min-h-11 px-4 text-sm font-medium"
-          >
-            Mark open
-          </button>
-        )}
-        {row.status !== "finished" && (
-          <button
-            onClick={() => onPatch({ status: "finished" })}
-            className="btn-secondary min-h-11 px-4 text-sm font-medium"
-          >
-            Mark finished
-          </button>
-        )}
-        <button
-          onClick={onRemove}
-          className="ml-auto min-h-11 px-2 text-sm text-danger hover:underline"
-        >
-          Remove
-        </button>
-      </div>
-
-      {hasProfile && (
-        <div>
-          <div className="section-label mb-2">Flavor profile</div>
-          <div className="flex justify-center">
-            <FlavorRadar profile={row.bottle.flavorProfile} size={230} />
-          </div>
-        </div>
-      )}
-
-      {row.status === "open" && (
-        <div>
-          <div className="section-label mb-2">
-            Fill level{row.fillLevel != null ? ` · ${row.fillLevel}%` : ""}
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {FILL_STEPS.map((step) => (
-              <button
-                key={step}
-                onClick={() => onPatch({ fillLevel: step })}
-                aria-pressed={row.fillLevel === step}
-                className={`chip inline-flex items-center min-h-11 px-3.5 text-[13px] font-medium ${
-                  row.fillLevel === step ? "chip-active" : "hover:text-foreground"
-                }`}
-              >
-                {step}%
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      <div className="grid grid-cols-3 gap-2 items-end">
-        <label className="text-xs text-muted flex flex-col gap-1.5">
-          Paid ($)
-          <input
-            value={price}
-            onChange={(e) => setPrice(e.target.value)}
-            inputMode="decimal"
-            className={inputClass}
-            placeholder="59.99"
-          />
-        </label>
-        <label className="text-xs text-muted flex flex-col gap-1.5">
-          Store
-          <input
-            value={store}
-            onChange={(e) => setStore(e.target.value)}
-            className={inputClass}
-            placeholder="Store"
-          />
-        </label>
-        <label className="text-xs text-muted flex flex-col gap-1.5">
-          Location
-          <input
-            value={location}
-            onChange={(e) => setLocation(e.target.value)}
-            className={inputClass}
-            placeholder="Shelf A"
-          />
-        </label>
-      </div>
-
-      <label className="text-xs text-muted flex flex-col gap-1.5">
-        Your notes
-        <textarea
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-          rows={2}
-          className={`${inputClass} resize-y min-h-[44px]`}
-          placeholder="Great with a drop of water…"
-        />
-      </label>
-
-      <div className="flex items-center justify-between gap-3">
-        <button
-          onClick={saveDetails}
-          className="btn-secondary min-h-11 px-4 text-sm font-medium"
-        >
-          Save details
-        </button>
-        <Link
-          href={`/bottles/${row.bottleId}`}
-          className="min-h-11 inline-flex items-center text-sm font-medium text-accent hover:underline"
-        >
-          Bottle &amp; tasting notes →
-        </Link>
-      </div>
     </div>
   );
 }

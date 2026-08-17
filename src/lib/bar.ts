@@ -425,6 +425,75 @@ export async function getBarFlavorHeat(
   return { wedges, leaves, topWedgeIds, hasHeat: topWedgeIds.length > 0 };
 }
 
+/** The slice of a BarRow that client-side heat needs. */
+export type FlavorHeatRow = {
+  personalFlavorTags: Record<string, number>;
+  bottle: Pick<
+    BarRowBottle,
+    "flavorProfile" | "producerFlavorTags" | "producerFlavorSourceUrl" | "producerFlavorSourceLabel"
+  >;
+};
+
+/**
+ * Heat over exactly the rows given — the client-side counterpart of
+ * getBarFlavorHeat, so the wheel can describe the *filtered* shelf beside it
+ * rather than the whole scope. Same recipe: catalog wedge profiles fill the
+ * inner ring (personal source only), tag intensities light the leaves and
+ * roll up through rollUpToWedges, both rings normalize to their own max, and
+ * a family is floored at its own hottest leaf. A row's personalFlavorTags
+ * already sum that bottle's pours, so the totals line up with the server's
+ * per-note accumulation.
+ */
+export function heatFromRows(rows: FlavorHeatRow[], source: "personal" | "producer"): BarFlavorHeat {
+  const validWedges = new Set<string>(WEDGE_IDS);
+  const wedgeTotals: Record<string, number> = {};
+  const leafTotals: Record<string, number> = {};
+
+  const addTags = (flavorTags: Record<string, number> | null) => {
+    if (!flavorTags) return;
+    const tags: Record<string, number> = {};
+    for (const [leafId, intensity] of Object.entries(flavorTags)) {
+      if (!wedgeForLeaf(leafId) || typeof intensity !== "number") continue;
+      leafTotals[leafId] = (leafTotals[leafId] ?? 0) + intensity;
+      tags[leafId] = intensity;
+    }
+    for (const [wedgeId, score] of Object.entries(rollUpToWedges(tags))) {
+      wedgeTotals[wedgeId] = (wedgeTotals[wedgeId] ?? 0) + score;
+    }
+  };
+
+  for (const row of rows) {
+    if (source === "personal") {
+      if (row.bottle.flavorProfile) {
+        for (const [wedgeId, score] of Object.entries(row.bottle.flavorProfile)) {
+          if (!validWedges.has(wedgeId) || typeof score !== "number") continue;
+          wedgeTotals[wedgeId] = (wedgeTotals[wedgeId] ?? 0) + Math.max(0, score);
+        }
+      }
+      addTags(row.personalFlavorTags);
+    } else if (hasPublishedProducerFlavorNotes(row.bottle)) {
+      addTags(row.bottle.producerFlavorTags);
+    }
+  }
+
+  const normalize = (totals: Record<string, number>): Record<string, number> => {
+    const max = Math.max(0, ...Object.values(totals));
+    if (max === 0) return {};
+    const out: Record<string, number> = {};
+    for (const [id, total] of Object.entries(totals)) {
+      if (total > 0) out[id] = Math.round((total / max) * 100) / 100;
+    }
+    return out;
+  };
+
+  const leaves = normalize(leafTotals);
+  const wedges = floorWedgesAtLeaves(normalize(wedgeTotals), leaves);
+  const topWedgeIds = Object.entries(wedges)
+    .sort((a, b) => b[1] - a[1])
+    .map(([id]) => id);
+  return { wedges, leaves, topWedgeIds, hasHeat: topWedgeIds.length > 0 };
+}
+
 // ---------------------------------------------------------------------------
 // Flavor calibration (your notes measured against the published ones)
 // ---------------------------------------------------------------------------

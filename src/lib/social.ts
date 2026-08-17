@@ -933,7 +933,7 @@ export interface SocialNote {
  * to a thread or card must use this so counts agree with the visible thread —
  * a mismatched count would reveal hidden activity.
  */
-function contributorVisibleSql(userCol: AnyColumn, viewerId: string) {
+export function contributorVisibleSql(userCol: AnyColumn, viewerId: string) {
   return sql`(${userCol} = ${viewerId} or (
     not exists (select 1 from blocks b where (b.blocker_id = ${viewerId} and b.blocked_id = ${userCol}) or (b.blocker_id = ${userCol} and b.blocked_id = ${viewerId}))
     and not exists (select 1 from user_profiles sp where sp.user_id = ${userCol} and sp.social_enabled = false)
@@ -1239,6 +1239,10 @@ export interface FriendBottleNote {
   rating: number | null;
   createdAt: Date;
   flavorTags: Record<string, number> | null;
+  nose: string | null;
+  palate: string | null;
+  finish: string | null;
+  freeform: string | null;
 }
 
 /** Same Dram source: one entry per followee (their latest note on this bottle), visibility+block enforced. */
@@ -1277,6 +1281,10 @@ export async function getFriendNotesForBottle(db: DB, viewerId: string, bottleId
       rating: schema.pours.rating,
       createdAt: schema.pours.createdAt,
       flavorTags: schema.tastingNotes.flavorTags,
+      nose: schema.tastingNotes.nose,
+      palate: schema.tastingNotes.palate,
+      finish: schema.tastingNotes.finish,
+      freeform: schema.tastingNotes.freeform,
     })
     .from(schema.pours)
     .innerJoin(schema.userProfiles, eq(schema.userProfiles.userId, schema.pours.userId))
@@ -1320,6 +1328,10 @@ export async function getFriendNotesForBottle(db: DB, viewerId: string, bottleId
     rating: row.rating,
     createdAt: row.createdAt,
     flavorTags: row.flavorTags,
+    nose: row.nose,
+    palate: row.palate,
+    finish: row.finish,
+    freeform: row.freeform,
   }));
 }
 

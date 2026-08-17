@@ -118,7 +118,9 @@ test.describe("signed in (demo collector)", () => {
 
   test("home dashboard", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByText(/Welcome back/i)).toBeVisible();
+    // Month-in-review header: pinned server clock (WHAIKEY_FAKE_NOW) = July.
+    await expect(page.getByText("JULY", { exact: true })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Your month" })).toBeVisible();
     // The hero IS tonight's pick now; its heading is the pinned-clock guard
     // that used to sit on the /bar shots — if the fixed time stops taking,
     // this names the cause instead of leaving a 20px reflow to a pixel diff.
@@ -176,15 +178,23 @@ test.describe("signed in (demo collector)", () => {
     await expect(map).toHaveScreenshot(shot("bar-compare-blind-spot"));
   });
 
-  test("tried: one control now picks the shelf and scopes the wheel", async ({ page }) => {
+  test("tried: one quick pick swaps the shelf and scopes the wheel", async ({ page }) => {
     await page.goto("/bar");
-    await page.getByRole("tab", { name: /Tried/ }).click();
-    await expect(page.getByRole("tab", { name: /Tried/ })).toHaveAttribute(
-      "aria-selected",
+    await page.getByRole("button", { name: "Tried", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Tried", exact: true })).toHaveAttribute(
+      "aria-pressed",
       "true",
     );
     await settle(page);
     await expect(page).toHaveScreenshot(shot("bar-tried"), { fullPage: true });
+  });
+
+  test("open: the quick state pick narrows stats, wheel, and list", async ({ page }) => {
+    await page.goto("/bar");
+    await page.getByRole("button", { name: "Open", exact: true }).click();
+    await expect(page.getByText(/Eagle Rare/i).first()).toBeVisible();
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("bar-open"), { fullPage: true });
   });
 
   test("wishlist, chosen from the filter panel", async ({ page }) => {
@@ -192,6 +202,8 @@ test.describe("signed in (demo collector)", () => {
     await page.getByRole("button", { name: /Filters/ }).click();
     await page.getByRole("radio", { name: /Wishlist/ }).click();
     await expect(page.getByText(/Yamazaki/i).first()).toBeVisible();
+    // Close the panel so the shot is about the wishlist, not the panel.
+    await page.getByRole("button", { name: /Filters/ }).click();
     await settle(page);
     await expect(page).toHaveScreenshot(shot("bar-wishlist"), { fullPage: true });
   });
@@ -211,6 +223,24 @@ test.describe("signed in (demo collector)", () => {
     await page.goto("/bottles/eagle-rare-10");
     await settle(page);
     await expect(page).toHaveScreenshot(shot("bottle-detail-owned"), { fullPage: true });
+  });
+
+  test("your note, compared: friends reference", async ({ page }) => {
+    await page.goto("/bottles/lagavulin-16/compare");
+    await expect(page.getByRole("heading", { name: "Your note, compared" })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Distillery note" })).toBeVisible();
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("compare-friends"), { fullPage: true });
+  });
+
+  test("your note, compared: professional reference, same screen", async ({ page }) => {
+    await page.goto("/bottles/lagavulin-16/compare");
+    await page.getByRole("tab", { name: "Professional" }).click();
+    await expect(page.getByText("The Malt Journal")).toBeVisible();
+    // The distillery card is the fixed reference — still visible here.
+    await expect(page.getByRole("region", { name: "Distillery note" })).toBeVisible();
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("compare-professional"), { fullPage: true });
   });
 
   test("pour flow: bottle picker", async ({ page }) => {
