@@ -72,7 +72,7 @@ describe("CompareClient", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "Professional" }));
     const proMatch = match();
-    expect(proMatch).toMatch(/% match with the professionals$/);
+    expect(proMatch).toMatch(/% match with the pros$/);
 
     expect(new Set([friendsMatch, communityMatch, proMatch]).size).toBe(3);
   });

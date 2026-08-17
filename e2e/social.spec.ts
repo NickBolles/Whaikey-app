@@ -44,6 +44,10 @@ test.describe("social: signed in as Jordan (the demo user)", () => {
 
   test("Compare notes navigates from Home into Sasha's note detail", async ({ page }) => {
     await page.goto("/");
+    // Let the hero/discovery rails finish loading first: the dashboard and
+    // rails above the friends module reflow the page while they resolve, and
+    // a click during that reflow can land beside the link.
+    await expect(page.getByText("Finding bottles…")).toHaveCount(0, { timeout: 15_000 });
     const friendsModule = page.getByRole("region", { name: "From your friends" });
     await friendsModule.getByRole("link", { name: /Compare notes/ }).click();
     await expect(page).toHaveURL(new RegExp(`/notes/${SASHA_LAGAVULIN_POUR_ID}$`));

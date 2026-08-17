@@ -9,7 +9,7 @@ import {
   type BottleComparison,
   type CompareProseNote,
   type CompareSource,
-} from "@/lib/bottle-compare";
+} from "@/lib/compare-math";
 import { leafLabel } from "@/lib/flavor-wheel";
 import { share } from "@/lib/native/share";
 import { FlavorChip } from "@/components/flavor-chip";
@@ -20,17 +20,20 @@ const MAX_INTENSITY = 3;
 const YOU_COLOR = "#e8a13c";
 const THEM_COLOR = "#6b7f8a";
 
-const SOURCE_META: Record<CompareSource, { short: string; empty: string }> = {
+const SOURCE_META: Record<CompareSource, { name: string; short: string; empty: string }> = {
   friends: {
+    name: "Friends",
     short: "friends",
     empty: "None of your friends have logged this bottle yet — the seat's open.",
   },
   community: {
+    name: "Community",
     short: "the community",
     empty: "No public community pours of this bottle yet.",
   },
   professional: {
-    short: "the professionals",
+    name: "Professional",
+    short: "the pros",
     empty: "No producer or critic notes on file for this bottle.",
   },
 };
@@ -188,7 +191,7 @@ export function CompareClient({ comparison }: { comparison: BottleComparison }) 
                 </span>
                 <span className="flex items-center gap-1.5">
                   <span aria-hidden className="h-2 w-2 rounded-full" style={{ backgroundColor: THEM_COLOR }} />
-                  <span className="capitalize">{SOURCE_META[source].short}</span>
+                  {SOURCE_META[source].name}
                 </span>
               </span>
               <span className="font-mono tabular-nums" data-testid="match-percent">

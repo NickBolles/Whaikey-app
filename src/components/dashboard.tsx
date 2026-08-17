@@ -33,8 +33,8 @@ function StatTile({ value, label, sub }: { value: string; label: string; sub: st
   return (
     <div className="card-flat min-w-0 flex-1 p-3">
       <div className="font-display text-[21px] font-medium leading-none text-accent">{value}</div>
-      <div className="mt-1.5 truncate text-xs text-foreground/85">{label}</div>
-      <div className="mt-0.5 truncate text-[11px] text-muted">{sub}</div>
+      <div className="mt-1.5 text-[11.5px] leading-tight text-foreground/85">{label}</div>
+      <div className="mt-1 text-[11px] leading-tight text-muted">{sub}</div>
     </div>
   );
 }
