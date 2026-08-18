@@ -5,7 +5,7 @@
  * while refreshUserPalate persists the running snapshot onto users.palateProfile
  * to satisfy the "accumulated on the user" model (PLAN.md §4.6).
  */
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
 import {
@@ -36,6 +36,50 @@ async function loadPalateEntries(db: DB, userId: string): Promise<PalateEntry[]>
     bottleProfile: r.bottleProfile ?? null,
     createdAt: r.createdAt,
   }));
+}
+
+/**
+ * The same load for MANY users in one query, so a caller comparing the viewer
+ * against everyone they follow costs one round trip instead of one per person.
+ * Users with no pours are absent from the map; callers treat that as "no
+ * palate yet", which `computePalateProfile` would report anyway.
+ */
+export async function getUserPalates(
+  db: DB,
+  userIds: string[],
+  now: Date = new Date(),
+): Promise<Map<string, PalateProfileResult>> {
+  const out = new Map<string, PalateProfileResult>();
+  if (userIds.length === 0) return out;
+
+  const rows = await db
+    .select({
+      userId: schema.pours.userId,
+      rating: schema.pours.rating,
+      createdAt: schema.pours.createdAt,
+      flavorTags: schema.tastingNotes.flavorTags,
+      bottleProfile: schema.bottles.flavorProfile,
+    })
+    .from(schema.pours)
+    .innerJoin(schema.bottles, eq(schema.pours.bottleId, schema.bottles.id))
+    .leftJoin(schema.tastingNotes, eq(schema.tastingNotes.pourId, schema.pours.id))
+    .where(inArray(schema.pours.userId, userIds));
+
+  const byUser = new Map<string, PalateEntry[]>();
+  for (const r of rows) {
+    const entries = byUser.get(r.userId) ?? [];
+    entries.push({
+      rating: r.rating,
+      flavorTags: r.flavorTags ?? null,
+      bottleProfile: r.bottleProfile ?? null,
+      createdAt: r.createdAt,
+    });
+    byUser.set(r.userId, entries);
+  }
+  for (const [userId, entries] of byUser) {
+    out.set(userId, computePalateProfile(entries, now));
+  }
+  return out;
 }
 
 /** The user's current palate, recomputed from their pours as of `now`. */

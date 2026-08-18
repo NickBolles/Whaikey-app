@@ -5,6 +5,7 @@ import { createTestBottle, createTestUser, setupTestDb, uid } from "@/test/helpe
 import {
   MIN_TWIN_SAMPLE,
   getPalateMatch,
+  getPalateMatches,
   getTasteTwins,
   getTwinEndorsements,
   palateMatchPercent,
@@ -190,8 +191,33 @@ describe("getTwinEndorsements", () => {
     ]);
     const entry = found.get(bottle.id)!;
     expect(entry.twinCount).toBe(2);
+    // The closest twin is credited with HER OWN rating, not the group's best.
     expect(entry.topTwin.handle).toBe("closest");
-    expect(entry.topRating).toBe(5);
+    expect(entry.topTwinRating).toBe(4.5);
+    // Every endorser cleared this bar, so a "4.5+" style claim stays true.
+    expect(entry.minRating).toBe(4.5);
+  });
+
+  it("never credits one twin with another's rating", async () => {
+    const viewer = await createTestUser(db);
+    const closest = await createTestUser(db);
+    const other = await createTestUser(db);
+    const bottle = await createTestBottle(db, { name: "Split Opinion" });
+
+    // The closest match liked it least — the earlier bug reported the group's
+    // best (5) beside the closest twin's handle, quoting words she never said.
+    await ratedPour(closest.id, bottle.id, 4, "public");
+    await ratedPour(other.id, bottle.id, 5, "public");
+
+    const found = await getTwinEndorsements(db, viewer.id, [bottle.id], [
+      twin(closest.id, "closest", 95),
+      twin(other.id, "other", 60),
+    ]);
+    const entry = found.get(bottle.id)!;
+    expect(entry.topTwin.handle).toBe("closest");
+    expect(entry.topTwinRating).toBe(4);
+    // Every endorser cleared 4, so "4+" describes the group truthfully.
+    expect(entry.minRating).toBe(4);
   });
 
   it("ignores ratings below the endorsement bar", async () => {
@@ -243,5 +269,75 @@ describe("getTwinEndorsements", () => {
     const viewer = await createTestUser(db);
     expect((await getTwinEndorsements(db, viewer.id, [], [twin("x", "x", 90)])).size).toBe(0);
     expect((await getTwinEndorsements(db, viewer.id, ["b"], [])).size).toBe(0);
+  });
+});
+
+describe("getPalateMatches", () => {
+  let db: DB;
+  beforeEach(async () => {
+    db = await setupTestDb();
+  });
+
+  async function profile(userId: string, handle: string) {
+    await db.insert(schema.userProfiles).values({
+      userId,
+      handle,
+      displayName: handle,
+      isPublic: true,
+      socialEnabled: true,
+    });
+  }
+
+  async function seedPalate(userId: string, bottleProfile: Record<string, number>) {
+    const bottle = await createTestBottle(db, { name: uid("b"), flavorProfile: bottleProfile });
+    for (let i = 0; i < MIN_TWIN_SAMPLE; i++) {
+      await db
+        .insert(schema.pours)
+        .values({ id: uid("pour"), userId, bottleId: bottle.id, rating: 5 });
+    }
+  }
+
+  it("answers for the people asked about, however far down the graph they rank", async () => {
+    const viewer = await createTestUser(db);
+    await profile(viewer.id, "viewer");
+    await seedPalate(viewer.id, { peaty: 9 });
+
+    // A close match and a distant one. Asking about the distant one alone must
+    // still answer — a ranked top-N lookup would have dropped it.
+    const close = await createTestUser(db);
+    const distant = await createTestUser(db);
+    for (const [u, handle, prof] of [
+      [close, "close", { peaty: 9 }],
+      [distant, "distant", { sweet: 9 }],
+    ] as const) {
+      await profile(u.id, handle);
+      await db.insert(schema.follows).values({
+        id: uid("f"),
+        followerId: viewer.id,
+        followeeId: u.id,
+        state: "accepted",
+      });
+      await seedPalate(u.id, prof);
+    }
+
+    const only = await getPalateMatches(db, viewer.id, [distant.id]);
+    expect(only.has(distant.id)).toBe(true);
+
+    const both = await getPalateMatches(db, viewer.id, [close.id, distant.id]);
+    expect(both.get(close.id)!).toBeGreaterThan(both.get(distant.id)!);
+  });
+
+  it("keeps the same scope rules as the ranked lookup", async () => {
+    const viewer = await createTestUser(db);
+    const stranger = await createTestUser(db);
+    await profile(viewer.id, "viewer");
+    await profile(stranger.id, "stranger");
+    await seedPalate(viewer.id, { peaty: 9 });
+    await seedPalate(stranger.id, { peaty: 9 });
+
+    // Not followed, and never yourself.
+    expect((await getPalateMatches(db, viewer.id, [stranger.id])).size).toBe(0);
+    expect((await getPalateMatches(db, viewer.id, [viewer.id])).size).toBe(0);
+    expect((await getPalateMatches(db, viewer.id, [])).size).toBe(0);
   });
 });

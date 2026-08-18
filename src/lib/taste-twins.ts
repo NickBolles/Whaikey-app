@@ -25,7 +25,7 @@ import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import type { DB } from "@/db";
 import { schema } from "@/db";
 import { cosineSimilarity, type PalateVector } from "@/lib/palate";
-import { getUserPalate } from "@/lib/palate-store";
+import { getUserPalate, getUserPalates } from "@/lib/palate-store";
 import { contributorVisibleSql } from "@/lib/social";
 
 /**
@@ -90,15 +90,44 @@ export async function getPalateMatch(
   viewerId: string | null,
   otherUserId: string,
 ): Promise<number | null> {
-  if (!viewerId || viewerId === otherUserId) return null;
-  const followees = await visibleFolloweeIds(db, viewerId);
-  if (!followees.includes(otherUserId)) return null;
+  if (!viewerId) return null;
+  const matches = await getPalateMatches(db, viewerId, [otherUserId]);
+  return matches.get(otherUserId) ?? null;
+}
 
-  const [mine, theirs] = await Promise.all([
-    getUserPalate(db, viewerId),
-    getUserPalate(db, otherUserId),
-  ]);
-  return palateMatchPercent(mine.vector, mine.sampleSize, theirs.vector, theirs.sampleSize);
+/**
+ * Matches for a SPECIFIC set of people — the authors actually on screen.
+ *
+ * Surfaces that render a fixed handful of notes ask for exactly those authors
+ * rather than ranking the whole graph and hoping the people they are showing
+ * land in the top slice: a viewer following hundreds would otherwise see the
+ * chip vanish from a recent note purely because that author sat outside an
+ * arbitrary cut. Two queries regardless of how many people are asked about.
+ */
+export async function getPalateMatches(
+  db: DB,
+  viewerId: string,
+  userIds: string[],
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  const wanted = [...new Set(userIds)].filter((id) => id !== viewerId);
+  if (wanted.length === 0) return out;
+
+  const followees = new Set(await visibleFolloweeIds(db, viewerId));
+  const eligible = wanted.filter((id) => followees.has(id));
+  if (eligible.length === 0) return out;
+
+  const palates = await getUserPalates(db, [viewerId, ...eligible]);
+  const mine = palates.get(viewerId);
+  if (!mine) return out;
+
+  for (const id of eligible) {
+    const theirs = palates.get(id);
+    if (!theirs) continue;
+    const match = palateMatchPercent(mine.vector, mine.sampleSize, theirs.vector, theirs.sampleSize);
+    if (match != null) out.set(id, match);
+  }
+  return out;
 }
 
 /**
@@ -113,7 +142,12 @@ export async function getTasteTwins(db: DB, viewerId: string, limit = 5): Promis
   const mine = await getUserPalate(db, viewerId);
   if (mine.sampleSize < MIN_TWIN_SAMPLE) return [];
 
-  const profiles = await db
+  const profiles: Array<{
+    userId: string;
+    handle: string;
+    displayName: string;
+    avatarUrl: string | null;
+  }> = await db
     .select({
       userId: schema.userProfiles.userId,
       handle: schema.userProfiles.handle,
@@ -128,9 +162,15 @@ export async function getTasteTwins(db: DB, viewerId: string, limit = 5): Promis
       ),
     );
 
+  // One query for every followee's palate rather than one per followee: a
+  // viewer following hundreds of people would otherwise add hundreds of
+  // sequential round trips to a Home render.
+  const palates = await getUserPalates(db, profiles.map((p) => p.userId));
+
   const twins: TasteTwin[] = [];
   for (const profile of profiles) {
-    const theirs = await getUserPalate(db, profile.userId);
+    const theirs = palates.get(profile.userId);
+    if (!theirs) continue;
     const matchPercent = palateMatchPercent(
       mine.vector,
       mine.sampleSize,
@@ -148,12 +188,17 @@ export async function getTasteTwins(db: DB, viewerId: string, limit = 5): Promis
 
 export interface TwinEndorsement {
   bottleId: string;
-  /** How many twins rated it at or above ENDORSEMENT_RATING. */
+  /** How many distinct twins rated it at or above ENDORSEMENT_RATING. */
   twinCount: number;
   /** The closest-matching endorser, for the reason line. */
   topTwin: TasteTwin;
-  /** Highest rating among the endorsing twins. */
-  topRating: number;
+  /** THAT twin's own best rating — never another endorser's. */
+  topTwinRating: number;
+  /**
+   * The lowest of the endorsers' best ratings, so a group can be described as
+   * "rated it 4.5+" and have every one of them actually clear that bar.
+   */
+  minRating: number;
 }
 
 /**
@@ -216,31 +261,38 @@ export async function getTwinEndorsements(
     )
     .orderBy(desc(schema.pours.rating));
 
-  // One entry per bottle, crediting the closest-matching endorser; the count
-  // is distinct people, so a twin who poured it twice is still one voice.
-  const seenPerBottle = new Map<string, Set<string>>();
+  // Each twin's OWN best rating per bottle. Keeping ratings attached to the
+  // person who gave them is the whole point: a reason that names one twin and
+  // quotes another's score is a quote nobody said. A twin who poured a bottle
+  // twice is still one voice.
+  const bestByBottleAndTwin = new Map<string, Map<string, number>>();
   for (const row of rows) {
-    const twin = twinById.get(row.userId);
-    if (!twin || row.rating == null) continue;
+    if (!twinById.has(row.userId) || row.rating == null) continue;
+    const perTwin = bestByBottleAndTwin.get(row.bottleId) ?? new Map<string, number>();
+    perTwin.set(row.userId, Math.max(perTwin.get(row.userId) ?? 0, row.rating));
+    bestByBottleAndTwin.set(row.bottleId, perTwin);
+  }
 
-    const seen = seenPerBottle.get(row.bottleId) ?? new Set<string>();
-    const isNewVoice = !seen.has(row.userId);
-    seen.add(row.userId);
-    seenPerBottle.set(row.bottleId, seen);
-
-    const existing = out.get(row.bottleId);
-    if (!existing) {
-      out.set(row.bottleId, {
-        bottleId: row.bottleId,
-        twinCount: 1,
-        topTwin: twin,
-        topRating: row.rating,
-      });
-      continue;
+  for (const [bottleId, perTwin] of bestByBottleAndTwin) {
+    let topTwin: TasteTwin | null = null;
+    let topTwinRating = 0;
+    let minRating = Infinity;
+    for (const [twinId, rating] of perTwin) {
+      const twin = twinById.get(twinId)!;
+      if (rating < minRating) minRating = rating;
+      if (!topTwin || twin.matchPercent > topTwin.matchPercent) {
+        topTwin = twin;
+        topTwinRating = rating;
+      }
     }
-    if (isNewVoice) existing.twinCount += 1;
-    if (row.rating > existing.topRating) existing.topRating = row.rating;
-    if (twin.matchPercent > existing.topTwin.matchPercent) existing.topTwin = twin;
+    if (!topTwin) continue;
+    out.set(bottleId, {
+      bottleId,
+      twinCount: perTwin.size,
+      topTwin,
+      topTwinRating,
+      minRating,
+    });
   }
 
   return out;

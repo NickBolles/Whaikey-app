@@ -7,7 +7,7 @@ import { getSessionUser } from "@/lib/session";
 import { isAiConfigured } from "@/lib/ai/client";
 import { ONBOARDING_COOKIE, needsOnboarding } from "@/lib/onboarding";
 import { getFriendFeed, getOwnProfile, listFollowing } from "@/lib/social";
-import { getTasteTwins } from "@/lib/taste-twins";
+import { getPalateMatches } from "@/lib/taste-twins";
 import { appNow } from "@/lib/clock";
 import { getDashboard } from "@/lib/dashboard";
 import { Dashboard } from "@/components/dashboard";
@@ -93,10 +93,15 @@ export default async function HomePage() {
   const hasProfile = Boolean(ownProfile?.socialEnabled);
   const hasFollows = following.some((f) => f.state === "accepted");
   const friendFeedRaw = hasFollows ? await getFriendFeed(db, user.id, { limit: 3 }) : [];
-  // US-16: one twins lookup decorates the whole feed, rather than a palate
-  // comparison per card. Authors with no computable match simply carry none.
-  const twins = friendFeedRaw.length > 0 ? await getTasteTwins(db, user.id, 50) : [];
-  const matchByUserId = new Map(twins.map((t) => [t.userId, t.matchPercent]));
+  // US-16: matches for exactly the authors on screen. Ranking the whole graph
+  // and keeping a top slice would drop the chip from a recent note whenever
+  // its author sat outside that slice — the feed picks by recency, not by
+  // match, so the two orderings must not be conflated.
+  const matchByUserId = await getPalateMatches(
+    db,
+    user.id,
+    friendFeedRaw.map((f) => f.author.userId),
+  );
   const friendFeedItems: FriendFeedItem[] = friendFeedRaw.map((f) => ({
     pourId: f.pourId,
     bottleId: f.bottleId,

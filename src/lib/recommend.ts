@@ -69,11 +69,18 @@ export interface RecommendOptions {
 const ENDORSEMENT_LOOKUP_LIMIT = 40;
 
 /**
- * A twin's endorsement is a thumb on the scale, not the scale. 1.15 can lift a
- * bottle past near-neighbours it was already close to and never past one the
+ * A twin's endorsement is a thumb on the scale, not the scale: enough to lift
+ * a bottle past near-neighbours it was already close to, never past one the
  * palate scored materially higher.
+ *
+ * Additive rather than a multiplier because "tonight" scores are
+ * `match + killBias - varietyPenalty` and are never floored at zero the way
+ * discovery's candidates are. Scaling a zero score leaves it untouched and
+ * scaling a negative one drives it further down, so the boost would silently
+ * demote exactly the bottle it was meant to promote. Adding is monotone at
+ * every sign.
  */
-const TWIN_ENDORSEMENT_BOOST = 1.15;
+const TWIN_ENDORSEMENT_BONUS = 0.15;
 
 const DISCOVERY_LIMIT = 8;
 const TONIGHT_LIMIT = 5;
@@ -139,12 +146,14 @@ export interface ReasonContext {
  * "people like you" is exactly the recommendation nobody trusts.
  */
 function twinSentence(endorsement: TwinEndorsement): string {
-  const { topTwin, twinCount, topRating } = endorsement;
-  const rating = topRating.toFixed(1);
+  const { topTwin, twinCount, topTwinRating, minRating } = endorsement;
   if (twinCount > 1) {
-    return `@${topTwin.handle} and ${twinCount - 1} other${twinCount > 2 ? "s" : ""} who taste like you rated it ${rating}.`;
+    // A threshold, not one endorser's score pinned on all of them: every twin
+    // counted here really did rate it at least this highly. Matches the shape
+    // docs/SOCIAL.md §7.7 uses — "your two closest palate matches rated it 4.5+".
+    return `${twinCount} people who taste like you rated it ${minRating.toFixed(1)}+.`;
   }
-  return `@${topTwin.handle}, a ${topTwin.matchPercent}% palate match, rated it ${rating}.`;
+  return `@${topTwin.handle}, a ${topTwin.matchPercent}% palate match, rated it ${topTwinRating.toFixed(1)}.`;
 }
 
 /**
@@ -351,7 +360,7 @@ export async function recommendBottles(
       twins,
     );
     for (const candidate of scored) {
-      if (twinEndorsements.has(candidate.bottleId)) candidate.score *= TWIN_ENDORSEMENT_BOOST;
+      if (twinEndorsements.has(candidate.bottleId)) candidate.score += TWIN_ENDORSEMENT_BONUS;
     }
     ctx = { ...ctx, twinEndorsements };
   }
