@@ -184,7 +184,7 @@ describe("GET /api/bottles/[id]", () => {
     expect(body.media).toEqual([expect.objectContaining({ kind: "bottle", rights: "display_remote" })]);
   });
 
-  it("hides disabled sources and review-required claims from public details", async () => {
+  it("hides disabled sources and non-displayable claims/media from public details", async () => {
     const bottle = await createTestBottle(db, { id: "hidden-provenance" });
     await db.insert(schema.catalogSources).values({
       id: "disabled-public-source",
@@ -220,10 +220,46 @@ describe("GET /api/bottles/[id]", () => {
       url: "https://registry.example/image.png",
       rights: "review_required",
     });
+    await db.insert(schema.catalogSources).values({
+      id: "enabled-review-source",
+      name: "Enabled review source",
+      kind: "editorial",
+      baseUrl: "https://reviews.example",
+      fetchPolicy: "structured",
+      mediaPolicy: "review_required",
+      enabled: true,
+    });
+    await db.insert(schema.bottleResources).values({
+      id: "enabled-review-resource",
+      bottleId: bottle.id,
+      sourceId: "enabled-review-source",
+      resourceType: "review",
+      url: "https://reviews.example/item",
+      retrievedAt: new Date(),
+    });
+    await db.insert(schema.bottleClaims).values({
+      id: "enabled-review-claim",
+      bottleId: bottle.id,
+      resourceId: "enabled-review-resource",
+      field: "reviewScore",
+      value: 99,
+      valueHash: "enabled-review-score",
+      status: "review_required",
+    });
+    await db.insert(schema.bottleMedia).values({
+      id: "enabled-review-media",
+      bottleId: bottle.id,
+      resourceId: "enabled-review-resource",
+      kind: "bottle",
+      url: "https://reviews.example/image.png",
+      rights: "review_required",
+    });
 
     const res = await detailGET(searchRequest(""), detailCtx(bottle.id));
     const body = await res.json();
-    expect(body.resources).toEqual([]);
+    expect(body.resources).toEqual([
+      expect.objectContaining({ id: "enabled-review-resource" }),
+    ]);
     expect(body.claims).toEqual([]);
     expect(body.media).toEqual([]);
   });

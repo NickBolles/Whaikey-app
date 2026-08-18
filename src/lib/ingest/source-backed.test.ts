@@ -201,6 +201,27 @@ describe("source-backed persistence", () => {
     expect(await db.select().from(schema.bottleMedia)).toHaveLength(1);
   });
 
+  it("replaces the extracted snapshot when an unchanged page is reclassified", async () => {
+    const bottle = await createTestBottle(db, { id: "reclassified-page", status: "imported" });
+    const resource = {
+      bottleId: bottle.id,
+      sourceId: OFFICIAL_SOURCE.id,
+      url: "https://www.example-distillery.com/products/reserve-10",
+      resourceType: "official_product" as const,
+      mediaKind: "bottle" as const,
+    };
+    const fetchImpl = vi.fn(async () => htmlResponse(PRODUCT_HTML)) as unknown as typeof fetch;
+    await ingestSourceManifest(db, { sources: [OFFICIAL_SOURCE], resources: [resource] }, { apply: true, fetchImpl });
+    await ingestSourceManifest(db, {
+      sources: [OFFICIAL_SOURCE],
+      resources: [{ ...resource, resourceType: "review" }],
+    }, { apply: true, fetchImpl });
+
+    const claims = await db.select().from(schema.bottleClaims);
+    expect(claims.some((claim) => claim.field === "description")).toBe(false);
+    expect(claims.every((claim) => claim.status === "corroborating")).toBe(true);
+  });
+
   it("tightens persisted media rights even when page content is unchanged", async () => {
     const bottle = await createTestBottle(db, { id: "media-policy-change", status: "imported" });
     const resource = {
@@ -220,6 +241,7 @@ describe("source-backed persistence", () => {
     expect(await db.select().from(schema.bottleMedia)).toEqual([
       expect.objectContaining({ rights: "review_required" }),
     ]);
+    expect((await db.select().from(schema.bottles).where(eq(schema.bottles.id, bottle.id)))[0].imageUrl).toBeNull();
   });
 
   it("keeps the most restrictive rights when different sources expose the same image", async () => {
@@ -254,6 +276,7 @@ describe("source-backed persistence", () => {
     expect(await db.select().from(schema.bottleMedia)).toEqual([
       expect.objectContaining({ rights: "review_required" }),
     ]);
+    expect((await db.select().from(schema.bottles).where(eq(schema.bottles.id, bottle.id)))[0].imageUrl).toBeNull();
   });
 
   it("stores editorial resources but cannot verify or overwrite a bottle", async () => {

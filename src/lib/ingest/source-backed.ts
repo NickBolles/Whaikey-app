@@ -602,10 +602,26 @@ export async function ingestSourceManifest(
       const [bottle] = await db.select().from(bottles).where(eq(bottles.id, resource.bottleId)).limit(1);
       if (!bottle) throw new Error(`Unknown bottle id: ${resource.bottleId}`);
 
+      const extractionHash = hash(JSON.stringify({
+        version: 1,
+        document: parsed.contentHash,
+        sourceKind: source.kind,
+        sourceName: source.name,
+        sourceAttribution: source.attribution ?? null,
+        fetchPolicy: source.fetchPolicy,
+        mediaPolicy: source.mediaPolicy,
+        resourceType: resource.resourceType,
+        mediaKind: resource.mediaKind ?? "bottle",
+      }));
       const existing = await db.select({ id: bottleResources.id, contentHash: bottleResources.contentHash }).from(bottleResources)
         .where(and(eq(bottleResources.bottleId, bottle.id), eq(bottleResources.url, parsed.canonicalUrl))).limit(1);
       const resourceId = existing[0]?.id ?? stableId("resource", bottle.id, parsed.canonicalUrl);
-      const contentChanged = existing.length > 0 && existing[0].contentHash !== parsed.contentHash;
+      const snapshotChanged = existing.length > 0 && existing[0].contentHash !== extractionHash;
+      const trackedImageBefore = bottle.imageUrl
+        ? await db.select({ id: bottleMedia.id }).from(bottleMedia).where(and(
+          eq(bottleMedia.bottleId, bottle.id), eq(bottleMedia.url, bottle.imageUrl),
+        )).limit(1)
+        : [];
       if (existing.length === 0) report.resourcesWritten += 1;
       await db.insert(bottleResources).values({
         id: resourceId,
@@ -615,7 +631,7 @@ export async function ingestSourceManifest(
         url: parsed.canonicalUrl,
         title: parsed.title ?? resource.title ?? null,
         publisher: parsed.publisher,
-        contentHash: parsed.contentHash,
+        contentHash: extractionHash,
         publishedAt: parsed.publishedAt,
         retrievedAt: new Date(),
       }).onConflictDoUpdate({
@@ -625,17 +641,18 @@ export async function ingestSourceManifest(
           resourceType: resource.resourceType,
           title: parsed.title ?? resource.title ?? null,
           publisher: parsed.publisher,
-          contentHash: parsed.contentHash,
+          contentHash: extractionHash,
           publishedAt: parsed.publishedAt,
           retrievedAt: new Date(),
           updatedAt: new Date(),
         },
       });
 
-      // A changed page replaces its prior extracted snapshot. Keeping both old
-      // and new values as accepted claims would manufacture a conflict that no
-      // current source page actually contains.
-      if (contentChanged) {
+      // A changed page or extraction policy replaces its prior snapshot. Keeping
+      // rows that the current classification no longer extracts (for example an
+      // official Product.description after reclassification as a review) would
+      // preserve stale authority and stale media rights.
+      if (snapshotChanged) {
         await db.delete(bottleClaims).where(eq(bottleClaims.resourceId, resourceId));
         await db.delete(bottleMedia).where(eq(bottleMedia.resourceId, resourceId));
       }
@@ -700,15 +717,42 @@ export async function ingestSourceManifest(
       }
 
       const officialProduct = source.kind === "official" && resource.resourceType === "official_product";
+      let clearManagedImage = false;
+      if (bottle.imageUrl) {
+        const trackedImageAfter = await db.select({ id: bottleMedia.id }).from(bottleMedia).where(and(
+          eq(bottleMedia.bottleId, bottle.id), eq(bottleMedia.url, bottle.imageUrl),
+        )).limit(1);
+        if (trackedImageBefore.length > 0 || trackedImageAfter.length > 0) {
+          const displayAllowed = await db.select({ id: bottleMedia.id }).from(bottleMedia)
+            .innerJoin(bottleResources, eq(bottleMedia.resourceId, bottleResources.id))
+            .innerJoin(catalogSources, eq(bottleResources.sourceId, catalogSources.id))
+            .where(and(
+              eq(bottleMedia.bottleId, bottle.id),
+              eq(bottleMedia.url, bottle.imageUrl),
+              eq(bottleMedia.rights, "display_remote"),
+              eq(catalogSources.enabled, true),
+            )).limit(1);
+          clearManagedImage = displayAllowed.length === 0;
+        }
+      }
       if (officialProduct) {
         const patch: Partial<typeof bottles.$inferInsert> = {};
         const value = (field: BottleClaimField) => parsed.claims.find((claim) => claim.field === field)?.value;
         const abv = value("abv");
         const ageYears = value("ageYears");
-        const image = parsed.media.find((item) => item.kind === "bottle" && item.rights === "display_remote");
+        const [image] = await db.select({ url: bottleMedia.url }).from(bottleMedia)
+          .innerJoin(bottleResources, eq(bottleMedia.resourceId, bottleResources.id))
+          .innerJoin(catalogSources, eq(bottleResources.sourceId, catalogSources.id))
+          .where(and(
+            eq(bottleMedia.bottleId, bottle.id),
+            eq(bottleMedia.kind, "bottle"),
+            eq(bottleMedia.rights, "display_remote"),
+            eq(catalogSources.enabled, true),
+          )).limit(1);
         if (bottle.abv == null && typeof abv === "number") patch.abv = abv;
         if (bottle.ageYears == null && typeof ageYears === "number") patch.ageYears = Math.round(ageYears);
-        if (bottle.imageUrl == null && image) patch.imageUrl = image.url;
+        if (clearManagedImage) patch.imageUrl = image?.url ?? null;
+        else if (bottle.imageUrl == null && image) patch.imageUrl = image.url;
         if (bottle.status === "imported") {
           patch.status = "verified";
           report.bottlesPromoted += 1;
@@ -722,6 +766,8 @@ export async function ingestSourceManifest(
           retailerSku: null,
           retrievedAt: new Date(),
         }).onConflictDoNothing();
+      } else if (clearManagedImage) {
+        await db.update(bottles).set({ imageUrl: null }).where(eq(bottles.id, bottle.id));
       }
     } catch (error) {
       report.errors.push({ url: resource.url, error: error instanceof Error ? error.message : String(error) });

@@ -255,7 +255,11 @@ export async function getBottleDetail(
     .from(bottleMedia)
     .innerJoin(bottleResources, eq(bottleMedia.resourceId, bottleResources.id))
     .innerJoin(catalogSources, eq(bottleResources.sourceId, catalogSources.id))
-    .where(and(eq(bottleMedia.bottleId, bottleId), eq(catalogSources.enabled, true)))
+    .where(and(
+      eq(bottleMedia.bottleId, bottleId),
+      eq(bottleMedia.rights, "display_remote"),
+      eq(catalogSources.enabled, true),
+    ))
     .orderBy(asc(bottleMedia.kind), asc(bottleMedia.createdAt));
 
   let userBottle: UserBottle | null = null;
