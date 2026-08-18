@@ -5,7 +5,7 @@
  * while refreshUserPalate persists the running snapshot onto users.palateProfile
  * to satisfy the "accumulated on the user" model (PLAN.md §4.6).
  */
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, type SQL } from "drizzle-orm";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
 import {
@@ -43,11 +43,19 @@ async function loadPalateEntries(db: DB, userId: string): Promise<PalateEntry[]>
  * against everyone they follow costs one round trip instead of one per person.
  * Users with no pours are absent from the map; callers treat that as "no
  * palate yet", which `computePalateProfile` would report anyway.
+ *
+ * `authorized` is an optional predicate on the pour rows, for callers reading
+ * OTHER people's pours: a palate is a projection of everything someone has
+ * logged, private pours included, so the relationship that permits reading it
+ * belongs in the same statement that reads it rather than in a list fetched
+ * beforehand. Taste twins passes its accepted-follow check here. Omitted for
+ * self-reads, which need no permission.
  */
 export async function getUserPalates(
   db: DB,
   userIds: string[],
   now: Date = new Date(),
+  authorized?: SQL,
 ): Promise<Map<string, PalateProfileResult>> {
   const out = new Map<string, PalateProfileResult>();
   if (userIds.length === 0) return out;
@@ -63,7 +71,9 @@ export async function getUserPalates(
     .from(schema.pours)
     .innerJoin(schema.bottles, eq(schema.pours.bottleId, schema.bottles.id))
     .leftJoin(schema.tastingNotes, eq(schema.tastingNotes.pourId, schema.pours.id))
-    .where(inArray(schema.pours.userId, userIds));
+    .where(
+      authorized ? and(inArray(schema.pours.userId, userIds), authorized) : inArray(schema.pours.userId, userIds),
+    );
 
   const byUser = new Map<string, PalateEntry[]>();
   for (const r of rows) {

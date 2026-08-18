@@ -65,9 +65,34 @@ export function palateMatchPercent(
   bRatedSample: number,
 ): number | null {
   if (aRatedSample < MIN_TWIN_SAMPLE || bRatedSample < MIN_TWIN_SAMPLE) return null;
+  // Enough pours, no direction: rate three drams a flat 3 and every weight is
+  // (3 - NEUTRAL_RATING) = 0. Cosine is undefined against a zero-magnitude
+  // vector, and `cosineSimilarity` reports that as 0 — which would render as a
+  // confident "0% palate match" between two people who have expressed no
+  // preference at all. Unknown, not opposite.
+  if (!hasDirection(a) || !hasDirection(b)) return null;
   const sim = cosineSimilarity(a, b);
   if (sim <= 0) return 0;
   return Math.round(sim * 100);
+}
+
+/** Any non-zero weight — i.e. the palate points somewhere. */
+function hasDirection(vector: PalateVector): boolean {
+  return Object.values(vector).some((weight) => weight !== 0);
+}
+
+/**
+ * Pour rows the viewer may derive a palate from: their own, plus anyone they
+ * still hold an accepted follow on. Handed to `getUserPalates` so the check
+ * runs in the statement that reads the pours — a follow revoked after
+ * `visibleFolloweeIds` returned would otherwise let a stale id list produce a
+ * match built from that person's whole history, private pours included.
+ */
+function palateReadableBy(viewerId: string) {
+  return or(
+    eq(schema.pours.userId, viewerId),
+    acceptedFollowSql(viewerId, schema.pours.userId),
+  )!;
 }
 
 /** Accepted followees of the viewer who are visible to them right now. */
@@ -123,7 +148,12 @@ export async function getPalateMatches(
   const eligible = wanted.filter((id) => followees.has(id));
   if (eligible.length === 0) return out;
 
-  const palates = await getUserPalates(db, [viewerId, ...eligible]);
+  const palates = await getUserPalates(
+    db,
+    [viewerId, ...eligible],
+    undefined,
+    palateReadableBy(viewerId),
+  );
   const mine = palates.get(viewerId);
   if (!mine) return out;
 
@@ -186,7 +216,12 @@ export async function getTasteTwins(db: DB, viewerId: string, limit = 5): Promis
   // One query for every followee's palate rather than one per followee: a
   // viewer following hundreds of people would otherwise add hundreds of
   // sequential round trips to a Home render.
-  const palates = await getUserPalates(db, profiles.map((p) => p.userId));
+  const palates = await getUserPalates(
+    db,
+    profiles.map((p) => p.userId),
+    undefined,
+    palateReadableBy(viewerId),
+  );
 
   const twins: TasteTwin[] = [];
   for (const profile of profiles) {

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
+import { NEUTRAL_RATING } from "@/lib/palate";
 import { createTestBottle, createTestUser, setupTestDb, uid } from "@/test/helpers";
 import {
   MIN_TWIN_SAMPLE,
@@ -24,6 +25,16 @@ describe("palateMatchPercent", () => {
 
   it("reports an opposite palate as 0 rather than a negative percentage", () => {
     expect(palateMatchPercent({ sweet: 1 }, 5, { sweet: -1 }, 5)).toBe(0);
+  });
+
+  it("calls a palate with no direction unknown, not 0%", () => {
+    // Three flat 3s: every weight is (3 - NEUTRAL_RATING) = 0, so cosine has
+    // nothing to measure against. "No preference expressed" must not render as
+    // a confident "you taste nothing alike".
+    const flat = { sweet: 0, peaty: 0 };
+    expect(palateMatchPercent(flat, 9, alsoSweet, 9)).toBeNull();
+    expect(palateMatchPercent(sweet, 9, flat, 9)).toBeNull();
+    expect(palateMatchPercent(flat, 9, flat, 9)).toBeNull();
   });
 
   it("stays null until BOTH palates carry enough rated pours", () => {
@@ -185,6 +196,19 @@ describe("taste twins against the graph", () => {
     await seedPalate(opposite.id, { peaty: 9 }, MIN_TWIN_SAMPLE, 1);
 
     expect(await getPalateMatch(db, viewer.id, opposite.id)).toBe(0);
+    expect(await getTasteTwins(db, viewer.id)).toEqual([]);
+  });
+
+  it("reports nothing for two drinkers who rated everything neutral", async () => {
+    const viewer = await createTestUser(db);
+    const neutral = await createTestUser(db);
+    await profile(viewer.id, "viewer");
+    await profile(neutral.id, "neutral");
+    await follow(viewer.id, neutral.id);
+    await seedPalate(viewer.id, { peaty: 9 }, MIN_TWIN_SAMPLE, NEUTRAL_RATING);
+    await seedPalate(neutral.id, { peaty: 9 }, MIN_TWIN_SAMPLE, NEUTRAL_RATING);
+
+    expect(await getPalateMatch(db, viewer.id, neutral.id)).toBeNull();
     expect(await getTasteTwins(db, viewer.id)).toEqual([]);
   });
 
