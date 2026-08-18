@@ -75,12 +75,14 @@ A scoping note so this section stays sharp: these bans are the load-bearing guar
 
 | Instead of rewarding… | We reward… | Data it uses |
 |---|---|---|
-| Volume | **Breadth** — regions, styles, cask types, distilleries *encountered* (a 15 ml sample at a bar counts the same as a bottle) | `tried` relationships |
+| Volume | **Breadth** — regions, countries, styles, cask types, distilleries *encountered* (a 15 ml sample at a bar counts the same as a bottle). Specified in full as the **Passport**: [FEATURES.md §11](./FEATURES.md#11-exploration--the-passport), stories US-18/19 | `tried` relationships, pours |
 | Frequency | **Precision** — descriptor vocabulary size, agreement with published notes, blind-tasting calibration | `tastingNotes.flavorTags`, `getFlavorCalibration()` |
 | Being first/most | **Being useful** — notes others found helpful, a substitute mapping that made a friend go "oh, that's what I taste" | Cheers/comments received |
 | Drinking a rare bottle | **Sharing a rare bottle** — sample swaps, pours poured for others, hosting a flight | Bottle-share tracker, flight hosting |
 
 Note that every one of these is satisfiable by someone drinking *less* whiskey more attentively. That's the test: **if a mechanic can't be won by a moderate drinker, it doesn't ship.**
+
+**This column is not a consolation prize.** §3.1 is a list of bans, and a ban list read alone makes the product sound joyless — which is a misreading worth heading off, because it has already caused hesitation about shipping perfectly good ideas. Badges, maps, completions, rivalry with friends and a card worth posting are all *encouraged* here; the guardrails constrain what the axis is, not how fun it can be. Breadth saturates and volume doesn't, and that single property is what lets an exploration mechanic be as competitive as we like without ever paying a user to pour another glass. When in doubt the question is not "are we allowed to gamify this?" but **"can someone win this by drinking less of more?"** — if yes, build it.
 
 ### 3.3 The subtle one: note count is a consumption proxy
 
@@ -148,6 +150,10 @@ The stories are the contract: each phase in §13 ships a coherent subset, and §
   ✓ Sample record links giver → receiver → the receiver's pour; giver is notified when the note lands.
 - **US-16 — Taste twins.** *As a user, I want recommendations to lean on people who taste like me, with the reason stated.*
   ✓ Palate-match % on profiles and notes; recs can cite "your two closest palate matches rated it 4.5+."
+- **US-18 — Passport badges.** *As an explorer, I want the regions, countries, distilleries and cask types I've met turned into something I can look at and finish, so curiosity has a scoreboard.*
+  ✓ Completions, milestones and discoveries per FEATURES.md §11.4; every badge advances only on a *distinct* new thing, is untimed, and is blind to volume and ABV. A distillery counts as tasted, never as visited.
+- **US-19 — Compare passports.** *As two friends, we want to see what each of us has met that the other hasn't, so "what should we open?" has an answer.*
+  ✓ Rendered as a diff — yours, theirs, and the shared gap — never as a ranked list of who has met more. Club passports (S3.5) aggregate the union with no per-member column.
 
 ### Community scale (S4)
 
@@ -409,7 +415,7 @@ The re-slicing rule (changed from the first draft): **every phase ships a loop a
 |---|---|---|---|
 | **S1 — Share control & the first comparison** | `revoked_at` + `/sharing` management page; viewer-side comparison on `/s/[code]`; wishlist CTA. No graph, no profiles, no visibility model. | US-1..3 | *A share link becomes a two-way palate comparison, and every link is controllable.* Implementable today — zero open decisions (§16). |
 | **S2 — Friends & Same Dram** | Profiles + handles, follow/friends, per-pour visibility, blocks, "From your friends" Home module, Same Dram friends column, Cheers, notification policy, "make everything private." | US-4..11 | *You follow a friend, and the bottle page answers "what did they taste that I didn't?"* |
-| **S3 — Conversation & groups** | Comments + reports, clubs + shared shelf, blind flights (can lead the phase — no club dependency), samples, taste twins in recommendations. | US-12..16 | *A tasting club can run a night on Whaikey, and a friend's palate improves your recs.* |
+| **S3 — Conversation & groups** | Comments + reports, clubs + shared shelf, blind flights (can lead the phase — no club dependency), samples, taste twins in recommendations, passport badges + friend diffing. | US-12..16, US-18/19 | *A tasting club can run a night on Whaikey, and a friend's palate improves your recs.* |
 | **S4 — Community scale** | Community flavor consensus, crowdsourced availability, moderation tooling, public discovery, jurisdiction review. | US-17 | *Aggregates get good enough to be a reason to join.* |
 
 **Sequencing rule, stated structurally rather than as a phase gate.** The first draft said "S1 ships fully before S2 opens." The real invariant is narrower: **nothing becomes visible to a second user until the visibility model and block checks are enforced on the read path that serves it.** Within S2 that means schema + projection functions land before any UI renders another person's data — ordinary dependency ordering. A phase-level freeze on top of that adds ceremony, not safety. (S1 needs no gate at all: it extends an existing bearer-token surface and shows the viewer only their own data.)

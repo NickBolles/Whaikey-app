@@ -30,7 +30,7 @@ function item(over: Partial<FriendFeedItem> = {}): FriendFeedItem {
 describe("FriendsModule", () => {
   it("shows the invite card when the viewer has no profile or no follows", () => {
     render(<FriendsModule items={[]} hasProfile={false} hasFollows={false} />);
-    expect(screen.getByText("Notes are better shared")).toBeInTheDocument();
+    expect(screen.getByText("A dram is better shared")).toBeInTheDocument();
     const links = screen.getAllByRole("link", { name: "Find friends" });
     expect(links.length).toBeGreaterThan(0);
     for (const link of links) expect(link).toHaveAttribute("href", "/friends");
@@ -38,7 +38,7 @@ describe("FriendsModule", () => {
 
   it("shows the quiet-week line when followed but nothing shared", () => {
     render(<FriendsModule items={[]} hasProfile={true} hasFollows={true} />);
-    expect(screen.getByText("Quiet week — nothing shared yet.")).toBeInTheDocument();
+    expect(screen.getByText(/Quiet week from your friends/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Manage" })).toHaveAttribute("href", "/friends");
   });
 

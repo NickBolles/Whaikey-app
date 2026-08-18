@@ -7,6 +7,7 @@ import { PourShareButton } from "@/components/pour-share-button";
 import { VisibilityControl } from "@/components/visibility-control";
 import type { PourVisibility } from "@/db/schema";
 import { FLAVOR_WHEEL, leafLabel, wedgeForLeaf } from "@/lib/flavor-wheel";
+import { IntensityDots } from "@/components/flavor-chip";
 
 /** Serialized pour crossing the server→client boundary (timestamp as ISO). */
 export interface TimelinePour {
@@ -100,7 +101,7 @@ function PourRow({ pour }: { pour: TimelinePour }) {
                 aria-hidden
               />
               <span className="text-foreground/90">{leafLabel(leafId) ?? leafId}</span>
-              <span className="text-accent">{"×".repeat(Math.min(intensity, 3))}</span>
+              <IntensityDots intensity={intensity} className="text-accent" />
             </li>
           ))}
           {tags.length > 4 && (

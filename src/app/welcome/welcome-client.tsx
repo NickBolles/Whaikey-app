@@ -428,7 +428,7 @@ function StepFriends({
       <StepHeading
         label="Step 3"
         title="Find your friends"
-        lede="Whiskey's better compared. Everything here is optional and off by default."
+        lede="A dram is better shared. Everything here is optional and off by default."
       />
 
       <FriendLookup ownHandle={profile.handle} />

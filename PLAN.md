@@ -10,6 +10,18 @@ An AI-native whiskey tracking app, inspired by wine apps like **Vivino** (social
 
 **Vision:** The fastest way to remember, understand, and grow your whiskey journey. Scan a bottle, get instant knowledge, log a pour in seconds, and have an AI companion that knows your palate better than you do.
 
+**What the app is for.** Five verbs, in the order a drinker actually meets them. Every feature should be traceable to one of them, and a feature that serves none of them is a delighter at best:
+
+| | | Looks like |
+|---|---|---|
+| **Explore** | Widen what you've met | Regions, countries, distilleries, cask types and styles you haven't tried yet — surfaced as territory, with the next step suggested |
+| **Learn** | Understand what you're drinking | Whiskey School, cask and production explainers, your notes read against the producer's and the critics' |
+| **Track** | Keep what you'd otherwise forget | Bottles, pours, notes, fill levels, spend — private by default, exportable always |
+| **Refine** | Get better at tasting | The flavor wheel, calibration against published notes, blind flights, a palate model that sharpens as you feed it |
+| **Share** | Do it with other people | Friends' notes beside yours, Same Dram, clubs, flights, taste twins, passports compared |
+
+**Explore and Share are the two we have historically under-built**, and both are the point of the thing: whiskey is a hobby people fall into because someone poured them something, and it stays a hobby because there's always a region, a distillery or a cask finish you haven't met. The app should feel like a passport and a table of friends, not a ledger.
+
 **Guiding principles:**
 
 1. **AI-native** — AI isn't a feature tab; it powers search, tasting-note capture, recommendations, and a conversational assistant throughout the app.
@@ -17,6 +29,7 @@ An AI-native whiskey tracking app, inspired by wine apps like **Vivino** (social
 3. **User-friendly** — A collector's app that a beginner can use. Progressive disclosure: simple by default, deep when you want it.
 4. **Your palate, not the crowd's** — Community ratings are context; personal taste modeling is the product. Friends' palates are the *most useful* context, which is why the social layer compares palates rather than aggregating them into an average.
 5. **Social by comparison, never by consumption** — Whiskey is drunk with people, so the app is better with people in it. But the shared thing is *the bottle* and the compared thing is *your palate* — never how much or how often you drink. Every social mechanic must be winnable by a moderate drinker, or it doesn't ship ([docs/SOCIAL.md](./docs/SOCIAL.md) §3).
+6. **Curiosity is what we celebrate** — The scoreboard, where there is one, counts *distinct things met*: regions, countries, distilleries, cask types, styles, descriptors. Breadth saturates — the fiftieth pour of the same bourbon moves nothing — which is exactly why it is safe to make it fun, competitive and shareable. A 15 ml sample at a bar earns the same as a bottle, so the cheapest way to fill a passport is to drink *less of more*, with friends. This is not a loophole in the responsible-drinking stance; it is the substitute the stance was designed to make room for ([docs/SOCIAL.md](./docs/SOCIAL.md) §3.2).
 
 ---
 
@@ -112,14 +125,23 @@ Implementation: LLM with **tool calling** into the app's own APIs (query invento
 
 **Non-negotiable constraints** (detail in SOCIAL.md §3 and §8, grounded in the published critique of Untappd's gamification): no streaks, no volume/frequency/ABV badges, no consumption leaderboards, no "your friends are drinking now" presence, no pour-nudging notifications. Everything is **private by default**; money data (purchase price, collection value, spend) never crosses a social boundary at all.
 
-### 2.9 Extras / Delighters (backlog)
+### 2.9 Exploration — the Passport (full spec: [docs/FEATURES.md](./docs/FEATURES.md) §11)
+
+**The organizing idea:** whiskey is enormous and a drinker's actual experience of it is small and lopsided — four bourbons and a Speyside, then a plateau. The Passport turns that gap into the product's most legible progress surface, by counting **distinct things you've met**: regions, countries, distilleries, cask types, categories, and flavor descriptors you've named yourself.
+
+- **The map, not the meter.** Each dimension renders as territory: Scotland's six regions with two filled, 41 distilleries met of the ones in our catalog, sherry/bourbon/port/virgin-oak casks tried. The empty cells are the feature — they're the recommendation surface with a reason already attached (*"you've never had a Campbeltown"*).
+- **Badges** for meaningful thresholds and completions — all five (well, six) Scotch regions; ten distilleries in one country; four cask finishes of the same distillate; a full flavor wedge named across your notes. Tiered, so there's always a next one, and every tier is reachable by tasting more *kinds*, never more *volume*.
+- **Tasted, not visited.** A distillery badge means you drank something they made, from anywhere — a bar pour, a friend's sample, a 15 ml miniature. We deliberately do **not** badge physical venue check-ins: that's the Untappd venue mechanic our guardrails ban (SOCIAL.md §3.1), and it drags in location privacy for no added meaning. A distillery *visit* can be a proud, manually-added memory on the passport; it is never a scored achievement.
+- **Shareable and comparable** — a passport card for friends and clubs, and passport diffing with a friend (*"you've both done Islay; neither of you has touched Japan"*), which turns into a shared plan: what to open next time you're in the same room. Clubs get an aggregate passport, so a group can go after a region together.
+- **Suggests the next step, never the next pour.** Exploration surfaces recommend *what* to try when you next try something — matched to your palate and your price band — and never prompt you to drink now. No notification says "one region to go."
+
+### 2.10 Extras / Delighters (backlog)
 
 - **Stats & Wrapped** — yearly "Whiskey Wrapped" recap (top bottle, flavor journey, spend… optionally hidden 😅).
-- Distillery map + visited-distillery passport.
+- Distillery map (visits as memories on the passport, not as scored badges — §2.9).
 - Sample/bottle-share management (track 2oz samples, who you owe).
 - Insurance export (CSV/PDF of collection with values).
 - Home-screen widgets: "tonight's pour," collection value.
-- Badges/achievements ("All 5 Scotch regions," "100 pours logged").
 
 ---
 
@@ -130,11 +152,14 @@ Implementation: LLM with **tool calling** into the app's own APIs (query invento
 | Bottle search + detail pages | Label photo scan | Blind tasting mode | Social graph & feed |
 | Barcode/UPC scan (rapid collection import) | Voice note → structured note | Cigar pairing | Clubs / group tastings |
 | My Bar with $ tracking | Palate wheel visualization | Gift mode | Marketplace/price alerts |
-| Quick pour log + ratings | Reverse pairing from my bar | Widgets | Distillery passport |
+| Quick pour log + ratings | Reverse pairing from my bar | Widgets | Club/aggregate passports |
 | Structured notes + flavor chips | Shareable pour/palate cards (link-based) | Wrapped recap | Community price reports |
-| Interactive flavor wheel | Collection value estimates | | |
+| Interactive flavor wheel | Collection value estimates | Passport badges & tiers | |
 | AI chat with tool calling | Explainable recommendations | | |
-| Wishlist / tried / own flows | Your notes vs. producer notes (calibration) | | |
+| Wishlist / tried / own flows | Breadth counters (regions/distilleries/casks tried) | | |
+| | Your notes vs. producer notes (calibration) | | |
+
+**On exploration specifically:** the *counters* are v1 — "3 of 6 Scotch regions, 11 distilleries" is a `select count(distinct …)` over data we already store, and it's the cheapest thing in the app that makes a solo user feel like they're getting somewhere. Badges, tiers and the full passport surface follow once there's enough logged history for a threshold to mean anything; sharing and club passports come with the graph.
 
 **On social specifically:** the *graph* is deliberately post-v1 (Phase S2+, [docs/SOCIAL.md](./docs/SOCIAL.md) §13), but **link-based sharing ships early** — it's the growth loop, it needs no graph, and it's already live for pours. The private journal has to be worth using alone before a network can carry it.
 
@@ -280,6 +305,7 @@ Principles: every third-party lookup converts into a first-party record (user co
 
 ### Phase 3 — Personalization & polish (week 11–14)
 - Palate profile + palate wheel; explainable new-bottle recommendations; "what to pour tonight."
+- **Passport v1** — breadth counters (regions, countries, distilleries, cask types, categories) on My Bar and the profile, with the unmet cells linked to search so a gap becomes a next bottle (§2.9).
 - Cost-per-pour, collection value dashboard, price history basics.
 - Offline pour logging, performance pass (cold start < 2s, search < 100ms).
 - **Milestone: App Store / Play Store beta (TestFlight first).**
@@ -290,7 +316,8 @@ Each phase ships a loop a user can feel, and the riskiest assumption (sparse not
 
 - **S1 — Share control & the first comparison:** share-link revocation + a "shared links" page; the share page shows a signed-in viewer how their notes on the same bottle compare, plus a wishlist hook. No graph, no profiles.
 - **S2 — Friends & Same Dram:** profiles + handles, palate card, follow graph, per-pour visibility (default *only me*), blocks, the "From your friends" Home module, **Same Dram** (you vs. producer vs. friends), cheers, notification policy, one-tap "make everything private."
-- **S3 — Conversation & groups:** comments + reports, clubs, blind flights end-to-end (no club dependency — flights can lead), taste twins feeding recommendations, bottle shares/samples.
+- **S3 — Conversation & groups:** comments + reports, clubs, blind flights end-to-end (no club dependency — flights can lead), taste twins feeding recommendations, bottle shares/samples, **passport badges + friend passport diffing** ("neither of you has touched Japan" → a plan for next time).
+- **S3.5 — Club passports:** an aggregate passport per club, so a group can take on a region together. Depends on clubs; deliberately after the solo passport has proven it motivates anything.
 - **S4 — Community scale:** community flavor consensus, crowdsourced availability, moderation tooling, public discovery.
 - In parallel: Wrapped recap, price alerts on wishlist, widgets.
 - Launch premium tier (see §6 Monetization).

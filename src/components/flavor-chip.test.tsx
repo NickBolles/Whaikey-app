@@ -30,9 +30,18 @@ describe("FlavorChip", () => {
     expect(chip.style.backgroundColor).not.toBe("");
   });
 
-  it("shows intensity as dots", () => {
+  it("shows intensity as a 3-dot meter, filled to the level", () => {
     render(<FlavorChip leafId="brine" intensity={3} />);
-    expect(screen.getByLabelText("intensity 3")).toHaveTextContent("●●●");
+    expect(screen.getByRole("img", { name: "intensity 3 of 3" })).toBeInTheDocument();
+  });
+
+  it("keeps all three dots at a lower intensity, so chip widths stay even", () => {
+    // The unearned dots are dimmed, not dropped: a row of chips at mixed
+    // intensities holds its rhythm, and nothing resizes when a level changes.
+    render(<FlavorChip leafId="brine" intensity={1} />);
+    const meter = screen.getByRole("img", { name: "intensity 1 of 3" });
+    expect(meter).toHaveTextContent("●●●");
+    expect(meter.querySelectorAll("span")).toHaveLength(3);
   });
 
   it("prefixes confirmed chips with ✓ and suggested chips with +", () => {
