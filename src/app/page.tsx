@@ -7,6 +7,7 @@ import { getSessionUser } from "@/lib/session";
 import { isAiConfigured } from "@/lib/ai/client";
 import { ONBOARDING_COOKIE, needsOnboarding } from "@/lib/onboarding";
 import { getFriendFeed, getOwnProfile, listFollowing } from "@/lib/social";
+import { getTasteTwins } from "@/lib/taste-twins";
 import { appNow } from "@/lib/clock";
 import { getDashboard } from "@/lib/dashboard";
 import { Dashboard } from "@/components/dashboard";
@@ -92,6 +93,10 @@ export default async function HomePage() {
   const hasProfile = Boolean(ownProfile?.socialEnabled);
   const hasFollows = following.some((f) => f.state === "accepted");
   const friendFeedRaw = hasFollows ? await getFriendFeed(db, user.id, { limit: 3 }) : [];
+  // US-16: one twins lookup decorates the whole feed, rather than a palate
+  // comparison per card. Authors with no computable match simply carry none.
+  const twins = friendFeedRaw.length > 0 ? await getTasteTwins(db, user.id, 50) : [];
+  const matchByUserId = new Map(twins.map((t) => [t.userId, t.matchPercent]));
   const friendFeedItems: FriendFeedItem[] = friendFeedRaw.map((f) => ({
     pourId: f.pourId,
     bottleId: f.bottleId,
@@ -109,6 +114,7 @@ export default async function HomePage() {
     commentCount: f.commentCount,
     viewerTags: f.viewerTags,
     viewerBottleRelationship: f.viewerBottleRelationship,
+    palateMatchPercent: matchByUserId.get(f.author.userId) ?? null,
   }));
 
   const bottleCount = dashboard.shelfTotal;

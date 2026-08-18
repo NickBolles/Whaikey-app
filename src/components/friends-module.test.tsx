@@ -23,6 +23,7 @@ function item(over: Partial<FriendFeedItem> = {}): FriendFeedItem {
     commentCount: over.commentCount ?? 1,
     viewerTags: over.viewerTags ?? null,
     viewerBottleRelationship: over.viewerBottleRelationship ?? null,
+    palateMatchPercent: over.palateMatchPercent ?? null,
   };
 }
 
@@ -77,5 +78,23 @@ describe("FriendsModule", () => {
     expect(screen.getByText("4.5")).toBeInTheDocument();
     expect(screen.getByText("2")).toBeInTheDocument();
     expect(screen.getByText("1")).toBeInTheDocument();
+  });
+});
+
+describe("FriendsModule — taste twins (US-16)", () => {
+  it("marks a note from someone who tastes like you", () => {
+    render(
+      <FriendsModule
+        items={[item({ palateMatchPercent: 87 })]}
+        hasProfile
+        hasFollows
+      />,
+    );
+    expect(screen.getByTestId("palate-match")).toHaveTextContent("87% palate match");
+  });
+
+  it("says nothing when the match can't be computed yet", () => {
+    render(<FriendsModule items={[item({ palateMatchPercent: null })]} hasProfile hasFollows />);
+    expect(screen.queryByTestId("palate-match")).not.toBeInTheDocument();
   });
 });

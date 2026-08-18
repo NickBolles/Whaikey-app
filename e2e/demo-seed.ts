@@ -354,6 +354,30 @@ export async function seedDemoUser(db: DB): Promise<void> {
     },
   ]);
 
+  // A third rated Sasha pour, so her palate clears MIN_TWIN_SAMPLE and the
+  // taste-twin match (US-16) has something to compute against Jordan's. Islay
+  // again, which is exactly why the two of them read as twins.
+  await db.insert(schema.pours).values({
+    id: "demo-friend-pour-3",
+    userId: DEMO_FRIEND_ID,
+    bottleId: "ardbeg-10",
+    rating: 4.5,
+    servingStyle: "neat",
+    amountMl: 30,
+    visibility: "friends",
+    createdAt: D("2026-07-09T20:30:00Z"),
+  });
+  await db.insert(schema.tastingNotes).values({
+    id: "demo-friend-note-3",
+    pourId: "demo-friend-pour-3",
+    nose: "Lemon peel over a bonfire.",
+    palate: "Soot, green olive, a long medicinal streak.",
+    finish: "Dry, salty, goes on for ages.",
+    flavorTags: { peat: 3, campfire: 2, citrus: 2, medicinal: 2 },
+    extractedBy: "user",
+    createdAt: D("2026-07-09T20:35:00Z"),
+  });
+
   // A public share link for Sasha's lagavulin pour — the /s/[code] comparison view.
   await db.insert(schema.pourShares).values({
     id: "demo-share-1",

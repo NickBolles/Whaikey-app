@@ -5,8 +5,10 @@ import { GlassWater, Lock, Star } from "lucide-react";
 import { getDb } from "@/db";
 import { getSessionUser } from "@/lib/session";
 import { getProfileView, type SocialNote } from "@/lib/social";
+import { getPalateMatch } from "@/lib/taste-twins";
 import { FLAVOR_WHEEL, leafLabel, wedgeForLeaf } from "@/lib/flavor-wheel";
 import { FlavorWheel } from "@/components/flavor-wheel";
+import { PalateMatchChip } from "@/components/palate-match-chip";
 import { UserAvatar } from "@/components/user-avatar";
 import { ProfileEditor } from "./profile-editor";
 import { FollowBlockActions } from "./follow-block-actions";
@@ -30,6 +32,10 @@ export default async function ProfilePage({ params }: Props) {
 
   const { profile, palate, recentNotes, viewerState } = view;
   const signedIn = Boolean(viewer);
+  // US-16: how closely this person tastes like the viewer. Null — and so
+  // absent — unless the viewer follows them and both palates carry enough
+  // rated pours to mean something.
+  const palateMatch = await getPalateMatch(getDb(), viewer?.id ?? null, profile.userId);
   // Mirrors getProfileView's own canSeeContent gate (docs/SOCIAL.md US-4): a
   // signed-out viewer never sees content, even for a public profile.
   const canSeeContent = signedIn && (viewerState.isSelf || profile.isPublic || viewerState.followState === "accepted");
@@ -49,6 +55,12 @@ export default async function ProfilePage({ params }: Props) {
               <p className="text-sm text-muted">@{profile.handle}</p>
             </div>
           </div>
+          {palateMatch != null && (
+            <div className="flex items-center gap-2">
+              <PalateMatchChip matchPercent={palateMatch} />
+              <span className="text-xs text-muted">between your palate and theirs</span>
+            </div>
+          )}
           {profile.bio && <p className="text-foreground/90">{profile.bio}</p>}
           {profile.homeRegion && <p className="text-sm text-muted">{profile.homeRegion}</p>}
           {signedIn && viewer && (
