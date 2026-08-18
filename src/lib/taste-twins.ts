@@ -30,7 +30,7 @@ import type { DB } from "@/db";
 import { schema } from "@/db";
 import { cosineSimilarity, type PalateVector } from "@/lib/palate";
 import { getUserPalate, getUserPalates } from "@/lib/palate-store";
-import { contributorVisibleSql } from "@/lib/social";
+import { acceptedFollowSql, contributorVisibleSql } from "@/lib/social";
 
 /**
  * Rated pours each side needs before a match is reported — counted as
@@ -143,8 +143,18 @@ export async function getPalateMatches(
 
 /**
  * The viewer's closest palates among the people they follow, strongest first.
- * Anyone whose match cannot be computed is left out rather than shown at 0 —
- * "we don't know yet" and "you taste nothing alike" are different claims.
+ *
+ * Two exclusions, for different reasons. A match that cannot be computed is
+ * left out rather than shown at 0 — "we don't know yet" and "you taste nothing
+ * alike" are different claims. A match that computes to 0 is left out too:
+ * this list is the endorsement pool, and a 0% match is someone whose palate is
+ * orthogonal or outright opposite to the viewer's. Letting their rating carry
+ * a "tastes like you" sentence (or nudge the ranking) would be the reverse of
+ * the signal it claims to be.
+ *
+ * `getPalateMatch`/`getPalateMatches` deliberately keep reporting 0 — on a
+ * profile that is an honest answer to "how alike are we", and nothing acts on
+ * it. Only this pool feeds recommendations.
  */
 export async function getTasteTwins(db: DB, viewerId: string, limit = 5): Promise<TasteTwin[]> {
   const followeeIds = await visibleFolloweeIds(db, viewerId);
@@ -188,7 +198,7 @@ export async function getTasteTwins(db: DB, viewerId: string, limit = 5): Promis
       theirs.vector,
       theirs.ratedSampleSize,
     );
-    if (matchPercent == null) continue;
+    if (matchPercent == null || matchPercent <= 0) continue;
     twins.push({ ...profile, matchPercent });
   }
 
@@ -221,6 +231,14 @@ export interface TwinEndorsement {
  * from someone who follows them back. A twin's private pour must not leak its
  * rating into a recommendation reason — the reason is a social projection of
  * that pour, and it stays behind the same gate the note itself does.
+ *
+ * Every relationship in that gate is re-checked IN this query rather than
+ * taken from `twins`, which is a snapshot from a `getTasteTwins` call earlier
+ * in the request. A follow revoked in between would otherwise leave the
+ * snapshot admitting a `followers`-visibility pour the viewer can no longer
+ * see — and the reason names the person, so the leak is attributed. The
+ * accepted follow is also what makes someone a twin at all, so requiring it
+ * here keeps the sentence's premise true even for a public pour.
  */
 export async function getTwinEndorsements(
   db: DB,
@@ -234,25 +252,15 @@ export async function getTwinEndorsements(
   const twinById = new Map(twins.map((t) => [t.userId, t]));
   const twinIds = [...twinById.keys()];
 
-  const followsBackRows = await db
-    .select({ followerId: schema.follows.followerId })
-    .from(schema.follows)
-    .where(
-      and(
-        inArray(schema.follows.followerId, twinIds),
-        eq(schema.follows.followeeId, viewerId),
-        eq(schema.follows.state, "accepted"),
-      ),
-    );
-  const friendIds = followsBackRows.map((r) => r.followerId);
-
-  const visibilityCond =
-    friendIds.length > 0
-      ? or(
-          inArray(schema.pours.visibility, ["followers", "public"]),
-          and(eq(schema.pours.visibility, "friends"), inArray(schema.pours.userId, friendIds)),
-        )
-      : inArray(schema.pours.visibility, ["followers", "public"]);
+  const visibilityCond = or(
+    inArray(schema.pours.visibility, ["followers", "public"]),
+    // Friends-only needs the author following the viewer back, checked here
+    // rather than pre-loaded into an id list for the same reason.
+    and(
+      eq(schema.pours.visibility, "friends"),
+      acceptedFollowSql(schema.pours.userId, viewerId),
+    ),
+  );
 
   const rows = await db
     .select({
@@ -267,6 +275,7 @@ export async function getTwinEndorsements(
         inArray(schema.pours.userId, twinIds),
         sql`${schema.pours.rating} >= ${ENDORSEMENT_RATING}`,
         contributorVisibleSql(schema.pours.userId, viewerId),
+        acceptedFollowSql(viewerId, schema.pours.userId),
         visibilityCond,
       ),
     )

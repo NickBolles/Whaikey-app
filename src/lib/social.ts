@@ -940,6 +940,20 @@ export function contributorVisibleSql(userCol: AnyColumn, viewerId: string) {
   ))`;
 }
 
+/**
+ * SQL predicate: an ACCEPTED follow from `follower` to `followee`, evaluated
+ * live in the query rather than read into a list earlier in the request.
+ *
+ * Same reasoning as `contributorVisibleSql`: a follow removed between a
+ * snapshot read and the query it feeds would leave a stale id list still
+ * admitting rows the viewer can no longer see. Anything that discloses a
+ * followee's pour — the note, its rating, or a projection of either — has to
+ * re-check the relationship in the same statement that selects the row.
+ */
+export function acceptedFollowSql(follower: AnyColumn | string, followee: AnyColumn | string) {
+  return sql`exists (select 1 from follows af where af.follower_id = ${follower} and af.followee_id = ${followee} and af.state = 'accepted')`;
+}
+
 async function countCheers(db: DB, pourId: string, viewerId: string | null): Promise<number> {
   const conditions = [eq(schema.reactions.pourId, pourId), eq(schema.reactions.kind, "cheers")];
   if (viewerId) conditions.push(contributorVisibleSql(schema.reactions.userId, viewerId));

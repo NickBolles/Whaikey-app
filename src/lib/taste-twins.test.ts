@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
 import { createTestBottle, createTestUser, setupTestDb, uid } from "@/test/helpers";
@@ -88,7 +89,10 @@ describe("taste twins against the graph", () => {
 
     await seedPalate(viewer.id, { peaty: 9 });
     await seedPalate(close.id, { peaty: 8 });
-    await seedPalate(distant.id, { sweet: 9 });
+    // Overlapping but mostly elsewhere: a real, lower match. A palate with no
+    // overlap at all scores 0 and is excluded outright (see below), so it
+    // couldn't stand in for "distant" here.
+    await seedPalate(distant.id, { peaty: 3, sweet: 9 });
 
     const twins = await getTasteTwins(db, viewer.id);
     expect(twins.map((t) => t.handle)).toEqual(["close", "distant"]);
@@ -167,6 +171,23 @@ describe("taste twins against the graph", () => {
     expect(await getPalateMatch(db, viewer.id, other.id)).not.toBeNull();
   });
 
+  it("keeps a 0% match off the endorsement pool while still reporting it", async () => {
+    // Opposite palates: peaty liked, sweet disliked on one side and the mirror
+    // on the other. A 0% match is evidence AGAINST taking their word for a
+    // bottle, so they must not become a twin — but the profile-level number is
+    // still an honest answer to "how alike are we".
+    const viewer = await createTestUser(db);
+    const opposite = await createTestUser(db);
+    await profile(viewer.id, "viewer");
+    await profile(opposite.id, "opposite");
+    await follow(viewer.id, opposite.id);
+    await seedPalate(viewer.id, { peaty: 9 }, MIN_TWIN_SAMPLE, 5);
+    await seedPalate(opposite.id, { peaty: 9 }, MIN_TWIN_SAMPLE, 1);
+
+    expect(await getPalateMatch(db, viewer.id, opposite.id)).toBe(0);
+    expect(await getTasteTwins(db, viewer.id)).toEqual([]);
+  });
+
   it("gives no self-match", async () => {
     const viewer = await createTestUser(db);
     await profile(viewer.id, "viewer");
@@ -190,6 +211,26 @@ describe("getTwinEndorsements", () => {
     matchPercent,
   });
 
+  /**
+   * A twin is by definition someone the viewer follows, and the endorsement
+   * query re-checks that live rather than trusting the passed-in list — so the
+   * follow has to exist for any of these fixtures to be visible.
+   */
+  async function followedTwin(
+    viewerId: string,
+    userId: string,
+    handle: string,
+    matchPercent: number,
+  ) {
+    await db.insert(schema.follows).values({
+      id: uid("f"),
+      followerId: viewerId,
+      followeeId: userId,
+      state: "accepted",
+    });
+    return twin(userId, handle, matchPercent);
+  }
+
   async function ratedPour(
     userId: string,
     bottleId: string,
@@ -212,8 +253,8 @@ describe("getTwinEndorsements", () => {
     await ratedPour(b.id, bottle.id, 5, "public");
 
     const found = await getTwinEndorsements(db, viewer.id, [bottle.id], [
-      twin(a.id, "closest", 91),
-      twin(b.id, "further", 70),
+      await followedTwin(viewer.id, a.id, "closest", 91),
+      await followedTwin(viewer.id, b.id, "further", 70),
     ]);
     const entry = found.get(bottle.id)!;
     expect(entry.twinCount).toBe(2);
@@ -236,8 +277,8 @@ describe("getTwinEndorsements", () => {
     await ratedPour(other.id, bottle.id, 5, "public");
 
     const found = await getTwinEndorsements(db, viewer.id, [bottle.id], [
-      twin(closest.id, "closest", 95),
-      twin(other.id, "other", 60),
+      await followedTwin(viewer.id, closest.id, "closest", 95),
+      await followedTwin(viewer.id, other.id, "other", 60),
     ]);
     const entry = found.get(bottle.id)!;
     expect(entry.topTwin.handle).toBe("closest");
@@ -252,7 +293,9 @@ describe("getTwinEndorsements", () => {
     const bottle = await createTestBottle(db, { name: "Just OK" });
     await ratedPour(a.id, bottle.id, 3.5, "public");
 
-    const found = await getTwinEndorsements(db, viewer.id, [bottle.id], [twin(a.id, "a", 90)]);
+    const found = await getTwinEndorsements(db, viewer.id, [bottle.id], [
+      await followedTwin(viewer.id, a.id, "a", 90),
+    ]);
     expect(found.size).toBe(0);
   });
 
@@ -262,7 +305,9 @@ describe("getTwinEndorsements", () => {
     const bottle = await createTestBottle(db, { name: "Private Love" });
     await ratedPour(a.id, bottle.id, 5, "private");
 
-    const found = await getTwinEndorsements(db, viewer.id, [bottle.id], [twin(a.id, "a", 95)]);
+    const found = await getTwinEndorsements(db, viewer.id, [bottle.id], [
+      await followedTwin(viewer.id, a.id, "a", 95),
+    ]);
     expect(found.size).toBe(0);
   });
 
@@ -281,14 +326,63 @@ describe("getTwinEndorsements", () => {
     });
 
     const oneWayOnly = await getTwinEndorsements(db, viewer.id, [bottle.id], [
-      twin(oneWay.id, "oneway", 90),
+      await followedTwin(viewer.id, oneWay.id, "oneway", 90),
     ]);
     expect(oneWayOnly.size).toBe(0);
 
     const mutualOnly = await getTwinEndorsements(db, viewer.id, [bottle.id], [
-      twin(mutual.id, "mutual", 90),
+      await followedTwin(viewer.id, mutual.id, "mutual", 90),
     ]);
     expect(mutualOnly.get(bottle.id)?.twinCount).toBe(1);
+  });
+
+  it("stops disclosing a rating the moment the follow is revoked", async () => {
+    // `twins` is a snapshot taken earlier in the request. If the viewer
+    // unfollows in between, a followers-visibility pour is no longer theirs to
+    // see — and the reason would have named the person it leaked from.
+    const viewer = await createTestUser(db);
+    const author = await createTestUser(db);
+    const bottle = await createTestBottle(db, { name: "Revoked" });
+    await ratedPour(author.id, bottle.id, 5, "followers");
+    const stale = await followedTwin(viewer.id, author.id, "author", 90);
+
+    expect((await getTwinEndorsements(db, viewer.id, [bottle.id], [stale])).size).toBe(1);
+
+    await db.delete(schema.follows).where(eq(schema.follows.followerId, viewer.id));
+    expect((await getTwinEndorsements(db, viewer.id, [bottle.id], [stale])).size).toBe(0);
+  });
+
+  it("drops a friends-only pour when the author's follow back is revoked", async () => {
+    const viewer = await createTestUser(db);
+    const author = await createTestUser(db);
+    const bottle = await createTestBottle(db, { name: "Was Mutual" });
+    await ratedPour(author.id, bottle.id, 5, "friends");
+    const stale = await followedTwin(viewer.id, author.id, "author", 90);
+    await db.insert(schema.follows).values({
+      id: uid("f"),
+      followerId: author.id,
+      followeeId: viewer.id,
+      state: "accepted",
+    });
+
+    expect((await getTwinEndorsements(db, viewer.id, [bottle.id], [stale])).size).toBe(1);
+
+    await db.delete(schema.follows).where(eq(schema.follows.followerId, author.id));
+    expect((await getTwinEndorsements(db, viewer.id, [bottle.id], [stale])).size).toBe(0);
+  });
+
+  it("does not admit a public pour from someone the viewer never followed", async () => {
+    // The accepted follow is what makes the person a twin at all, so "public"
+    // is not enough to earn a "tastes like you" sentence about them.
+    const viewer = await createTestUser(db);
+    const stranger = await createTestUser(db);
+    const bottle = await createTestBottle(db, { name: "Stranger's Pick" });
+    await ratedPour(stranger.id, bottle.id, 5, "public");
+
+    const found = await getTwinEndorsements(db, viewer.id, [bottle.id], [
+      twin(stranger.id, "stranger", 95),
+    ]);
+    expect(found.size).toBe(0);
   });
 
   it("returns nothing without bottles or twins to work with", async () => {
