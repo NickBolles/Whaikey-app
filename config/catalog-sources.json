@@ -1,0 +1,41 @@
+{
+  "sources": [
+    {
+      "id": "buffalo-trace",
+      "name": "Buffalo Trace Distillery",
+      "kind": "official",
+      "baseUrl": "https://www.buffalotracedistillery.com",
+      "fetchPolicy": "structured",
+      "mediaPolicy": "review_required",
+      "attribution": "Buffalo Trace Distillery"
+    },
+    {
+      "id": "breaking-bourbon",
+      "name": "Breaking Bourbon",
+      "kind": "editorial",
+      "baseUrl": "https://www.breakingbourbon.com",
+      "fetchPolicy": "structured",
+      "mediaPolicy": "link_only",
+      "attribution": "Breaking Bourbon"
+    },
+    {
+      "id": "whisky-advocate",
+      "name": "Whisky Advocate",
+      "kind": "editorial",
+      "baseUrl": "https://whiskyadvocate.com",
+      "fetchPolicy": "link_only",
+      "mediaPolicy": "link_only",
+      "attribution": "Whisky Advocate"
+    },
+    {
+      "id": "whisky-edition",
+      "name": "WHISKY:EDITION",
+      "kind": "editorial",
+      "baseUrl": "https://thewhiskyedition.com",
+      "fetchPolicy": "structured",
+      "mediaPolicy": "review_required",
+      "attribution": "WHISKY:EDITION — CC BY 4.0"
+    }
+  ],
+  "resources": []
+}

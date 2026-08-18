@@ -14,6 +14,13 @@ export { fetchSystembolagetCandidates } from "./systembolaget";
 export { fetchWhiskyEditionCandidates } from "./whiskyedition";
 export { fetchVinmonopoletCandidates } from "./vinmonopolet";
 export { enrichBottleProfiles, enrichModel, type EnrichReport } from "./enrich";
+export {
+  ingestSourceManifest,
+  parseSourceDocument,
+  validatePublicSourceUrl,
+  type CatalogSourceManifest,
+  type SourceIngestReport,
+} from "./source-backed";
 
 /** UPC provenance for a candidate's barcodes: the source's own tag when it is a UpcSource, else "seed". */
 function upcSourceFor(candidate: CatalogCandidate): UpcSource {

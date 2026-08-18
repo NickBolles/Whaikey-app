@@ -1,13 +1,20 @@
-import { and, asc, eq, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, inArray, ne, sql, type SQL } from "drizzle-orm";
 import type { DB } from "@/db";
 import {
   bottleAliases,
+  bottleClaims,
+  bottleMedia,
+  bottleResources,
   bottles,
+  catalogSources,
   distilleries,
   pairings,
   pours,
   userBottles,
   type Bottle,
+  type BottleClaim,
+  type BottleMedia,
+  type BottleResource,
   type Distillery,
   type Pairing,
   type UserBottle,
@@ -168,6 +175,18 @@ export interface BottleDetail {
   /** The signed-in user's shelf row for this bottle, null when absent/signed out. */
   userBottle: UserBottle | null;
   pairings: Pairing[];
+  resources: Array<
+    BottleResource & {
+      source: {
+        id: string;
+        name: string;
+        kind: "official" | "editorial" | "retailer" | "registry";
+        attribution: string | null;
+      };
+    }
+  >;
+  claims: BottleClaim[];
+  media: BottleMedia[];
 }
 
 /**
@@ -203,6 +222,42 @@ export async function getBottleDetail(
     .where(eq(pairings.bottleId, bottleId))
     .orderBy(asc(pairings.pairingType), asc(pairings.createdAt));
 
+  const resourceRows = await db
+    .select({
+      resource: bottleResources,
+      sourceId: catalogSources.id,
+      sourceName: catalogSources.name,
+      sourceKind: catalogSources.kind,
+      sourceAttribution: catalogSources.attribution,
+    })
+    .from(bottleResources)
+    .innerJoin(catalogSources, eq(bottleResources.sourceId, catalogSources.id))
+    .where(and(eq(bottleResources.bottleId, bottleId), eq(catalogSources.enabled, true)))
+    .orderBy(asc(bottleResources.resourceType), asc(bottleResources.title));
+
+  // Public detail responses expose compact factual claims, not source-owned
+  // description/review prose. Enrichment reads the private claim table directly.
+  const claimRows = await db
+    .select({ claim: bottleClaims })
+    .from(bottleClaims)
+    .innerJoin(bottleResources, eq(bottleClaims.resourceId, bottleResources.id))
+    .innerJoin(catalogSources, eq(bottleResources.sourceId, catalogSources.id))
+    .where(and(
+      eq(bottleClaims.bottleId, bottleId),
+      ne(bottleClaims.field, "description"),
+      inArray(bottleClaims.status, ["accepted", "corroborating"]),
+      eq(catalogSources.enabled, true),
+    ))
+    .orderBy(asc(bottleClaims.field), asc(bottleClaims.createdAt));
+
+  const mediaRows = await db
+    .select({ media: bottleMedia })
+    .from(bottleMedia)
+    .innerJoin(bottleResources, eq(bottleMedia.resourceId, bottleResources.id))
+    .innerJoin(catalogSources, eq(bottleResources.sourceId, catalogSources.id))
+    .where(and(eq(bottleMedia.bottleId, bottleId), eq(catalogSources.enabled, true)))
+    .orderBy(asc(bottleMedia.kind), asc(bottleMedia.createdAt));
+
   let userBottle: UserBottle | null = null;
   if (userId) {
     const [ub] = await db
@@ -222,5 +277,16 @@ export async function getBottleDetail(
     },
     userBottle,
     pairings: pairingRows,
+    resources: resourceRows.map((row) => ({
+      ...row.resource,
+      source: {
+        id: row.sourceId,
+        name: row.sourceName,
+        kind: row.sourceKind,
+        attribution: row.sourceAttribution,
+      },
+    })),
+    claims: claimRows.map((row) => row.claim),
+    media: mediaRows.map((row) => row.media),
   };
 }

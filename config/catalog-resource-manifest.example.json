@@ -1,0 +1,38 @@
+{
+  "sources": [
+    {
+      "id": "buffalo-trace",
+      "name": "Buffalo Trace Distillery",
+      "kind": "official",
+      "baseUrl": "https://www.buffalotracedistillery.com",
+      "fetchPolicy": "structured",
+      "mediaPolicy": "review_required",
+      "attribution": "Buffalo Trace Distillery"
+    },
+    {
+      "id": "breaking-bourbon",
+      "name": "Breaking Bourbon",
+      "kind": "editorial",
+      "baseUrl": "https://breakingbourbon.com",
+      "fetchPolicy": "link_only",
+      "mediaPolicy": "link_only",
+      "attribution": "Breaking Bourbon"
+    }
+  ],
+  "resources": [
+    {
+      "bottleId": "eagle-rare-10",
+      "sourceId": "buffalo-trace",
+      "url": "https://www.buffalotracedistillery.com/our-brands/eagle-rare/eagle-rare-10/",
+      "resourceType": "official_product",
+      "mediaKind": "bottle"
+    },
+    {
+      "bottleId": "eagle-rare-10",
+      "sourceId": "breaking-bourbon",
+      "url": "https://breakingbourbon.com/review/eagle-rare-10-year-single-barrel",
+      "resourceType": "review",
+      "title": "Eagle Rare 10 Year Single Barrel Review"
+    }
+  ]
+}

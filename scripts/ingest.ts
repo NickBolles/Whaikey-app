@@ -6,6 +6,7 @@
  *   pnpm ingest cola --since 2026-01-01 [--until 2026-07-01] [--dry-run]
  *   pnpm ingest cola --full [--until 2026-07-01] [--dry-run]
  *   pnpm ingest oregon|utah|bc|systembolaget|whiskyedition|vinmonopolet [--dry-run]
+ *   pnpm ingest resources --manifest ./path/to/manifest.json [--apply]
  *   pnpm ingest enrich [--limit N] [--batch-size N] [--no-web] [--dry-run]
  *   pnpm ingest prune            # delete imported bottles untouched by users
  *
@@ -40,6 +41,7 @@
  *            Anthropic-compatible Messages API but does not accept Anthropic
  *            hosted web search, so --no-web is implied there.
  */
+import { readFile } from "node:fs/promises";
 import { createDb, resolveDbUrl } from "../src/db";
 import { migrateDb } from "../src/db/migrate";
 import {
@@ -57,7 +59,9 @@ import {
   fetchVinmonopoletCandidates,
   fetchWhiskyEditionCandidates,
   ingestCandidates,
+  ingestSourceManifest,
   pruneImportedBottles,
+  type CatalogSourceManifest,
 } from "../src/lib/ingest";
 import { AiNotConfiguredError } from "../src/lib/ai/client";
 
@@ -73,6 +77,25 @@ async function main(): Promise<void> {
   const url = resolveDbUrl();
   const db = createDb(url);
   await migrateDb(db, url);
+
+  if (source === "resources") {
+    const manifestPath = arg("manifest");
+    if (!manifestPath) {
+      console.error("resources requires --manifest <path-to-json>");
+      process.exit(1);
+    }
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as CatalogSourceManifest;
+    const report = await ingestSourceManifest(db, manifest, { apply: hasFlag("apply") });
+    console.log(
+      `[resources]${report.apply ? "" : " (dry run)"} ${report.resources} resources: ` +
+        `${report.fetched} fetched, ${report.claimsExtracted} claims extracted, ${report.mediaExtracted} media discovered; ` +
+        `${report.resourcesWritten} resources, ${report.claimsWritten} claims, ${report.mediaWritten} media written, ` +
+        `${report.bottlesPromoted} bottles promoted, ${report.errors.length} errors.`,
+    );
+    for (const error of report.errors) console.error(`  ${error.url}: ${error.error}`);
+    if (report.errors.length > 0) process.exitCode = 1;
+    return;
+  }
 
   if (source === "enrich") {
     const limit = arg("limit") ? Number(arg("limit")) : undefined;
@@ -153,7 +176,7 @@ async function main(): Promise<void> {
   }
 
   console.error(
-    "Usage: pnpm ingest <iowa|cola|oregon|utah|bc|systembolaget|whiskyedition|vinmonopolet|enrich|prune> [--since YYYY-MM-DD|--full] [--until YYYY-MM-DD] [--limit N] [--batch-size N] [--no-web] [--dry-run]",
+    "Usage: pnpm ingest <iowa|cola|oregon|utah|bc|systembolaget|whiskyedition|vinmonopolet|resources|enrich|prune> [--manifest FILE] [--apply] [--since YYYY-MM-DD|--full] [--until YYYY-MM-DD] [--limit N] [--batch-size N] [--no-web] [--dry-run]",
   );
   process.exit(1);
 }

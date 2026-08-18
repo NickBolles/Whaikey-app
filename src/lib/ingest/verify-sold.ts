@@ -1,7 +1,7 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import type { DB } from "@/db";
-import { bottles, bottleUpcs, bottleVerifications, priceHistory } from "@/db/schema";
+import { bottleResources, bottles, bottleUpcs, bottleVerifications, catalogSources, priceHistory } from "@/db/schema";
 import { isValidUpc } from "@/lib/upc";
 
 export type VerificationCandidate = {
@@ -94,6 +94,10 @@ export async function findImportedBottles(db: DB, limit: number): Promise<Verifi
     .from(bottles).where(eq(bottles.status, "imported")).limit(limit);
 }
 
+function stableEvidenceId(prefix: string, value: string): string {
+  return `${prefix}-${createHash("sha256").update(value).digest("hex").slice(0, 24)}`;
+}
+
 /** Persist only source-backed, normalized facts; existing curated values always win. */
 export async function persistSoldVerification(db: DB, verification: SoldVerification, dryRun: boolean): Promise<boolean> {
   const [current] = await db.select().from(bottles).where(and(eq(bottles.id, verification.id), eq(bottles.status, "imported"))).limit(1);
@@ -101,6 +105,30 @@ export async function persistSoldVerification(db: DB, verification: SoldVerifica
   if (dryRun) return true;
 
   await db.insert(bottleVerifications).values({ id: randomUUID(), bottleId: current.id, url: verification.evidenceUrl, label: verification.evidenceLabel, retailerSku: verification.retailerSku, retrievedAt: new Date() }).onConflictDoNothing();
+
+  // Bridge the existing verifier into the shared resource graph so every new
+  // evidence URL appears on the bottle page without copying source prose.
+  const evidence = new URL(verification.evidenceUrl);
+  const sourceId = stableEvidenceId("verification-source", evidence.origin);
+  await db.insert(catalogSources).values({
+    id: sourceId,
+    name: verification.evidenceLabel ?? evidence.hostname,
+    kind: "retailer",
+    baseUrl: evidence.origin,
+    fetchPolicy: "link_only",
+    mediaPolicy: "link_only",
+  }).onConflictDoNothing();
+  await db.insert(bottleResources).values({
+    id: stableEvidenceId("resource", `${current.id}\u0000${verification.evidenceUrl}`),
+    bottleId: current.id,
+    sourceId,
+    resourceType: "retailer",
+    url: verification.evidenceUrl,
+    title: verification.evidenceLabel,
+    publisher: verification.evidenceLabel,
+    retrievedAt: new Date(),
+  }).onConflictDoNothing();
+
   const patch: Record<string, unknown> = { status: "verified" };
   if (current.abv == null && verification.abv != null) patch.abv = verification.abv;
   if (current.ageYears == null && verification.ageYears != null) patch.ageYears = verification.ageYears;

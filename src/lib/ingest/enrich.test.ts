@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { eq, isNull } from "drizzle-orm";
 import type { DB } from "@/db";
-import { bottles, pours, tastingNotes } from "@/db/schema";
+import { bottleClaims, bottleResources, bottles, catalogSources, pours, tastingNotes } from "@/db/schema";
 import { makeFakeAnthropic } from "@/lib/ai/testing";
 import { createTestBottle, createTestUser, setupTestDb, uid } from "@/test/helpers";
 import {
@@ -196,6 +196,64 @@ describe("enrichBottleProfiles", () => {
     await enrichBottleProfiles(db, { client: fake.client, web: false });
     const withoutWeb = fake.create.mock.calls[1][0] as { tools?: Array<{ type: string }> };
     expect(withoutWeb.tools).toBeUndefined();
+  });
+
+  it("uses stored source facts and removes sourced bottles from the web-search budget", async () => {
+    const bottle = await createTestBottle(db, { id: "sourced-bottle", flavorProfile: null, description: null });
+    await db.insert(catalogSources).values({
+      id: "official", name: "Official Producer", kind: "official", baseUrl: "https://producer.example",
+      fetchPolicy: "structured", mediaPolicy: "display_remote",
+    });
+    await db.insert(bottleResources).values({
+      id: "official-resource", bottleId: bottle.id, sourceId: "official", resourceType: "official_product",
+      url: "https://producer.example/products/sourced", retrievedAt: new Date(),
+    });
+    await db.insert(bottleClaims).values({
+      id: "official-description", bottleId: bottle.id, resourceId: "official-resource", field: "description",
+      value: "Vanilla, toasted oak, and orange peel.", valueHash: "description-hash", status: "accepted",
+    });
+    const fake = makeFakeAnthropic([textResponse([{ id: bottle.id, profile: fullProfile() }])]);
+
+    await enrichBottleProfiles(db, { client: fake.client, web: true });
+
+    const params = fake.create.mock.calls[0][0] as {
+      tools?: unknown;
+      messages: Array<{ content: string }>;
+    };
+    expect(params.tools).toBeUndefined();
+    expect(params.messages[0].content).toContain("Vanilla, toasted oak, and orange peel.");
+    expect(params.messages[0].content).toContain("https://producer.example/products/sourced");
+  });
+
+  it("ignores disabled and review-required claims when deciding the web-search budget", async () => {
+    const disabledBottle = await createTestBottle(db, { id: "disabled-source-bottle", flavorProfile: null });
+    const reviewBottle = await createTestBottle(db, { id: "review-required-bottle", flavorProfile: null });
+    await db.insert(catalogSources).values([
+      { id: "disabled-source", name: "Disabled", kind: "official", baseUrl: "https://disabled.example", fetchPolicy: "structured", mediaPolicy: "link_only", enabled: false },
+      { id: "review-source", name: "Registry", kind: "registry", baseUrl: "https://registry.example", fetchPolicy: "structured", mediaPolicy: "link_only" },
+    ]);
+    await db.insert(bottleResources).values([
+      { id: "disabled-resource", bottleId: disabledBottle.id, sourceId: "disabled-source", resourceType: "official_product", url: "https://disabled.example/product", retrievedAt: new Date() },
+      { id: "review-resource", bottleId: reviewBottle.id, sourceId: "review-source", resourceType: "registry", url: "https://registry.example/product", retrievedAt: new Date() },
+    ]);
+    await db.insert(bottleClaims).values([
+      { id: "disabled-claim", bottleId: disabledBottle.id, resourceId: "disabled-resource", field: "description", value: "DISABLED_SECRET", valueHash: "disabled-hash", status: "accepted" },
+      { id: "review-claim", bottleId: reviewBottle.id, resourceId: "review-resource", field: "description", value: "REVIEW_SECRET", valueHash: "review-hash", status: "review_required" },
+    ]);
+    const fake = makeFakeAnthropic([textResponse([
+      { id: disabledBottle.id, profile: fullProfile() },
+      { id: reviewBottle.id, profile: fullProfile() },
+    ])]);
+
+    await enrichBottleProfiles(db, { client: fake.client, web: true });
+
+    const params = fake.create.mock.calls[0][0] as {
+      tools?: Array<{ max_uses: number }>;
+      messages: Array<{ content: string }>;
+    };
+    expect(params.tools?.[0].max_uses).toBe(2);
+    expect(params.messages[0].content).not.toContain("DISABLED_SECRET");
+    expect(params.messages[0].content).not.toContain("REVIEW_SECRET");
   });
 
   it("resumes pause_turn continuations and parses the joined output", async () => {
