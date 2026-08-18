@@ -82,16 +82,22 @@ function hasDirection(vector: PalateVector): boolean {
 }
 
 /**
- * Pour rows the viewer may derive a palate from: their own, plus anyone they
- * still hold an accepted follow on. Handed to `getUserPalates` so the check
- * runs in the statement that reads the pours — a follow revoked after
- * `visibleFolloweeIds` returned would otherwise let a stale id list produce a
- * match built from that person's whole history, private pours included.
+ * Pour rows the viewer may derive a palate from: their own, plus anyone who is
+ * visible to them AND whom they still hold an accepted follow on. Handed to
+ * `getUserPalates` so both halves run in the statement that reads the pours —
+ * anything that changes after `visibleFolloweeIds` returned would otherwise let
+ * a stale id list produce a match built from that person's whole history,
+ * private pours included.
+ *
+ * Both halves are needed, and they revoke access by different means: a block or
+ * a step-back (`socialEnabled: false`) leaves the accepted follow row intact,
+ * so the follow check alone would still authorize the read; an unfollow leaves
+ * the profile perfectly visible, so `contributorVisibleSql` alone would too.
  */
-function palateReadableBy(viewerId: string) {
-  return or(
-    eq(schema.pours.userId, viewerId),
-    acceptedFollowSql(viewerId, schema.pours.userId),
+export function palateReadableBy(viewerId: string) {
+  return and(
+    contributorVisibleSql(schema.pours.userId, viewerId),
+    or(eq(schema.pours.userId, viewerId), acceptedFollowSql(viewerId, schema.pours.userId)),
   )!;
 }
 

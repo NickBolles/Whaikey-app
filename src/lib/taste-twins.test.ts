@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
 import { NEUTRAL_RATING } from "@/lib/palate";
+import { getUserPalates } from "@/lib/palate-store";
 import { createTestBottle, createTestUser, setupTestDb, uid } from "@/test/helpers";
 import {
   MIN_TWIN_SAMPLE,
@@ -11,6 +12,7 @@ import {
   getTasteTwins,
   getTwinEndorsements,
   palateMatchPercent,
+  palateReadableBy,
 } from "./taste-twins";
 
 describe("palateMatchPercent", () => {
@@ -210,6 +212,38 @@ describe("taste twins against the graph", () => {
 
     expect(await getPalateMatch(db, viewer.id, neutral.id)).toBeNull();
     expect(await getTasteTwins(db, viewer.id)).toEqual([]);
+  });
+
+  it("authorizes the palate read itself, not just the followee list", async () => {
+    // The id list and the palate query are two reads. Everything that can
+    // revoke access between them is re-checked in the second one — and the
+    // revocations work differently: a block or a step-back leaves the accepted
+    // follow intact, an unfollow leaves the profile perfectly visible.
+    const viewer = await createTestUser(db);
+    const followee = await createTestUser(db);
+    const blocker = await createTestUser(db);
+    const steppedBack = await createTestUser(db);
+    const stranger = await createTestUser(db);
+    await profile(viewer.id, "viewer");
+    await profile(followee.id, "followee");
+    await profile(blocker.id, "blocker");
+    await profile(steppedBack.id, "steppedback", false);
+    await profile(stranger.id, "stranger");
+    for (const u of [followee, blocker, steppedBack]) await follow(viewer.id, u.id);
+    for (const u of [viewer, followee, blocker, steppedBack, stranger]) {
+      await seedPalate(u.id, { peaty: 9 });
+    }
+    await db
+      .insert(schema.blocks)
+      .values({ id: uid("blk"), blockerId: blocker.id, blockedId: viewer.id });
+
+    const palates = await getUserPalates(
+      db,
+      [viewer.id, followee.id, blocker.id, steppedBack.id, stranger.id],
+      undefined,
+      palateReadableBy(viewer.id),
+    );
+    expect([...palates.keys()].sort()).toEqual([followee.id, viewer.id].sort());
   });
 
   it("gives no self-match", async () => {
