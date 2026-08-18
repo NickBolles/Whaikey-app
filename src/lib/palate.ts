@@ -56,6 +56,13 @@ export interface PalateProfileResult {
   leaves: PalateVector;
   /** Number of entries that carried a usable flavor signal. */
   sampleSize: number;
+  /**
+   * Of those, how many the drinker actually rated. Unrated pours still shape
+   * the vector (at UNRATED_WEIGHT), but they are the weakest evidence there
+   * is — "you poured it" — so any surface that needs a floor of real opinion
+   * before it will speak (taste twins) counts these, not sampleSize.
+   */
+  ratedSampleSize: number;
 }
 
 /** 0.5 ^ (ageDays / halfLife); 1 at age 0, never negative. */
@@ -92,11 +99,13 @@ export function computePalateProfile(entries: PalateEntry[], now: Date): PalateP
   const vector = zeroVector();
   const leaves: PalateVector = {};
   let sampleSize = 0;
+  let ratedSampleSize = 0;
 
   for (const entry of entries) {
     const scores = entryWedgeScores(entry);
     if (!scores) continue;
     sampleSize += 1;
+    if (entry.rating != null) ratedSampleSize += 1;
 
     const preference =
       entry.rating == null ? UNRATED_WEIGHT : entry.rating - NEUTRAL_RATING;
@@ -118,7 +127,7 @@ export function computePalateProfile(entries: PalateEntry[], now: Date): PalateP
     }
   }
 
-  return { vector, leaves, sampleSize };
+  return { vector, leaves, sampleSize, ratedSampleSize };
 }
 
 /** Cosine similarity of two wedge vectors in [-1, 1]; 0 when either is all-zero. */

@@ -82,6 +82,24 @@ describe("computePalateProfile", () => {
     expect(vector.grain).toBeLessThan(NEUTRAL_RATING);
   });
 
+  it("counts rated pours separately from usable ones", () => {
+    // sampleSize answers "is there any signal here at all"; ratedSampleSize
+    // answers "has this drinker actually expressed an opinion" — the stronger
+    // question, and the one evidence floors like taste twins ask.
+    const { sampleSize, ratedSampleSize } = computePalateProfile(
+      [
+        { rating: 4, flavorTags: null, bottleProfile: { peaty: 10 }, createdAt: NOW },
+        { rating: null, flavorTags: null, bottleProfile: { peaty: 10 }, createdAt: NOW },
+        { rating: null, flavorTags: { campfire: 2 }, bottleProfile: null, createdAt: NOW },
+        { rating: 5, flavorTags: {}, bottleProfile: null, createdAt: NOW },
+      ],
+      NOW,
+    );
+    expect(sampleSize).toBe(3);
+    // The rated-but-signal-less fourth entry counts toward neither.
+    expect(ratedSampleSize).toBe(1);
+  });
+
   it("ignores entries with no flavor signal", () => {
     const { vector, sampleSize } = computePalateProfile(
       [{ rating: 5, flavorTags: {}, bottleProfile: null, createdAt: NOW }],
@@ -201,7 +219,7 @@ describe("palateHeat", () => {
 
 describe("palateWheelHeat", () => {
   const profile = (vector: Record<string, number>, leaves: Record<string, number>, sampleSize = 3) =>
-    ({ vector, leaves, sampleSize });
+    ({ vector, leaves, sampleSize, ratedSampleSize: sampleSize });
 
   it("floors a family at its hottest descriptor, like the bar heat map does", () => {
     // Sweet dominates the wedge vector, so peaty normalizes low — but campfire

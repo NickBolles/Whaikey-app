@@ -27,7 +27,9 @@ const updatedAt = () =>
 /**
  * palateProfile: incrementally-accumulated flavor-preference snapshot
  * (src/lib/palate.ts). `vector` maps the 8 flavor-wheel wedge ids to a signed
- * preference weight; `sampleSize` is the number of rated pours folded in. Read
+ * preference weight; `sampleSize` is the number of pours that carried a usable
+ * flavor signal, rated or not (the rated-only count lives on the computed
+ * `PalateProfileResult.ratedSampleSize`, which is what evidence floors use). Read
  * paths recompute from pours for freshness — this column is the running cache.
  */
 export interface PalateProfile {

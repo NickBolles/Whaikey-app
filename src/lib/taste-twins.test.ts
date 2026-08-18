@@ -62,7 +62,7 @@ describe("taste twins against the graph", () => {
     userId: string,
     bottleProfile: Record<string, number>,
     count = MIN_TWIN_SAMPLE,
-    rating = 5,
+    rating: number | null = 5,
   ) {
     const bottle = await createTestBottle(db, { name: uid("b"), flavorProfile: bottleProfile });
     for (let i = 0; i < count; i++) {
@@ -139,6 +139,32 @@ describe("taste twins against the graph", () => {
 
     expect(await getTasteTwins(db, viewer.id)).toEqual([]);
     expect(await getPalateMatch(db, viewer.id, fresh.id)).toBeNull();
+  });
+
+  it("never counts unrated pours toward the evidence floor", async () => {
+    // Both sides have three pours of a peaty bottle and not one opinion between
+    // them. The vectors align perfectly (they're the same catalog profile at a
+    // flat UNRATED_WEIGHT), so a floor counting any usable pour would report a
+    // twin out of nothing but two people having poured the same thing.
+    const viewer = await createTestUser(db);
+    const other = await createTestUser(db);
+    await profile(viewer.id, "viewer");
+    await profile(other.id, "other");
+    await follow(viewer.id, other.id);
+    await seedPalate(viewer.id, { peaty: 9 }, MIN_TWIN_SAMPLE, null);
+    await seedPalate(other.id, { peaty: 9 }, MIN_TWIN_SAMPLE, null);
+
+    expect(await getTasteTwins(db, viewer.id)).toEqual([]);
+    expect(await getPalateMatch(db, viewer.id, other.id)).toBeNull();
+
+    // One rated pour each is still short of the floor; three each clears it.
+    await seedPalate(viewer.id, { peaty: 9 }, 1);
+    await seedPalate(other.id, { peaty: 9 }, 1);
+    expect(await getPalateMatch(db, viewer.id, other.id)).toBeNull();
+
+    await seedPalate(viewer.id, { peaty: 9 }, MIN_TWIN_SAMPLE);
+    await seedPalate(other.id, { peaty: 9 }, MIN_TWIN_SAMPLE);
+    expect(await getPalateMatch(db, viewer.id, other.id)).not.toBeNull();
   });
 
   it("gives no self-match", async () => {

@@ -2,7 +2,12 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
 import { createTestBottle, createTestUser, setupTestDb, uid } from "@/test/helpers";
-import { buildReason, recommendBottles, type Recommendation } from "./recommend";
+import {
+  buildReason,
+  buildReasonDetail,
+  recommendBottles,
+  type Recommendation,
+} from "./recommend";
 import { getUserPalate } from "./palate-store";
 
 let db: DB;
@@ -224,6 +229,46 @@ describe("buildReason", () => {
     const reason = buildReason("tonight", rec, {}, { band: null });
     expect(reason).toMatch(/10%/);
     expect(reason).toMatch(/finish|fade/i);
+  });
+
+  it("flags which sentences carry a twin attribution, precedence and all", () => {
+    const endorsement = {
+      bottleId: "b",
+      twinCount: 1,
+      topTwin: {
+        userId: "u",
+        handle: "sasha",
+        displayName: "Sasha",
+        avatarUrl: null,
+        matchPercent: 91,
+      },
+      topTwinRating: 4.5,
+      minRating: 4.5,
+    };
+    const rec: Recommendation = {
+      bottleId: "b",
+      name: "X",
+      distillery: null,
+      category: "bourbon",
+      region: null,
+      ageYears: null,
+      avgPrice: null,
+      matchPercent: 70,
+      reason: "",
+    };
+    const ctx = { band: null, twinEndorsements: new Map([["b", endorsement]]) };
+
+    const discovery = buildReasonDetail("discovery", rec, {}, ctx);
+    expect(discovery.reason).toContain("@sasha");
+    expect(discovery.twinAttributed).toBe(true);
+
+    // In tonight mode a nearly-empty bottle outranks the endorsement, so the
+    // sentence is no longer about a person — and must not claim to be.
+    const nearlyEmpty = buildReasonDetail("tonight", { ...rec, fillLevel: 10 }, {}, ctx);
+    expect(nearlyEmpty.reason).toMatch(/10%/);
+    expect(nearlyEmpty.twinAttributed).toBe(false);
+
+    expect(buildReasonDetail("discovery", rec, {}, { band: null }).twinAttributed).toBe(false);
   });
 });
 

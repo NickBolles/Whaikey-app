@@ -82,6 +82,44 @@ describe("attachAiExplanations", () => {
     expect(rows).toHaveLength(0);
   });
 
+  it("leaves a twin-attributed reason alone, and out of the cache", async () => {
+    // US-16's whole point is a reason you can check against a person. The model
+    // is never told about the endorsement, so letting it rewrite this sentence
+    // would silently delete the attribution in exactly the configuration
+    // production runs in.
+    const fake = makeFakeAnthropic([textResponse(JSON.stringify({ reason: "Generic AI line." }))]);
+    const twinRec = makeRec({
+      reason: "@sasha, a 91% palate match, rated it 4.5.",
+      twinAttributed: true,
+    });
+    const result = await attachAiExplanations(db, userId, "discovery", [twinRec], fake.client);
+    expect(result[0].reason).toBe("@sasha, a 91% palate match, rated it 4.5.");
+    expect(fake.create).not.toHaveBeenCalled();
+    expect(await db.select().from(schema.recExplanations)).toHaveLength(0);
+  });
+
+  it("does not serve a stale cached line over a twin attribution", async () => {
+    // A cached row from an earlier, unattributed run must not resurrect itself
+    // and overwrite the endorsement the ranking just earned.
+    await db.insert(schema.recExplanations).values({
+      id: uid("rec"),
+      userId,
+      bottleId,
+      mode: "discovery",
+      reason: "Cached: because you loved smoky drams.",
+    });
+    const fake = makeFakeAnthropic([]);
+    const result = await attachAiExplanations(
+      db,
+      userId,
+      "discovery",
+      [makeRec({ reason: "@sasha, a 91% palate match, rated it 4.5.", twinAttributed: true })],
+      fake.client,
+    );
+    expect(result[0].reason).toBe("@sasha, a 91% palate match, rated it 4.5.");
+    expect(fake.create).not.toHaveBeenCalled();
+  });
+
   it("falls back to the deterministic reason on AI failure without throwing", async () => {
     const fake = makeFakeAnthropic([]); // no scripted responses => create throws
     const result = await attachAiExplanations(db, userId, "discovery", [makeRec()], fake.client);

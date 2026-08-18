@@ -48,6 +48,12 @@ export interface Recommendation {
   avgPrice: number | null;
   matchPercent: number | null;
   reason: string;
+  /**
+   * US-16: this reason names a real person (or counts them) rather than
+   * describing the bottle. Set so downstream layers can tell an attributed
+   * sentence from a generic one — the AI explanation pass leaves these alone.
+   */
+  twinAttributed?: boolean;
   fillLevel?: number | null;
   status?: string | null;
   userBottleId?: string | null;
@@ -201,6 +207,36 @@ export function buildReason(
     return `${lead}, in your usual ${formatBand(ctx.band)} range.`;
   }
   return `${lead}.`;
+}
+
+export interface ReasonDetail {
+  reason: string;
+  /**
+   * True when the sentence built above is the twin sentence — i.e. it makes a
+   * claim about a named person's rating. In "tonight" mode a low fill level or
+   * a change-of-pace pick outranks an endorsement, so the presence of an
+   * endorsement in the context is not by itself enough to know.
+   */
+  twinAttributed: boolean;
+}
+
+/**
+ * `buildReason` plus whether the sentence it produced carries a twin
+ * attribution. Pure, and derived from the same inputs, so callers never have to
+ * re-implement the precedence rules above to find out.
+ */
+export function buildReasonDetail(
+  mode: RecMode,
+  rec: Recommendation,
+  palate: PalateVector,
+  ctx: ReasonContext,
+): ReasonDetail {
+  const reason = buildReason(mode, rec, palate, ctx);
+  const endorsement = ctx.twinEndorsements?.get(rec.bottleId);
+  return {
+    reason,
+    twinAttributed: endorsement != null && reason === twinSentence(endorsement),
+  };
 }
 
 interface ScoredBottle {
@@ -382,7 +418,9 @@ export async function recommendBottles(
         ? { fillLevel: s.fillLevel, status: s.status, userBottleId: s.userBottleId }
         : {}),
     };
-    rec.reason = buildReason(mode, rec, palate.vector, ctx);
+    const detail = buildReasonDetail(mode, rec, palate.vector, ctx);
+    rec.reason = detail.reason;
+    if (detail.twinAttributed) rec.twinAttributed = true;
     return rec;
   });
 }

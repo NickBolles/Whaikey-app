@@ -13,9 +13,13 @@
  *
  * **Evidence.** A palate built from one pour will happily report 96% against
  * anyone; the number would be noise wearing a percentage sign. Both sides
- * need at least MIN_TWIN_SAMPLE rated pours behind them or the match is null
+ * need at least MIN_TWIN_SAMPLE RATED pours behind them or the match is null
  * and the surface hides it, the same way `tasteMatchPercent` hides a
- * bottle match before the palate has signal.
+ * bottle match before the palate has signal. Rated specifically: an unrated
+ * pour contributes a flat UNRATED_WEIGHT toward whatever the bottle's catalog
+ * profile says, so three of those on each side would let two people who have
+ * never expressed an opinion read as a high match. Hence `ratedSampleSize`
+ * rather than `sampleSize` everywhere in this file.
  *
  * Nothing here counts or ranks pour volume: a twin is someone who tastes like
  * you, never someone who drinks more than you.
@@ -29,8 +33,10 @@ import { getUserPalate, getUserPalates } from "@/lib/palate-store";
 import { contributorVisibleSql } from "@/lib/social";
 
 /**
- * Rated pours each side needs before a match is reported. Three is the same
- * floor the Home dashboard uses to decide it has enough to describe a month.
+ * Rated pours each side needs before a match is reported — counted as
+ * `PalateProfileResult.ratedSampleSize`, never the looser `sampleSize`. Three
+ * is the same floor the Home dashboard uses to decide it has enough to
+ * describe a month.
  */
 export const MIN_TWIN_SAMPLE = 3;
 
@@ -54,11 +60,11 @@ export interface TasteTwin {
  */
 export function palateMatchPercent(
   a: PalateVector,
-  aSampleSize: number,
+  aRatedSample: number,
   b: PalateVector,
-  bSampleSize: number,
+  bRatedSample: number,
 ): number | null {
-  if (aSampleSize < MIN_TWIN_SAMPLE || bSampleSize < MIN_TWIN_SAMPLE) return null;
+  if (aRatedSample < MIN_TWIN_SAMPLE || bRatedSample < MIN_TWIN_SAMPLE) return null;
   const sim = cosineSimilarity(a, b);
   if (sim <= 0) return 0;
   return Math.round(sim * 100);
@@ -124,7 +130,12 @@ export async function getPalateMatches(
   for (const id of eligible) {
     const theirs = palates.get(id);
     if (!theirs) continue;
-    const match = palateMatchPercent(mine.vector, mine.sampleSize, theirs.vector, theirs.sampleSize);
+    const match = palateMatchPercent(
+      mine.vector,
+      mine.ratedSampleSize,
+      theirs.vector,
+      theirs.ratedSampleSize,
+    );
     if (match != null) out.set(id, match);
   }
   return out;
@@ -140,7 +151,7 @@ export async function getTasteTwins(db: DB, viewerId: string, limit = 5): Promis
   if (followeeIds.length === 0) return [];
 
   const mine = await getUserPalate(db, viewerId);
-  if (mine.sampleSize < MIN_TWIN_SAMPLE) return [];
+  if (mine.ratedSampleSize < MIN_TWIN_SAMPLE) return [];
 
   const profiles: Array<{
     userId: string;
@@ -173,9 +184,9 @@ export async function getTasteTwins(db: DB, viewerId: string, limit = 5): Promis
     if (!theirs) continue;
     const matchPercent = palateMatchPercent(
       mine.vector,
-      mine.sampleSize,
+      mine.ratedSampleSize,
       theirs.vector,
-      theirs.sampleSize,
+      theirs.ratedSampleSize,
     );
     if (matchPercent == null) continue;
     twins.push({ ...profile, matchPercent });
