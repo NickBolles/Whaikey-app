@@ -3,6 +3,7 @@
 import { useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { BookmarkPlus, MessageCircle, Star, Wine } from "lucide-react";
+import { PalateMatchChip } from "@/components/palate-match-chip";
 import { UserAvatar } from "@/components/user-avatar";
 import { FLAVOR_WHEEL, leafLabel, wedgeForLeaf } from "@/lib/flavor-wheel";
 import { compareFlavorNotes } from "@/lib/flavor-compare";
@@ -63,6 +64,13 @@ export interface FriendFeedItem {
   commentCount: number;
   viewerTags: Record<string, number> | null;
   viewerBottleRelationship: "own" | "tried" | "wishlist" | null;
+  /**
+   * How closely this author's palate matches the viewer's (US-16), or null
+   * when there isn't enough tasted on either side to say. A note from someone
+   * who tastes like you is worth more of your attention than one that doesn't,
+   * and this says which is which without ranking anybody.
+   */
+  palateMatchPercent?: number | null;
 }
 
 export interface FriendsModuleProps {
@@ -174,8 +182,11 @@ function FeedCard({ item }: { item: FriendFeedItem }) {
                 {item.bottleName}
               </Link>
             </div>
-            <div className="mt-0.5 text-xs text-muted">
-              {[item.servingStyle, dateLabel].filter(Boolean).join(" · ")}
+            <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-muted">
+              <span>{[item.servingStyle, dateLabel].filter(Boolean).join(" · ")}</span>
+              {item.palateMatchPercent != null && (
+                <PalateMatchChip matchPercent={item.palateMatchPercent} />
+              )}
             </div>
           </div>
         </div>

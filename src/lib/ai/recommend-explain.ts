@@ -108,7 +108,8 @@ async function generateReason(
 /**
  * Return the recs with `reason` replaced by a cached or freshly-generated AI
  * explanation. Cache hits never call the model. When AI isn't configured (and no
- * client is injected), the deterministic reasons pass through unchanged. Any
+ * client is injected), the deterministic reasons pass through unchanged. Recs
+ * whose reason carries a taste-twin attribution are never enriched or cached. Any
  * failure per-rec keeps that rec's deterministic reason. No AI call for [].
  */
 export async function attachAiExplanations(
@@ -127,10 +128,20 @@ export async function attachAiExplanations(
   const cache = new Map(cachedRows.map((r) => [r.bottleId, r.reason]));
 
   const out = recs.map((r) => ({ ...r }));
-  const uncached = out.filter((r) => !cache.has(r.bottleId));
+
+  // US-16: a twin-attributed reason names a real person and the palate match
+  // that earned the mention. That is a fact about the viewer's graph, not a
+  // sentence the model is better at writing, and it is deliberately the one
+  // reason a drinker can check against a person — so it survives to the
+  // response untouched. It also stays OUT of the per-(user, bottle, mode)
+  // cache: an endorsement is time-varying and identity-bearing, and a frozen
+  // "@sasha, a 91% palate match, rated it 4.5." would outlive the follow, the
+  // rating, and the visibility it depends on.
+  const enrichable = out.filter((r) => !r.twinAttributed);
+  const uncached = enrichable.filter((r) => !cache.has(r.bottleId));
 
   // Apply cache hits first.
-  for (const rec of out) {
+  for (const rec of enrichable) {
     const hit = cache.get(rec.bottleId);
     if (hit) rec.reason = hit;
   }

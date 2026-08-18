@@ -2,7 +2,12 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
 import { createTestBottle, createTestUser, setupTestDb, uid } from "@/test/helpers";
-import { buildReason, recommendBottles, type Recommendation } from "./recommend";
+import {
+  buildReason,
+  buildReasonDetail,
+  recommendBottles,
+  type Recommendation,
+} from "./recommend";
 import { getUserPalate } from "./palate-store";
 
 let db: DB;
@@ -224,5 +229,188 @@ describe("buildReason", () => {
     const reason = buildReason("tonight", rec, {}, { band: null });
     expect(reason).toMatch(/10%/);
     expect(reason).toMatch(/finish|fade/i);
+  });
+
+  it("flags which sentences carry a twin attribution, precedence and all", () => {
+    const endorsement = {
+      bottleId: "b",
+      twinCount: 1,
+      topTwin: {
+        userId: "u",
+        handle: "sasha",
+        displayName: "Sasha",
+        avatarUrl: null,
+        matchPercent: 91,
+      },
+      topTwinRating: 4.5,
+      minRating: 4.5,
+    };
+    const rec: Recommendation = {
+      bottleId: "b",
+      name: "X",
+      distillery: null,
+      category: "bourbon",
+      region: null,
+      ageYears: null,
+      avgPrice: null,
+      matchPercent: 70,
+      reason: "",
+    };
+    const ctx = { band: null, twinEndorsements: new Map([["b", endorsement]]) };
+
+    const discovery = buildReasonDetail("discovery", rec, {}, ctx);
+    expect(discovery.reason).toContain("@sasha");
+    expect(discovery.twinAttributed).toBe(true);
+
+    // In tonight mode a nearly-empty bottle outranks the endorsement, so the
+    // sentence is no longer about a person — and must not claim to be.
+    const nearlyEmpty = buildReasonDetail("tonight", { ...rec, fillLevel: 10 }, {}, ctx);
+    expect(nearlyEmpty.reason).toMatch(/10%/);
+    expect(nearlyEmpty.twinAttributed).toBe(false);
+
+    expect(buildReasonDetail("discovery", rec, {}, { band: null }).twinAttributed).toBe(false);
+  });
+});
+
+describe("recommendBottles — taste twins (US-16)", () => {
+  /** A followee with a palate of their own, visible to the viewer. */
+  async function twinWhoLikes(
+    handle: string,
+    bottleId: string,
+    rating: number,
+    visibility: schema.PourVisibility = "public",
+  ): Promise<string> {
+    const twin = await createTestUser(db);
+    await db.insert(schema.userProfiles).values({
+      userId: twin.id,
+      handle,
+      displayName: handle,
+      isPublic: true,
+      socialEnabled: true,
+    });
+    await db.insert(schema.follows).values({
+      id: uid("f"),
+      followerId: userId,
+      followeeId: twin.id,
+      state: "accepted",
+    });
+    // Their own palate, leaning the same way as the viewer's below.
+    const theirLove = await createTestBottle(db, { name: uid("twin-b"), flavorProfile: { peaty: 9 } });
+    for (let i = 0; i < 3; i++) {
+      await db
+        .insert(schema.pours)
+        .values({ id: uid("pour"), userId: twin.id, bottleId: theirLove.id, rating: 5 });
+    }
+    await db
+      .insert(schema.pours)
+      .values({ id: uid("pour"), userId: twin.id, bottleId, rating, visibility });
+    return twin.id;
+  }
+
+  /** Give the viewer a peaty palate over a bottle they already own. */
+  async function peatyViewer(): Promise<void> {
+    const owned = await createTestBottle(db, { name: "Owned Peat", flavorProfile: { peaty: 9 } });
+    await own(owned.id);
+    await logPour(owned.id, 5);
+    await logPour(owned.id, 5);
+    await logPour(owned.id, 5);
+  }
+
+  it("cites the twin who rated it, with the match that earned the mention", async () => {
+    await peatyViewer();
+    const candidate = await createTestBottle(db, { name: "Twin Pick", flavorProfile: { peaty: 8 } });
+    await twinWhoLikes("sasha", candidate.id, 4.5);
+
+    const recs = await recommendBottles(db, userId, { mode: "discovery" });
+    const pick = recs.find((r) => r.bottleId === candidate.id);
+    expect(pick).toBeDefined();
+    expect(pick!.reason).toMatch(/^@sasha, a \d+% palate match, rated it 4\.5\.$/);
+  });
+
+  it("counts more than one endorsing twin without naming them all", async () => {
+    await peatyViewer();
+    const candidate = await createTestBottle(db, { name: "Group Pick", flavorProfile: { peaty: 8 } });
+    await twinWhoLikes("sasha", candidate.id, 5);
+    await twinWhoLikes("riley", candidate.id, 4);
+
+    const recs = await recommendBottles(db, userId, { mode: "discovery" });
+    const pick = recs.find((r) => r.bottleId === candidate.id)!;
+    // A threshold every endorser cleared — the lower of 5.0 and 4.0 — rather
+    // than pinning the best score on the whole group.
+    expect(pick.reason).toBe("2 people who taste like you rated it 4.0+.");
+  });
+
+  it("never quotes a rating the named twin did not give", async () => {
+    await peatyViewer();
+    const candidate = await createTestBottle(db, { name: "Split Pick", flavorProfile: { peaty: 8 } });
+    // The higher rating comes from the FURTHER twin; the reason must not
+    // attribute it, directly or by implication, to the closer one.
+    await twinWhoLikes("closer", candidate.id, 4);
+    await twinWhoLikes("further", candidate.id, 5);
+
+    const recs = await recommendBottles(db, userId, { mode: "discovery" });
+    const pick = recs.find((r) => r.bottleId === candidate.id)!;
+    expect(pick.reason).not.toMatch(/@closer.*5\.0/);
+    expect(pick.reason).toContain("4.0+");
+  });
+
+  it("promotes an endorsed pick in tonight mode, where scores can go negative", async () => {
+    // Tonight scores are match + killBias - varietyPenalty and are never
+    // floored at zero, so a multiplier would push a negative score further
+    // down and demote the very bottle it meant to promote.
+    const openBackedBottle = await createTestBottle(db, {
+      name: "Backed Open",
+      flavorProfile: { peaty: 9 },
+    });
+    const openPlainBottle = await createTestBottle(db, {
+      name: "Plain Open",
+      flavorProfile: { peaty: 9 },
+    });
+    await own(openBackedBottle.id, { status: "open", fillLevel: 80 });
+    await own(openPlainBottle.id, { status: "open", fillLevel: 80 });
+    await logPour(openBackedBottle.id, 5);
+    await logPour(openPlainBottle.id, 5);
+    await logPour(openPlainBottle.id, 5);
+    await twinWhoLikes("sasha", openBackedBottle.id, 5);
+
+    const recs = await recommendBottles(db, userId, { mode: "tonight" });
+    const order = recs.map((r) => r.bottleId);
+    expect(order).toContain(openBackedBottle.id);
+    expect(order.indexOf(openBackedBottle.id)).toBeLessThanOrEqual(
+      order.indexOf(openPlainBottle.id),
+    );
+  });
+
+  it("never cites a twin's private pour, falling back to the palate reason", async () => {
+    await peatyViewer();
+    const candidate = await createTestBottle(db, { name: "Quiet Pick", flavorProfile: { peaty: 8 } });
+    await twinWhoLikes("sasha", candidate.id, 5, "private");
+
+    const recs = await recommendBottles(db, userId, { mode: "discovery" });
+    const pick = recs.find((r) => r.bottleId === candidate.id)!;
+    expect(pick.reason).not.toMatch(/sasha/);
+    expect(pick.reason).toMatch(/Leans into your taste|close match/i);
+  });
+
+  it("lifts an endorsed bottle over a near neighbour it was behind", async () => {
+    await peatyViewer();
+    // Scored fractionally higher by palate alone, but nobody vouches for it.
+    const unbacked = await createTestBottle(db, { name: "AAA Unbacked", flavorProfile: { peaty: 9 } });
+    const backed = await createTestBottle(db, { name: "ZZZ Backed", flavorProfile: { peaty: 8, woody: 1 } });
+    await twinWhoLikes("sasha", backed.id, 5);
+
+    const recs = await recommendBottles(db, userId, { mode: "discovery" });
+    const order = recs.map((r) => r.bottleId);
+    expect(order.indexOf(backed.id)).toBeLessThan(order.indexOf(unbacked.id));
+  });
+
+  it("recommends nothing new on a twin's word alone", async () => {
+    await peatyViewer();
+    // A twin loves it, but it is nothing like the viewer's palate.
+    const offPalate = await createTestBottle(db, { name: "Off Palate", flavorProfile: { floral: 9 } });
+    await twinWhoLikes("sasha", offPalate.id, 5);
+
+    const recs = await recommendBottles(db, userId, { mode: "discovery" });
+    expect(recs.map((r) => r.bottleId)).not.toContain(offPalate.id);
   });
 });

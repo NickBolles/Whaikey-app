@@ -327,9 +327,11 @@ test.describe("signed in (demo collector)", () => {
     await expect(page).toHaveScreenshot(shot("add-confirm"), { fullPage: true });
   });
 
-  test("a friend's profile: palate, signature descriptors, recent notes", async ({ page }) => {
+  test("a friend's profile: palate, taste-twin match, signature descriptors, notes", async ({ page }) => {
     await page.goto("/u/sasha");
     await expect(page.getByRole("heading", { name: "Sasha Glen" })).toBeVisible();
+    // US-16: Jordan follows Sasha and both palates carry enough rated pours.
+    await expect(page.getByTestId("palate-match")).toBeVisible();
     await expect(page.getByText("Recent notes")).toBeVisible();
     await expect(page.getByText(/Lagavulin/i).first()).toBeVisible();
     await settle(page);

@@ -32,6 +32,11 @@ import {
   type PriceBand,
 } from "@/lib/palate";
 import { getUserPalate, getUserPriceBand } from "@/lib/palate-store";
+import {
+  getTasteTwins,
+  getTwinEndorsements,
+  type TwinEndorsement,
+} from "@/lib/taste-twins";
 
 export interface Recommendation {
   bottleId: string;
@@ -43,6 +48,12 @@ export interface Recommendation {
   avgPrice: number | null;
   matchPercent: number | null;
   reason: string;
+  /**
+   * US-16: this reason names a real person (or counts them) rather than
+   * describing the bottle. Set so downstream layers can tell an attributed
+   * sentence from a generic one — the AI explanation pass leaves these alone.
+   */
+  twinAttributed?: boolean;
   fillLevel?: number | null;
   status?: string | null;
   userBottleId?: string | null;
@@ -54,6 +65,28 @@ export interface RecommendOptions {
   mode: RecMode;
   limit?: number;
 }
+
+/**
+ * How far down the palate-scored shortlist we look for twin endorsements.
+ * Comfortably wider than any rendered list, so an endorsement can promote a
+ * bottle that would otherwise have just missed the cut, without turning the
+ * lookup into a scan of every scored bottle.
+ */
+const ENDORSEMENT_LOOKUP_LIMIT = 40;
+
+/**
+ * A twin's endorsement is a thumb on the scale, not the scale: enough to lift
+ * a bottle past near-neighbours it was already close to, never past one the
+ * palate scored materially higher.
+ *
+ * Additive rather than a multiplier because "tonight" scores are
+ * `match + killBias - varietyPenalty` and are never floored at zero the way
+ * discovery's candidates are. Scaling a zero score leaves it untouched and
+ * scaling a negative one drives it further down, so the boost would silently
+ * demote exactly the bottle it was meant to promote. Adding is monotone at
+ * every sign.
+ */
+const TWIN_ENDORSEMENT_BONUS = 0.15;
 
 const DISCOVERY_LIMIT = 8;
 const TONIGHT_LIMIT = 5;
@@ -104,6 +137,29 @@ export interface ReasonContext {
   band: PriceBand | null;
   /** Categories the user poured in their most recent pours (variety signal). */
   recentCategories?: Set<string>;
+  /**
+   * Bottles the viewer's taste twins rated highly (US-16), keyed by bottle id.
+   * Only ever built from pours already visible to this viewer, so a reason can
+   * never say more about a twin's pour than the note itself would.
+   */
+  twinEndorsements?: Map<string, TwinEndorsement>;
+}
+
+/**
+ * "Someone who tastes like you liked this" — the one reason a drinker can
+ * check against a person rather than against a model. Named outright, with
+ * the match percentage that earned the mention, because an unattributed
+ * "people like you" is exactly the recommendation nobody trusts.
+ */
+function twinSentence(endorsement: TwinEndorsement): string {
+  const { topTwin, twinCount, topTwinRating, minRating } = endorsement;
+  if (twinCount > 1) {
+    // A threshold, not one endorser's score pinned on all of them: every twin
+    // counted here really did rate it at least this highly. Matches the shape
+    // docs/SOCIAL.md §7.7 uses — "your two closest palate matches rated it 4.5+".
+    return `${twinCount} people who taste like you rated it ${minRating.toFixed(1)}+.`;
+  }
+  return `@${topTwin.handle}, a ${topTwin.matchPercent}% palate match, rated it ${topTwinRating.toFixed(1)}.`;
 }
 
 /**
@@ -128,6 +184,8 @@ export function buildReason(
         ? `${base} — and a ${rec.matchPercent}% match for your palate.`
         : `${base}.`;
     }
+    const tonightEndorsement = ctx.twinEndorsements?.get(rec.bottleId);
+    if (tonightEndorsement) return twinSentence(tonightEndorsement);
     const tops = topWedges(palate, 1).map(wedgeWord);
     if (tops.length > 0) {
       const suffix = rec.matchPercent != null ? ` (${rec.matchPercent}% match)` : "";
@@ -137,6 +195,9 @@ export function buildReason(
   }
 
   // discovery
+  const endorsement = ctx.twinEndorsements?.get(rec.bottleId);
+  if (endorsement) return twinSentence(endorsement);
+
   const tops = topWedges(palate, 2).map(wedgeWord);
   const lead =
     tops.length > 0
@@ -146,6 +207,36 @@ export function buildReason(
     return `${lead}, in your usual ${formatBand(ctx.band)} range.`;
   }
   return `${lead}.`;
+}
+
+export interface ReasonDetail {
+  reason: string;
+  /**
+   * True when the sentence built above is the twin sentence — i.e. it makes a
+   * claim about a named person's rating. In "tonight" mode a low fill level or
+   * a change-of-pace pick outranks an endorsement, so the presence of an
+   * endorsement in the context is not by itself enough to know.
+   */
+  twinAttributed: boolean;
+}
+
+/**
+ * `buildReason` plus whether the sentence it produced carries a twin
+ * attribution. Pure, and derived from the same inputs, so callers never have to
+ * re-implement the precedence rules above to find out.
+ */
+export function buildReasonDetail(
+  mode: RecMode,
+  rec: Recommendation,
+  palate: PalateVector,
+  ctx: ReasonContext,
+): ReasonDetail {
+  const reason = buildReason(mode, rec, palate, ctx);
+  const endorsement = ctx.twinEndorsements?.get(rec.bottleId);
+  return {
+    reason,
+    twinAttributed: endorsement != null && reason === twinSentence(endorsement),
+  };
 }
 
 interface ScoredBottle {
@@ -286,6 +377,30 @@ export async function recommendBottles(
     ctx = { band };
   }
 
+  // US-16: lean on people who taste like you. Twins are looked up once and
+  // their endorsements are read only over the candidates that survived
+  // scoring, so the extra query is bounded by the shortlist rather than the
+  // catalog. An endorsement lifts a bottle a little and then explains itself
+  // in the reason — it never invents a candidate the palate didn't already
+  // like, so a friend's rating can reorder the list but not fill it.
+  const twins = await getTasteTwins(db, userId);
+  let twinEndorsements: Map<string, TwinEndorsement> | undefined;
+  if (twins.length > 0) {
+    const shortlist = [...scored]
+      .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
+      .slice(0, ENDORSEMENT_LOOKUP_LIMIT);
+    twinEndorsements = await getTwinEndorsements(
+      db,
+      userId,
+      shortlist.map((s) => s.bottleId),
+      twins,
+    );
+    for (const candidate of scored) {
+      if (twinEndorsements.has(candidate.bottleId)) candidate.score += TWIN_ENDORSEMENT_BONUS;
+    }
+    ctx = { ...ctx, twinEndorsements };
+  }
+
   scored.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
 
   return scored.slice(0, limit).map((s) => {
@@ -303,7 +418,9 @@ export async function recommendBottles(
         ? { fillLevel: s.fillLevel, status: s.status, userBottleId: s.userBottleId }
         : {}),
     };
-    rec.reason = buildReason(mode, rec, palate.vector, ctx);
+    const detail = buildReasonDetail(mode, rec, palate.vector, ctx);
+    rec.reason = detail.reason;
+    if (detail.twinAttributed) rec.twinAttributed = true;
     return rec;
   });
 }
