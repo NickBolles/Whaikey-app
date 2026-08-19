@@ -243,8 +243,13 @@ describe("enrichBottleProfiles", () => {
 
     await enrichBottleProfiles(db, { client: fake.client, web: true });
 
-    const params = fake.create.mock.calls[0][0] as { tools?: Array<{ type: string }> };
+    const params = fake.create.mock.calls[0][0] as {
+      tools?: Array<{ type: string }>;
+      messages: Array<{ content: string }>;
+    };
     expect(params.tools?.[0].type).toBe("web_search_20260209");
+    expect(params.messages[0].content).toContain('"needsFlavorResearch":true');
+    expect(params.messages[0].content).toContain("Catalog-only facts");
   });
 
   it("ignores disabled and review-required claims when deciding the web-search budget", async () => {

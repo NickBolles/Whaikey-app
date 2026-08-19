@@ -60,6 +60,10 @@ export interface EnrichableBottle {
   sourceFacts?: Array<{ field: string; value: unknown; source: string; url: string }>;
 }
 
+function hasFlavorBearingSourceFact(bottle: EnrichableBottle): boolean {
+  return bottle.sourceFacts?.some((fact) => fact.field === "description") ?? false;
+}
+
 export function buildEnrichPrompt(batch: EnrichableBottle[], web: boolean): string {
   const rows = batch.map((b) =>
     JSON.stringify({
@@ -73,6 +77,7 @@ export function buildEnrichPrompt(batch: EnrichableBottle[], web: boolean): stri
       description: b.description ?? undefined,
       userNotes: b.userNotes.length > 0 ? b.userNotes : undefined,
       sourceFacts: b.sourceFacts && b.sourceFacts.length > 0 ? b.sourceFacts : undefined,
+      needsFlavorResearch: b.userNotes.length === 0 && !hasFlavorBearingSourceFact(b),
     }),
   );
   return [
@@ -81,10 +86,10 @@ export function buildEnrichPrompt(batch: EnrichableBottle[], web: boolean): stri
     "",
     "Ground each profile in the strongest evidence available, in this order:",
     "1. The bottle's userNotes (real tasting notes from this app's users — weigh these heavily).",
-    "2. The bottle's sourceFacts (facts extracted from the cited publisher URL). If sourceFacts are present, use them and do not run a separate web search for that bottle.",
+    "2. The bottle's flavor-bearing sourceFacts, such as a description, when present. Catalog-only facts such as brand, ABV, age, price, or score are context but not tasting evidence.",
     ...(web
       ? [
-          '3. Web search: only for bottles without userNotes or sourceFacts that you don\'t already know confidently, search the web to discover published tasting notes (e.g. "<bottle name> tasting notes review"). At most one search per bottle.',
+          '3. Web search: for rows with needsFlavorResearch=true, search the web to discover published tasting notes (e.g. "<bottle name> tasting notes review"). At most one search per bottle.',
         ]
       : []),
     `${web ? "4" : "3"}. The bottle's description and what you know about the specific bottling.`,
@@ -342,10 +347,8 @@ async function runModelBatch(
   web: boolean,
 ): Promise<string> {
   const prompt = buildEnrichPrompt(batch, web);
-  const searchCandidates = batch.filter((bottle) => {
-    const hasFlavorBearingSourceFact = bottle.sourceFacts?.some((fact) => fact.field === "description") ?? false;
-    return bottle.userNotes.length === 0 && !hasFlavorBearingSourceFact;
-  });
+  const searchCandidates = batch.filter((bottle) =>
+    bottle.userNotes.length === 0 && !hasFlavorBearingSourceFact(bottle));
   const allowSearch = web && searchCandidates.length > 0;
   const base = {
     model,

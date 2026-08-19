@@ -3,7 +3,7 @@ import { lookup } from "node:dns/promises";
 import { request as httpsRequest } from "node:https";
 import { isIP } from "node:net";
 import { Readable } from "node:stream";
-import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, ne, or, sql } from "drizzle-orm";
 import type { DB } from "@/db";
 import {
   bottleClaims,
@@ -848,6 +848,30 @@ export async function ingestSourceManifest(
         const value = (field: BottleClaimField) => parsed.claims.find((claim) => claim.field === field)?.value;
         const abv = value("abv");
         const ageYears = value("ageYears");
+        const fallbackClaim = async (field: "abv" | "ageYears") => {
+          const [claim] = await db.select({ id: bottleClaims.id, value: bottleClaims.value })
+            .from(bottleClaims)
+            .innerJoin(bottleResources, eq(bottleClaims.resourceId, bottleResources.id))
+            .innerJoin(catalogSources, eq(bottleResources.sourceId, catalogSources.id))
+            .where(and(
+              eq(bottleClaims.bottleId, bottle.id),
+              eq(bottleClaims.field, field),
+              eq(bottleClaims.status, "accepted"),
+              ne(bottleClaims.resourceId, resourceId),
+              eq(bottleResources.resourceType, "official_product"),
+              eq(catalogSources.kind, "official"),
+              eq(catalogSources.enabled, true),
+            ))
+            .orderBy(desc(bottleClaims.canonicalized), desc(bottleClaims.createdAt))
+            .limit(1);
+          return claim;
+        };
+        const fallbackAbv = typeof abv === "number" ? undefined : await fallbackClaim("abv");
+        const fallbackAge = typeof ageYears === "number" ? undefined : await fallbackClaim("ageYears");
+        const nextAbv = typeof abv === "number" ? abv :
+          typeof fallbackAbv?.value === "number" ? fallbackAbv.value : null;
+        const nextAge = typeof ageYears === "number" ? ageYears :
+          typeof fallbackAge?.value === "number" ? fallbackAge.value : null;
         const [image] = await db.select({ url: bottleMedia.url }).from(bottleMedia)
           .innerJoin(bottleResources, eq(bottleMedia.resourceId, bottleResources.id))
           .innerJoin(catalogSources, eq(bottleResources.sourceId, catalogSources.id))
@@ -859,10 +883,10 @@ export async function ingestSourceManifest(
             eq(catalogSources.enabled, true),
             hasNoEnabledRestrictedTwin,
           )).orderBy(desc(bottleMedia.isPrimary), desc(bottleMedia.createdAt)).limit(1);
-        if (managesAbv) patch.abv = typeof abv === "number" ? abv : null;
-        else if (bottle.abv == null && typeof abv === "number") patch.abv = abv;
-        if (managesAge) patch.ageYears = typeof ageYears === "number" ? ageYears : null;
-        else if (bottle.ageYears == null && typeof ageYears === "number") patch.ageYears = ageYears;
+        if (managesAbv) patch.abv = nextAbv;
+        else if (bottle.abv == null && nextAbv != null) patch.abv = nextAbv;
+        if (managesAge) patch.ageYears = nextAge;
+        else if (bottle.ageYears == null && nextAge != null) patch.ageYears = nextAge;
         if (clearManagedImage || managesImage) patch.imageUrl = image?.url ?? restorableManagedImage?.url ?? null;
         else if (bottle.imageUrl == null && (image || restorableManagedImage)) {
           patch.imageUrl = image?.url ?? restorableManagedImage?.url;
@@ -872,6 +896,12 @@ export async function ingestSourceManifest(
           report.bottlesPromoted += 1;
         }
         if (Object.keys(patch).length > 0) await db.update(bottles).set(patch).where(eq(bottles.id, bottle.id));
+        if (fallbackAbv && patch.abv === fallbackAbv.value) {
+          await db.update(bottleClaims).set({ canonicalized: true }).where(eq(bottleClaims.id, fallbackAbv.id));
+        }
+        if (fallbackAge && patch.ageYears === fallbackAge.value) {
+          await db.update(bottleClaims).set({ canonicalized: true }).where(eq(bottleClaims.id, fallbackAge.id));
+        }
         if (image && patch.imageUrl === image.url) {
           await db.update(bottleMedia).set({ canonicalized: true }).where(and(
             eq(bottleMedia.resourceId, resourceId), eq(bottleMedia.url, image.url),

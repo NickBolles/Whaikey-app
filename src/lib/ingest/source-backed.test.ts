@@ -246,6 +246,39 @@ describe("source-backed persistence", () => {
     expect((await db.select().from(schema.bottleClaims)).some((claim) => claim.field === "abv" || claim.field === "ageYears")).toBe(false);
   });
 
+  it("promotes a remaining official fallback when the owning source removes a canonical fact", async () => {
+    const bottle = await createTestBottle(db, { id: "fallback-canonical-fact", status: "imported", abv: null });
+    const sourceA = { ...OFFICIAL_SOURCE, id: "official-a" };
+    const sourceB = { ...OFFICIAL_SOURCE, id: "official-b" };
+    const resource = (sourceId: string, path: string) => ({
+      bottleId: bottle.id,
+      sourceId,
+      url: `https://www.example-distillery.com/products/${path}`,
+      resourceType: "official_product" as const,
+    });
+    const page = (path: string, abv: string) => PRODUCT_HTML
+      .replace("https://www.example-distillery.com/products/reserve-10", `https://www.example-distillery.com/products/${path}`)
+      .replace('"value":"45%"', `"value":"${abv}%"`);
+
+    await ingestSourceManifest(db, { sources: [sourceA], resources: [resource(sourceA.id, "a")] }, {
+      apply: true,
+      fetchImpl: (async () => htmlResponse(page("a", "45"))) as typeof fetch,
+    });
+    await ingestSourceManifest(db, { sources: [sourceB], resources: [resource(sourceB.id, "b")] }, {
+      apply: true,
+      fetchImpl: (async () => htmlResponse(page("b", "50"))) as typeof fetch,
+    });
+    const pageWithoutAbv = page("a", "45")
+      .replace('      {"@type":"PropertyValue","name":"ABV","value":"45%"},\n', "");
+    await ingestSourceManifest(db, { sources: [sourceA], resources: [resource(sourceA.id, "a")] }, {
+      apply: true,
+      fetchImpl: (async () => htmlResponse(pageWithoutAbv)) as typeof fetch,
+    });
+
+    expect((await db.select().from(schema.bottles).where(eq(schema.bottles.id, bottle.id)))[0].abv).toBe(50);
+    expect((await db.select().from(schema.bottleClaims)).some((claim) => claim.field === "abv" && claim.value === 50 && claim.canonicalized)).toBe(true);
+  });
+
   it("keeps one resource when a stable manifest URL publishes a new canonical URL", async () => {
     const bottle = await createTestBottle(db, { id: "canonical-move", status: "imported" });
     const requestedUrl = "https://www.example-distillery.com/products/legacy";
