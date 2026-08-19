@@ -68,6 +68,28 @@ describe("SourceBackedResources", () => {
     expect(within(section).getByRole("img", { name: "Example Distillery exterior" })).toBeInTheDocument();
   });
 
+  it("keeps retailer verification evidence out of the official section", () => {
+    const retailer = {
+      ...baseResource,
+      id: "retailer",
+      sourceId: "retailer-source",
+      resourceType: "retailer" as const,
+      title: "Retail listing",
+      source: {
+        id: "retailer-source",
+        name: "Example Retailer",
+        kind: "retailer" as const,
+        attribution: "Example Retailer",
+        fetchPolicy: "link_only" as const,
+      },
+    };
+    render(<SourceBackedResources bottleName="Example Reserve" resources={[retailer]} media={[]} />);
+
+    expect(screen.queryByRole("region", { name: "Official sources" })).not.toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "Retail & registry evidence" }))
+      .getByRole("link", { name: /Retail listing/i })).toBeInTheDocument();
+  });
+
   it("groups official pages and independent reviews as outbound sources", () => {
     const review = {
       ...baseResource,

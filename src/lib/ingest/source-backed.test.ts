@@ -529,19 +529,38 @@ describe("source-backed persistence", () => {
     expect(report.errors[0]?.error).toMatch(/2 MB limit/i);
   });
 
-  it("preserves a source disabled by an operator during refresh", async () => {
-    const bottle = await createTestBottle(db, { id: "disabled-source-refresh", status: "imported" });
+  it("preserves operator disablement and records ownership when a source is re-enabled", async () => {
+    const bottle = await createTestBottle(db, { id: "disabled-source-refresh", status: "imported", abv: null });
+    const manifest: CatalogSourceManifest = {
+      sources: [OFFICIAL_SOURCE],
+      resources: [{ bottleId: bottle.id, sourceId: OFFICIAL_SOURCE.id, url: "https://www.example-distillery.com/products/reserve-10", resourceType: "official_product" }],
+    };
     await db.insert(schema.catalogSources).values({
       ...OFFICIAL_SOURCE,
       baseUrl: new URL(OFFICIAL_SOURCE.baseUrl).origin,
       enabled: false,
     });
-    await ingestSourceManifest(db, {
-      sources: [OFFICIAL_SOURCE],
-      resources: [{ bottleId: bottle.id, sourceId: OFFICIAL_SOURCE.id, url: "https://www.example-distillery.com/products/reserve-10", resourceType: "official_product" }],
-    }, { apply: true, fetchImpl: (async () => htmlResponse(PRODUCT_HTML)) as typeof fetch });
+    await ingestSourceManifest(db, manifest, {
+      apply: true,
+      fetchImpl: (async () => htmlResponse(PRODUCT_HTML)) as typeof fetch,
+    });
 
     expect((await db.select().from(schema.catalogSources).where(eq(schema.catalogSources.id, OFFICIAL_SOURCE.id)))[0].enabled).toBe(false);
+    expect((await db.select().from(schema.bottleClaims).where(eq(schema.bottleClaims.field, "abv")))[0].canonicalized).toBe(false);
+
+    await db.update(schema.catalogSources).set({ enabled: true }).where(eq(schema.catalogSources.id, OFFICIAL_SOURCE.id));
+    await ingestSourceManifest(db, manifest, {
+      apply: true,
+      fetchImpl: (async () => htmlResponse(PRODUCT_HTML)) as typeof fetch,
+    });
+    expect((await db.select().from(schema.bottleClaims).where(eq(schema.bottleClaims.field, "abv")))[0].canonicalized).toBe(true);
+    expect((await db.select().from(schema.bottles).where(eq(schema.bottles.id, bottle.id)))[0].abv).toBe(45);
+
+    await ingestSourceManifest(db, manifest, {
+      apply: true,
+      fetchImpl: (async () => htmlResponse(PRODUCT_HTML.replace('"value":"45%"', '"value":"50%"'))) as typeof fetch,
+    });
+    expect((await db.select().from(schema.bottles).where(eq(schema.bottles.id, bottle.id)))[0].abv).toBe(50);
   });
 
   it("reports unknown bottle IDs in dry-run without fetching or writing sources", async () => {

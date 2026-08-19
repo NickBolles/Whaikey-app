@@ -95,8 +95,11 @@ export function SourceBackedResources({
   const bottleImage = displayable.find((item) => item.kind === "bottle" && item.isPrimary) ??
     displayable.find((item) => item.kind === "bottle");
   const distilleryImage = displayable.find((item) => item.kind === "distillery");
-  const official = resources.filter((resource) => resource.source.kind !== "editorial" && resource.resourceType !== "review");
-  const reviews = resources.filter((resource) => resource.source.kind === "editorial" || resource.resourceType === "review");
+  const official = resources.filter((resource) =>
+    resource.source.kind === "official" && resource.resourceType !== "review");
+  const reviews = resources.filter((resource) =>
+    resource.source.kind === "editorial" || resource.resourceType === "review");
+  const evidence = resources.filter((resource) => !official.includes(resource) && !reviews.includes(resource));
 
   if (!bottleImage && !distilleryImage && resources.length === 0) return null;
 
@@ -104,7 +107,7 @@ export function SourceBackedResources({
     <div className="flex flex-col gap-6">
       {bottleImage && <SourceImage media={bottleImage} bottleName={bottleName} />}
 
-      {(official.length > 0 || reviews.length > 0) && (
+      {(official.length > 0 || reviews.length > 0 || evidence.length > 0) && (
         <section aria-label="Sources" className="flex flex-col gap-4">
           <div>
             <h2 className="section-label">Sources & more</h2>
@@ -114,6 +117,7 @@ export function SourceBackedResources({
           </div>
           <ResourceList title="Official sources" resources={official} />
           <ResourceList title="Independent reviews" resources={reviews} />
+          <ResourceList title="Retail & registry evidence" resources={evidence} />
         </section>
       )}
 

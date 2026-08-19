@@ -744,6 +744,10 @@ export async function ingestSourceManifest(
       const status = claimStatus(source, resource);
       for (const claim of parsed.claims) {
         const valueHash = hash(JSON.stringify(claim.value));
+        const canonicalized = officialProduct && (
+          (claim.field === "abv" && (bottle.abv == null || managesAbv)) ||
+          (claim.field === "ageYears" && (bottle.ageYears == null || managesAge))
+        );
         const found = await db.select({ id: bottleClaims.id }).from(bottleClaims).where(and(
           eq(bottleClaims.resourceId, resourceId),
           eq(bottleClaims.field, claim.field),
@@ -757,13 +761,10 @@ export async function ingestSourceManifest(
           value: claim.value,
           valueHash,
           status,
-          canonicalized: officialProduct && (
-            (claim.field === "abv" && (bottle.abv == null || managesAbv)) ||
-            (claim.field === "ageYears" && (bottle.ageYears == null || managesAge))
-          ),
+          canonicalized,
         }).onConflictDoUpdate({
           target: [bottleClaims.resourceId, bottleClaims.field, bottleClaims.valueHash],
-          set: { status },
+          set: { status, canonicalized },
         });
         if (found.length === 0) report.claimsWritten += 1;
       }
