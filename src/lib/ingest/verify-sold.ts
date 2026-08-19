@@ -104,7 +104,15 @@ export async function persistSoldVerification(db: DB, verification: SoldVerifica
   if (!current || !verification.evidenceUrl) return false;
   if (dryRun) return true;
 
-  await db.insert(bottleVerifications).values({ id: randomUUID(), bottleId: current.id, url: verification.evidenceUrl, label: verification.evidenceLabel, retailerSku: verification.retailerSku, retrievedAt: new Date() }).onConflictDoNothing();
+  await db.insert(bottleVerifications).values({
+    id: randomUUID(),
+    bottleId: current.id,
+    url: verification.evidenceUrl,
+    label: verification.evidenceLabel,
+    retailerSku: verification.retailerSku,
+    retrievedAt: new Date(),
+    promotedBottle: true,
+  }).onConflictDoNothing();
 
   // Bridge the existing verifier into the shared resource graph so every new
   // evidence URL appears on the bottle page without copying source prose.

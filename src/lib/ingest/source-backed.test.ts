@@ -310,11 +310,38 @@ describe("source-backed persistence", () => {
     expect(claims.some((claim) => claim.field === "description")).toBe(false);
     expect(claims.every((claim) => claim.status === "corroborating")).toBe(true);
     expect((await db.select().from(schema.bottles).where(eq(schema.bottles.id, bottle.id)))[0]).toMatchObject({
+      status: "imported",
       abv: null,
       ageYears: null,
       imageUrl: null,
     });
     expect(await db.select().from(schema.bottleVerifications)).toEqual([]);
+  });
+
+  it("keeps verified status when another verification remains after source revocation", async () => {
+    const bottle = await createTestBottle(db, { id: "multi-verification", status: "imported" });
+    const resource = {
+      bottleId: bottle.id,
+      sourceId: OFFICIAL_SOURCE.id,
+      url: "https://www.example-distillery.com/products/reserve-10",
+      resourceType: "official_product" as const,
+    };
+    const fetchImpl = vi.fn(async () => htmlResponse(PRODUCT_HTML)) as unknown as typeof fetch;
+    await ingestSourceManifest(db, { sources: [OFFICIAL_SOURCE], resources: [resource] }, { apply: true, fetchImpl });
+    await db.insert(schema.bottleVerifications).values({
+      id: "other-verification",
+      bottleId: bottle.id,
+      url: "https://retailer.example/product",
+      label: "Other source",
+      retrievedAt: new Date(),
+    });
+    await ingestSourceManifest(db, {
+      sources: [OFFICIAL_SOURCE],
+      resources: [{ ...resource, resourceType: "review" }],
+    }, { apply: true, fetchImpl });
+
+    expect((await db.select().from(schema.bottles).where(eq(schema.bottles.id, bottle.id)))[0].status).toBe("verified");
+    expect(await db.select().from(schema.bottleVerifications)).toHaveLength(1);
   });
 
   it("tightens persisted media rights even when page content is unchanged", async () => {
@@ -337,6 +364,29 @@ describe("source-backed persistence", () => {
       expect.objectContaining({ rights: "review_required" }),
     ]);
     expect((await db.select().from(schema.bottles).where(eq(schema.bottles.id, bottle.id)))[0].imageUrl).toBeNull();
+  });
+
+  it("preserves a matching curated image when restricted source media was never canonicalized", async () => {
+    const curatedImage = "https://www.example-distillery.com/images/reserve-10.png";
+    const bottle = await createTestBottle(db, {
+      id: "curated-restricted-image",
+      status: "verified",
+      imageUrl: curatedImage,
+    });
+    const restrictedSource = { ...OFFICIAL_SOURCE, mediaPolicy: "review_required" as const };
+    await ingestSourceManifest(db, {
+      sources: [restrictedSource],
+      resources: [{
+        bottleId: bottle.id,
+        sourceId: restrictedSource.id,
+        url: "https://www.example-distillery.com/products/reserve-10",
+        resourceType: "official_product",
+        mediaKind: "bottle",
+      }],
+    }, { apply: true, fetchImpl: (async () => htmlResponse(PRODUCT_HTML)) as typeof fetch });
+
+    expect((await db.select().from(schema.bottles).where(eq(schema.bottles.id, bottle.id)))[0].imageUrl).toBe(curatedImage);
+    expect((await db.select().from(schema.bottleMedia))[0].canonicalized).toBe(false);
   });
 
   it("keeps the most restrictive rights when different sources expose the same image", async () => {
@@ -368,10 +418,25 @@ describe("source-backed persistence", () => {
       fetchImpl: (async () => htmlResponse(page("display-page"))) as typeof fetch,
     });
 
-    expect(await db.select().from(schema.bottleMedia)).toEqual([
-      expect.objectContaining({ rights: "review_required" }),
+    expect((await db.select().from(schema.bottleMedia)).map((media) => media.rights).sort()).toEqual([
+      "display_remote",
+      "review_required",
     ]);
     expect((await db.select().from(schema.bottles).where(eq(schema.bottles.id, bottle.id)))[0].imageUrl).toBeNull();
+
+    const reviewWithoutImage = page("review-page")
+      .replace('  <meta property="og:image" content="https://www.example-distillery.com/images/reserve-10.png" />\n', "")
+      .replace('    "image":"https://www.example-distillery.com/images/reserve-10.png",\n', "");
+    await ingestSourceManifest(db, { sources: [reviewSource], resources: [resource(reviewSource.id, "review-page")] }, {
+      apply: true,
+      fetchImpl: (async () => htmlResponse(reviewWithoutImage)) as typeof fetch,
+    });
+
+    expect(await db.select().from(schema.bottleMedia)).toEqual([
+      expect.objectContaining({ rights: "display_remote", resourceId: expect.any(String) }),
+    ]);
+    expect((await db.select().from(schema.bottles).where(eq(schema.bottles.id, bottle.id)))[0].imageUrl)
+      .toBe("https://www.example-distillery.com/images/reserve-10.png");
   });
 
   it("stores editorial resources but cannot verify or overwrite a bottle", async () => {

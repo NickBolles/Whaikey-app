@@ -225,6 +225,28 @@ describe("enrichBottleProfiles", () => {
     expect(params.messages[0].content).toContain("https://producer.example/products/sourced");
   });
 
+  it("keeps catalog-only source facts in the flavor web-search budget", async () => {
+    const bottle = await createTestBottle(db, { id: "catalog-only-source-facts", flavorProfile: null, description: null });
+    await db.insert(catalogSources).values({
+      id: "catalog-source", name: "Official Producer", kind: "official", baseUrl: "https://catalog.example",
+      fetchPolicy: "structured", mediaPolicy: "display_remote",
+    });
+    await db.insert(bottleResources).values({
+      id: "catalog-resource", bottleId: bottle.id, sourceId: "catalog-source", resourceType: "official_product",
+      url: "https://catalog.example/product", retrievedAt: new Date(),
+    });
+    await db.insert(bottleClaims).values({
+      id: "catalog-brand", bottleId: bottle.id, resourceId: "catalog-resource", field: "brand",
+      value: "Catalog Brand", valueHash: "catalog-brand-hash", status: "accepted",
+    });
+    const fake = makeFakeAnthropic([textResponse([{ id: bottle.id, profile: fullProfile() }])]);
+
+    await enrichBottleProfiles(db, { client: fake.client, web: true });
+
+    const params = fake.create.mock.calls[0][0] as { tools?: Array<{ type: string }> };
+    expect(params.tools?.[0].type).toBe("web_search_20260209");
+  });
+
   it("ignores disabled and review-required claims when deciding the web-search budget", async () => {
     const disabledBottle = await createTestBottle(db, { id: "disabled-source-bottle", flavorProfile: null });
     const reviewBottle = await createTestBottle(db, { id: "review-required-bottle", flavorProfile: null });

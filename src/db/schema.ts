@@ -694,6 +694,8 @@ export const bottleVerifications = pgTable(
     retailerSku: text("retailer_sku"),
     /** When the model retrieved the cited page. */
     retrievedAt: timestamp("retrieved_at", { withTimezone: true, mode: "date" }).notNull(),
+    /** True only when this evidence changed the bottle from imported to verified. */
+    promotedBottle: boolean("promoted_bottle").notNull().default(false),
     createdAt: createdAt(),
   },
   (t) => [
@@ -806,7 +808,7 @@ export const bottleMedia = pgTable(
     createdAt: createdAt(),
   },
   (t) => [
-    uniqueIndex("bottle_media_bottle_url_uq").on(t.bottleId, t.url),
+    uniqueIndex("bottle_media_resource_url_uq").on(t.resourceId, t.url),
     index("bottle_media_bottle_idx").on(t.bottleId),
   ],
 );

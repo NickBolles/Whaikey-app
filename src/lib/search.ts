@@ -262,6 +262,16 @@ export async function getBottleDetail(
       eq(bottleMedia.bottleId, bottleId),
       eq(bottleMedia.rights, "display_remote"),
       eq(catalogSources.enabled, true),
+      sql<boolean>`NOT EXISTS (
+        SELECT 1
+        FROM bottle_media AS restricted_media
+        INNER JOIN bottle_resources AS restricted_resource ON restricted_media.resource_id = restricted_resource.id
+        INNER JOIN catalog_sources AS restricted_source ON restricted_resource.source_id = restricted_source.id
+        WHERE restricted_media.bottle_id = ${bottleMedia.bottleId}
+          AND restricted_media.url = ${bottleMedia.url}
+          AND restricted_media.rights <> 'display_remote'
+          AND restricted_source.enabled = true
+      )`,
     ))
     .orderBy(asc(bottleMedia.kind), asc(bottleMedia.createdAt));
 

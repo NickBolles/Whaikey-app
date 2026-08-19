@@ -264,6 +264,26 @@ describe("GET /api/bottles/[id]", () => {
     expect(body.media).toEqual([]);
   });
 
+  it("applies the most restrictive enabled policy across source-specific media associations", async () => {
+    const bottle = await createTestBottle(db, { id: "conflicting-media-rights" });
+    await db.insert(schema.catalogSources).values([
+      { id: "display-media-source", name: "Display", kind: "official", baseUrl: "https://display.example", fetchPolicy: "structured", mediaPolicy: "display_remote" },
+      { id: "restricted-media-source", name: "Restricted", kind: "editorial", baseUrl: "https://restricted.example", fetchPolicy: "structured", mediaPolicy: "review_required" },
+    ]);
+    await db.insert(schema.bottleResources).values([
+      { id: "display-media-resource", bottleId: bottle.id, sourceId: "display-media-source", resourceType: "official_product", url: "https://display.example/item", retrievedAt: new Date() },
+      { id: "restricted-media-resource", bottleId: bottle.id, sourceId: "restricted-media-source", resourceType: "review", url: "https://restricted.example/item", retrievedAt: new Date() },
+    ]);
+    const sharedUrl = "https://cdn.example/shared.png";
+    await db.insert(schema.bottleMedia).values([
+      { id: "display-media", bottleId: bottle.id, resourceId: "display-media-resource", kind: "bottle", url: sharedUrl, rights: "display_remote" },
+      { id: "restricted-media", bottleId: bottle.id, resourceId: "restricted-media-resource", kind: "bottle", url: sharedUrl, rights: "review_required" },
+    ]);
+
+    const res = await detailGET(searchRequest(""), detailCtx(bottle.id));
+    expect((await res.json()).media).toEqual([]);
+  });
+
   it("includes the signed-in user's shelf relationship", async () => {
     const bottle = await createTestBottle(db);
     const me = await createTestUser(db);

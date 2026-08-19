@@ -342,8 +342,10 @@ async function runModelBatch(
   web: boolean,
 ): Promise<string> {
   const prompt = buildEnrichPrompt(batch, web);
-  const searchCandidates = batch.filter((bottle) =>
-    bottle.userNotes.length === 0 && (!bottle.sourceFacts || bottle.sourceFacts.length === 0));
+  const searchCandidates = batch.filter((bottle) => {
+    const hasFlavorBearingSourceFact = bottle.sourceFacts?.some((fact) => fact.field === "description") ?? false;
+    return bottle.userNotes.length === 0 && !hasFlavorBearingSourceFact;
+  });
   const allowSearch = web && searchCandidates.length > 0;
   const base = {
     model,
