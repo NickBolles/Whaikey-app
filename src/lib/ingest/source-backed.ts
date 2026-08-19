@@ -824,8 +824,10 @@ export async function ingestSourceManifest(
             eq(bottleMedia.rights, "display_remote"),
             eq(catalogSources.enabled, true),
           )).orderBy(desc(bottleMedia.isPrimary), desc(bottleMedia.createdAt)).limit(1);
-        if ((bottle.abv == null || managesAbv) && typeof abv === "number") patch.abv = abv;
-        if ((bottle.ageYears == null || managesAge) && typeof ageYears === "number") patch.ageYears = ageYears;
+        if (managesAbv) patch.abv = typeof abv === "number" ? abv : null;
+        else if (bottle.abv == null && typeof abv === "number") patch.abv = abv;
+        if (managesAge) patch.ageYears = typeof ageYears === "number" ? ageYears : null;
+        else if (bottle.ageYears == null && typeof ageYears === "number") patch.ageYears = ageYears;
         if (clearManagedImage || managesImage) patch.imageUrl = image?.url ?? null;
         else if (bottle.imageUrl == null && image) patch.imageUrl = image.url;
         if (bottle.status === "imported") {

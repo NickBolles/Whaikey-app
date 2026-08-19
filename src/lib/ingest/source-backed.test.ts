@@ -223,6 +223,29 @@ describe("source-backed persistence", () => {
     expect(await db.select().from(schema.bottleMedia)).toHaveLength(1);
   });
 
+  it("clears source-managed canonical facts when a changed page removes them", async () => {
+    const bottle = await createTestBottle(db, { id: "removed-canonical-facts", status: "imported", abv: null, ageYears: null });
+    const manifest: CatalogSourceManifest = {
+      sources: [OFFICIAL_SOURCE],
+      resources: [{ bottleId: bottle.id, sourceId: OFFICIAL_SOURCE.id, url: "https://www.example-distillery.com/products/reserve-10", resourceType: "official_product" }],
+    };
+    const withoutCanonicalFacts = PRODUCT_HTML
+      .replace('      {"@type":"PropertyValue","name":"ABV","value":"45%"},\n', "")
+      .replace('      {"@type":"PropertyValue","name":"Age","value":"10 years"}\n', "");
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(htmlResponse(PRODUCT_HTML))
+      .mockResolvedValueOnce(htmlResponse(withoutCanonicalFacts)) as unknown as typeof fetch;
+
+    await ingestSourceManifest(db, manifest, { apply: true, fetchImpl });
+    await ingestSourceManifest(db, manifest, { apply: true, fetchImpl });
+
+    expect((await db.select().from(schema.bottles).where(eq(schema.bottles.id, bottle.id)))[0]).toMatchObject({
+      abv: null,
+      ageYears: null,
+    });
+    expect((await db.select().from(schema.bottleClaims)).some((claim) => claim.field === "abv" || claim.field === "ageYears")).toBe(false);
+  });
+
   it("keeps one resource when a stable manifest URL publishes a new canonical URL", async () => {
     const bottle = await createTestBottle(db, { id: "canonical-move", status: "imported" });
     const requestedUrl = "https://www.example-distillery.com/products/legacy";
