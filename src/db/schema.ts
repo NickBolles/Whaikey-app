@@ -775,6 +775,7 @@ export const bottleClaims = pgTable(
     valueHash: text("value_hash").notNull(),
     status: text("status").$type<"accepted" | "corroborating" | "conflict" | "review_required">().notNull(),
     confidence: doublePrecision("confidence").notNull().default(1),
+    canonicalized: boolean("canonicalized").notNull().default(false),
     createdAt: createdAt(),
   },
   (t) => [
@@ -801,6 +802,7 @@ export const bottleMedia = pgTable(
     width: integer("width"),
     height: integer("height"),
     isPrimary: boolean("is_primary").notNull().default(false),
+    canonicalized: boolean("canonicalized").notNull().default(false),
     createdAt: createdAt(),
   },
   (t) => [

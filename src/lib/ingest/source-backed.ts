@@ -3,7 +3,7 @@ import { lookup } from "node:dns/promises";
 import { request as httpsRequest } from "node:https";
 import { isIP } from "node:net";
 import { Readable } from "node:stream";
-import { and, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import type { DB } from "@/db";
 import {
   bottleClaims,
@@ -266,6 +266,20 @@ function numberFrom(value: unknown): number | null {
   return match ? Number(match[0]) : null;
 }
 
+function wholeAgeYears(property: Record<string, unknown>, name: string, value: unknown, numeric: number): number | null {
+  const unit = [
+    stringValue(property.unitText),
+    stringValue(property.unitCode),
+    typeof value === "string" ? value : null,
+    name,
+  ].filter(Boolean).join(" ").toLowerCase();
+  if (/\b(month|months|mon)\b/.test(unit)) {
+    return numeric % 12 === 0 && numeric / 12 <= 100 ? numeric / 12 : null;
+  }
+  if (/\b(day|days|week|weeks|hour|hours)\b/.test(unit)) return null;
+  return Number.isInteger(numeric) && numeric >= 0 && numeric <= 100 ? numeric : null;
+}
+
 function pushClaim(claims: ExtractedClaim[], field: BottleClaimField, value: ExtractedClaim["value"] | null): void {
   if (value == null || value === "") return;
   const encoded = JSON.stringify(value);
@@ -292,7 +306,7 @@ function productProperties(product: Record<string, unknown>, claims: ExtractedCl
     const numeric = numberFrom(value);
     if (numeric == null) continue;
     if (/\babv\b|alcohol by volume/.test(name) && numeric >= 0 && numeric <= 100) pushClaim(claims, "abv", numeric);
-    if (/\bage\b|aged/.test(name) && numeric >= 0 && numeric <= 100) pushClaim(claims, "ageYears", Math.round(numeric));
+    if (/\bage\b|aged/.test(name)) pushClaim(claims, "ageYears", wholeAgeYears(row, name, value, numeric));
   }
   const offer = Array.isArray(product.offers) ? product.offers[0] : product.offers;
   if (offer && typeof offer === "object") {
@@ -542,14 +556,33 @@ export async function ingestSourceManifest(
     errors: [],
   };
 
+  const bottleIds = [...new Set(manifest.resources.map((resource) => resource.bottleId))];
+  const existingBottleIds = bottleIds.length === 0
+    ? new Set<string>()
+    : new Set((await db.select({ id: bottles.id }).from(bottles).where(inArray(bottles.id, bottleIds))).map((row) => row.id));
+  for (const resource of manifest.resources) {
+    if (!existingBottleIds.has(resource.bottleId)) {
+      report.errors.push({ url: resource.url, error: `Unknown bottle id: ${resource.bottleId}` });
+    }
+  }
+  // Applying a manifest is all-or-nothing with respect to basic bottle identity:
+  // do not upsert source rows before discovering an invalid assignment.
+  if (report.errors.length > 0) return report;
+
+  const disabledSourceIds = new Set<string>();
   if (apply) {
     for (const source of manifest.sources) {
       const baseUrl = new URL(source.baseUrl).origin;
-      const [registered] = await db.select({ baseUrl: catalogSources.baseUrl, kind: catalogSources.kind })
+      const [registered] = await db.select({
+        baseUrl: catalogSources.baseUrl,
+        kind: catalogSources.kind,
+        enabled: catalogSources.enabled,
+      })
         .from(catalogSources).where(eq(catalogSources.id, source.id)).limit(1);
       if (registered && (registered.baseUrl !== baseUrl || registered.kind !== source.kind)) {
         throw new Error(`Catalog source identity drift for ${source.id}; create a new source id`);
       }
+      if (registered?.enabled === false) disabledSourceIds.add(source.id);
       await db.insert(catalogSources).values({
         ...source,
         baseUrl,
@@ -562,7 +595,6 @@ export async function ingestSourceManifest(
           fetchPolicy: source.fetchPolicy,
           mediaPolicy: source.mediaPolicy,
           attribution: source.attribution ?? null,
-          enabled: true,
           updatedAt: new Date(),
         },
       });
@@ -613,19 +645,52 @@ export async function ingestSourceManifest(
         resourceType: resource.resourceType,
         mediaKind: resource.mediaKind ?? "bottle",
       }));
-      const existing = await db.select({ id: bottleResources.id, contentHash: bottleResources.contentHash }).from(bottleResources)
-        .where(and(eq(bottleResources.bottleId, bottle.id), eq(bottleResources.url, parsed.canonicalUrl))).limit(1);
-      const resourceId = existing[0]?.id ?? stableId("resource", bottle.id, parsed.canonicalUrl);
-      const snapshotChanged = existing.length > 0 && existing[0].contentHash !== extractionHash;
+      const manifestResourceId = stableId("resource", bottle.id, requestedUrl);
+      const resourceAssociation = source.kind === "official" && resource.resourceType === "official_product"
+        ? or(
+            eq(bottleResources.id, manifestResourceId),
+            eq(bottleResources.url, parsed.canonicalUrl),
+            and(eq(bottleResources.sourceId, source.id), eq(bottleResources.resourceType, "official_product")),
+          )
+        : or(eq(bottleResources.id, manifestResourceId), eq(bottleResources.url, parsed.canonicalUrl));
+      const candidates = await db.select({
+        id: bottleResources.id,
+        url: bottleResources.url,
+        contentHash: bottleResources.contentHash,
+      }).from(bottleResources).where(and(
+        eq(bottleResources.bottleId, bottle.id),
+        resourceAssociation,
+      ));
+      const manifestMatch = candidates.find((candidate) => candidate.id === manifestResourceId);
+      const canonicalMatch = candidates.find((candidate) => candidate.url === parsed.canonicalUrl);
+      const existing = manifestMatch ?? canonicalMatch ?? candidates[0];
+      const resourceId = existing?.id ?? manifestResourceId;
+      const priorResourceIds = candidates.map((candidate) => candidate.id);
+      const priorCanonicalClaims = priorResourceIds.length === 0 ? [] : await db.select({
+        field: bottleClaims.field,
+        value: bottleClaims.value,
+      }).from(bottleClaims).where(and(
+        inArray(bottleClaims.resourceId, priorResourceIds),
+        eq(bottleClaims.canonicalized, true),
+      ));
+      const priorCanonicalMedia = priorResourceIds.length === 0 ? [] : await db.select({
+        url: bottleMedia.url,
+      }).from(bottleMedia).where(and(
+        inArray(bottleMedia.resourceId, priorResourceIds),
+        eq(bottleMedia.canonicalized, true),
+      ));
+      const snapshotChanged = existing != null && existing.contentHash !== extractionHash;
       const trackedImageBefore = bottle.imageUrl
         ? await db.select({ id: bottleMedia.id }).from(bottleMedia).where(and(
           eq(bottleMedia.bottleId, bottle.id), eq(bottleMedia.url, bottle.imageUrl),
         )).limit(1)
         : [];
-      if (existing.length === 0) report.resourcesWritten += 1;
-      await db.insert(bottleResources).values({
-        id: resourceId,
-        bottleId: bottle.id,
+      // If a stable manifest URL now publishes a different canonical URL, retire
+      // any duplicate row left by older ingestion and keep the manifest identity.
+      for (const duplicate of candidates) {
+        if (duplicate.id !== resourceId) await db.delete(bottleResources).where(eq(bottleResources.id, duplicate.id));
+      }
+      const resourceValues = {
         sourceId: source.id,
         resourceType: resource.resourceType,
         url: parsed.canonicalUrl,
@@ -634,19 +699,18 @@ export async function ingestSourceManifest(
         contentHash: extractionHash,
         publishedAt: parsed.publishedAt,
         retrievedAt: new Date(),
-      }).onConflictDoUpdate({
-        target: [bottleResources.bottleId, bottleResources.url],
-        set: {
-          sourceId: source.id,
-          resourceType: resource.resourceType,
-          title: parsed.title ?? resource.title ?? null,
-          publisher: parsed.publisher,
-          contentHash: extractionHash,
-          publishedAt: parsed.publishedAt,
-          retrievedAt: new Date(),
-          updatedAt: new Date(),
-        },
-      });
+        updatedAt: new Date(),
+      };
+      if (existing) {
+        await db.update(bottleResources).set(resourceValues).where(eq(bottleResources.id, resourceId));
+      } else {
+        report.resourcesWritten += 1;
+        await db.insert(bottleResources).values({
+          id: resourceId,
+          bottleId: bottle.id,
+          ...resourceValues,
+        });
+      }
 
       // A changed page or extraction policy replaces its prior snapshot. Keeping
       // rows that the current classification no longer extracts (for example an
@@ -657,6 +721,13 @@ export async function ingestSourceManifest(
         await db.delete(bottleMedia).where(eq(bottleMedia.resourceId, resourceId));
       }
 
+      const officialProduct = source.kind === "official" &&
+        resource.resourceType === "official_product" && !disabledSourceIds.has(source.id);
+      const priorCanonicalAbv = priorCanonicalClaims.find((claim) => claim.field === "abv")?.value;
+      const priorCanonicalAge = priorCanonicalClaims.find((claim) => claim.field === "ageYears")?.value;
+      const managesAbv = typeof priorCanonicalAbv === "number" && priorCanonicalAbv === bottle.abv;
+      const managesAge = typeof priorCanonicalAge === "number" && priorCanonicalAge === bottle.ageYears;
+      const managesImage = bottle.imageUrl != null && priorCanonicalMedia.some((media) => media.url === bottle.imageUrl);
       const status = claimStatus(source, resource);
       for (const claim of parsed.claims) {
         const valueHash = hash(JSON.stringify(claim.value));
@@ -673,6 +744,10 @@ export async function ingestSourceManifest(
           value: claim.value,
           valueHash,
           status,
+          canonicalized: officialProduct && (
+            (claim.field === "abv" && (bottle.abv == null || managesAbv)) ||
+            (claim.field === "ageYears" && (bottle.ageYears == null || managesAge))
+          ),
         }).onConflictDoUpdate({
           target: [bottleClaims.resourceId, bottleClaims.field, bottleClaims.valueHash],
           set: { status },
@@ -716,7 +791,6 @@ export async function ingestSourceManifest(
         if (found.length === 0) report.mediaWritten += 1;
       }
 
-      const officialProduct = source.kind === "official" && resource.resourceType === "official_product";
       let clearManagedImage = false;
       if (bottle.imageUrl) {
         const trackedImageAfter = await db.select({ id: bottleMedia.id }).from(bottleMedia).where(and(
@@ -745,19 +819,33 @@ export async function ingestSourceManifest(
           .innerJoin(catalogSources, eq(bottleResources.sourceId, catalogSources.id))
           .where(and(
             eq(bottleMedia.bottleId, bottle.id),
+            eq(bottleMedia.resourceId, resourceId),
             eq(bottleMedia.kind, "bottle"),
             eq(bottleMedia.rights, "display_remote"),
             eq(catalogSources.enabled, true),
-          )).limit(1);
-        if (bottle.abv == null && typeof abv === "number") patch.abv = abv;
-        if (bottle.ageYears == null && typeof ageYears === "number") patch.ageYears = Math.round(ageYears);
-        if (clearManagedImage) patch.imageUrl = image?.url ?? null;
+          )).orderBy(desc(bottleMedia.isPrimary), desc(bottleMedia.createdAt)).limit(1);
+        if ((bottle.abv == null || managesAbv) && typeof abv === "number") patch.abv = abv;
+        if ((bottle.ageYears == null || managesAge) && typeof ageYears === "number") patch.ageYears = ageYears;
+        if (clearManagedImage || managesImage) patch.imageUrl = image?.url ?? null;
         else if (bottle.imageUrl == null && image) patch.imageUrl = image.url;
         if (bottle.status === "imported") {
           patch.status = "verified";
           report.bottlesPromoted += 1;
         }
         if (Object.keys(patch).length > 0) await db.update(bottles).set(patch).where(eq(bottles.id, bottle.id));
+        if (image && patch.imageUrl === image.url) {
+          await db.update(bottleMedia).set({ canonicalized: true }).where(and(
+            eq(bottleMedia.resourceId, resourceId), eq(bottleMedia.url, image.url),
+          ));
+        }
+        for (const previous of candidates) {
+          if (previous.url !== parsed.canonicalUrl) {
+            await db.delete(bottleVerifications).where(eq(
+              bottleVerifications.id,
+              stableId("verification", bottle.id, previous.url),
+            ));
+          }
+        }
         await db.insert(bottleVerifications).values({
           id: stableId("verification", bottle.id, parsed.canonicalUrl),
           bottleId: bottle.id,
@@ -766,8 +854,18 @@ export async function ingestSourceManifest(
           retailerSku: null,
           retrievedAt: new Date(),
         }).onConflictDoNothing();
-      } else if (clearManagedImage) {
-        await db.update(bottles).set({ imageUrl: null }).where(eq(bottles.id, bottle.id));
+      } else {
+        const revokedCanonical: Partial<typeof bottles.$inferInsert> = {};
+        if (managesAbv) revokedCanonical.abv = null;
+        if (managesAge) revokedCanonical.ageYears = null;
+        if (clearManagedImage || managesImage) revokedCanonical.imageUrl = null;
+        if (Object.keys(revokedCanonical).length > 0) {
+          await db.update(bottles).set(revokedCanonical).where(eq(bottles.id, bottle.id));
+        }
+        await db.delete(bottleVerifications).where(eq(
+          bottleVerifications.id,
+          stableId("verification", bottle.id, parsed.canonicalUrl),
+        ));
       }
     } catch (error) {
       report.errors.push({ url: resource.url, error: error instanceof Error ? error.message : String(error) });

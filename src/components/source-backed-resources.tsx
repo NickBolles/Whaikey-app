@@ -13,10 +13,10 @@ const RESOURCE_LABELS: Record<Resource["resourceType"], string> = {
   registry: "Registry record",
 };
 
-function retrievedLabel(value: Date | string): string {
+function retrievedLabel(value: Date | string, fetched: boolean): string {
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) return "Source on file";
-  return `Checked ${new Intl.DateTimeFormat("en-US", {
+  return `${fetched ? "Checked" : "Added"} ${new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "numeric",
     year: "numeric",
@@ -44,7 +44,7 @@ function ResourceList({ title, resources }: { title: string; resources: Resource
                 <span className="min-w-0">
                   <span className="block text-sm font-medium leading-snug">{linkName}</span>
                   <span className="mt-0.5 block text-xs text-muted">
-                    {resource.source.name} · {retrievedLabel(resource.retrievedAt)}
+                    {resource.source.name} · {retrievedLabel(resource.retrievedAt, resource.source.fetchPolicy !== "link_only")}
                   </span>
                 </span>
                 <ExternalLink aria-hidden size={17} className="shrink-0 text-muted" />

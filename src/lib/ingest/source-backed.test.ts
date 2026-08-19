@@ -74,6 +74,20 @@ describe("source-backed document extraction", () => {
     ]);
   });
 
+  it("normalizes only whole-year age units", () => {
+    const parseAge = (property: string) => parseSourceDocument({
+      url: "https://www.example-distillery.com/products/reserve-10",
+      contentType: "text/html",
+      body: PRODUCT_HTML.replace('{"@type":"PropertyValue","name":"Age","value":"10 years"}', property),
+      source: OFFICIAL_SOURCE,
+      resourceType: "official_product",
+    }).claims.find((claim) => claim.field === "ageYears")?.value;
+
+    expect(parseAge('{"@type":"PropertyValue","name":"Age","value":"18 months"}')).toBeUndefined();
+    expect(parseAge('{"@type":"PropertyValue","name":"Age","value":24,"unitText":"months"}')).toBe(2);
+    expect(parseAge('{"@type":"PropertyValue","name":"Age","value":"12 years"}')).toBe(12);
+  });
+
   it("extracts a structured review score but never stores the article body", () => {
     const parsed = parseSourceDocument({
       url: "https://reviews.example/review/example-reserve",
@@ -187,7 +201,10 @@ describe("source-backed persistence", () => {
       sources: [OFFICIAL_SOURCE],
       resources: [{ bottleId: bottle.id, sourceId: OFFICIAL_SOURCE.id, url: "https://www.example-distillery.com/products/reserve-10", resourceType: "official_product", mediaKind: "bottle" }],
     };
-    const changedHtml = PRODUCT_HTML.replace('"value":"45%"', '"value":"50%"');
+    const changedHtml = PRODUCT_HTML
+      .replace('"value":"45%"', '"value":"50%"')
+      .replace('"value":"10 years"', '"value":"12 years"')
+      .replaceAll("https://www.example-distillery.com/images/reserve-10.png", "https://www.example-distillery.com/images/reserve-12.png");
     const fetchImpl = vi.fn()
       .mockResolvedValueOnce(htmlResponse(PRODUCT_HTML))
       .mockResolvedValueOnce(htmlResponse(changedHtml)) as unknown as typeof fetch;
@@ -198,11 +215,60 @@ describe("source-backed persistence", () => {
     const claims = await db.select().from(schema.bottleClaims);
     expect(claims).toHaveLength(6);
     expect(claims.find((claim) => claim.field === "abv")?.value).toBe(50);
+    expect((await db.select().from(schema.bottles).where(eq(schema.bottles.id, bottle.id)))[0]).toMatchObject({
+      abv: 50,
+      ageYears: 12,
+      imageUrl: "https://www.example-distillery.com/images/reserve-12.png",
+    });
     expect(await db.select().from(schema.bottleMedia)).toHaveLength(1);
   });
 
+  it("keeps one resource when a stable manifest URL publishes a new canonical URL", async () => {
+    const bottle = await createTestBottle(db, { id: "canonical-move", status: "imported" });
+    const requestedUrl = "https://www.example-distillery.com/products/legacy";
+    const manifest: CatalogSourceManifest = {
+      sources: [OFFICIAL_SOURCE],
+      resources: [{ bottleId: bottle.id, sourceId: OFFICIAL_SOURCE.id, url: requestedUrl, resourceType: "official_product" }],
+    };
+    const page = (canonicalUrl: string) => PRODUCT_HTML.replace(
+      "https://www.example-distillery.com/products/reserve-10",
+      canonicalUrl,
+    );
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(htmlResponse(page(requestedUrl)))
+      .mockResolvedValueOnce(htmlResponse(page("https://www.example-distillery.com/products/current"))) as unknown as typeof fetch;
+
+    await ingestSourceManifest(db, manifest, { apply: true, fetchImpl });
+    await ingestSourceManifest(db, manifest, { apply: true, fetchImpl });
+
+    expect(await db.select().from(schema.bottleResources)).toEqual([
+      expect.objectContaining({ url: "https://www.example-distillery.com/products/current" }),
+    ]);
+    expect(await db.select().from(schema.bottleVerifications)).toHaveLength(1);
+  });
+
+  it("keeps a curated canonical override when source facts change", async () => {
+    const bottle = await createTestBottle(db, { id: "curated-override", status: "verified", abv: 42, ageYears: 8 });
+    const manifest: CatalogSourceManifest = {
+      sources: [OFFICIAL_SOURCE],
+      resources: [{ bottleId: bottle.id, sourceId: OFFICIAL_SOURCE.id, url: "https://www.example-distillery.com/products/reserve-10", resourceType: "official_product" }],
+    };
+    const changedHtml = PRODUCT_HTML.replace('"value":"45%"', '"value":"50%"').replace('"value":"10 years"', '"value":"12 years"');
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(htmlResponse(PRODUCT_HTML))
+      .mockResolvedValueOnce(htmlResponse(changedHtml)) as unknown as typeof fetch;
+
+    await ingestSourceManifest(db, manifest, { apply: true, fetchImpl });
+    await ingestSourceManifest(db, manifest, { apply: true, fetchImpl });
+
+    expect((await db.select().from(schema.bottles).where(eq(schema.bottles.id, bottle.id)))[0]).toMatchObject({
+      abv: 42,
+      ageYears: 8,
+    });
+  });
+
   it("replaces the extracted snapshot when an unchanged page is reclassified", async () => {
-    const bottle = await createTestBottle(db, { id: "reclassified-page", status: "imported" });
+    const bottle = await createTestBottle(db, { id: "reclassified-page", status: "imported", abv: null, ageYears: null, imageUrl: null });
     const resource = {
       bottleId: bottle.id,
       sourceId: OFFICIAL_SOURCE.id,
@@ -220,6 +286,12 @@ describe("source-backed persistence", () => {
     const claims = await db.select().from(schema.bottleClaims);
     expect(claims.some((claim) => claim.field === "description")).toBe(false);
     expect(claims.every((claim) => claim.status === "corroborating")).toBe(true);
+    expect((await db.select().from(schema.bottles).where(eq(schema.bottles.id, bottle.id)))[0]).toMatchObject({
+      abv: null,
+      ageYears: null,
+      imageUrl: null,
+    });
+    expect(await db.select().from(schema.bottleVerifications)).toEqual([]);
   });
 
   it("tightens persisted media rights even when page content is unchanged", async () => {
@@ -297,6 +369,29 @@ describe("source-backed persistence", () => {
     expect((await db.select().from(schema.bottleClaims)).some((claim) => claim.field === "description")).toBe(false);
   });
 
+  it("never promotes displayable editorial media into the canonical bottle image", async () => {
+    const bottle = await createTestBottle(db, { id: "editorial-image-scope", status: "imported", imageUrl: null });
+    const editorial = {
+      ...OFFICIAL_SOURCE,
+      id: "editorial-images",
+      kind: "editorial" as const,
+      baseUrl: "https://reviews.example",
+    };
+    await ingestSourceManifest(db, {
+      sources: [editorial],
+      resources: [{ bottleId: bottle.id, sourceId: editorial.id, url: "https://reviews.example/review", resourceType: "review", mediaKind: "bottle" }],
+    }, { apply: true, fetchImpl: (async () => htmlResponse(PRODUCT_HTML)) as typeof fetch });
+    const officialWithoutImage = PRODUCT_HTML
+      .replace('  <meta property="og:image" content="https://www.example-distillery.com/images/reserve-10.png" />\n', "")
+      .replace('    "image":"https://www.example-distillery.com/images/reserve-10.png",\n', "");
+    await ingestSourceManifest(db, {
+      sources: [OFFICIAL_SOURCE],
+      resources: [{ bottleId: bottle.id, sourceId: OFFICIAL_SOURCE.id, url: "https://www.example-distillery.com/products/reserve-10", resourceType: "official_product", mediaKind: "bottle" }],
+    }, { apply: true, fetchImpl: (async () => htmlResponse(officialWithoutImage)) as typeof fetch });
+
+    expect((await db.select().from(schema.bottles).where(eq(schema.bottles.id, bottle.id)))[0].imageUrl).toBeNull();
+  });
+
   it("rejects source-id drift across manifests", async () => {
     const bottle = await createTestBottle(db, { id: "source-drift", status: "imported" });
     const manifest: CatalogSourceManifest = {
@@ -344,6 +439,33 @@ describe("source-backed persistence", () => {
     const report = await ingestSourceManifest(db, manifest, { fetchImpl });
 
     expect(report.errors[0]?.error).toMatch(/2 MB limit/i);
+  });
+
+  it("preserves a source disabled by an operator during refresh", async () => {
+    const bottle = await createTestBottle(db, { id: "disabled-source-refresh", status: "imported" });
+    await db.insert(schema.catalogSources).values({
+      ...OFFICIAL_SOURCE,
+      baseUrl: new URL(OFFICIAL_SOURCE.baseUrl).origin,
+      enabled: false,
+    });
+    await ingestSourceManifest(db, {
+      sources: [OFFICIAL_SOURCE],
+      resources: [{ bottleId: bottle.id, sourceId: OFFICIAL_SOURCE.id, url: "https://www.example-distillery.com/products/reserve-10", resourceType: "official_product" }],
+    }, { apply: true, fetchImpl: (async () => htmlResponse(PRODUCT_HTML)) as typeof fetch });
+
+    expect((await db.select().from(schema.catalogSources).where(eq(schema.catalogSources.id, OFFICIAL_SOURCE.id)))[0].enabled).toBe(false);
+  });
+
+  it("reports unknown bottle IDs in dry-run without fetching or writing sources", async () => {
+    const fetchImpl = vi.fn(async () => htmlResponse(PRODUCT_HTML)) as unknown as typeof fetch;
+    const report = await ingestSourceManifest(db, {
+      sources: [OFFICIAL_SOURCE],
+      resources: [{ bottleId: "missing-bottle", sourceId: OFFICIAL_SOURCE.id, url: "https://www.example-distillery.com/products/reserve-10", resourceType: "official_product" }],
+    }, { fetchImpl });
+
+    expect(report.errors).toEqual([expect.objectContaining({ error: "Unknown bottle id: missing-bottle" })]);
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(await db.select().from(schema.catalogSources)).toEqual([]);
   });
 
   it("dry-runs by default and makes no writes", async () => {

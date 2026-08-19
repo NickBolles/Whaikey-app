@@ -15,6 +15,7 @@ import {
   type BottleClaim,
   type BottleMedia,
   type BottleResource,
+  type CatalogFetchPolicy,
   type Distillery,
   type Pairing,
   type UserBottle,
@@ -182,6 +183,7 @@ export interface BottleDetail {
         name: string;
         kind: "official" | "editorial" | "retailer" | "registry";
         attribution: string | null;
+        fetchPolicy: CatalogFetchPolicy;
       };
     }
   >;
@@ -229,6 +231,7 @@ export async function getBottleDetail(
       sourceName: catalogSources.name,
       sourceKind: catalogSources.kind,
       sourceAttribution: catalogSources.attribution,
+      sourceFetchPolicy: catalogSources.fetchPolicy,
     })
     .from(bottleResources)
     .innerJoin(catalogSources, eq(bottleResources.sourceId, catalogSources.id))
@@ -288,6 +291,7 @@ export async function getBottleDetail(
         name: row.sourceName,
         kind: row.sourceKind,
         attribution: row.sourceAttribution,
+        fetchPolicy: row.sourceFetchPolicy,
       },
     })),
     claims: claimRows.map((row) => row.claim),

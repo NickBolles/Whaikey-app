@@ -20,7 +20,7 @@ const baseResource = {
   retrievedAt: new Date("2026-08-18T12:00:00Z"),
   createdAt: new Date("2026-08-18T12:00:00Z"),
   updatedAt: new Date("2026-08-18T12:00:00Z"),
-  source: { id: "producer", name: "Example Producer", kind: "official" as const, attribution: null },
+  source: { id: "producer", name: "Example Producer", kind: "official" as const, attribution: null, fetchPolicy: "structured" as const },
 };
 
 const bottleMedia = {
@@ -35,6 +35,7 @@ const bottleMedia = {
   width: 800,
   height: 1200,
   isPrimary: true,
+  canonicalized: false,
   createdAt: new Date("2026-08-18T12:00:00Z"),
 };
 
@@ -76,7 +77,7 @@ describe("SourceBackedResources", () => {
       url: "https://www.breakingbourbon.com/review/example",
       title: "Example Reserve Review",
       publisher: "Breaking Bourbon",
-      source: { id: "breaking-bourbon", name: "Breaking Bourbon", kind: "editorial" as const, attribution: "Breaking Bourbon" },
+      source: { id: "breaking-bourbon", name: "Breaking Bourbon", kind: "editorial" as const, attribution: "Breaking Bourbon", fetchPolicy: "link_only" as const },
     };
     render(<SourceBackedResources bottleName="Example Reserve" resources={[baseResource, review]} media={[]} />);
 
@@ -84,6 +85,8 @@ describe("SourceBackedResources", () => {
     const reviews = screen.getByRole("region", { name: "Independent reviews" });
     expect(within(official).getByRole("link", { name: /Official product/i })).toHaveAttribute("href", baseResource.url);
     expect(within(reviews).getByRole("link", { name: /Example Reserve Review/i })).toHaveAttribute("href", review.url);
+    expect(within(official).getByText(/Checked Aug 18, 2026/)).toBeInTheDocument();
+    expect(within(reviews).getByText(/Added Aug 18, 2026/)).toBeInTheDocument();
     for (const link of screen.getAllByRole("link")) {
       expect(link).toHaveAttribute("target", "_blank");
       expect(link).toHaveAttribute("rel", expect.stringContaining("noopener"));
