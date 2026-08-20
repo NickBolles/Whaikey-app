@@ -7,7 +7,7 @@ import { setupTestDb } from "@/test/helpers";
 import type { DB } from "@/db";
 
 /**
- * Migration 0016 repairs catalogs written before bottles.country existed:
+ * Migration 0020 repairs catalogs written before bottles.country existed:
  * production applies migrations but never reseeds (scripts/build.mjs), so the
  * rollout itself must set country on existing rows and stop the region column
  * reporting "Scotland". These tests run the actual migration file against
@@ -15,7 +15,7 @@ import type { DB } from "@/db";
  */
 
 const MIGRATION = readFileSync(
-  path.join(process.cwd(), "src", "db", "migrations", "0016_backfill-bottle-origin.sql"),
+  path.join(process.cwd(), "src", "db", "migrations", "0020_backfill-bottle-origin.sql"),
   "utf8",
 );
 
@@ -32,7 +32,7 @@ async function bottleOrigins(db: DB): Promise<Record<string, { country: string |
   return Object.fromEntries(rows.map((r) => [r.id, { country: r.country, region: r.region }]));
 }
 
-describe("0016 origin backfill", () => {
+describe("0020 origin backfill", () => {
   let db: DB;
 
   beforeEach(async () => {
