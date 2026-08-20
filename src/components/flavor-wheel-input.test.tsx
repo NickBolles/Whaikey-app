@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 
 const { haptic } = vi.hoisted(() => ({ haptic: vi.fn() }));
 vi.mock("@/lib/native/haptics", () => ({ haptic }));
@@ -164,10 +164,13 @@ describe("FlavorWheelInput", () => {
   it("renders chips for selected tags and removes on tap", () => {
     render(<Harness initial={{ vanilla: 2, "green-apple": 1 }} />);
     const vanillaChip = screen.getByRole("button", { name: "Remove Vanilla" });
-    expect(vanillaChip).toHaveTextContent("Vanilla ××");
-    expect(screen.getByRole("button", { name: "Remove Green apple" })).toHaveTextContent(
-      "Green apple ×",
-    );
+    // Intensity reads as a 3-dot meter, not repeated glyphs — the label carries
+    // the level so it can't be confused with the ✕ remove control beside it.
+    expect(vanillaChip).toHaveTextContent("Vanilla");
+    expect(within(vanillaChip).getByRole("img", { name: "intensity 2 of 3" })).toBeInTheDocument();
+    const appleChip = screen.getByRole("button", { name: "Remove Green apple" });
+    expect(appleChip).toHaveTextContent("Green apple");
+    expect(within(appleChip).getByRole("img", { name: "intensity 1 of 3" })).toBeInTheDocument();
 
     fireEvent.click(vanillaChip);
     expect(screen.queryByRole("button", { name: "Remove Vanilla" })).not.toBeInTheDocument();

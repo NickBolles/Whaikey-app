@@ -18,6 +18,40 @@ export function leafColor(leafId: string): string {
   return LEAF_COLOR.get(leafId) ?? "var(--muted)";
 }
 
+/**
+ * Intensity as a 1-3 meter: always three dots, the unearned ones dimmed rather
+ * than absent.
+ *
+ * Two reasons it is not a repeated glyph. Constant width — a row of chips at
+ * mixed intensities keeps its rhythm, and a chip doesn't resize when someone
+ * edits the level. And it has to be unmistakably a *reading*, not a control:
+ * the previous "×"/"××" rendering sat exactly where a remove affordance sits
+ * and was read as one — next to a real ✕ remove button, in the pour sheet.
+ * Dots can't be mistaken for a close box.
+ */
+export function IntensityDots({
+  intensity,
+  className = "",
+}: {
+  intensity: number;
+  className?: string;
+}) {
+  const filled = Math.max(1, Math.min(3, Math.round(intensity)));
+  return (
+    <span
+      role="img"
+      aria-label={`intensity ${filled} of 3`}
+      className={`inline-flex shrink-0 items-center gap-[1.5px] text-[7px] leading-none ${className}`}
+    >
+      {[1, 2, 3].map((n) => (
+        <span key={n} aria-hidden className={n <= filled ? "opacity-100" : "opacity-25"}>
+          ●
+        </span>
+      ))}
+    </span>
+  );
+}
+
 export type FlavorChipVariant = "solid" | "confirmed" | "suggested";
 
 export interface FlavorChipProps {
@@ -69,11 +103,7 @@ export function FlavorChip({
     <>
       {prefix}
       {label}
-      {clamped != null && (
-        <span className="font-mono text-[10px] opacity-65" aria-label={`intensity ${clamped}`}>
-          {"●".repeat(clamped)}
-        </span>
-      )}
+      {clamped != null && <IntensityDots intensity={clamped} className="opacity-80" />}
     </>
   );
 

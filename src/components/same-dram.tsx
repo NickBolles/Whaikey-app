@@ -147,7 +147,7 @@ export function SameDram({ viewerTags, producer, friends, hasViewerNotes }: Same
         <h2 className="section-label">Same Dram</h2>
         <div className="card-flat p-4">
           <p className="text-sm text-muted">
-            None of your friends have tasted this yet.{" "}
+            You&rsquo;re first to this one — none of your friends have tasted it yet.{" "}
             <Link href="/friends" className="text-accent hover:brightness-110 transition-[filter]">
               Find friends
             </Link>

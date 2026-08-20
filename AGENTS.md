@@ -12,7 +12,7 @@ AI-native whiskey tracking app: search/scan bottles → own/tried/wishlist → l
 
 - `PLAN.md` — product plan, architecture, data model, monetization, roadmap phases.
 - `docs/FEATURES.md` — feature specs with priorities; `docs/COMPETITORS.md` — market analysis; `docs/DATA_SOURCES.md` — catalog/price/scan data strategy.
-- `docs/SOCIAL.md` — **binding** for anything social: friends/feed/clubs, the visibility model (private by default, money data never crosses a social boundary), and the banned-mechanics list (no streaks, volume/ABV badges, or consumption leaderboards). Read it before adding any user-to-user surface.
+- `docs/SOCIAL.md` — **binding** for anything social: friends/feed/clubs, the visibility model (private by default, money data never crosses a social boundary), the banned-mechanics list (no streaks, volume/ABV badges, or consumption leaderboards) **and §3.2's encouraged substitutes, which are just as binding**. Read it before adding any user-to-user surface.
 - `docs/DESIGN.md` — **binding** design system (recipes + rules + screenshot workflow). Any UI change must follow it.
 - `docs/NATIVE_APP.md` — iOS/Android via Capacitor: framework decision, architecture, phases, native capability catalog; `docs/APP_STORE_SETUP.md` — store onboarding runbook.
 
@@ -51,6 +51,8 @@ Playwright in this dev container: prefix with `PLAYWRIGHT_CHROMIUM_PATH=/opt/pw-
 
 ## Product guardrails
 
+- The product is five verbs: **explore, learn, track, refine, share** (PLAN.md §1). Judge a feature against those before anything else — and note that the first and last are the ones this codebase has historically under-built.
 - Responsible-drinking stance: no features/copy that reward consumption frequency; AI never encourages drinking, never invents prices or availability. Socially this hardens into a ban list — no streaks, no volume/ABV/time-of-day badges, no leaderboard sorted by a consumption quantity, no pour-nudging notifications (docs/SOCIAL.md §3.1).
+- **The stance bans an axis, not fun.** Badges, maps, completions, passports, rivalry with friends, shareable cards — all explicitly encouraged (docs/SOCIAL.md §3.2, spec'd in docs/FEATURES.md §11). What they may count is **distinct things met** — regions, countries, distilleries, cask types, descriptors, and distilleries *visited* — never how much or how often. Breadth saturates where volume doesn't, so a 15 ml sample of something new counts the same as a bottle and a repeat pour counts for nothing. The test before building any game mechanic: **can someone win this by drinking less of more?** If yes, build it; do not stop to ask whether gamification is allowed.
 - Users' notes/inventory are private by default and always exportable; no dark patterns. Visibility is opt-in per object and never raised retroactively; purchase price, collection value and spend never appear in a social projection.
 - Prices/valuations are estimates — show ranges/trends, never false precision (see COMPETITORS.md §2.7 for why).
