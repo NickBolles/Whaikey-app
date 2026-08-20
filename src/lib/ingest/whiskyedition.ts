@@ -58,6 +58,25 @@ export function whiskyEditionCategory(review: WhiskyEditionReview): WhiskeyCateg
   return "world";
 }
 
+/** Canonical spellings for the country variants the review metadata uses. */
+const COUNTRY_ALIASES: Record<string, string> = {
+  usa: "USA",
+  "united states": "USA",
+  "united states of america": "USA",
+  "u.s.a.": "USA",
+};
+
+/**
+ * Normalize a review's country to the catalog's English names. The source
+ * already writes English ("Scotland", "Japan"), so values pass through as-is;
+ * only the US spelling variants need collapsing.
+ */
+export function whiskyEditionCountry(review: WhiskyEditionReview): string | null {
+  const raw = review.metadata?.country?.trim();
+  if (!raw) return null;
+  return COUNTRY_ALIASES[raw.toLowerCase()] ?? raw;
+}
+
 export interface WhiskyEditionAdapterResult {
   scanned: number;
   candidates: CatalogCandidate[];
@@ -84,6 +103,7 @@ export function whiskyEditionReviewsToCandidates(
       name,
       category,
       source: "whiskyedition",
+      country: whiskyEditionCountry(review) ?? undefined,
       region: review.metadata?.region ?? undefined,
       ageYears: typeof age === "number" && age >= 1 && age <= 60 ? Math.round(age) : null,
       abv: typeof abv === "number" && abv >= 20 && abv <= 80 ? abv : null,

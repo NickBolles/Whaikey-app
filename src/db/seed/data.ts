@@ -24,6 +24,13 @@ export interface SeedBottle {
   distilleryId: string | null;
   name: string;
   category: WhiskeyCategory;
+  /**
+   * Where it was made. Optional here only because it is inherited from the
+   * distillery when there is one — `bottleOrigin()` resolves it, and every
+   * bottle without a `distilleryId` must set it explicitly.
+   */
+  country?: string;
+  /** Sub-national origin (Scotch region, US state). Never a country name. */
   region?: string;
   /** null = no age statement (NAS) */
   ageYears: number | null;
@@ -421,7 +428,7 @@ export const SEED_BOTTLES: SeedBottle[] = [
     ageYears: null, abv: 46.5, caskTypes: ["new charred oak"], msrp: 45, avgPrice: 40,
     description: "Limestone Branch's park-tribute blend; cherry, rye spice, and smoked caramel.",
     flavorProfile: fp({ sweet: 6, fruity: 5, spicy: 4, woody: 4, grain: 2 }), aliases: ["Yellowstone"] },
-  { id: "jeffersons-ocean", distilleryId: null, name: "Jefferson's Ocean Aged at Sea", category: "bourbon", region: "Kentucky",
+  { id: "jeffersons-ocean", distilleryId: null, country: "USA", name: "Jefferson's Ocean Aged at Sea", category: "bourbon", region: "Kentucky",
     ageYears: null, abv: 45, caskTypes: ["new charred oak"], msrp: 90, avgPrice: 80,
     description: "Sourced bourbon matured on container ships; briny caramel and dark, toasted sugar.",
     flavorProfile: fp({ sweet: 6, woody: 6, spicy: 3, fruity: 3, grain: 2, feinty: 2 }), aliases: ["Jefferson's Ocean"] },
@@ -541,11 +548,11 @@ export const SEED_BOTTLES: SeedBottle[] = [
     ageYears: null, abv: 41.5, caskTypes: ["new charred oak"], mashBill: "Blend of high-rye and low-rye mash bills", msrp: 40, avgPrice: 38,
     description: "Maryland-style rye — softer and fruitier than Kentucky's; orange peel, clove, and caramel.",
     flavorProfile: fp({ spicy: 5, fruity: 4, sweet: 5, woody: 3, grain: 3, floral: 2 }), aliases: ["Sagamore"] },
-  { id: "redemption-rye", distilleryId: null, name: "Redemption Rye", category: "rye", region: "Indiana",
+  { id: "redemption-rye", distilleryId: null, country: "USA", name: "Redemption Rye", category: "rye", region: "Indiana",
     ageYears: null, abv: 46, caskTypes: ["new charred oak"], mashBill: "95% rye, 5% malted barley", msrp: 30, avgPrice: 28,
     description: "Sourced MGP 95/5 rye built for cocktails; dill, mint, and peppery spice.",
     flavorProfile: fp({ spicy: 6, grain: 4, floral: 3, sweet: 4, woody: 3, fruity: 2 }), aliases: ["Redemption"] },
-  { id: "templeton-rye-4", distilleryId: null, name: "Templeton Rye 4 Year", category: "rye", region: "Iowa",
+  { id: "templeton-rye-4", distilleryId: null, country: "USA", name: "Templeton Rye 4 Year", category: "rye", region: "Iowa",
     ageYears: 4, abv: 40, caskTypes: ["new charred oak"], mashBill: "95% rye, 5% malted barley", msrp: 35, avgPrice: 30,
     description: "Approachable 95% rye; butterscotch sweetness ahead of gentle baking spice.",
     flavorProfile: fp({ sweet: 5, spicy: 5, grain: 4, woody: 3, fruity: 2 }), aliases: ["Templeton"] },
@@ -883,15 +890,15 @@ export const SEED_BOTTLES: SeedBottle[] = [
     ageYears: null, abv: 40, caskTypes: ["refill oak"], msrp: 20, avgPrice: 18,
     description: "The big American-market blend; honey, heather, and soft grain.",
     flavorProfile: fp({ grain: 5, sweet: 5, floral: 3, fruity: 3, woody: 2 }), aliases: ["Dewars White"] },
-  { id: "buchanans-12", distilleryId: null, name: "Buchanan's DeLuxe 12", category: "scotch-blended", region: "Scotland",
+  { id: "buchanans-12", distilleryId: null, country: "Scotland", name: "Buchanan's DeLuxe 12", category: "scotch-blended", region: "Scotland",
     ageYears: 12, abv: 40, caskTypes: ["refill oak"], msrp: 35, avgPrice: 32,
     description: "The Diageo blend with a huge US following; orange chocolate, toffee, and light smoke.",
     flavorProfile: fp({ sweet: 5, fruity: 5, grain: 4, woody: 3, peaty: 1, spicy: 2 }), aliases: ["Buchanan's"] },
-  { id: "teachers-highland-cream", distilleryId: null, name: "Teacher's Highland Cream", category: "scotch-blended", region: "Scotland",
+  { id: "teachers-highland-cream", distilleryId: null, country: "Scotland", name: "Teacher's Highland Cream", category: "scotch-blended", region: "Scotland",
     ageYears: null, abv: 40, caskTypes: ["refill oak"], msrp: 18, avgPrice: 16,
     description: "High-malt budget blend built on smoky Ardmore; bonfire embers and malt loaf.",
     flavorProfile: fp({ peaty: 4, grain: 5, sweet: 4, woody: 3, fruity: 2 }), aliases: ["Teachers"] },
-  { id: "cutty-sark", distilleryId: null, name: "Cutty Sark", category: "scotch-blended", region: "Scotland",
+  { id: "cutty-sark", distilleryId: null, country: "Scotland", name: "Cutty Sark", category: "scotch-blended", region: "Scotland",
     ageYears: null, abv: 40, caskTypes: ["refill oak"], msrp: 18, avgPrice: 16,
     description: "The pale, easy highball blend of Prohibition fame; lemon, vanilla, and grain.",
     flavorProfile: fp({ grain: 5, fruity: 4, sweet: 4, floral: 2, woody: 1 }), aliases: ["Cutty"] },
@@ -991,7 +998,7 @@ export const SEED_BOTTLES: SeedBottle[] = [
     ageYears: null, abv: 40, caskTypes: ["ex-bourbon", "stout-seasoned"], msrp: 35, avgPrice: 32,
     description: "Jameson finished in craft-stout barrels; cocoa, coffee, and hops over the house smoothness.",
     flavorProfile: fp({ grain: 5, sweet: 5, woody: 3, fruity: 3, spicy: 2, feinty: 1 }), aliases: ["Caskmates"] },
-  { id: "writers-tears-copper-pot", distilleryId: null, name: "Writers' Tears Copper Pot", category: "irish", region: "Ireland",
+  { id: "writers-tears-copper-pot", distilleryId: null, country: "Ireland", name: "Writers' Tears Copper Pot", category: "irish", region: "Ireland",
     ageYears: null, abv: 40, caskTypes: ["ex-bourbon"], msrp: 45, avgPrice: 40,
     description: "A marriage of pot-still and single-malt whiskeys; baked apple, honey, and ginger snap.",
     flavorProfile: fp({ fruity: 5, sweet: 5, grain: 4, spicy: 3, floral: 2 }), aliases: ["Writers Tears"] },
@@ -1003,7 +1010,7 @@ export const SEED_BOTTLES: SeedBottle[] = [
     ageYears: null, abv: 40, caskTypes: ["virgin oak", "ex-bourbon", "oloroso sherry"], msrp: 30, avgPrice: 27,
     description: "Castle-grounds blend married across three cask types; toasted oak, caramel, and dark fruit.",
     flavorProfile: fp({ sweet: 5, woody: 4, fruity: 4, grain: 4, spicy: 3 }), aliases: ["Slane"] },
-  { id: "knappogue-castle-12", distilleryId: null, name: "Knappogue Castle 12", category: "irish", region: "Ireland",
+  { id: "knappogue-castle-12", distilleryId: null, country: "Ireland", name: "Knappogue Castle 12", category: "irish", region: "Ireland",
     ageYears: 12, abv: 43, caskTypes: ["ex-bourbon"], msrp: 45, avgPrice: 40,
     description: "Bourbon-cask Irish single malt; lemon curd, green apple, and vanilla.",
     flavorProfile: fp({ fruity: 5, sweet: 4, grain: 4, floral: 3, woody: 2 }), aliases: ["Knappogue"] },
@@ -1123,15 +1130,15 @@ export const SEED_BOTTLES: SeedBottle[] = [
     ageYears: null, abv: 40, caskTypes: ["refill oak"], msrp: 20, avgPrice: 18,
     description: "Canada's steady standard blend; toffee, green apple, and gentle rye spice.",
     flavorProfile: fp({ grain: 5, sweet: 5, fruity: 3, spicy: 3, woody: 3 }), aliases: ["Wisers Deluxe", "Wisers"] },
-  { id: "gibsons-finest-12", distilleryId: null, name: "Gibson's Finest Rare 12", category: "canadian", region: "Canada",
+  { id: "gibsons-finest-12", distilleryId: null, country: "Canada", name: "Gibson's Finest Rare 12", category: "canadian", region: "Canada",
     ageYears: 12, abv: 40, caskTypes: ["refill oak"], msrp: 30, avgPrice: 28,
     description: "A Canadian-shelf staple twelve-year; creamy butterscotch, oak, and orchard fruit.",
     flavorProfile: fp({ sweet: 6, woody: 4, grain: 4, fruity: 3, spicy: 2 }), aliases: ["Gibsons 12"] },
-  { id: "caribou-crossing", distilleryId: null, name: "Caribou Crossing Single Barrel", category: "canadian", region: "Canada",
+  { id: "caribou-crossing", distilleryId: null, country: "Canada", name: "Caribou Crossing Single Barrel", category: "canadian", region: "Canada",
     ageYears: null, abv: 40, caskTypes: ["refill oak"], msrp: 50, avgPrice: 45,
     description: "The first single-barrel Canadian whisky (Sazerac); vanilla cream, honey, and soft rye.",
     flavorProfile: fp({ sweet: 6, grain: 4, fruity: 3, woody: 4, spicy: 2 }), aliases: ["Caribou Crossing"] },
-  { id: "pendleton", distilleryId: null, name: "Pendleton Blended Canadian Whisky", category: "canadian", region: "Canada",
+  { id: "pendleton", distilleryId: null, country: "Canada", name: "Pendleton Blended Canadian Whisky", category: "canadian", region: "Canada",
     ageYears: null, abv: 40, caskTypes: ["refill oak"], msrp: 25, avgPrice: 23,
     description: "The rodeo whisky — distilled in Canada, bottled in Oregon; smooth vanilla and brown sugar.",
     flavorProfile: fp({ sweet: 6, grain: 5, fruity: 2, woody: 3, spicy: 2 }), aliases: ["Pendleton Whisky"] },
@@ -1139,11 +1146,11 @@ export const SEED_BOTTLES: SeedBottle[] = [
     ageYears: null, abv: 40, caskTypes: ["refill oak"], msrp: 12, avgPrice: 11,
     description: "Blended-at-birth budget staple; caramel, light grain, and easy sweetness.",
     flavorProfile: fp({ grain: 6, sweet: 5, woody: 2, fruity: 2, spicy: 1 }), aliases: ["BV"] },
-  { id: "canadian-mist", distilleryId: null, name: "Canadian Mist", category: "canadian", region: "Ontario",
+  { id: "canadian-mist", distilleryId: null, country: "Canada", name: "Canadian Mist", category: "canadian", region: "Ontario",
     ageYears: null, abv: 40, caskTypes: ["refill oak"], msrp: 12, avgPrice: 11,
     description: "Collingwood-made mixing standard; light corn sweetness and soft vanilla.",
     flavorProfile: fp({ grain: 6, sweet: 5, fruity: 2, woody: 2 }), aliases: ["Mist"] },
-  { id: "seagrams-vo", distilleryId: null, name: "Seagram's V.O.", category: "canadian", region: "Canada",
+  { id: "seagrams-vo", distilleryId: null, country: "Canada", name: "Seagram's V.O.", category: "canadian", region: "Canada",
     ageYears: null, abv: 40, caskTypes: ["refill oak"], msrp: 15, avgPrice: 13,
     description: "The century-old 'Very Own' blend; clean grain, caramel, and a rye edge.",
     flavorProfile: fp({ grain: 6, sweet: 4, spicy: 3, woody: 2, fruity: 2 }), aliases: ["VO"] },
@@ -1348,3 +1355,25 @@ export const SEED_BOTTLE_UPCS: Record<string, string[]> = {
   "nikka-from-the-barrel": ["4904230031307"],
   "kavalan-classic": ["4710001001017"],
 };
+
+/**
+ * The country/region a bottle actually gets stored with.
+ *
+ * Two rules, and they exist because `bottles.region` used to hold whatever was
+ * handy — a Scotch region on one row, a US state on the next, a whole country
+ * on a blend. Anything counting distinct regions saw "Scotland" as a peer of
+ * "Islay", and a blend looked like a region nobody could visit.
+ *
+ * 1. **Country is inherited from the distillery** when there is one; a bottle
+ *    with no distillery (blends, sourced bottlings) must declare its own.
+ * 2. **Region is sub-national or nothing.** A region equal to the country is
+ *    that older habit showing through, and resolves to null.
+ */
+export function bottleOrigin(
+  bottle: Pick<SeedBottle, "country" | "region" | "distilleryId">,
+  distilleryCountry?: string | null,
+): { country: string | null; region: string | null } {
+  const country = bottle.country ?? distilleryCountry ?? null;
+  const region = bottle.region == null || bottle.region === country ? null : bottle.region;
+  return { country, region };
+}

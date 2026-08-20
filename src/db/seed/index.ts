@@ -1,7 +1,12 @@
 import { sql } from "drizzle-orm";
 import type { DB } from "../index";
 import { bottleAliases, bottles, bottleUpcs, distilleries } from "../schema";
-import { SEED_BOTTLES, SEED_BOTTLE_UPCS, SEED_DISTILLERIES } from "./data";
+import {
+  SEED_BOTTLES,
+  SEED_BOTTLE_UPCS,
+  SEED_DISTILLERIES,
+  bottleOrigin,
+} from "./data";
 
 export interface SeedResult {
   distilleries: number;
@@ -57,29 +62,42 @@ export async function seedDatabase(db: DB): Promise<SeedResult> {
       });
   }
 
+  // Country is inherited from the distillery, so it is resolved here rather
+  // than repeated on 269 seed literals (bottleOrigin, and the rules it keeps).
+  const distilleryCountry = new Map(
+    SEED_DISTILLERIES.map((d) => [d.id, d.country]),
+  );
+
   for (const batch of chunk(SEED_BOTTLES, CHUNK_SIZE)) {
     await db
       .insert(bottles)
       .values(
-        batch.map((b) => ({
-          id: b.id,
-          distilleryId: b.distilleryId,
-          name: b.name,
-          category: b.category,
-          region: b.region ?? null,
-          ageYears: b.ageYears,
-          abv: b.abv,
-          caskTypes: b.caskTypes,
-          mashBill: b.mashBill ?? null,
-          msrp: b.msrp,
-          avgPrice: b.avgPrice,
-          description: b.description,
-          flavorProfile: b.flavorProfile,
-          producerFlavorTags: b.producerFlavorTags ?? null,
-          producerFlavorSourceUrl: b.producerFlavorSourceUrl ?? null,
-          producerFlavorSourceLabel: b.producerFlavorSourceLabel ?? null,
-          status: "verified" as const,
-        })),
+        batch.map((b) => {
+          const origin = bottleOrigin(
+            b,
+            b.distilleryId ? distilleryCountry.get(b.distilleryId) : null,
+          );
+          return {
+            id: b.id,
+            distilleryId: b.distilleryId,
+            name: b.name,
+            category: b.category,
+            country: origin.country,
+            region: origin.region,
+            ageYears: b.ageYears,
+            abv: b.abv,
+            caskTypes: b.caskTypes,
+            mashBill: b.mashBill ?? null,
+            msrp: b.msrp,
+            avgPrice: b.avgPrice,
+            description: b.description,
+            flavorProfile: b.flavorProfile,
+            producerFlavorTags: b.producerFlavorTags ?? null,
+            producerFlavorSourceUrl: b.producerFlavorSourceUrl ?? null,
+            producerFlavorSourceLabel: b.producerFlavorSourceLabel ?? null,
+            status: "verified" as const,
+          };
+        }),
       )
       .onConflictDoUpdate({
         target: bottles.id,
@@ -87,6 +105,7 @@ export async function seedDatabase(db: DB): Promise<SeedResult> {
           distilleryId: sql`excluded.distillery_id`,
           name: sql`excluded.name`,
           category: sql`excluded.category`,
+          country: sql`excluded.country`,
           region: sql`excluded.region`,
           ageYears: sql`excluded.age_years`,
           abv: sql`excluded.abv`,
@@ -127,14 +146,15 @@ export async function seedDatabase(db: DB): Promise<SeedResult> {
   // Seed rows never overwrite user confirmations: on any conflict (same id
   // from a re-seed, or a user-confirmed row already holding this upc+bottle)
   // the existing row — and its confirmedCount — wins.
-  const upcRows = Object.entries(SEED_BOTTLE_UPCS).flatMap(([bottleId, codes]) =>
-    codes.map((upc) => ({
-      id: `${bottleId}--upc-${upc}`,
-      bottleId,
-      upc,
-      source: "seed" as const,
-      confirmedCount: 0,
-    })),
+  const upcRows = Object.entries(SEED_BOTTLE_UPCS).flatMap(
+    ([bottleId, codes]) =>
+      codes.map((upc) => ({
+        id: `${bottleId}--upc-${upc}`,
+        bottleId,
+        upc,
+        source: "seed" as const,
+        confirmedCount: 0,
+      })),
   );
   for (const batch of chunk(upcRows, CHUNK_SIZE)) {
     await db.insert(bottleUpcs).values(batch).onConflictDoNothing();

@@ -16,6 +16,7 @@ import type { DB } from "@/db";
 import { bottles, pours, recExplanations, tastingNotes } from "@/db/schema";
 import type { RecMode } from "@/db/schema";
 import type { Recommendation } from "@/lib/recommend";
+import { originLabel } from "@/lib/origin";
 import { chatModel, getAnthropic, isAiConfigured } from "./client";
 import { parseModelJson, textFromContent } from "./json";
 import { reserveAiRequest } from "./rate-limit";
@@ -51,7 +52,7 @@ function buildPrompt(mode: RecMode, rec: Recommendation, context: string): strin
     `Bottle: ${rec.name}`,
     rec.distillery ? `Distillery: ${rec.distillery}` : null,
     `Category: ${rec.category}`,
-    rec.region ? `Region: ${rec.region}` : null,
+    originLabel(rec.region, rec.country) ? `Origin: ${originLabel(rec.region, rec.country)}` : null,
     rec.matchPercent != null ? `Palate match: ${rec.matchPercent}%` : null,
     rec.avgPrice != null ? `Avg price: $${Math.round(rec.avgPrice)}` : null,
     typeof rec.fillLevel === "number" ? `Fill level remaining: ${rec.fillLevel}%` : null,

@@ -3,6 +3,7 @@ import {
   WHISKY_EDITION_API_URL,
   fetchWhiskyEditionCandidates,
   whiskyEditionCategory,
+  whiskyEditionCountry,
   whiskyEditionReviewsToCandidates,
   type WhiskyEditionReview,
 } from "./whiskyedition";
@@ -29,6 +30,7 @@ describe("whiskyEditionReviewsToCandidates", () => {
       name: "Ledaig 5 Years (2020/2025) - James Eadie",
       category: "scotch-single-malt",
       source: "whiskyedition",
+      country: "Scotland",
       region: "Isle of Mull",
       ageYears: 5,
       abv: 52.6,
@@ -44,6 +46,20 @@ describe("whiskyEditionReviewsToCandidates", () => {
       review({}),
     ]);
     expect(candidates).toHaveLength(1);
+  });
+});
+
+describe("whiskyEditionCountry", () => {
+  const country = (value: string | null | undefined): string | null =>
+    whiskyEditionCountry({ name: "x", metadata: { country: value } });
+
+  it("collapses US spelling variants and passes English names through", () => {
+    expect(country("United States")).toBe("USA");
+    expect(country("usa")).toBe("USA");
+    expect(country("Scotland")).toBe("Scotland");
+    expect(country("Taiwan")).toBe("Taiwan");
+    expect(country("")).toBeNull();
+    expect(country(null)).toBeNull();
   });
 });
 

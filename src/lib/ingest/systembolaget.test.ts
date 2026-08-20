@@ -3,6 +3,7 @@ import {
   SYSTEMBOLAGET_MIRROR_URL,
   fetchSystembolagetCandidates,
   systembolagetCategory,
+  systembolagetCountry,
   systembolagetProductsToCandidates,
   type SystembolagetProduct,
 } from "./systembolaget";
@@ -54,6 +55,29 @@ describe("systembolagetProductsToCandidates", () => {
   it("dedupes identical names", () => {
     const { candidates } = systembolagetProductsToCandidates([product({}), product({})]);
     expect(candidates).toHaveLength(1);
+  });
+});
+
+describe("systembolagetCountry", () => {
+  it("translates Swedish country names to the catalog's English ones", () => {
+    expect(systembolagetCountry(product({ country: "Skottland" }))).toBe("Scotland");
+    expect(systembolagetCountry(product({ country: "Irland" }))).toBe("Ireland");
+    expect(systembolagetCountry(product({ country: "Kanada" }))).toBe("Canada");
+    expect(systembolagetCountry(product({ country: "Sverige" }))).toBe("Sweden");
+    expect(systembolagetCountry(product({ country: "USA" }))).toBe("USA");
+  });
+
+  it("stays null for Storbritannien and unknowns — the category fallback decides", () => {
+    // "Storbritannien" doesn't say which whisky nation; a Maltwhisky row still
+    // resolves to Scotland via categoryCountry(scotch-single-malt) at insert.
+    expect(systembolagetCountry(product({ country: "Storbritannien" }))).toBeNull();
+    expect(systembolagetCountry(product({ country: "Mongoliet" }))).toBeNull();
+    expect(systembolagetCountry(product({ country: null }))).toBeNull();
+  });
+
+  it("carries the mapped country on candidates", () => {
+    const { candidates } = systembolagetProductsToCandidates([product({ country: "Japan", categoryLevel3: "Maltwhisky" })]);
+    expect(candidates[0]).toMatchObject({ country: "Japan", category: "japanese" });
   });
 });
 

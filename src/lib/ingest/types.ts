@@ -12,6 +12,14 @@ export interface CatalogCandidate {
   category: WhiskeyCategory;
   /** Data source tag, recorded in the ingest report and UPC rows. */
   source: "iowa" | "cola" | "oregon" | "utah" | "bc" | "systembolaget" | "whiskyedition" | "vinmonopolet";
+  /**
+   * Normalized English country name ("Scotland", "USA"), when the source
+   * states one. Adapters translate source vocabularies (Swedish names,
+   * "United States" variants) before it lands here; the shared insert path
+   * falls back to `categoryCountry()` for geographically defined categories.
+   */
+  country?: string;
+  /** Sub-national origin only (see bottles.region) — never a country. */
   region?: string;
   ageYears?: number | null;
   abv?: number | null;

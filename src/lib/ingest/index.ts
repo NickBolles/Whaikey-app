@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import type { DB } from "@/db";
 import { bottleAliases, bottles, bottleUpcs, pours, userBottles, UPC_SOURCES, type UpcSource } from "@/db/schema";
+import { categoryCountry } from "@/lib/origin";
 import { slugify } from "./normalize";
 import type { CatalogCandidate, IngestReport } from "./types";
 
@@ -99,6 +100,11 @@ export async function ingestCandidates(
       bottleId = slug;
       report.inserted += 1;
       slugToBottle.set(slug, bottleId);
+      // Same origin contract the seed enforces via bottleOrigin(): country from
+      // the source when it states one, else implied by a geographically defined
+      // category; region is sub-national or null, never a repeat of the country.
+      const country = candidate.country ?? categoryCountry(candidate.category);
+      const region = candidate.region && candidate.region !== country ? candidate.region : null;
       if (!opts.dryRun) {
         await db
           .insert(bottles)
@@ -106,7 +112,8 @@ export async function ingestCandidates(
             id: bottleId,
             name: candidate.name,
             category: candidate.category,
-            region: candidate.region ?? null,
+            country,
+            region,
             ageYears: candidate.ageYears ?? null,
             abv: candidate.abv ?? null,
             avgPrice: candidate.avgPrice ?? null,
