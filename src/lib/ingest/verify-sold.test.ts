@@ -158,6 +158,61 @@ describe("sold verification", () => {
     expect(await db.select().from(schema.bottleVerifications)).toEqual([]);
   });
 
+  it("promotes a vetted feedback producer link after deterministic identity validation", async () => {
+    const db: DB = await setupTestDb();
+    const bottle = await createTestBottle(db, { id: "feedback-producer-promotion", name: "Example Bottle", status: "imported", abv: null });
+    await db.insert(schema.catalogSources).values([
+      {
+        id: "trusted-producer",
+        name: "Example Producer",
+        kind: "official",
+        baseUrl: "https://producer.example",
+        fetchPolicy: "structured",
+        mediaPolicy: "review_required",
+      },
+      {
+        id: "feedback-producer",
+        name: "Feedback producer",
+        kind: "registry",
+        baseUrl: "https://producer.example",
+        fetchPolicy: "link_only",
+        mediaPolicy: "link_only",
+      },
+    ]);
+    await db.insert(schema.bottleResources).values({
+      id: "feedback-producer-resource",
+      bottleId: bottle.id,
+      sourceId: "feedback-producer",
+      resourceType: "producer",
+      url: "https://producer.example/products/bottle",
+      retrievedAt: new Date(),
+    });
+    const verification = normalizeSoldVerification({
+      id: bottle.id,
+      sold: true,
+      evidenceUrl: "https://producer.example/products/bottle",
+      evidenceLabel: "Example Producer",
+      evidenceKind: "manufacturer",
+      retailerSku: null,
+      upcs: [],
+      abv: 46,
+      ageYears: null,
+      price: null,
+      description: null,
+    })!;
+
+    expect(await persistSoldVerification(db, verification, false, {
+      fetchImpl: (async () => new Response(manufacturerPage(bottle.name), {
+        status: 200,
+        headers: { "content-type": "text/html" },
+      })) as typeof fetch,
+    })).toBe(true);
+    expect(await db.select().from(schema.bottleResources)).toEqual([
+      expect.objectContaining({ sourceId: "trusted-producer", resourceType: "official_product" }),
+    ]);
+    expect((await db.select().from(schema.bottles).where(eq(schema.bottles.id, bottle.id)))[0].status).toBe("verified");
+  });
+
   it("rejects a curated manufacturer page for a different bottling", async () => {
     const db: DB = await setupTestDb();
     const bottle = await createTestBottle(db, { id: "mismatched-manufacturer", name: "Example Reserve 10 Year", status: "imported", abv: null });

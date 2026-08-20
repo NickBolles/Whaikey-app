@@ -736,6 +736,16 @@ describe("source-backed persistence", () => {
       apply: true,
       fetchImpl: (async () => htmlResponse(PRODUCT_HTML)) as typeof fetch,
     });
+    const fallbackSource = { ...OFFICIAL_SOURCE, id: "fallback-image-source" };
+    const fallbackUrl = "https://www.example-distillery.com/products/fallback-reserve";
+    const fallbackImage = "https://www.example-distillery.com/images/fallback-policy.png";
+    const fallbackHtml = PRODUCT_HTML
+      .replace("https://www.example-distillery.com/products/reserve-10", fallbackUrl)
+      .replaceAll("https://www.example-distillery.com/images/reserve-10.png", fallbackImage);
+    await ingestSourceManifest(db, {
+      sources: [fallbackSource],
+      resources: [{ ...resource, sourceId: fallbackSource.id, url: fallbackUrl }],
+    }, { apply: true, fetchImpl: (async () => htmlResponse(fallbackHtml)) as typeof fetch });
     const unavailableFetch = vi.fn(async () => { throw new Error("origin unavailable"); }) as unknown as typeof fetch;
     const report = await ingestSourceManifest(db, {
       sources: [{ ...OFFICIAL_SOURCE, mediaPolicy: "link_only" }],
@@ -745,10 +755,15 @@ describe("source-backed persistence", () => {
     expect(report.errors[0]?.error).toMatch(/origin unavailable/i);
     expect((await db.select().from(schema.catalogSources).where(eq(schema.catalogSources.id, OFFICIAL_SOURCE.id)))[0].mediaPolicy)
       .toBe("link_only");
-    expect(await db.select().from(schema.bottleMedia)).toEqual([
-      expect.objectContaining({ rights: "link_only", canonicalized: false }),
+    expect((await db.select().from(schema.bottleMedia)).map((media) => ({
+      url: media.url,
+      rights: media.rights,
+      canonicalized: media.canonicalized,
+    })).sort((a, b) => a.url.localeCompare(b.url))).toEqual([
+      { url: fallbackImage, rights: "display_remote", canonicalized: true },
+      { url: "https://www.example-distillery.com/images/reserve-10.png", rights: "link_only", canonicalized: false },
     ]);
-    expect((await db.select().from(schema.bottles).where(eq(schema.bottles.id, bottle.id)))[0].imageUrl).toBeNull();
+    expect((await db.select().from(schema.bottles).where(eq(schema.bottles.id, bottle.id)))[0].imageUrl).toBe(fallbackImage);
   });
 
   it("preserves a matching curated image when restricted source media was never canonicalized", async () => {

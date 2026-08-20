@@ -164,7 +164,18 @@ export async function persistSoldVerification(
     if (existingResource && (
       existingResource.sourceId !== trustedManufacturer.id ||
       existingResource.resourceType !== "official_product"
-    )) return false;
+    )) {
+      const [existingSource] = await db.select({
+        kind: catalogSources.kind,
+        baseUrl: catalogSources.baseUrl,
+        fetchPolicy: catalogSources.fetchPolicy,
+        enabled: catalogSources.enabled,
+      }).from(catalogSources).where(eq(catalogSources.id, existingResource.sourceId)).limit(1);
+      const promotableFeedbackLink = existingResource.resourceType === "producer" &&
+        existingSource?.kind === "registry" && existingSource.fetchPolicy === "link_only" &&
+        existingSource.enabled && existingSource.baseUrl === evidence.origin;
+      if (!promotableFeedbackLink) return false;
+    }
 
     const report = await ingestSourceManifest(db, {
       sources: [{

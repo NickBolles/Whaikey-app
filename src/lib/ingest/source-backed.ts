@@ -705,12 +705,39 @@ export async function ingestSourceManifest(
             rights: source.mediaPolicy,
             canonicalized: false,
           }).where(inArray(bottleMedia.id, sourceMedia.map((media) => media.id)));
+          const clearedBottleIds = new Set<string>();
           for (const media of sourceMedia) {
             if (!media.canonicalized) continue;
-            await db.update(bottles).set({ imageUrl: null }).where(and(
+            const cleared = await db.update(bottles).set({ imageUrl: null }).where(and(
               eq(bottles.id, media.bottleId),
               eq(bottles.imageUrl, media.url),
+            )).returning({ id: bottles.id });
+            if (cleared.length > 0) clearedBottleIds.add(media.bottleId);
+          }
+          for (const bottleId of clearedBottleIds) {
+            const [fallback] = await db.select({ id: bottleMedia.id, url: bottleMedia.url })
+              .from(bottleMedia)
+              .innerJoin(bottleResources, eq(bottleMedia.resourceId, bottleResources.id))
+              .innerJoin(catalogSources, eq(bottleResources.sourceId, catalogSources.id))
+              .where(and(
+                eq(bottleMedia.bottleId, bottleId),
+                eq(bottleMedia.kind, "bottle"),
+                eq(bottleMedia.rights, "display_remote"),
+                eq(bottleResources.resourceType, "official_product"),
+                eq(catalogSources.kind, "official"),
+                eq(catalogSources.enabled, true),
+                hasNoEnabledRestrictedTwin,
+              ))
+              .orderBy(desc(bottleMedia.isPrimary), asc(catalogSources.id), asc(bottleMedia.id))
+              .limit(1);
+            if (!fallback) continue;
+            await db.update(bottles).set({ imageUrl: fallback.url }).where(eq(bottles.id, bottleId));
+            await db.update(bottleMedia).set({ canonicalized: false }).where(and(
+              eq(bottleMedia.bottleId, bottleId),
+              eq(bottleMedia.kind, "bottle"),
+              eq(bottleMedia.canonicalized, true),
             ));
+            await db.update(bottleMedia).set({ canonicalized: true }).where(eq(bottleMedia.id, fallback.id));
           }
         }
         // Restrictive changes are safety revocations, not optimistic updates:
@@ -837,9 +864,23 @@ export async function ingestSourceManifest(
       const manifestMatch = candidates.find((candidate) => candidate.id === manifestResourceId);
       const canonicalMatch = candidates.find((candidate) => candidate.url === parsed.canonicalUrl);
       const existing = manifestMatch ?? canonicalMatch ?? candidates[0];
-      const conflictingSource = candidates.find((candidate) => candidate.sourceId !== source.id);
-      if (conflictingSource) {
-        throw new Error(`Resource URL is already associated with source ${conflictingSource.sourceId}`);
+      const conflictingSources = candidates.filter((candidate) => candidate.sourceId !== source.id);
+      for (const conflicting of conflictingSources) {
+        const [priorSource] = await db.select({
+          kind: catalogSources.kind,
+          baseUrl: catalogSources.baseUrl,
+          fetchPolicy: catalogSources.fetchPolicy,
+          enabled: catalogSources.enabled,
+        }).from(catalogSources).where(eq(catalogSources.id, conflicting.sourceId)).limit(1);
+        const promotableFeedbackLink = parsed.primaryProductMatched &&
+          source.kind === "official" && policyAllowsOfficialAuthority &&
+          resource.resourceType === "official_product" &&
+          conflicting.resourceType === "producer" &&
+          priorSource?.kind === "registry" && priorSource.fetchPolicy === "link_only" &&
+          priorSource.enabled && priorSource.baseUrl === new URL(source.baseUrl).origin;
+        if (!promotableFeedbackLink) {
+          throw new Error(`Resource URL is already associated with source ${conflicting.sourceId}`);
+        }
       }
       const previouslyOfficialProduct = existing?.resourceType === "official_product" &&
         previouslyStructuredOfficialSourceIds.has(source.id);
