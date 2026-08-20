@@ -220,6 +220,41 @@ describe("listUserBottles", () => {
     const all = await listUserBottles(db, user.id);
     expect(all).toHaveLength(2);
   });
+
+  it("summarises the user's pours per bottle: count, average, and range", async () => {
+    const db = await setupTestDb();
+    const user = await createTestUser(db);
+    const other = await createTestUser(db);
+    const poured = await createTestBottle(db, { name: "Poured" });
+    const untouched = await createTestBottle(db, { name: "Untouched" });
+
+    await seedUserBottle(db, { userId: user.id, bottleId: poured.id, relationship: "own" });
+    await seedUserBottle(db, { userId: user.id, bottleId: untouched.id, relationship: "own" });
+
+    // Three pours, one unrated: the unrated one counts a pour but never drags
+    // the average or the range.
+    for (const rating of [3.5, 4.5, null]) {
+      await db
+        .insert(schema.pours)
+        .values({ id: uid("pour"), userId: user.id, bottleId: poured.id, rating });
+    }
+    // Another user's pour of the same bottle must not leak in.
+    await db
+      .insert(schema.pours)
+      .values({ id: uid("pour"), userId: other.id, bottleId: poured.id, rating: 1 });
+
+    const rows = await listUserBottles(db, user.id);
+    const byName = new Map(rows.map((r) => [r.bottle.name, r]));
+
+    expect(byName.get("Poured")).toMatchObject({
+      personalRating: 4,
+      pourStats: { pourCount: 3, ratedPourCount: 2, ratingMin: 3.5, ratingMax: 4.5 },
+    });
+    expect(byName.get("Untouched")).toMatchObject({
+      personalRating: null,
+      pourStats: { pourCount: 0, ratedPourCount: 0, ratingMin: null, ratingMax: null },
+    });
+  });
 });
 
 describe("getBarFlavorHeat", () => {
