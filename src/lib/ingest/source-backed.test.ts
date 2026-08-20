@@ -508,6 +508,49 @@ describe("source-backed persistence", () => {
     expect((await db.select().from(schema.bottleMedia)).find((media) => media.url === fallbackImage)?.canonicalized).toBe(true);
   });
 
+  it("selects one deterministic fallback owner when multiple official sources remain", async () => {
+    const bottle = await createTestBottle(db, { id: "deterministic-fallback", status: "imported", abv: null, imageUrl: null });
+    const owner = { ...OFFICIAL_SOURCE, id: "fallback-owner" };
+    const alpha = { ...OFFICIAL_SOURCE, id: "fallback-alpha" };
+    const zulu = { ...OFFICIAL_SOURCE, id: "fallback-zulu" };
+    const resource = (sourceId: string, path: string) => ({
+      bottleId: bottle.id,
+      sourceId,
+      url: `https://www.example-distillery.com/products/${path}`,
+      resourceType: "official_product" as const,
+      mediaKind: "bottle" as const,
+    });
+    const page = (path: string, abv: string, image: string) => PRODUCT_HTML
+      .replace("https://www.example-distillery.com/products/reserve-10", `https://www.example-distillery.com/products/${path}`)
+      .replace('"value":"45%"', `"value":"${abv}%"`)
+      .replaceAll("https://www.example-distillery.com/images/reserve-10.png", image);
+    const alphaImage = "https://www.example-distillery.com/images/alpha.png";
+    const zuluImage = "https://www.example-distillery.com/images/zulu.png";
+
+    await ingestSourceManifest(db, { sources: [owner], resources: [resource(owner.id, "owner")] }, {
+      apply: true, fetchImpl: (async () => htmlResponse(page("owner", "45", "https://www.example-distillery.com/images/owner.png"))) as typeof fetch,
+    });
+    await ingestSourceManifest(db, { sources: [alpha], resources: [resource(alpha.id, "alpha")] }, {
+      apply: true, fetchImpl: (async () => htmlResponse(page("alpha", "50", alphaImage))) as typeof fetch,
+    });
+    await ingestSourceManifest(db, { sources: [zulu], resources: [resource(zulu.id, "zulu")] }, {
+      apply: true, fetchImpl: (async () => htmlResponse(page("zulu", "55", zuluImage))) as typeof fetch,
+    });
+    await ingestSourceManifest(db, {
+      sources: [owner],
+      resources: [{ ...resource(owner.id, "owner"), resourceType: "review" }],
+    }, { apply: true, fetchImpl: (async () => htmlResponse(page("owner", "45", "https://www.example-distillery.com/images/owner.png"))) as typeof fetch });
+
+    const updated = (await db.select().from(schema.bottles).where(eq(schema.bottles.id, bottle.id)))[0];
+    expect(updated).toMatchObject({ abv: 50, imageUrl: alphaImage });
+    expect((await db.select().from(schema.bottleClaims))
+      .filter((claim) => claim.field === "abv" && claim.canonicalized)
+      .map((claim) => claim.value)).toEqual([50]);
+    expect((await db.select().from(schema.bottleMedia))
+      .filter((media) => media.kind === "bottle" && media.canonicalized)
+      .map((media) => media.url)).toEqual([alphaImage]);
+  });
+
   it("tightens persisted media rights even when page content is unchanged", async () => {
     const bottle = await createTestBottle(db, { id: "media-policy-change", status: "imported" });
     const resource = {

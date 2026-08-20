@@ -3,7 +3,7 @@ import { lookup } from "node:dns/promises";
 import { request as httpsRequest } from "node:https";
 import { isIP } from "node:net";
 import { Readable } from "node:stream";
-import { and, desc, eq, inArray, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, ne, or, sql } from "drizzle-orm";
 import type { DB } from "@/db";
 import {
   bottleClaims,
@@ -833,9 +833,30 @@ export async function ingestSourceManifest(
             eq(catalogSources.kind, "official"),
             eq(catalogSources.enabled, true),
           ))
-          .orderBy(desc(bottleClaims.canonicalized), desc(bottleClaims.createdAt))
+          .orderBy(
+            desc(bottleClaims.canonicalized),
+            asc(catalogSources.id),
+            asc(bottleResources.id),
+            asc(bottleClaims.id),
+          )
           .limit(1);
         return claim;
+      };
+      const transferClaimOwnership = async (field: "abv" | "ageYears", claimId: string) => {
+        await db.update(bottleClaims).set({ canonicalized: false }).where(and(
+          eq(bottleClaims.bottleId, bottle.id),
+          eq(bottleClaims.field, field),
+          eq(bottleClaims.canonicalized, true),
+        ));
+        await db.update(bottleClaims).set({ canonicalized: true }).where(eq(bottleClaims.id, claimId));
+      };
+      const transferImageOwnership = async (mediaId: string) => {
+        await db.update(bottleMedia).set({ canonicalized: false }).where(and(
+          eq(bottleMedia.bottleId, bottle.id),
+          eq(bottleMedia.kind, "bottle"),
+          eq(bottleMedia.canonicalized, true),
+        ));
+        await db.update(bottleMedia).set({ canonicalized: true }).where(eq(bottleMedia.id, mediaId));
       };
       const [restorableManagedImage] = await db.select({ id: bottleMedia.id, url: bottleMedia.url }).from(bottleMedia)
         .innerJoin(bottleResources, eq(bottleMedia.resourceId, bottleResources.id))
@@ -849,7 +870,13 @@ export async function ingestSourceManifest(
           eq(catalogSources.enabled, true),
           hasNoEnabledRestrictedTwin,
         ))
-        .orderBy(desc(bottleMedia.canonicalized), desc(bottleMedia.isPrimary), desc(bottleMedia.createdAt))
+        .orderBy(
+          desc(bottleMedia.canonicalized),
+          asc(catalogSources.id),
+          asc(bottleResources.id),
+          desc(bottleMedia.isPrimary),
+          asc(bottleMedia.id),
+        )
         .limit(1);
       const verificationIds = [...new Set([
         ...candidates.map((candidate) => stableId("verification", bottle.id, candidate.url)),
@@ -871,7 +898,7 @@ export async function ingestSourceManifest(
           typeof fallbackAbv?.value === "number" ? fallbackAbv.value : null;
         const nextAge = typeof ageYears === "number" ? ageYears :
           typeof fallbackAge?.value === "number" ? fallbackAge.value : null;
-        const [image] = await db.select({ url: bottleMedia.url }).from(bottleMedia)
+        const [image] = await db.select({ id: bottleMedia.id, url: bottleMedia.url }).from(bottleMedia)
           .innerJoin(bottleResources, eq(bottleMedia.resourceId, bottleResources.id))
           .innerJoin(catalogSources, eq(bottleResources.sourceId, catalogSources.id))
           .where(and(
@@ -896,19 +923,15 @@ export async function ingestSourceManifest(
         }
         if (Object.keys(patch).length > 0) await db.update(bottles).set(patch).where(eq(bottles.id, bottle.id));
         if (fallbackAbv && patch.abv === fallbackAbv.value) {
-          await db.update(bottleClaims).set({ canonicalized: true }).where(eq(bottleClaims.id, fallbackAbv.id));
+          await transferClaimOwnership("abv", fallbackAbv.id);
         }
         if (fallbackAge && patch.ageYears === fallbackAge.value) {
-          await db.update(bottleClaims).set({ canonicalized: true }).where(eq(bottleClaims.id, fallbackAge.id));
+          await transferClaimOwnership("ageYears", fallbackAge.id);
         }
         if (image && patch.imageUrl === image.url) {
-          await db.update(bottleMedia).set({ canonicalized: true }).where(and(
-            eq(bottleMedia.resourceId, resourceId), eq(bottleMedia.url, image.url),
-          ));
-        }
-        if (restorableManagedImage && patch.imageUrl === restorableManagedImage.url) {
-          await db.update(bottleMedia).set({ canonicalized: true })
-            .where(eq(bottleMedia.id, restorableManagedImage.id));
+          await transferImageOwnership(image.id);
+        } else if (restorableManagedImage && patch.imageUrl === restorableManagedImage.url) {
+          await transferImageOwnership(restorableManagedImage.id);
         }
         for (const previous of candidates) {
           if (previous.url !== parsed.canonicalUrl) {
@@ -960,14 +983,13 @@ export async function ingestSourceManifest(
           await db.update(bottles).set(revokedCanonical).where(eq(bottles.id, bottle.id));
         }
         if (fallbackAbv && revokedCanonical.abv === fallbackAbv.value) {
-          await db.update(bottleClaims).set({ canonicalized: true }).where(eq(bottleClaims.id, fallbackAbv.id));
+          await transferClaimOwnership("abv", fallbackAbv.id);
         }
         if (fallbackAge && revokedCanonical.ageYears === fallbackAge.value) {
-          await db.update(bottleClaims).set({ canonicalized: true }).where(eq(bottleClaims.id, fallbackAge.id));
+          await transferClaimOwnership("ageYears", fallbackAge.id);
         }
         if (restorableManagedImage && revokedCanonical.imageUrl === restorableManagedImage.url) {
-          await db.update(bottleMedia).set({ canonicalized: true })
-            .where(eq(bottleMedia.id, restorableManagedImage.id));
+          await transferImageOwnership(restorableManagedImage.id);
         }
       }
     } catch (error) {
