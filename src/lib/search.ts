@@ -47,6 +47,7 @@ const resultColumns = {
   name: bottles.name,
   category: bottles.category,
   distillery: distilleries.name,
+  country: bottles.country,
   region: bottles.region,
   ageYears: bottles.ageYears,
   abv: bottles.abv,

@@ -23,6 +23,7 @@ import type { BottleSearchResult } from "@/lib/ai/tools";
 import { CategoryChip } from "@/components/category-chip";
 import { haptic } from "@/lib/native/haptics";
 import { isNativeApp } from "@/lib/native/platform";
+import { originLabel } from "@/lib/origin";
 import {
   isNativeTorchAvailable,
   setNativeTorch,
@@ -1281,7 +1282,7 @@ function DecisionSheet({
                 <div className="min-w-0">
                   <div className="font-medium truncate">{b.name}</div>
                   <div className="text-xs text-muted truncate mt-0.5">
-                    {[b.distillery, b.region].filter(Boolean).join(" · ")}
+                    {[b.distillery, originLabel(b.region, b.country)].filter(Boolean).join(" · ")}
                   </div>
                   <div className="mt-1.5">
                     <CategoryChip category={b.category} />

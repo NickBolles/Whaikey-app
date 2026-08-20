@@ -331,7 +331,7 @@ Inspired by Vivino's "Wine Adventures" (gamified guided tasting journeys, a Prem
 ### 10.3 Guided tastings — where learning meets the glass (🔵 Phase 3–4)
 - Structured tasting exercises using a bottle you own: step-by-step nosing/tasting prompts, wheel input at each step, then compare your notes to community/expert consensus.
 - **Palate training**: "Can you find the vanilla?" exercises; blind-mode variants with a friend pouring.
-- **Taste-along flights**: curated multi-bottle journeys ("The Scotch regions" — all six of `SCOTCH_REGIONS`, §11.1) — works with what you own, suggests affordable fills for gaps (a natural, honest commerce hook later).
+- **Taste-along flights**: curated multi-bottle journeys ("The Scotch regions") — works with what you own, suggests affordable fills for gaps (a natural, honest commerce hook later).
 - Calibration payoff: guided tastings feed the palate profile with higher-quality signal than casual pours.
 
 ### 10.4 AI tutor mode (🔵)
@@ -353,8 +353,8 @@ The app's progress surface, and the answer to "what do I try next?". Whiskey is 
 
 | Dimension | Source | Shape |
 |---|---|---|
-| **Regions** | `bottles.region` | Closed per country (Scotland's six — see below) → completable |
-| **Countries** | `distilleries.country` | Semi-closed (~15 producing countries worth naming) |
+| **Countries** | `bottles.country` | Known for **every** bottle → the dimension that always works |
+| **Regions** | `bottles.region` | Sub-national, and only where the catalog knows one → finer grain, sparser |
 | **Distilleries** | `bottles.distilleryId` | Open-ended → milestone tiers |
 | **Cask types** | `bottles.caskTypes[]` | Semi-closed (sherry, bourbon, port, madeira, virgin oak, mizunara…) |
 | **Categories** | `bottles.category` | Closed (the `WhiskeyCategory` union) |
@@ -362,11 +362,16 @@ The app's progress surface, and the answer to "what do I try next?". Whiskey is 
 
 Every dimension is derivable from data already stored. No new logging step, no new field for the user to fill: **you earn a passport by using the app normally.**
 
-**On "Scotland's six".** Two numbers are both true and must not be swapped. The Scotch Whisky Regulations 2009 protect **five** localities — Speyside, Highland, Lowland, Islay, Campbeltown — and formally fold the islands into the Highlands. The shelf disagrees, and so does our catalog: `bottles.region` stores `"Islands"` for Highland Park, Talisker, Arran, Jura and Tobermory. A counter derived from that column therefore has a denominator of **six**, and folding Islands away would tell a Talisker drinker their region doesn't exist.
+**Country and region are two dimensions, not one.** Every bottle has a country — including a blended Scotch, which is married from several regions and belongs to none. Not every bottle has a region, and that is fine: a region is *sub-national* detail (a Scotch region, a US state) and null when there isn't one.
 
-So: **the product counts six; the lesson teaches that five are protected.** Both live in one place — `src/lib/scotch-regions.ts` exports `SCOTCH_REGIONS`, `SCOTCH_REGION_COUNT` (6) and `PROTECTED_SCOTCH_REGION_COUNT` (5), the regions lesson generates its tour from it, and a test asserts the seeded catalog uses no region name outside the set. Never write either number as a literal, in code or in copy.
+Keeping them separate is what makes the counters honest. The catalog used to store whatever was handy in `bottles.region` — `"Islay"` on one row, `"Kentucky"` on the next, `"Scotland"` on a blend — so anything counting distinct regions saw a country as a peer of a region, and a bottle of Johnnie Walker looked like a region nobody could visit. Now `bottles.country` carries the country (inherited from the distillery, or declared where there is none), `bottles.region` is sub-national or null, and `bottleOrigin()` enforces both rules at seed time. Screens that want one line ask `originLabel()` for the most specific name available.
 
-One value in that column is not a region: blended Scotch carries `"Scotland"` (`SCOTCH_BLEND_REGION`), because a blend is married from several regions and belongs to none. It renders fine on a bottle page and **never counts** — otherwise a bottle of Johnnie Walker would award a seventh region.
+Two badge families fall straight out of that, and neither needs a curated list to start:
+
+- **Countries** — the dimension that always works. Every bottle counts, so a new user's first pour puts something on the map. Scotland, Ireland, USA, Japan, Canada, India, Taiwan, Australia, Wales…
+- **Regions** — the finer grain within a country, where we know it. Islay, Speyside, Kentucky, Islands.
+
+Both are open sets counted as *distinct met*, which needs no denominator at all. **Completions** — "all six Scotch regions" — do need one, and a curated per-country region list is the thing to add *when* we build them, not before. That is also where the five-vs-six question gets settled deliberately: the Scotch Whisky Regulations protect five localities and formally fold the islands into the Highlands, while our catalog (and most shelves) treat Islands as its own. Either answer is defensible; what isn't is a counter and a lesson quietly disagreeing.
 
 ### 11.2 What counts as "met"
 
@@ -384,7 +389,7 @@ The plain numbers, on My Bar and on the profile palate card: *"3 of 6 Scotch reg
 
 Three kinds, deliberately different in feel:
 
-- **Completions** — a closed set finished. *All six Scotch regions. Every category. A full flavor wedge named across your own notes.* The satisfying kind, because it can actually end.
+- **Completions** — a closed set finished. *Every Scotch region. Every category. A full flavor wedge named across your own notes.* The satisfying kind, because it can actually end — and the kind that needs a curated denominator first (§11.1).
 - **Milestones** — tiers on the open sets, at 5 / 10 / 25 / 50 / 100. *"25 distilleries."* Always a next one, never a last one.
 - **Discoveries** — a shape in what you've done rather than a count. *Four cask finishes of the same distillate. A region tried before it was in your recommendations. The same bottle noted a year apart with different descriptors* (that one rewards returning attentively, not consuming).
 

@@ -38,6 +38,7 @@ export async function resolveUpc(db: DB, upc: string): Promise<UpcMatch[]> {
       id: schema.bottles.id,
       name: schema.bottles.name,
       category: schema.bottles.category,
+      country: schema.bottles.country,
       region: schema.bottles.region,
       ageYears: schema.bottles.ageYears,
       abv: schema.bottles.abv,

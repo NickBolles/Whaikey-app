@@ -129,6 +129,18 @@ export const bottles = pgTable(
     distilleryId: text("distillery_id").references(() => distilleries.id),
     name: text("name").notNull(),
     category: text("category").$type<WhiskeyCategory>().notNull(),
+    /**
+     * Where it was made. Always set for seeded bottles, including blends and
+     * sourced bottlings that have no single distillery to inherit it from —
+     * which is why it lives here rather than being read through `distilleryId`.
+     */
+    country: text("country"),
+    /**
+     * Sub-national origin only — a Scotch region, a US state, a Japanese
+     * prefecture — and null whenever there isn't one. Never a country: a
+     * blended Scotch is `country: "Scotland", region: null`, not the other way
+     * around, so anything counting regions can count this column directly.
+     */
     region: text("region"),
     ageYears: integer("age_years"),
     abv: doublePrecision("abv"),

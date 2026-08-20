@@ -9,12 +9,6 @@
  * Progress is knowledge-based (lessons finished), never pours poured.
  */
 
-import {
-  PROTECTED_SCOTCH_REGION_COUNT,
-  SCOTCH_REGIONS,
-  SCOTCH_REGION_COUNT,
-} from "@/lib/scotch-regions";
-
 export interface QuizQuestion {
   prompt: string;
   options: string[];
@@ -640,18 +634,22 @@ export const TRACKS: Track[] = [
         relatedWedgeIds: ["fruity", "floral", "peaty"],
         sections: [
           {
-            heading: "Five protected, six on the shelf",
+            heading: "Five-ish regions",
             paragraphs: [
-              `Scotland's whisky map is legally carved into ${PROTECTED_SCOTCH_REGION_COUNT} protected regions — Speyside, Highland, Lowland, Islay, and Campbeltown — with the scattered Islands formally folded into the Highlands. Almost nobody shelves them that way, though, and neither do we: bottles from Orkney to Arran are labelled Islands here, so Whaikey counts ${SCOTCH_REGION_COUNT}. Each grew a house style out of its geography, water, and history.`,
+              "Scotland's whisky map is traditionally carved into five protected regions — Speyside, Highland, Lowland, Islay, and Campbeltown — with the scattered Islands usually folded into the Highlands. Each grew a house style out of its geography, water, and history.",
             ],
           },
           {
             heading: "The tour",
             paragraphs: ["One line each, to get your bearings:"],
-            // Generated from the shared region contract so the lesson, the
-            // passport counter and any region filter can never disagree about
-            // what the set is (src/lib/scotch-regions.ts).
-            bullets: SCOTCH_REGIONS.map((r) => `${r.label} — ${r.blurb}`),
+            bullets: [
+              "Speyside — the densest cluster of distilleries in the world; orchard fruit, honey, and elegant sherried malts.",
+              "Highland — the biggest and most varied region: heather and honey in the south, dry spice in the north, salt at the coasts.",
+              "Lowland — traditionally gentle, grassy, and light; a classic first-Scotch region.",
+              "Islay — peat smoke, brine, and iodine; small island, enormous flavors.",
+              "Campbeltown — once \"the whisky capital of the world\", now a tiny, cultish region of oily, briny, lightly funky malts.",
+              "Islands — Orkney to Arran: heathery smoke, sea spray, and everything between.",
+            ],
           },
           {
             heading: "A compass, not a cage",
