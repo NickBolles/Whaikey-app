@@ -21,6 +21,16 @@ export {
   type CatalogSourceManifest,
   type SourceIngestReport,
 } from "./source-backed";
+export {
+  bottleIdFromReference,
+  buildFeedbackReviewPrompt,
+  buildFeedbackReviewSchema,
+  issueSection,
+  normalizeFeedbackReview,
+  reviewWhiskeyFeedback,
+  type FeedbackReviewResult,
+  type WhiskeyFeedbackIssue,
+} from "./feedback-review";
 
 /** UPC provenance for a candidate's barcodes: the source's own tag when it is a UpcSource, else "seed". */
 function upcSourceFor(candidate: CatalogCandidate): UpcSource {

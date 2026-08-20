@@ -246,6 +246,36 @@ describe("source-backed persistence", () => {
     expect((await db.select().from(schema.bottleClaims)).some((claim) => claim.field === "abv" || claim.field === "ageYears")).toBe(false);
   });
 
+  it("serializes official resources for one bottle while allowing cross-bottle concurrency", async () => {
+    const bottle = await createTestBottle(db, { id: "serialized-canonical", status: "imported", abv: null });
+    const sourceA = { ...OFFICIAL_SOURCE, id: "serialize-a" };
+    const sourceB = { ...OFFICIAL_SOURCE, id: "serialize-b" };
+    const page = (path: string, abv: string) => PRODUCT_HTML
+      .replace("https://www.example-distillery.com/products/reserve-10", `https://www.example-distillery.com/products/${path}`)
+      .replace('"value":"45%"', `"value":"${abv}%"`);
+    const fetchImpl = vi.fn(async (url: string | URL | Request) => {
+      const current = String(url);
+      if (current.endsWith("/a")) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        return htmlResponse(page("a", "45"));
+      }
+      return htmlResponse(page("b", "50"));
+    }) as unknown as typeof fetch;
+
+    await ingestSourceManifest(db, {
+      sources: [sourceA, sourceB],
+      resources: [
+        { bottleId: bottle.id, sourceId: sourceA.id, url: "https://www.example-distillery.com/products/a", resourceType: "official_product" },
+        { bottleId: bottle.id, sourceId: sourceB.id, url: "https://www.example-distillery.com/products/b", resourceType: "official_product" },
+      ],
+    }, { apply: true, fetchImpl, concurrency: 4 });
+
+    expect((await db.select().from(schema.bottles).where(eq(schema.bottles.id, bottle.id)))[0].abv).toBe(45);
+    expect((await db.select().from(schema.bottleClaims))
+      .filter((claim) => claim.field === "abv" && claim.canonicalized)
+      .map((claim) => claim.value)).toEqual([45]);
+  });
+
   it("promotes a remaining official fallback when the owning source removes a canonical fact", async () => {
     const bottle = await createTestBottle(db, { id: "fallback-canonical-fact", status: "imported", abv: null });
     const sourceA = { ...OFFICIAL_SOURCE, id: "official-a" };
@@ -374,7 +404,9 @@ describe("source-backed persistence", () => {
     }, { apply: true, fetchImpl });
 
     expect((await db.select().from(schema.bottles).where(eq(schema.bottles.id, bottle.id)))[0].status).toBe("verified");
-    expect(await db.select().from(schema.bottleVerifications)).toHaveLength(1);
+    expect(await db.select().from(schema.bottleVerifications)).toEqual([
+      expect.objectContaining({ id: "other-verification", promotedBottle: true }),
+    ]);
   });
 
   it("tightens persisted media rights even when page content is unchanged", async () => {
@@ -540,6 +572,35 @@ describe("source-backed persistence", () => {
     const report = await ingestSourceManifest(db, manifest, { fetchImpl });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     expect(report.errors[0]?.error).toMatch(/HTTPS|public host/i);
+  });
+
+  it("resolves relative metadata against the final same-origin redirect URL", async () => {
+    const bottle = await createTestBottle(db, { id: "redirect-relative", status: "imported", imageUrl: null });
+    const manifest: CatalogSourceManifest = {
+      sources: [OFFICIAL_SOURCE],
+      resources: [{ bottleId: bottle.id, sourceId: OFFICIAL_SOURCE.id, url: "https://www.example-distillery.com/old/page", resourceType: "official_product", mediaKind: "bottle" }],
+    };
+    const redirectedHtml = `<html><head>
+      <link rel="canonical" href="./" />
+      <meta property="og:title" content="Redirected Bottle" />
+      <meta property="og:image" content="bottle.jpg" />
+    </head></html>`;
+    const fetchImpl = vi.fn(async (url: string | URL | Request) => {
+      const current = String(url);
+      if (current.endsWith("/old/page")) {
+        return new Response(null, { status: 302, headers: { location: "/new/path/" } });
+      }
+      return htmlResponse(redirectedHtml);
+    }) as unknown as typeof fetch;
+
+    await ingestSourceManifest(db, manifest, { apply: true, fetchImpl });
+
+    expect(await db.select().from(schema.bottleResources)).toEqual([
+      expect.objectContaining({ url: "https://www.example-distillery.com/new/path/" }),
+    ]);
+    expect(await db.select().from(schema.bottleMedia)).toEqual([
+      expect.objectContaining({ url: "https://www.example-distillery.com/new/path/bottle.jpg" }),
+    ]);
   });
 
   it("rejects chunked bodies as soon as they cross the streamed 2 MB limit", async () => {

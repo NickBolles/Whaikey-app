@@ -1,0 +1,75 @@
+name: Source-backed catalog scan
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "Apply deterministic source-backed updates"
+        required: true
+        default: false
+        type: boolean
+      manifest:
+        description: "Curated manifest to scan"
+        required: true
+        default: config/catalog-resource-manifest.json
+        type: choice
+        options:
+          - config/catalog-resource-manifest.json
+          - config/catalog-resource-manifest.example.json
+  schedule:
+    # Refresh the curated resource graph weekly. This path uses no model/API.
+    - cron: "30 10 * * 2"
+
+concurrency:
+  group: source-backed-catalog-scan
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    if: github.event_name == 'schedule' || github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: catalog-production
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      MANIFEST: ${{ inputs.manifest || 'config/catalog-resource-manifest.json' }}
+      APPLY: ${{ github.event_name == 'schedule' || inputs.apply }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Validate configuration
+        run: |
+          test -n "$DATABASE_URL" || { echo "::error::DATABASE_URL is not configured"; exit 1; }
+          case "$MANIFEST" in
+            config/catalog-resource-manifest.json|config/catalog-resource-manifest.example.json) ;;
+            *) echo "::error::Unapproved manifest path"; exit 1 ;;
+          esac
+
+      - name: Run deterministic source scan
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/source-backed-scan
+          args=""
+          if [ "$APPLY" = "true" ]; then args="--apply"; fi
+          pnpm ingest resources --manifest "$MANIFEST" $args 2>&1 | tee artifacts/source-backed-scan/report.log
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: source-backed-catalog-scan-${{ github.run_id }}
+          path: artifacts/source-backed-scan/
+          retention-days: 14
+          if-no-files-found: warn

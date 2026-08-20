@@ -58,6 +58,8 @@ Iowa/COLA-imported bottles are label approvals or wholesale SKUs, not proof a co
 
 ### 2.4c Source-backed product and editorial resource graph
 
+Automation and the issue-driven feedback loop are documented in [SUBSCRIPTION_CATALOG_AUTOMATION.md](./SUBSCRIPTION_CATALOG_AUTOMATION.md). The scheduled manifest scan is deterministic and model-free; subscription-backed AI only discovers bounded candidate URLs, which still pass through this parser and its provenance rules.
+
 **Implemented:** `pnpm ingest resources --manifest <file>` parses a curated manifest of exact bottle-to-page matches. It is a dry run unless `--apply` is supplied. The adapter prefers JSON-LD (`Product` / `Review`) and OpenGraph metadata, stores atomic claims with their source URL and retrieval timestamp, and never retains article/review bodies. Official product pages may fill only missing canonical fields and may promote `imported → verified`; editorial pages remain corroborating links and cannot promote or overwrite a bottle. TTB pages are rejected as official product evidence.
 
 Source and image policy are explicit per manifest entry:

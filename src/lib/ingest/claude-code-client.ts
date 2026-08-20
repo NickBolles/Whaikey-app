@@ -79,12 +79,15 @@ export function buildProfileArraySchema(): Record<string, unknown> {
  *   --output-format json     single JSON result object on stdout
  *   --json-schema <schema>   validate/shape the result as the profile array
  *   --no-session-persistence never write a resumable session to disk
- *   --disallowedTools         prevent file, shell, and web operations
+ *   --tools <list>            expose only WebSearch/WebFetch when requested
  *   --model <model>           optional operator-selected CLI model override
  */
 export function buildClaudeArgs(opts: { model?: string; schema: Record<string, unknown>; allowWebSearch?: boolean }): string[] {
   const args = [
     "-p", "--output-format", "json", "--json-schema", JSON.stringify(opts.schema), "--no-session-persistence",
+    "--tools", opts.allowWebSearch ? "WebSearch,WebFetch" : "",
+    "--strict-mcp-config", "--mcp-config", JSON.stringify({ mcpServers: {} }),
+    "--disable-slash-commands",
   ];
   if (opts.model) args.push("--model", opts.model);
   return args;

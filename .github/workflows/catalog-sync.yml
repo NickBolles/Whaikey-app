@@ -8,8 +8,8 @@
 #             run partial instead of blocking the rest
 #   - cola:   TTB label approvals for the last 8 days (registry maintenance
 #             can interrupt this source, and the run reports any interruption)
-#   - enrich: fill flavor profiles for new bottles (community notes first,
-#             then an OpenRouter-backed model (preferred) or Anthropic fallback)
+#   - optional API enrichment: manual opt-in only. Subscription-backed catalog
+#             review lives in subscription-catalog-verification.yml.
 #
 # Requires repo secrets: DATABASE_URL (Postgres/Supabase pooler URL) and, for
 # the enrich step, OPENROUTER_API_KEY (preferred) or ANTHROPIC_API_KEY. Without DATABASE_URL the run stops early
@@ -21,9 +21,9 @@ on:
   workflow_dispatch:
     inputs:
       skip_enrich:
-        description: "Skip the AI enrichment step"
+        description: "Skip API-key AI enrichment (subscription workflow preferred)"
         type: boolean
-        default: false
+        default: true
       cola_scope:
         description: "TTB COLA range to import (full history is whiskey-only and can take hours)"
         type: choice
@@ -141,7 +141,7 @@ jobs:
         # explicitly dispatch a separate enrichment run when desired.
         # Keep bulk enrichment offline by default: direct Anthropic web search
         # can add one paid search per bottle at this catalog scale.
-        if: ${{ inputs.skip_enrich != true && inputs.cola_scope != 'full-history' }}
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.skip_enrich != true && inputs.cola_scope != 'full-history' }}
         continue-on-error: true
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}

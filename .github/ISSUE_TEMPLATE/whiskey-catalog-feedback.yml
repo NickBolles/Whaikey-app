@@ -1,0 +1,62 @@
+name: Whiskey catalog feedback
+description: Flag one bottle for a source-backed catalog review.
+title: "[Whiskey feedback] "
+labels:
+  - whiskey-feedback
+  - needs-ai-review
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve Whaikey. Submit one bottle per issue. A maintainer can approve a bounded AI research pass; deterministic source and provenance rules control all catalog writes.
+  - type: input
+    id: bottle
+    attributes:
+      label: Bottle ID or URL
+      description: Paste the bottle page URL or its exact ID from the URL.
+      placeholder: https://whaikey.com/bottles/eagle-rare-10
+    validations:
+      required: true
+  - type: dropdown
+    id: attention
+    attributes:
+      label: What needs attention?
+      options:
+        - Wrong bottle identity or duplicate
+        - Missing or incorrect age / ABV
+        - Missing official producer page
+        - Missing review or source attribution
+        - Missing or incorrect bottle image
+        - Availability / verification evidence
+        - Flavor profile needs better evidence
+        - Other catalog issue
+    validations:
+      required: true
+  - type: checkboxes
+    id: quick_checks
+    attributes:
+      label: Quick checks
+      description: Select every statement that applies.
+      options:
+        - label: The bottle name or edition looks wrong
+        - label: Age or ABV looks wrong
+        - label: The image is wrong or missing
+        - label: An official producer source is missing
+        - label: A review or retailer source is missing
+        - label: The flavor profile does not match sourced tasting notes
+        - label: This may be a duplicate bottle
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Optional details, expected value, or a source URL you already know.
+      placeholder: Tell us what you noticed. Do not include private information.
+    validations:
+      required: false
+  - type: checkboxes
+    id: acknowledgment
+    attributes:
+      label: Source quality
+      options:
+        - label: I understand that retailer listings and TTB/COLA records are evidence, not canonical producer authority.
+          required: true

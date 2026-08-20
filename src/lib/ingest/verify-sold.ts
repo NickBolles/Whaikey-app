@@ -18,6 +18,7 @@ export type SoldVerification = {
   sold: boolean;
   evidenceUrl: string | null;
   evidenceLabel: string | null;
+  evidenceKind: "manufacturer" | "retailer";
   retailerSku: string | null;
   upcs: string[];
   abv: number | null;
@@ -37,11 +38,12 @@ export function buildSoldVerificationSchema(): Record<string, unknown> {
           properties: {
             id: { type: "string" }, sold: { type: "boolean" },
             evidenceUrl: { type: ["string", "null"] }, evidenceLabel: { type: ["string", "null"] },
+            evidenceKind: { type: ["string", "null"], enum: ["manufacturer", "retailer", null] },
             retailerSku: { type: ["string", "null"] }, upcs: { type: "array", items: { type: "string" } },
             abv: { type: ["number", "null"] }, ageYears: { type: ["integer", "null"] },
             price: { type: ["number", "null"] }, description: { type: ["string", "null"] },
           },
-          required: ["id", "sold", "evidenceUrl", "evidenceLabel", "retailerSku", "upcs", "abv", "ageYears", "price", "description"],
+          required: ["id", "sold", "evidenceUrl", "evidenceLabel", "evidenceKind", "retailerSku", "upcs", "abv", "ageYears", "price", "description"],
           additionalProperties: false,
         },
       },
@@ -52,7 +54,7 @@ export function buildSoldVerificationSchema(): Record<string, unknown> {
 }
 
 export function buildSoldVerificationPrompt(rows: VerificationCandidate[]): string {
-  return `Verify whether each TTB-label-derived whiskey is an actual consumer product currently or historically offered for sale. Search the web. A TTB COLA record alone is NOT evidence.\n\nFor sold=true, require a specific manufacturer or retailer product page and return its direct http(s) URL and source label. Only return facts explicitly supported by that page. Never guess a UPC, retailer SKU, price, ABV, age, or description. If no qualifying product page exists, return sold=false with all fact fields null/empty. UPCs must be numeric GTINs as printed by the source. Retailer SKU is source context only.\n\nReturn a JSON object with a results array containing one result per supplied id. Candidates:\n${JSON.stringify(rows)}`;
+  return `Verify whether each TTB-label-derived whiskey is an actual consumer product currently or historically offered for sale. Search the web. A TTB COLA record alone is NOT evidence.\n\nFor sold=true, require a specific manufacturer or retailer product page and return its direct http(s) URL, source label, and evidenceKind (manufacturer or retailer). Only return facts explicitly supported by that page. Never guess a UPC, retailer SKU, price, ABV, age, or description. If no qualifying product page exists, return sold=false with all fact fields null/empty and evidenceKind=null. UPCs must be numeric GTINs as printed by the source. Retailer SKU is source context only.\n\nReturn a JSON object with a results array containing one result per supplied id. Candidates:\n${JSON.stringify(rows)}`;
 }
 
 function finiteInRange(value: unknown, min: number, max: number): number | null {
@@ -76,11 +78,13 @@ export function normalizeSoldVerification(value: unknown): SoldVerification | nu
   if (typeof row.id !== "string" || row.sold !== true) return null;
   const evidenceUrl = safeUrl(row.evidenceUrl);
   if (!evidenceUrl) return null;
+  if (row.evidenceKind !== "manufacturer" && row.evidenceKind !== "retailer") return null;
   const upcs = Array.isArray(row.upcs)
     ? [...new Set(row.upcs.filter((v): v is string => typeof v === "string").map((v) => v.replace(/\D/g, "")).filter(isValidUpc))]
     : [];
   return {
     id: row.id, sold: true, evidenceUrl,
+    evidenceKind: row.evidenceKind,
     evidenceLabel: typeof row.evidenceLabel === "string" && row.evidenceLabel.trim() ? row.evidenceLabel.trim().slice(0, 200) : null,
     retailerSku: typeof row.retailerSku === "string" && row.retailerSku.trim() ? row.retailerSku.trim().slice(0, 200) : null,
     upcs, abv: finiteInRange(row.abv, 0, 100), ageYears: finiteInRange(row.ageYears, 0, 100),
@@ -117,20 +121,38 @@ export async function persistSoldVerification(db: DB, verification: SoldVerifica
   // Bridge the existing verifier into the shared resource graph so every new
   // evidence URL appears on the bottle page without copying source prose.
   const evidence = new URL(verification.evidenceUrl);
-  const sourceId = stableEvidenceId("verification-source", evidence.origin);
+  const claimsManufacturer = verification.evidenceKind === "manufacturer";
+  const [trustedManufacturer] = claimsManufacturer
+    ? await db.select({
+        id: catalogSources.id,
+        name: catalogSources.name,
+        attribution: catalogSources.attribution,
+        fetchPolicy: catalogSources.fetchPolicy,
+        mediaPolicy: catalogSources.mediaPolicy,
+      }).from(catalogSources).where(and(
+        eq(catalogSources.kind, "official"),
+        eq(catalogSources.baseUrl, evidence.origin),
+        eq(catalogSources.enabled, true),
+      )).limit(1)
+    : [];
+  const sourceKind = trustedManufacturer ? "official" as const :
+    claimsManufacturer ? "registry" as const : "retailer" as const;
+  const sourceId = trustedManufacturer?.id ??
+    stableEvidenceId("verification-source", `${sourceKind}\u0000${evidence.origin}`);
   await db.insert(catalogSources).values({
     id: sourceId,
-    name: verification.evidenceLabel ?? evidence.hostname,
-    kind: "retailer",
+    name: trustedManufacturer?.name ?? verification.evidenceLabel ?? evidence.hostname,
+    kind: sourceKind,
     baseUrl: evidence.origin,
-    fetchPolicy: "link_only",
-    mediaPolicy: "link_only",
+    fetchPolicy: trustedManufacturer?.fetchPolicy ?? "link_only",
+    mediaPolicy: trustedManufacturer?.mediaPolicy ?? "link_only",
+    attribution: trustedManufacturer?.attribution ?? verification.evidenceLabel,
   }).onConflictDoNothing();
   await db.insert(bottleResources).values({
     id: stableEvidenceId("resource", `${current.id}\u0000${verification.evidenceUrl}`),
     bottleId: current.id,
     sourceId,
-    resourceType: "retailer",
+    resourceType: trustedManufacturer ? "official_product" : claimsManufacturer ? "producer" : "retailer",
     url: verification.evidenceUrl,
     title: verification.evidenceLabel,
     publisher: verification.evidenceLabel,

@@ -489,7 +489,7 @@ async function fetchPublicHttps(url: string, signal: AbortSignal): Promise<Respo
   });
 }
 
-async function fetchDocument(url: string, source: CatalogSourceDefinition, fetchImpl?: typeof fetch): Promise<{ body: string; contentType: string }> {
+async function fetchDocument(url: string, source: CatalogSourceDefinition, fetchImpl?: typeof fetch): Promise<{ body: string; contentType: string; finalUrl: string }> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
@@ -513,7 +513,7 @@ async function fetchDocument(url: string, source: CatalogSourceDefinition, fetch
     if (response.url) validatePublicSourceUrl(response.url, source);
     const declaredLength = Number(response.headers.get("content-length"));
     if (Number.isFinite(declaredLength) && declaredLength > MAX_DOCUMENT_BYTES) throw new Error("Document exceeds 2 MB limit");
-    if (!response.body) return { body: "", contentType: response.headers.get("content-type") ?? "text/html" };
+    if (!response.body) return { body: "", contentType: response.headers.get("content-type") ?? "text/html", finalUrl: currentUrl };
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let received = 0;
@@ -533,7 +533,7 @@ async function fetchDocument(url: string, source: CatalogSourceDefinition, fetch
     } finally {
       reader.releaseLock();
     }
-    return { body, contentType: response.headers.get("content-type") ?? "text/html" };
+    return { body, contentType: response.headers.get("content-type") ?? "text/html", finalUrl: currentUrl };
   } finally {
     clearTimeout(timeout);
   }
@@ -631,8 +631,9 @@ export async function ingestSourceManifest(
         const document = await fetchDocument(requestedUrl, source, fetchImpl);
         report.fetched += 1;
         parsed = parseSourceDocument({
-          url: requestedUrl,
-          ...document,
+          url: document.finalUrl,
+          body: document.body,
+          contentType: document.contentType,
           source,
           resourceType: resource.resourceType,
           mediaKind: resource.mediaKind,
@@ -940,9 +941,16 @@ export async function ingestSourceManifest(
         const remainingVerification = await db.select({ id: bottleVerifications.id })
           .from(bottleVerifications)
           .where(eq(bottleVerifications.bottleId, bottle.id))
+          .orderBy(bottleVerifications.createdAt)
           .limit(1);
-        if (sourcePromotedBottle && bottle.status === "verified" && remainingVerification.length === 0) {
-          revokedCanonical.status = "imported";
+        if (sourcePromotedBottle && bottle.status === "verified") {
+          if (remainingVerification.length === 0) {
+            revokedCanonical.status = "imported";
+          } else {
+            await db.update(bottleVerifications)
+              .set({ promotedBottle: true })
+              .where(eq(bottleVerifications.id, remainingVerification[0].id));
+          }
         }
         if (Object.keys(revokedCanonical).length > 0) {
           await db.update(bottles).set(revokedCanonical).where(eq(bottles.id, bottle.id));
@@ -953,15 +961,24 @@ export async function ingestSourceManifest(
     }
   };
 
+  const resourcesByBottle = new Map<string, CatalogResourceDefinition[]>();
+  for (const resource of manifest.resources) {
+    const group = resourcesByBottle.get(resource.bottleId) ?? [];
+    group.push(resource);
+    resourcesByBottle.set(resource.bottleId, group);
+  }
+  const bottleGroups = [...resourcesByBottle.values()];
   let cursor = 0;
   const concurrency = Math.min(Math.max(1, Math.floor(opts.concurrency ?? 4)), 8);
   async function worker(): Promise<void> {
-    while (cursor < manifest.resources.length) {
-      const resource = manifest.resources[cursor];
+    while (cursor < bottleGroups.length) {
+      const group = bottleGroups[cursor];
       cursor += 1;
-      await processResource(resource);
+      // Canonical ownership is bottle-scoped. Keep resources for the same
+      // bottle sequential while still processing different bottles in parallel.
+      for (const resource of group) await processResource(resource);
     }
   }
-  await Promise.all(Array.from({ length: Math.min(concurrency, manifest.resources.length) }, () => worker()));
+  await Promise.all(Array.from({ length: Math.min(concurrency, bottleGroups.length) }, () => worker()));
   return report;
 }
