@@ -25,6 +25,7 @@ const PICK: Recommendation = {
   distillery: "Islay Distillers",
   category: "scotch-single-malt",
   region: "Islay",
+  country: null,
   ageYears: 12,
   avgPrice: 65,
   matchPercent: 87,

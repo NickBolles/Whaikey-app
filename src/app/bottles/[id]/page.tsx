@@ -15,6 +15,7 @@ import { FlavorRadar } from "@/components/flavor-radar";
 import { SameDram, type SameDramFriendNote, type SameDramProducer } from "@/components/same-dram";
 import { ShelfActions } from "./shelf-actions";
 import { ShelfDetails } from "./shelf-details";
+import { originLabel } from "@/lib/origin";
 
 export const dynamic = "force-dynamic";
 
@@ -125,7 +126,9 @@ export default async function BottleDetailPage({
       : null;
 
   const metaParts = [
-    bottle.region ?? distillery?.region ?? null,
+    // Most specific origin we can name; a blend has no region and shows its
+    // country rather than nothing (src/lib/origin.ts).
+    originLabel(bottle.region ?? distillery?.region, bottle.country ?? distillery?.country),
     bottle.ageYears != null ? `${bottle.ageYears} years` : null,
     bottle.abv != null ? `${bottle.abv}% ABV` : null,
     bottle.caskTypes && bottle.caskTypes.length > 0 ? bottle.caskTypes.join(" + ") : null,

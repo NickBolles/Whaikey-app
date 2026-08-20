@@ -29,6 +29,7 @@ function makeRec(overrides: Partial<Recommendation> = {}): Recommendation {
     distillery: null,
     category: "bourbon",
     region: null,
+    country: null,
     ageYears: 10,
     avgPrice: 60,
     matchPercent: 84,

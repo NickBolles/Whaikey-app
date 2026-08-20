@@ -623,7 +623,11 @@ describe("getPalateCard / getProfileView", () => {
     expect(empty.wheelHeat).toBeNull();
     expect(empty.regionsCovered).toEqual([]);
 
-    const bottle = await createTestBottle(db, { region: "Speyside", category: "scotch-single-malt" });
+    const bottle = await createTestBottle(db, {
+      country: "Scotland",
+      region: "Speyside",
+      category: "scotch-single-malt",
+    });
     const pour = await insertPour(db, user.id, bottle.id, { rating: 4.5 });
     await insertNote(db, pour.id, { flavorTags: { vanilla: 3, honey: 2 } });
     await db
@@ -632,6 +636,7 @@ describe("getPalateCard / getProfileView", () => {
 
     const card = await getPalateCard(db, user.id);
     expect(card.wheelHeat).not.toBeNull();
+    expect(card.countriesCovered).toEqual(["Scotland"]);
     expect(card.regionsCovered).toEqual(["Speyside"]);
     expect(card.stylesCovered).toEqual(["scotch-single-malt"]);
     expect(card.signatureLeafIds.length).toBeGreaterThan(0);
@@ -662,7 +667,13 @@ describe("getPalateCard / getProfileView", () => {
     const viewer = await createTestUser(db);
     const view = await getProfileView(db, viewer.id, "private_t");
     expect(view?.profile.handle).toBe("private_t");
-    expect(view?.palate).toEqual({ wheelHeat: null, signatureLeafIds: [], regionsCovered: [], stylesCovered: [] });
+    expect(view?.palate).toEqual({
+      wheelHeat: null,
+      signatureLeafIds: [],
+      countriesCovered: [],
+      regionsCovered: [],
+      stylesCovered: [],
+    });
     expect(view?.recentNotes).toEqual([]);
   });
 

@@ -44,6 +44,7 @@ export interface Recommendation {
   distillery: string | null;
   category: string;
   region: string | null;
+  country: string | null;
   ageYears: number | null;
   avgPrice: number | null;
   matchPercent: number | null;
@@ -245,6 +246,7 @@ interface ScoredBottle {
   distillery: string | null;
   category: string;
   region: string | null;
+  country: string | null;
   ageYears: number | null;
   avgPrice: number | null;
   flavorProfile: Record<string, number> | null;
@@ -272,6 +274,7 @@ async function discoveryCandidates(
       name: bottles.name,
       category: bottles.category,
       region: bottles.region,
+      country: bottles.country,
       ageYears: bottles.ageYears,
       avgPrice: bottles.avgPrice,
       flavorProfile: bottles.flavorProfile,
@@ -315,6 +318,7 @@ async function tonightCandidates(
       name: bottles.name,
       category: bottles.category,
       region: bottles.region,
+      country: bottles.country,
       ageYears: bottles.ageYears,
       avgPrice: bottles.avgPrice,
       flavorProfile: bottles.flavorProfile,
@@ -336,6 +340,7 @@ async function tonightCandidates(
       distillery: b.distillery,
       category: b.category,
       region: b.region,
+      country: b.country,
       ageYears: b.ageYears,
       avgPrice: b.avgPrice,
       flavorProfile: b.flavorProfile,
@@ -410,6 +415,7 @@ export async function recommendBottles(
       distillery: s.distillery,
       category: s.category,
       region: s.region,
+      country: s.country,
       ageYears: s.ageYears,
       avgPrice: s.avgPrice,
       matchPercent: tasteMatchPercent(palate.vector, s.flavorProfile, palate.sampleSize),
