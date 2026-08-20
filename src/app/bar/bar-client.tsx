@@ -640,6 +640,15 @@ export function BarClient({
                   }
                   spine={own ? { level, bottleId: row.bottleId } : null}
                   flavorTags={row.personalFlavorTags}
+                  pours={
+                    row.pourStats && row.pourStats.pourCount > 0
+                      ? {
+                          count: row.pourStats.pourCount,
+                          ratingMin: row.pourStats.ratingMin,
+                          ratingMax: row.pourStats.ratingMax,
+                        }
+                      : null
+                  }
                 />
               </li>
             );

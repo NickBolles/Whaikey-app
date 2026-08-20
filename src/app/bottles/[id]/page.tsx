@@ -10,12 +10,15 @@ import { getUserPalate } from "@/lib/palate-store";
 import { tasteMatchPercent } from "@/lib/palate";
 import { hasPublishedProducerFlavorNotes } from "@/lib/bar";
 import { getFriendNotesForBottle } from "@/lib/social";
+import { listPours } from "@/lib/pours";
 import { CategoryChip } from "@/components/category-chip";
 import { FlavorRadar } from "@/components/flavor-radar";
 import { SameDram, type SameDramFriendNote, type SameDramProducer } from "@/components/same-dram";
+import { SmallStars } from "@/components/small-stars";
 import { ShelfActions } from "./shelf-actions";
 import { ShelfDetails } from "./shelf-details";
 import { originLabel } from "@/lib/origin";
+import { YourPours, type YourPourItem } from "./your-pours";
 
 export const dynamic = "force-dynamic";
 
@@ -37,29 +40,12 @@ const RELATIONSHIP_SUMMARY: Record<string, string> = {
   wishlist: "This bottle is on your wishlist.",
 };
 
-function SmallStars({ rating }: { rating: number }) {
-  return (
-    <div aria-hidden className="flex items-center gap-0.5">
-      {[1, 2, 3, 4, 5].map((n) => {
-        const fraction = Math.max(0, Math.min(1, rating - (n - 1)));
-        return (
-          <svg key={n} viewBox="0 0 24 24" width={13} height={13} className="block">
-            <path
-              d="M12 1.8l3.1 6.33 6.98.98-5.06 4.9 1.2 6.94L12 17.68l-6.22 3.27 1.2-6.94-5.06-4.9 6.98-.98L12 1.8z"
-              fill="var(--border)"
-            />
-            {fraction > 0 && (
-              <path
-                d="M12 1.8l3.1 6.33 6.98.98-5.06 4.9 1.2 6.94L12 17.68l-6.22 3.27 1.2-6.94-5.06-4.9 6.98-.98L12 1.8z"
-                fill="var(--accent)"
-                style={{ clipPath: `inset(0 ${((1 - fraction) * 100).toFixed(0)}% 0 0)` }}
-              />
-            )}
-          </svg>
-        );
-      })}
-    </div>
-  );
+/** The first line a pour's note has to offer, trimmed for an inline row. */
+function pourSnippet(note: { nose: string | null; palate: string | null; finish: string | null; freeform: string | null } | null): string | null {
+  if (!note) return null;
+  const text = note.nose ?? note.palate ?? note.finish ?? note.freeform;
+  if (!text) return null;
+  return text.length > 90 ? `${text.slice(0, 90).trimEnd()}…` : text;
 }
 
 export default async function BottleDetailPage({
@@ -82,19 +68,31 @@ export default async function BottleDetailPage({
   // notes, and the producer column (only when attributed). Signed-out
   // viewers get none of this — the section is hidden entirely for them.
   let sameDram: { viewerTags: Record<string, number> | null; friends: SameDramFriendNote[]; hasViewerNotes: boolean } | null = null;
+  // The viewer's full pour history on this bottle, for the Your Pours section.
+  let yourPours: YourPourItem[] = [];
   if (user) {
     const db = getDb();
     const palate = await getUserPalate(db, user.id);
     match = tasteMatchPercent(palate.vector, bottle.flavorProfile, palate.sampleSize);
 
-    const [viewerNoteRows, friendNotes] = await Promise.all([
+    const [viewerNoteRows, friendNotes, viewerPours] = await Promise.all([
       db
         .select({ flavorTags: schema.tastingNotes.flavorTags })
         .from(schema.tastingNotes)
         .innerJoin(schema.pours, eq(schema.tastingNotes.pourId, schema.pours.id))
         .where(and(eq(schema.pours.userId, user.id), eq(schema.pours.bottleId, bottle.id))),
       getFriendNotesForBottle(db, user.id, bottle.id),
+      listPours(db, user.id, { bottleId: bottle.id, limit: 200 }),
     ]);
+
+    yourPours = viewerPours.map((p) => ({
+      id: p.id,
+      rating: p.rating,
+      servingStyle: p.servingStyle,
+      amountMl: p.amountMl,
+      createdAt: p.createdAt.toISOString(),
+      snippet: pourSnippet(p.note),
+    }));
 
     const viewerFlavorTags: Record<string, number> = {};
     for (const row of viewerNoteRows) {
@@ -224,6 +222,9 @@ export default async function BottleDetailPage({
         )}
       </section>
 
+      {/* The viewer's own history with this bottle, beside the community's. */}
+      {user && yourPours.length > 0 && <YourPours bottleId={bottle.id} pours={yourPours} />}
+
       {sameDram && (
         <>
           <SameDram
@@ -257,7 +258,6 @@ export default async function BottleDetailPage({
               </p>
               <div className="flex flex-col gap-2">
                 <Link href={`/pour?bottleId=${bottle.id}`} className="btn-primary flex items-center justify-center px-4 py-3 text-sm font-medium">Log a pour</Link>
-                <Link href={`/history?bottleId=${bottle.id}`} className="btn-secondary flex min-h-11 items-center justify-center px-4 text-sm font-medium">View your pours for this bottle</Link>
                 <ShelfActions bottleId={bottle.id} current={userBottle?.relationship ?? null} />
               </div>
               {userBottle?.relationship === "own" && (

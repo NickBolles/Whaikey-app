@@ -162,6 +162,10 @@ export async function seedDemoUser(db: DB): Promise<void> {
   }
 
   await db.insert(schema.pours).values([
+    // Eagle Rare carries three rated pours on purpose: enough history for the
+    // bottle page's rating trend and the bar card's pours-count + range.
+    pour("demo-pour-6", "eagle-rare-10", 3.5, "2026-04-20T19:00:00Z", { userBottleId: "demo-ub-1" }),
+    pour("demo-pour-7", "eagle-rare-10", 4, "2026-06-10T20:00:00Z", { userBottleId: "demo-ub-1" }),
     pour("demo-pour-1", "eagle-rare-10", 4.5, "2026-07-14T20:30:00Z", { userBottleId: "demo-ub-1" }),
     pour("demo-pour-2", "lagavulin-16", 5, "2026-07-12T21:00:00Z", {
       userBottleId: "demo-ub-2",

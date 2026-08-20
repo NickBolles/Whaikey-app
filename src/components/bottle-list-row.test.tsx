@@ -46,4 +46,41 @@ describe("BottleListRow", () => {
     expect(screen.queryByTestId("fill-spine")).not.toBeInTheDocument();
     expect(screen.getByRole("link").textContent).toBe("X");
   });
+
+  it("shows the pour count and the rating range when pours disagree", () => {
+    render(
+      <BottleListRow
+        href="/bottles/x"
+        name="X"
+        score={4.0}
+        pours={{ count: 3, ratingMin: 3.5, ratingMax: 4.5 }}
+      />,
+    );
+    const row = screen.getByRole("link");
+    expect(row).toHaveTextContent("4.0");
+    expect(row).toHaveTextContent("3 pours");
+    expect(row).toHaveTextContent("3.5–4.5");
+  });
+
+  it("shows no range when every rated pour agrees, and singularises one pour", () => {
+    render(
+      <BottleListRow
+        href="/bottles/x"
+        name="X"
+        score={4.5}
+        pours={{ count: 1, ratingMin: 4.5, ratingMax: 4.5 }}
+      />,
+    );
+    const row = screen.getByRole("link");
+    expect(row).toHaveTextContent("1 pour");
+    expect(row).not.toHaveTextContent("–");
+  });
+
+  it("counts unrated pours without inventing a score or a range", () => {
+    render(<BottleListRow href="/bottles/x" name="X" pours={{ count: 2 }} />);
+    const row = screen.getByRole("link");
+    expect(row).toHaveTextContent("2 pours");
+    expect(row).not.toHaveTextContent("–");
+    expect(row.textContent).not.toMatch(/\d\.\d/);
+  });
 });
