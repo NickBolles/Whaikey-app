@@ -32,7 +32,6 @@ export function RatingSparkline({ ratings }: { ratings: number[] }) {
   const pts = points(ratings);
   const line = pts.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ");
   const area = `${line} L${pts[pts.length - 1].x.toFixed(1)} ${H - PAD_Y} L${pts[0].x.toFixed(1)} ${H - PAD_Y} Z`;
-  const last = pts[pts.length - 1];
 
   return (
     <svg
@@ -65,11 +64,33 @@ export function RatingSparkline({ ratings }: { ratings: number[] }) {
         strokeLinejoin="round"
         vectorEffect="non-scaling-stroke"
       />
-      {pts.slice(0, -1).map((p, i) => (
-        <circle key={i} cx={p.x} cy={p.y} r={2.5} fill="var(--accent-deep)" stroke="var(--surface-raised)" strokeWidth={1.5} />
-      ))}
-      {/* The latest pour is the one moment of full amber. */}
-      <circle cx={last.x} cy={last.y} r={3.5} fill="var(--accent)" stroke="var(--surface-raised)" strokeWidth={2} />
+      {/* Dots are zero-length round-capped strokes, not <circle>s: the svg
+          stretches non-uniformly to fill its slot, and a non-scaling stroke is
+          the one mark that stays round while it does. The latest pour is the
+          one moment of full amber. */}
+      {pts.map((p, i) => {
+        const isLast = i === pts.length - 1;
+        const dot = `M${p.x.toFixed(1)} ${p.y.toFixed(1)} L${p.x.toFixed(1)} ${p.y.toFixed(1)}`;
+        return (
+          <g key={i}>
+            <path
+              d={dot}
+              stroke="var(--surface-raised)"
+              strokeWidth={isLast ? 11 : 8}
+              strokeLinecap="round"
+              vectorEffect="non-scaling-stroke"
+            />
+            <path
+              d={dot}
+              data-dot={isLast ? "last" : "point"}
+              stroke={isLast ? "var(--accent)" : "var(--accent-deep)"}
+              strokeWidth={isLast ? 7 : 5}
+              strokeLinecap="round"
+              vectorEffect="non-scaling-stroke"
+            />
+          </g>
+        );
+      })}
     </svg>
   );
 }

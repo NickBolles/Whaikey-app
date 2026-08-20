@@ -15,10 +15,11 @@ describe("RatingSparkline", () => {
 
   it("draws one dot per pour, the latest set apart from the rest", () => {
     render(<RatingSparkline ratings={[3.5, 4, 4.5]} />);
-    const dots = screen.getByTestId("rating-sparkline").querySelectorAll("circle");
+    const dots = screen.getByTestId("rating-sparkline").querySelectorAll("[data-dot]");
     expect(dots).toHaveLength(3);
-    expect(dots[2].getAttribute("fill")).toBe("var(--accent)");
-    expect(dots[0].getAttribute("fill")).toBe("var(--accent-deep)");
+    expect(dots[2].getAttribute("data-dot")).toBe("last");
+    expect(dots[2].getAttribute("stroke")).toBe("var(--accent)");
+    expect(dots[0].getAttribute("stroke")).toBe("var(--accent-deep)");
   });
 
   it("refuses to draw a trend from a single point", () => {
