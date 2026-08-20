@@ -119,20 +119,10 @@ export async function persistSoldVerification(db: DB, verification: SoldVerifica
   )).limit(1);
   if (disabledOrigin) return false;
 
-  await db.insert(bottleVerifications).values({
-    id: stableVerificationId(current.id, verification.evidenceUrl),
-    bottleId: current.id,
-    url: verification.evidenceUrl,
-    label: verification.evidenceLabel,
-    retailerSku: verification.retailerSku,
-    retrievedAt: new Date(),
-    promotedBottle: true,
-  }).onConflictDoNothing();
-
   // Bridge the existing verifier into the shared resource graph so every new
   // evidence URL appears on the bottle page without copying source prose.
   const claimsManufacturer = verification.evidenceKind === "manufacturer";
-  const [trustedManufacturer] = claimsManufacturer
+  const trustedManufacturerCandidates = claimsManufacturer
     ? await db.select({
         id: catalogSources.id,
         name: catalogSources.name,
@@ -142,9 +132,12 @@ export async function persistSoldVerification(db: DB, verification: SoldVerifica
       }).from(catalogSources).where(and(
         eq(catalogSources.kind, "official"),
         eq(catalogSources.baseUrl, evidence.origin),
+        eq(catalogSources.fetchPolicy, "structured"),
         eq(catalogSources.enabled, true),
-      )).limit(1)
+      )).limit(2)
     : [];
+  if (trustedManufacturerCandidates.length > 1) return false;
+  const trustedManufacturer = trustedManufacturerCandidates[0];
   const sourceKind = trustedManufacturer ? "official" as const :
     claimsManufacturer ? "registry" as const : "retailer" as const;
   const sourceId = trustedManufacturer?.id ??
@@ -158,16 +151,40 @@ export async function persistSoldVerification(db: DB, verification: SoldVerifica
     mediaPolicy: trustedManufacturer?.mediaPolicy ?? "link_only",
     attribution: trustedManufacturer?.attribution ?? verification.evidenceLabel,
   }).onConflictDoNothing();
-  const resourceId = stableEvidenceId("resource", `${current.id}\u0000${verification.evidenceUrl}`);
+  const resourceType = trustedManufacturer ? "official_product" as const :
+    claimsManufacturer ? "producer" as const : "retailer" as const;
+  const proposedResourceId = stableEvidenceId("resource", `${current.id}\u0000${verification.evidenceUrl}`);
   await db.insert(bottleResources).values({
-    id: resourceId,
+    id: proposedResourceId,
     bottleId: current.id,
     sourceId,
-    resourceType: trustedManufacturer ? "official_product" : claimsManufacturer ? "producer" : "retailer",
+    resourceType,
     url: verification.evidenceUrl,
     title: verification.evidenceLabel,
     publisher: verification.evidenceLabel,
     retrievedAt: new Date(),
+  }).onConflictDoNothing();
+  const [persistedResource] = await db.select({
+    id: bottleResources.id,
+    sourceId: bottleResources.sourceId,
+    resourceType: bottleResources.resourceType,
+  }).from(bottleResources).where(and(
+    eq(bottleResources.bottleId, current.id),
+    eq(bottleResources.url, verification.evidenceUrl),
+  )).limit(1);
+  if (!persistedResource || persistedResource.sourceId !== sourceId || persistedResource.resourceType !== resourceType) {
+    return false;
+  }
+  const resourceId = persistedResource.id;
+
+  await db.insert(bottleVerifications).values({
+    id: stableVerificationId(current.id, verification.evidenceUrl),
+    bottleId: current.id,
+    url: verification.evidenceUrl,
+    label: verification.evidenceLabel,
+    retailerSku: verification.retailerSku,
+    retrievedAt: new Date(),
+    promotedBottle: true,
   }).onConflictDoNothing();
 
   if (trustedManufacturer) {
@@ -193,10 +210,10 @@ export async function persistSoldVerification(db: DB, verification: SoldVerifica
   }
 
   const patch: Record<string, unknown> = { status: "verified" };
-  if (current.abv == null && verification.abv != null) patch.abv = verification.abv;
-  if (current.ageYears == null && verification.ageYears != null) patch.ageYears = verification.ageYears;
+  if (trustedManufacturer && current.abv == null && verification.abv != null) patch.abv = verification.abv;
+  if (trustedManufacturer && current.ageYears == null && verification.ageYears != null) patch.ageYears = verification.ageYears;
   if (current.avgPrice == null && verification.price != null) patch.avgPrice = verification.price;
-  if (current.description == null && verification.description != null) patch.description = verification.description;
+  if (trustedManufacturer && current.description == null && verification.description != null) patch.description = verification.description;
   await db.update(bottles).set(patch).where(eq(bottles.id, current.id));
   for (const upc of verification.upcs) {
     await db.insert(bottleUpcs).values({ id: `${current.id}--verified-${upc}`, bottleId: current.id, upc, source: "verified", confirmedCount: 0 }).onConflictDoNothing();

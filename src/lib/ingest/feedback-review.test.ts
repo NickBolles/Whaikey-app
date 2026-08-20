@@ -74,6 +74,37 @@ describe("whiskey feedback review", () => {
     expect(normalized.manifest.resources[0].resourceType).toBe("producer");
   });
 
+  it("rejects AI feedback resources from disabled origins", async () => {
+    await createTestBottle(db, { id: "eagle-rare-10", name: "Eagle Rare 10", status: "verified" });
+    await db.insert(schema.catalogSources).values({
+      id: "disabled-reviews",
+      name: "Disabled reviews",
+      kind: "editorial",
+      baseUrl: "https://blocked.example",
+      fetchPolicy: "link_only",
+      mediaPolicy: "link_only",
+      enabled: false,
+    });
+    const claudeRunner = vi.fn(async () => ({
+      bottleId: "eagle-rare-10",
+      summary: "Found a link on a quarantined origin.",
+      resources: [{
+        sourceName: "Blocked",
+        sourceKind: "editorial",
+        url: "https://blocked.example/eagle-rare-10",
+      }],
+    }));
+    const resolveHost = vi.fn(async () => undefined);
+
+    await expect(reviewWhiskeyFeedback(db, issue, {
+      apply: true,
+      claudeRunner,
+      resolveHost,
+    })).rejects.toThrow(/origin is disabled/i);
+    expect(resolveHost).not.toHaveBeenCalled();
+    expect(await db.select().from(schema.bottleResources)).toEqual([]);
+  });
+
   it("feeds only validated discovered URLs into deterministic source ingestion", async () => {
     await createTestBottle(db, { id: "eagle-rare-10", name: "Eagle Rare 10", status: "verified" });
     const claudeRunner = vi.fn(async () => ({

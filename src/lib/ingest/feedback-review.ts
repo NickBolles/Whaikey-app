@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
 import type { DB } from "@/db";
-import { bottles } from "@/db/schema";
+import { bottles, catalogSources } from "@/db/schema";
 import {
   ingestSourceManifest,
   resolvePublicAddresses,
@@ -181,6 +181,15 @@ export async function reviewWhiskeyFeedback(
     allowWebSearch: true,
   });
   const normalized = normalizeFeedbackReview(output, bottle);
+  const disabledOrigins = new Set((await db.select({ baseUrl: catalogSources.baseUrl })
+    .from(catalogSources)
+    .where(eq(catalogSources.enabled, false)))
+    .map((source) => new URL(source.baseUrl).origin));
+  for (const source of normalized.manifest.sources) {
+    if (disabledOrigins.has(new URL(source.baseUrl).origin)) {
+      throw new Error(`Feedback evidence origin is disabled: ${source.baseUrl}`);
+    }
+  }
   const resolveHost = options.resolveHost ?? (async (hostname: string) => {
     await resolvePublicAddresses(hostname);
   });

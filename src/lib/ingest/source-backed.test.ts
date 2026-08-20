@@ -305,6 +305,68 @@ describe("source-backed persistence", () => {
       .map((claim) => claim.value)).toEqual([45]);
   });
 
+  it("does not reassign an existing resource URL to a different source", async () => {
+    const bottle = await createTestBottle(db, { id: "resource-source-conflict", status: "imported", abv: null });
+    const resourceUrl = "https://www.example-distillery.com/products/reserve-10";
+    await ingestSourceManifest(db, {
+      sources: [OFFICIAL_SOURCE],
+      resources: [{ bottleId: bottle.id, sourceId: OFFICIAL_SOURCE.id, url: resourceUrl, resourceType: "official_product" }],
+    }, { apply: true, fetchImpl: (async () => htmlResponse(PRODUCT_HTML)) as typeof fetch });
+    const retailer = {
+      ...OFFICIAL_SOURCE,
+      id: "conflicting-retailer",
+      name: "Conflicting retailer",
+      kind: "retailer" as const,
+      fetchPolicy: "link_only" as const,
+    };
+
+    const report = await ingestSourceManifest(db, {
+      sources: [retailer],
+      resources: [{ bottleId: bottle.id, sourceId: retailer.id, url: resourceUrl, resourceType: "retailer" }],
+    }, { apply: true });
+
+    expect(report.errors[0]?.error).toMatch(/already associated/i);
+    expect((await db.select().from(schema.bottleResources))[0]).toMatchObject({ sourceId: OFFICIAL_SOURCE.id });
+    expect((await db.select().from(schema.bottles).where(eq(schema.bottles.id, bottle.id)))[0].status).toBe("verified");
+  });
+
+  it("does not persist a source policy change when resource processing fails", async () => {
+    const bottle = await createTestBottle(db, { id: "failed-policy-change", status: "imported", abv: null });
+    const officialUrl = "https://www.example-distillery.com/products/reserve-10";
+    const conflictingUrl = "https://www.example-distillery.com/products/conflicting";
+    await ingestSourceManifest(db, {
+      sources: [OFFICIAL_SOURCE],
+      resources: [{ bottleId: bottle.id, sourceId: OFFICIAL_SOURCE.id, url: officialUrl, resourceType: "official_product" }],
+    }, { apply: true, fetchImpl: (async () => htmlResponse(PRODUCT_HTML)) as typeof fetch });
+    const editorial = {
+      ...OFFICIAL_SOURCE,
+      id: "policy-conflict-editorial",
+      name: "Policy conflict editorial",
+      kind: "editorial" as const,
+      fetchPolicy: "link_only" as const,
+      mediaPolicy: "link_only" as const,
+    };
+    await ingestSourceManifest(db, {
+      sources: [editorial],
+      resources: [{ bottleId: bottle.id, sourceId: editorial.id, url: conflictingUrl, resourceType: "review" }],
+    }, { apply: true });
+    const tightened = { ...OFFICIAL_SOURCE, mediaPolicy: "link_only" as const };
+    const conflictingHtml = PRODUCT_HTML.replace(
+      '<link rel="canonical" href="https://www.example-distillery.com/products/reserve-10" />',
+      `<link rel="canonical" href="${conflictingUrl}" />`,
+    );
+
+    const report = await ingestSourceManifest(db, {
+      sources: [tightened],
+      resources: [{ bottleId: bottle.id, sourceId: tightened.id, url: officialUrl, resourceType: "official_product" }],
+    }, { apply: true, fetchImpl: (async () => htmlResponse(conflictingHtml)) as typeof fetch });
+
+    expect(report.errors[0]?.error).toMatch(/already associated/i);
+    expect((await db.select().from(schema.catalogSources).where(eq(schema.catalogSources.id, OFFICIAL_SOURCE.id)))[0].mediaPolicy)
+      .toBe("display_remote");
+    expect((await db.select().from(schema.bottles).where(eq(schema.bottles.id, bottle.id)))[0].status).toBe("verified");
+  });
+
   it("preserves distinct official product pages from the same source", async () => {
     const bottle = await createTestBottle(db, { id: "multiple-official-pages", status: "imported", abv: null });
     const page = (path: string, abv: string) => PRODUCT_HTML
@@ -696,6 +758,60 @@ describe("source-backed persistence", () => {
       abv: null,
     });
     expect(await db.select().from(schema.bottleVerifications)).toEqual([]);
+
+    const structured = { ...source, fetchPolicy: "structured" as const };
+    await ingestSourceManifest(db, {
+      sources: [structured],
+      resources: [{
+        bottleId: bottle.id,
+        sourceId: source.id,
+        url: "https://www.example-distillery.com/products/reserve-10",
+        resourceType: "official_product",
+      }],
+    }, { apply: true, fetchImpl: (async () => htmlResponse(PRODUCT_HTML)) as typeof fetch });
+    expect((await db.select().from(schema.bottles).where(eq(schema.bottles.id, bottle.id)))[0].status).toBe("imported");
+    expect((await db.select().from(schema.bottleClaims).where(eq(schema.bottleClaims.field, "abv")))[0].status)
+      .toBe("corroborating");
+
+    await ingestSourceManifest(db, {
+      sources: [structured],
+      resources: [{
+        bottleId: bottle.id,
+        sourceId: source.id,
+        url: "https://www.example-distillery.com/products/reserve-10",
+        resourceType: "official_product",
+      }],
+    }, { apply: true, fetchImpl: (async () => htmlResponse(PRODUCT_HTML)) as typeof fetch });
+    expect((await db.select().from(schema.bottles).where(eq(schema.bottles.id, bottle.id)))[0].status).toBe("verified");
+    expect((await db.select().from(schema.bottleClaims).where(eq(schema.bottleClaims.field, "abv")))[0].status)
+      .toBe("accepted");
+  });
+
+  it("revokes verification when an official source is tightened to link-only", async () => {
+    const bottle = await createTestBottle(db, { id: "official-policy-revocation", status: "imported", abv: null });
+    const resource = {
+      bottleId: bottle.id,
+      sourceId: OFFICIAL_SOURCE.id,
+      url: "https://www.example-distillery.com/products/reserve-10",
+      resourceType: "official_product" as const,
+    };
+    await ingestSourceManifest(db, {
+      sources: [OFFICIAL_SOURCE],
+      resources: [resource],
+    }, { apply: true, fetchImpl: (async () => htmlResponse(PRODUCT_HTML)) as typeof fetch });
+
+    const linkOnly = { ...OFFICIAL_SOURCE, fetchPolicy: "link_only" as const };
+    const fetchImpl = vi.fn(async () => { throw new Error("link-only should not fetch"); }) as unknown as typeof fetch;
+    await ingestSourceManifest(db, { sources: [linkOnly], resources: [resource] }, { apply: true, fetchImpl });
+
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect((await db.select().from(schema.bottles).where(eq(schema.bottles.id, bottle.id)))[0]).toMatchObject({
+      status: "imported",
+      abv: null,
+    });
+    expect(await db.select().from(schema.bottleVerifications)).toEqual([]);
+    expect((await db.select().from(schema.catalogSources).where(eq(schema.catalogSources.id, OFFICIAL_SOURCE.id)))[0].fetchPolicy)
+      .toBe("link_only");
   });
 
   it("stores editorial resources but cannot verify or overwrite a bottle", async () => {

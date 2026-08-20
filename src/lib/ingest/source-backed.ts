@@ -572,8 +572,11 @@ async function fetchDocument(url: string, source: CatalogSourceDefinition, fetch
   }
 }
 
-function claimStatus(source: CatalogSourceDefinition, resource: CatalogResourceDefinition): "accepted" | "corroborating" | "review_required" {
-  if (source.kind === "official" && resource.resourceType === "official_product") return "accepted";
+function claimStatus(
+  source: CatalogSourceDefinition,
+  officialAuthority: boolean,
+): "accepted" | "corroborating" | "review_required" {
+  if (officialAuthority) return "accepted";
   if (source.kind === "registry") return "review_required";
   return "corroborating";
 }
@@ -614,12 +617,19 @@ export async function ingestSourceManifest(
   if (report.errors.length > 0) return report;
 
   const disabledSourceIds = new Set<string>();
+  const previouslyStructuredOfficialSourceIds = new Set<string>();
+  const existingSourceIds = new Set<string>();
+  const failedSourceIds = new Set<string>();
+  const previousFetchPolicy = new Map<string, CatalogFetchPolicy>();
+  const previousMediaPolicy = new Map<string, CatalogMediaPolicy>();
   if (apply) {
     for (const source of manifest.sources) {
       const baseUrl = new URL(source.baseUrl).origin;
       const [registered] = await db.select({
         baseUrl: catalogSources.baseUrl,
         kind: catalogSources.kind,
+        fetchPolicy: catalogSources.fetchPolicy,
+        mediaPolicy: catalogSources.mediaPolicy,
         enabled: catalogSources.enabled,
       })
         .from(catalogSources).where(eq(catalogSources.id, source.id)).limit(1);
@@ -627,6 +637,14 @@ export async function ingestSourceManifest(
         throw new Error(`Catalog source identity drift for ${source.id}; create a new source id`);
       }
       if (registered?.enabled === false) disabledSourceIds.add(source.id);
+      if (registered) existingSourceIds.add(source.id);
+      if (registered) {
+        previousFetchPolicy.set(source.id, registered.fetchPolicy);
+        previousMediaPolicy.set(source.id, registered.mediaPolicy);
+      }
+      if (registered?.kind === "official" && registered.fetchPolicy === "structured") {
+        previouslyStructuredOfficialSourceIds.add(source.id);
+      }
       await db.insert(catalogSources).values({
         ...source,
         baseUrl,
@@ -636,8 +654,6 @@ export async function ingestSourceManifest(
           name: source.name,
           kind: source.kind,
           baseUrl: new URL(source.baseUrl).origin,
-          fetchPolicy: source.fetchPolicy,
-          mediaPolicy: source.mediaPolicy,
           attribution: source.attribution ?? null,
           updatedAt: new Date(),
         },
@@ -648,6 +664,20 @@ export async function ingestSourceManifest(
   const processResource = async (resource: CatalogResourceDefinition): Promise<void> => {
     const source = sourceMap.get(resource.sourceId)!;
     try {
+      const priorFetchPolicy = previousFetchPolicy.get(source.id);
+      const priorMediaPolicy = previousMediaPolicy.get(source.id);
+      const mediaPolicyRank: Record<CatalogMediaPolicy, number> = {
+        display_remote: 0,
+        review_required: 1,
+        link_only: 2,
+      };
+      const effectiveMediaPolicy = priorMediaPolicy && mediaPolicyRank[priorMediaPolicy] > mediaPolicyRank[source.mediaPolicy]
+        ? priorMediaPolicy
+        : source.mediaPolicy;
+      const extractionSource = { ...source, mediaPolicy: effectiveMediaPolicy };
+      const policyAllowsOfficialAuthority = priorFetchPolicy == null
+        ? source.fetchPolicy === "structured"
+        : priorFetchPolicy === "structured" && source.fetchPolicy === "structured";
       const requestedUrl = validatePublicSourceUrl(resource.url, source).toString();
       const [bottle] = await db.select().from(bottles).where(eq(bottles.id, resource.bottleId)).limit(1);
       if (!bottle) throw new Error(`Unknown bottle id: ${resource.bottleId}`);
@@ -696,7 +726,7 @@ export async function ingestSourceManifest(
           url: document.finalUrl,
           body: document.body,
           contentType: document.contentType,
-          source,
+          source: extractionSource,
           resourceType: resource.resourceType,
           mediaKind: resource.mediaKind,
           expectedBottleName: bottle.name,
@@ -713,7 +743,7 @@ export async function ingestSourceManifest(
         sourceName: source.name,
         sourceAttribution: source.attribution ?? null,
         fetchPolicy: source.fetchPolicy,
-        mediaPolicy: source.mediaPolicy,
+        mediaPolicy: effectiveMediaPolicy,
         resourceType: resource.resourceType,
         mediaKind: resource.mediaKind ?? "bottle",
       }));
@@ -725,6 +755,8 @@ export async function ingestSourceManifest(
         id: bottleResources.id,
         url: bottleResources.url,
         contentHash: bottleResources.contentHash,
+        resourceType: bottleResources.resourceType,
+        sourceId: bottleResources.sourceId,
       }).from(bottleResources).where(and(
         eq(bottleResources.bottleId, bottle.id),
         resourceAssociation,
@@ -732,6 +764,12 @@ export async function ingestSourceManifest(
       const manifestMatch = candidates.find((candidate) => candidate.id === manifestResourceId);
       const canonicalMatch = candidates.find((candidate) => candidate.url === parsed.canonicalUrl);
       const existing = manifestMatch ?? canonicalMatch ?? candidates[0];
+      const conflictingSource = candidates.find((candidate) => candidate.sourceId !== source.id);
+      if (conflictingSource) {
+        throw new Error(`Resource URL is already associated with source ${conflictingSource.sourceId}`);
+      }
+      const previouslyOfficialProduct = existing?.resourceType === "official_product" &&
+        previouslyStructuredOfficialSourceIds.has(source.id);
       const resourceId = existing?.id ?? manifestResourceId;
       const priorResourceIds = candidates.map((candidate) => candidate.id);
       const priorCanonicalClaims = priorResourceIds.length === 0 ? [] : await db.select({
@@ -792,14 +830,14 @@ export async function ingestSourceManifest(
       }
 
       const officialProduct = source.kind === "official" &&
-        source.fetchPolicy === "structured" &&
+        policyAllowsOfficialAuthority &&
         resource.resourceType === "official_product" && !disabledSourceIds.has(source.id);
       const priorCanonicalAbv = priorCanonicalClaims.find((claim) => claim.field === "abv")?.value;
       const priorCanonicalAge = priorCanonicalClaims.find((claim) => claim.field === "ageYears")?.value;
       const managesAbv = typeof priorCanonicalAbv === "number" && priorCanonicalAbv === bottle.abv;
       const managesAge = typeof priorCanonicalAge === "number" && priorCanonicalAge === bottle.ageYears;
       const managesImage = bottle.imageUrl != null && priorCanonicalMedia.some((media) => media.url === bottle.imageUrl);
-      const status = claimStatus(source, resource);
+      const status = claimStatus(source, officialProduct);
       for (const claim of parsed.claims) {
         const valueHash = hash(JSON.stringify(claim.value));
         const canonicalized = officialProduct && (
@@ -1024,19 +1062,21 @@ export async function ingestSourceManifest(
         if (managesAbv) revokedCanonical.abv = typeof fallbackAbv?.value === "number" ? fallbackAbv.value : null;
         if (managesAge) revokedCanonical.ageYears = typeof fallbackAge?.value === "number" ? fallbackAge.value : null;
         if (clearManagedImage || managesImage) revokedCanonical.imageUrl = restorableManagedImage?.url ?? null;
-        await db.delete(bottleVerifications).where(inArray(bottleVerifications.id, verificationIds));
-        const remainingVerification = await db.select({ id: bottleVerifications.id })
-          .from(bottleVerifications)
-          .where(eq(bottleVerifications.bottleId, bottle.id))
-          .orderBy(bottleVerifications.createdAt)
-          .limit(1);
-        if (sourcePromotedBottle && bottle.status === "verified") {
-          if (remainingVerification.length === 0) {
-            revokedCanonical.status = "imported";
-          } else {
-            await db.update(bottleVerifications)
-              .set({ promotedBottle: true })
-              .where(eq(bottleVerifications.id, remainingVerification[0].id));
+        if (previouslyOfficialProduct) {
+          await db.delete(bottleVerifications).where(inArray(bottleVerifications.id, verificationIds));
+          const remainingVerification = await db.select({ id: bottleVerifications.id })
+            .from(bottleVerifications)
+            .where(eq(bottleVerifications.bottleId, bottle.id))
+            .orderBy(bottleVerifications.createdAt)
+            .limit(1);
+          if (sourcePromotedBottle && bottle.status === "verified") {
+            if (remainingVerification.length === 0) {
+              revokedCanonical.status = "imported";
+            } else {
+              await db.update(bottleVerifications)
+                .set({ promotedBottle: true })
+                .where(eq(bottleVerifications.id, remainingVerification[0].id));
+            }
           }
         }
         if (Object.keys(revokedCanonical).length > 0) {
@@ -1053,6 +1093,7 @@ export async function ingestSourceManifest(
         }
       }
     } catch (error) {
+      failedSourceIds.add(source.id);
       report.errors.push({ url: resource.url, error: error instanceof Error ? error.message : String(error) });
     }
   };
@@ -1076,5 +1117,15 @@ export async function ingestSourceManifest(
     }
   }
   await Promise.all(Array.from({ length: Math.min(concurrency, bottleGroups.length) }, () => worker()));
+  if (apply) {
+    for (const source of manifest.sources) {
+      if (!existingSourceIds.has(source.id) || failedSourceIds.has(source.id)) continue;
+      await db.update(catalogSources).set({
+        fetchPolicy: source.fetchPolicy,
+        mediaPolicy: source.mediaPolicy,
+        updatedAt: new Date(),
+      }).where(eq(catalogSources.id, source.id));
+    }
+  }
   return report;
 }
