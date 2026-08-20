@@ -792,6 +792,7 @@ export async function ingestSourceManifest(
       }
 
       const officialProduct = source.kind === "official" &&
+        source.fetchPolicy === "structured" &&
         resource.resourceType === "official_product" && !disabledSourceIds.has(source.id);
       const priorCanonicalAbv = priorCanonicalClaims.find((claim) => claim.field === "abv")?.value;
       const priorCanonicalAge = priorCanonicalClaims.find((claim) => claim.field === "ageYears")?.value;

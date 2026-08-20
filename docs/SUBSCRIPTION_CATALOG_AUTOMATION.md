@@ -42,7 +42,7 @@ Workflow: `.github/workflows/whiskey-feedback-review.yml`
 3. A maintainer applies `ai-review-approved` (or manually dispatches the workflow).
 4. The private subscription runner loads reviewed code from the default branch, stores the issue payload as JSON without shell interpolation, and runs one bounded structured-output search.
 5. The issue body is treated as untrusted data. Claude is allowed only `WebSearch` and `WebFetch`; it cannot use shell or repository tools.
-6. The model may suggest at most six exact URLs. It cannot write bottle facts directly. URLs are normalized and passed through Whaikey's deterministic source-backed parser before any database write. A model-labeled official page receives official authority only when its origin is already present in the curated official-source registry; otherwise it is stored as link-only producer evidence pending curation.
+6. The model may suggest at most six exact URLs. It cannot write bottle facts or grant official authority directly. URLs are normalized and stored as link-only producer/review/retailer evidence. A maintainer must separately add a producer URL to the curated source manifest before deterministic parsing can treat it as canonical authority.
 7. The workflow comments with attributed links and the validated ingestion report, then changes the issue label to `ai-reviewed`. Failures are labeled `ai-review-failed` and can be retried deliberately.
 
 Create these repository labels before enabling the flow:

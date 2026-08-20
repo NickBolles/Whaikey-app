@@ -675,6 +675,29 @@ describe("source-backed persistence", () => {
       .toBe("https://www.example-distillery.com/images/reserve-10.png");
   });
 
+  it("does not verify a bottle from an unfetched official link-only resource", async () => {
+    const bottle = await createTestBottle(db, { id: "official-link-only", status: "imported", abv: null });
+    const source = { ...OFFICIAL_SOURCE, fetchPolicy: "link_only" as const };
+    const fetchImpl = vi.fn(async () => htmlResponse(PRODUCT_HTML)) as unknown as typeof fetch;
+
+    await ingestSourceManifest(db, {
+      sources: [source],
+      resources: [{
+        bottleId: bottle.id,
+        sourceId: source.id,
+        url: "https://www.example-distillery.com/products/reserve-10",
+        resourceType: "official_product",
+      }],
+    }, { apply: true, fetchImpl });
+
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect((await db.select().from(schema.bottles).where(eq(schema.bottles.id, bottle.id)))[0]).toMatchObject({
+      status: "imported",
+      abv: null,
+    });
+    expect(await db.select().from(schema.bottleVerifications)).toEqual([]);
+  });
+
   it("stores editorial resources but cannot verify or overwrite a bottle", async () => {
     const bottle = await createTestBottle(db, { id: "editorial-only", status: "imported", abv: null });
     const source = { ...OFFICIAL_SOURCE, id: "breaking-bourbon", name: "Breaking Bourbon", kind: "editorial" as const, baseUrl: "https://www.breakingbourbon.com", mediaPolicy: "link_only" as const };

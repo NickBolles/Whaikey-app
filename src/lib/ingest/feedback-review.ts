@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import type { DB } from "@/db";
-import { bottles, catalogSources } from "@/db/schema";
+import { bottles } from "@/db/schema";
 import {
   ingestSourceManifest,
   resolvePublicAddresses,
@@ -100,7 +100,6 @@ function stableSourceId(kind: string, origin: string): string {
 export function normalizeFeedbackReview(
   value: unknown,
   bottle: { id: string; name: string },
-  options: { trustedOfficialOrigins?: ReadonlySet<string> } = {},
 ): { summary: string; manifest: CatalogSourceManifest } {
   if (!value || typeof value !== "object") throw new Error("Feedback review output must be an object");
   const row = value as Record<string, unknown>;
@@ -130,17 +129,17 @@ export function normalizeFeedbackReview(
     if (seenUrls.has(normalizedUrl)) continue;
     seenUrls.add(normalizedUrl);
 
-    const effectiveKind = normalizedKind === "official" && !options.trustedOfficialOrigins?.has(parsed.origin)
-      ? "registry" as const
-      : normalizedKind;
+    // Model discovery can suggest a producer page, but cannot grant canonical
+    // authority. A maintainer must add it to the curated manifest separately.
+    const effectiveKind = normalizedKind === "official" ? "registry" as const : normalizedKind;
     const sourceId = stableSourceId(effectiveKind, parsed.origin);
     const source = {
       id: sourceId,
       name: sourceName,
       kind: effectiveKind,
       baseUrl: parsed.origin,
-      fetchPolicy: effectiveKind === "official" ? "structured" as const : "link_only" as const,
-      mediaPolicy: effectiveKind === "official" ? "review_required" as const : "link_only" as const,
+      fetchPolicy: "link_only" as const,
+      mediaPolicy: "link_only" as const,
       attribution: sourceName,
     };
     validatePublicSourceUrl(normalizedUrl, source);
@@ -149,8 +148,7 @@ export function normalizeFeedbackReview(
       bottleId: bottle.id,
       sourceId,
       url: normalizedUrl,
-      resourceType: effectiveKind === "official" ? "official_product" :
-        effectiveKind === "editorial" ? "review" : effectiveKind === "retailer" ? "retailer" : "producer",
+      resourceType: effectiveKind === "editorial" ? "review" : effectiveKind === "retailer" ? "retailer" : "producer",
       mediaKind: "bottle",
       title: sourceName,
     });
@@ -182,33 +180,7 @@ export async function reviewWhiskeyFeedback(
     model: options.model,
     allowWebSearch: true,
   });
-  const officialRows = await db.select({
-    id: catalogSources.id,
-    name: catalogSources.name,
-    baseUrl: catalogSources.baseUrl,
-    fetchPolicy: catalogSources.fetchPolicy,
-    mediaPolicy: catalogSources.mediaPolicy,
-    attribution: catalogSources.attribution,
-  }).from(catalogSources)
-    .where(and(eq(catalogSources.kind, "official"), eq(catalogSources.enabled, true)));
-  const officialByOrigin = new Map(officialRows.map((source) => [new URL(source.baseUrl).origin, source]));
-  const normalized = normalizeFeedbackReview(output, bottle, {
-    trustedOfficialOrigins: new Set(officialByOrigin.keys()),
-  });
-  for (const source of normalized.manifest.sources) {
-    if (source.kind !== "official") continue;
-    const registered = officialByOrigin.get(new URL(source.baseUrl).origin);
-    if (!registered) continue;
-    const generatedId = source.id;
-    source.id = registered.id;
-    source.name = registered.name;
-    source.fetchPolicy = registered.fetchPolicy;
-    source.mediaPolicy = registered.mediaPolicy;
-    source.attribution = registered.attribution ?? registered.name;
-    for (const resource of normalized.manifest.resources) {
-      if (resource.sourceId === generatedId) resource.sourceId = registered.id;
-    }
-  }
+  const normalized = normalizeFeedbackReview(output, bottle);
   const resolveHost = options.resolveHost ?? (async (hostname: string) => {
     await resolvePublicAddresses(hostname);
   });

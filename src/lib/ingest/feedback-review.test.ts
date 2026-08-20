@@ -61,7 +61,7 @@ describe("whiskey feedback review", () => {
     }, { id: "eagle-rare-10", name: "Eagle Rare 10" })).toThrow(/HTTPS/i);
   });
 
-  it("requires curated origin trust before granting official authority", () => {
+  it("never grants canonical authority to an AI-discovered producer URL", () => {
     const output = {
       bottleId: "eagle-rare-10",
       summary: "Found a producer page.",
@@ -69,15 +69,9 @@ describe("whiskey feedback review", () => {
     };
     const bottle = { id: "eagle-rare-10", name: "Eagle Rare 10" };
 
-    const untrusted = normalizeFeedbackReview(output, bottle);
-    expect(untrusted.manifest.sources[0]).toMatchObject({ kind: "registry", fetchPolicy: "link_only" });
-    expect(untrusted.manifest.resources[0].resourceType).toBe("producer");
-
-    const trusted = normalizeFeedbackReview(output, bottle, {
-      trustedOfficialOrigins: new Set(["https://producer.example"]),
-    });
-    expect(trusted.manifest.sources[0]).toMatchObject({ kind: "official", fetchPolicy: "structured" });
-    expect(trusted.manifest.resources[0].resourceType).toBe("official_product");
+    const normalized = normalizeFeedbackReview(output, bottle);
+    expect(normalized.manifest.sources[0]).toMatchObject({ kind: "registry", fetchPolicy: "link_only" });
+    expect(normalized.manifest.resources[0].resourceType).toBe("producer");
   });
 
   it("feeds only validated discovered URLs into deterministic source ingestion", async () => {
