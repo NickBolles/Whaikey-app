@@ -10,6 +10,9 @@ describe("sold verification", () => {
   it("requires non-TTB product evidence before accepting a sale", () => {
     expect(normalizeSoldVerification({ id: "b", sold: true, evidenceUrl: "https://ttb.gov/cola", evidenceLabel: "TTB", evidenceKind: "manufacturer", retailerSku: null, upcs: [], abv: null, ageYears: null, price: null, description: null })).toBeNull();
     expect(normalizeSoldVerification({ id: "b", sold: true, evidenceUrl: "http://example-retailer.com/products/b", evidenceLabel: "Retailer", evidenceKind: "retailer", retailerSku: null, upcs: [], abv: null, ageYears: null, price: null, description: null })).toBeNull();
+    expect(normalizeSoldVerification({ id: "b", sold: true, evidenceUrl: "https://127.0.0.1/products/b", evidenceLabel: "Private", evidenceKind: "retailer", retailerSku: null, upcs: [], abv: null, ageYears: null, price: null, description: null })).toBeNull();
+    expect(normalizeSoldVerification({ id: "b", sold: true, evidenceUrl: "https://localhost/products/b", evidenceLabel: "Local", evidenceKind: "retailer", retailerSku: null, upcs: [], abv: null, ageYears: null, price: null, description: null })).toBeNull();
+    expect(normalizeSoldVerification({ id: "b", sold: true, evidenceUrl: "https://user:pass@example-retailer.com/products/b", evidenceLabel: "Credentials", evidenceKind: "retailer", retailerSku: null, upcs: [], abv: null, ageYears: null, price: null, description: null })).toBeNull();
     expect(normalizeSoldVerification({ id: "b", sold: true, evidenceUrl: "https://example-retailer.com/products/b", evidenceLabel: "Retailer", evidenceKind: "retailer", retailerSku: "A-1", upcs: ["080244002145", "bad"], abv: 45, ageYears: 10, price: 49.99, description: "A product." })).toEqual(expect.objectContaining({ id: "b", upcs: ["080244002145"], abv: 45, price: 49.99 }));
   });
 

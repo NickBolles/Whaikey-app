@@ -73,6 +73,7 @@ export interface ParsedSourceDocument {
   contentHash: string;
   claims: ExtractedClaim[];
   media: ExtractedMedia[];
+  primaryProductMatched: boolean;
 }
 
 interface ParseInput {
@@ -87,6 +88,11 @@ interface ParseInput {
 
 const MAX_DOCUMENT_BYTES = 2_000_000;
 const FETCH_TIMEOUT_MS = 15_000;
+const MEDIA_POLICY_RANK: Record<CatalogMediaPolicy, number> = {
+  display_remote: 0,
+  review_required: 1,
+  link_only: 2,
+};
 
 function hash(value: string): string {
   return createHash("sha256").update(value).digest("hex");
@@ -333,7 +339,7 @@ function primaryProductForPage(
   requestedUrl: URL,
   expectedBottleName?: string,
 ): Record<string, unknown> | undefined {
-  if (products.length <= 1) return products[0];
+  if (products.length === 0) return undefined;
   const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
   const title = normalize(metaContent(html, "og:title") ?? pageTitle(html) ?? "");
   const expected = normalize(expectedBottleName ?? "");
@@ -356,7 +362,7 @@ function primaryProductForPage(
       bestScore = score;
     }
   }
-  return best;
+  return bestScore >= 250 ? best : undefined;
 }
 
 /** Extract only bounded metadata/facts; article and review bodies are never returned. */
@@ -399,7 +405,9 @@ export function parseSourceDocument(input: ParseInput): ParsedSourceDocument {
 
   const structuredImage = primaryProduct ? imageValue(primaryProduct.image) : null;
   const openGraphImage = metaContent(html, "og:image");
-  const rawImage = structuredImage ?? (openGraphImage ? { url: openGraphImage, width: null, height: null } : null);
+  const rawImage = officialProduct && !primaryProduct
+    ? null
+    : structuredImage ?? (openGraphImage ? { url: openGraphImage, width: null, height: null } : null);
   if (rawImage && input.mediaKind) {
     try {
       const mediaUrl = new URL(rawImage.url, requestedUrl);
@@ -429,6 +437,7 @@ export function parseSourceDocument(input: ParseInput): ParsedSourceDocument {
     contentHash: hash(input.body),
     claims,
     media,
+    primaryProductMatched: primaryProduct != null,
   };
 }
 
@@ -645,6 +654,35 @@ export async function ingestSourceManifest(
       if (registered?.kind === "official" && registered.fetchPolicy === "structured") {
         previouslyStructuredOfficialSourceIds.add(source.id);
       }
+      if (registered && MEDIA_POLICY_RANK[source.mediaPolicy] > MEDIA_POLICY_RANK[registered.mediaPolicy]) {
+        const sourceMedia = await db.select({
+          id: bottleMedia.id,
+          bottleId: bottleMedia.bottleId,
+          url: bottleMedia.url,
+          canonicalized: bottleMedia.canonicalized,
+        }).from(bottleMedia)
+          .innerJoin(bottleResources, eq(bottleMedia.resourceId, bottleResources.id))
+          .where(eq(bottleResources.sourceId, source.id));
+        if (sourceMedia.length > 0) {
+          await db.update(bottleMedia).set({
+            rights: source.mediaPolicy,
+            canonicalized: false,
+          }).where(inArray(bottleMedia.id, sourceMedia.map((media) => media.id)));
+          for (const media of sourceMedia) {
+            if (!media.canonicalized) continue;
+            await db.update(bottles).set({ imageUrl: null }).where(and(
+              eq(bottles.id, media.bottleId),
+              eq(bottles.imageUrl, media.url),
+            ));
+          }
+        }
+        // Restrictive changes are safety revocations, not optimistic updates:
+        // persist them even when one of the source's pages is unavailable.
+        await db.update(catalogSources).set({
+          mediaPolicy: source.mediaPolicy,
+          updatedAt: new Date(),
+        }).where(eq(catalogSources.id, source.id));
+      }
       await db.insert(catalogSources).values({
         ...source,
         baseUrl,
@@ -666,12 +704,7 @@ export async function ingestSourceManifest(
     try {
       const priorFetchPolicy = previousFetchPolicy.get(source.id);
       const priorMediaPolicy = previousMediaPolicy.get(source.id);
-      const mediaPolicyRank: Record<CatalogMediaPolicy, number> = {
-        display_remote: 0,
-        review_required: 1,
-        link_only: 2,
-      };
-      const effectiveMediaPolicy = priorMediaPolicy && mediaPolicyRank[priorMediaPolicy] > mediaPolicyRank[source.mediaPolicy]
+      const effectiveMediaPolicy = priorMediaPolicy && MEDIA_POLICY_RANK[priorMediaPolicy] > MEDIA_POLICY_RANK[source.mediaPolicy]
         ? priorMediaPolicy
         : source.mediaPolicy;
       const extractionSource = { ...source, mediaPolicy: effectiveMediaPolicy };
@@ -708,6 +741,7 @@ export async function ingestSourceManifest(
           contentHash: hash(`disabled\u0000${disabledResource.contentHash ?? ""}`),
           claims: [],
           media: [],
+          primaryProductMatched: false,
         };
       } else if (source.fetchPolicy === "link_only") {
         parsed = {
@@ -718,6 +752,7 @@ export async function ingestSourceManifest(
           contentHash: hash(requestedUrl),
           claims: [],
           media: [],
+          primaryProductMatched: false,
         };
       } else {
         const document = await fetchDocument(requestedUrl, source, fetchImpl);
@@ -830,7 +865,7 @@ export async function ingestSourceManifest(
       }
 
       const officialProduct = source.kind === "official" &&
-        policyAllowsOfficialAuthority &&
+        policyAllowsOfficialAuthority && parsed.primaryProductMatched &&
         resource.resourceType === "official_product" && !disabledSourceIds.has(source.id);
       const priorCanonicalAbv = priorCanonicalClaims.find((claim) => claim.field === "abv")?.value;
       const priorCanonicalAge = priorCanonicalClaims.find((claim) => claim.field === "ageYears")?.value;
@@ -976,13 +1011,16 @@ export async function ingestSourceManifest(
           asc(bottleMedia.id),
         )
         .limit(1);
-      const verificationIds = [...new Set([
-        ...candidates.map((candidate) => stableId("verification", bottle.id, candidate.url)),
-        stableId("verification", bottle.id, parsed.canonicalUrl),
+      const verificationUrls = [...new Set([
+        ...candidates.map((candidate) => candidate.url),
+        parsed.canonicalUrl,
       ])];
       const priorVerifications = await db.select({ promotedBottle: bottleVerifications.promotedBottle })
         .from(bottleVerifications)
-        .where(inArray(bottleVerifications.id, verificationIds));
+        .where(and(
+          eq(bottleVerifications.bottleId, bottle.id),
+          inArray(bottleVerifications.url, verificationUrls),
+        ));
       const sourcePromotedBottle = priorVerifications.some((verification) => verification.promotedBottle);
 
       if (officialProduct) {
@@ -1033,9 +1071,9 @@ export async function ingestSourceManifest(
         }
         for (const previous of candidates) {
           if (previous.url !== parsed.canonicalUrl) {
-            await db.delete(bottleVerifications).where(eq(
-              bottleVerifications.id,
-              stableId("verification", bottle.id, previous.url),
+            await db.delete(bottleVerifications).where(and(
+              eq(bottleVerifications.bottleId, bottle.id),
+              eq(bottleVerifications.url, previous.url),
             ));
           }
         }
@@ -1063,7 +1101,10 @@ export async function ingestSourceManifest(
         if (managesAge) revokedCanonical.ageYears = typeof fallbackAge?.value === "number" ? fallbackAge.value : null;
         if (clearManagedImage || managesImage) revokedCanonical.imageUrl = restorableManagedImage?.url ?? null;
         if (previouslyOfficialProduct) {
-          await db.delete(bottleVerifications).where(inArray(bottleVerifications.id, verificationIds));
+          await db.delete(bottleVerifications).where(and(
+            eq(bottleVerifications.bottleId, bottle.id),
+            inArray(bottleVerifications.url, verificationUrls),
+          ));
           const remainingVerification = await db.select({ id: bottleVerifications.id })
             .from(bottleVerifications)
             .where(eq(bottleVerifications.bottleId, bottle.id))

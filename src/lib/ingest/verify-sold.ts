@@ -3,6 +3,7 @@ import { and, eq } from "drizzle-orm";
 import type { DB } from "@/db";
 import { bottleClaims, bottleResources, bottles, bottleUpcs, bottleVerifications, catalogSources, priceHistory } from "@/db/schema";
 import { isValidUpc } from "@/lib/upc";
+import { validatePublicSourceUrl } from "./source-backed";
 
 export type VerificationCandidate = {
   id: string;
@@ -54,7 +55,7 @@ export function buildSoldVerificationSchema(): Record<string, unknown> {
 }
 
 export function buildSoldVerificationPrompt(rows: VerificationCandidate[]): string {
-  return `Verify whether each TTB-label-derived whiskey is an actual consumer product currently or historically offered for sale. Search the web. A TTB COLA record alone is NOT evidence.\n\nFor sold=true, require a specific manufacturer or retailer product page and return its direct http(s) URL, source label, and evidenceKind (manufacturer or retailer). Only return facts explicitly supported by that page. Never guess a UPC, retailer SKU, price, ABV, age, or description. If no qualifying product page exists, return sold=false with all fact fields null/empty and evidenceKind=null. UPCs must be numeric GTINs as printed by the source. Retailer SKU is source context only.\n\nReturn a JSON object with a results array containing one result per supplied id. Candidates:\n${JSON.stringify(rows)}`;
+  return `Verify whether each TTB-label-derived whiskey is an actual consumer product currently or historically offered for sale. Search the web. A TTB COLA record alone is NOT evidence.\n\nFor sold=true, require a specific manufacturer or retailer product page and return its direct public HTTPS URL, source label, and evidenceKind (manufacturer or retailer). Never return localhost, private-network, credential-bearing, or plaintext HTTP URLs. Only return facts explicitly supported by that page. Never guess a UPC, retailer SKU, price, ABV, age, or description. If no qualifying product page exists, return sold=false with all fact fields null/empty and evidenceKind=null. UPCs must be numeric GTINs as printed by the source. Retailer SKU is source context only.\n\nReturn a JSON object with a results array containing one result per supplied id. Candidates:\n${JSON.stringify(rows)}`;
 }
 
 function finiteInRange(value: unknown, min: number, max: number): number | null {
@@ -67,7 +68,14 @@ function safeUrl(value: unknown): string | null {
     const url = new URL(value);
     if (url.protocol !== "https:") return null;
     if (url.hostname.endsWith("ttb.gov")) return null;
-    return url.toString();
+    return validatePublicSourceUrl(url.toString(), {
+      id: "verification-evidence",
+      name: "Verification evidence",
+      kind: "registry",
+      baseUrl: url.origin,
+      fetchPolicy: "link_only",
+      mediaPolicy: "link_only",
+    }).toString();
   } catch { return null; }
 }
 

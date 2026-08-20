@@ -103,6 +103,26 @@ describe("source-backed document extraction", () => {
     expect(parsed.media).toEqual([]);
   });
 
+  it("does not match a soft-404 or unrelated product page", () => {
+    const parsed = parseSourceDocument({
+      url: "https://www.example-distillery.com/products/expected-reserve",
+      contentType: "text/html",
+      body: `<html><head>
+        <title>Page not found</title>
+        <meta property="og:image" content="https://www.example-distillery.com/images/unrelated.png" />
+        <script type="application/ld+json">{"@type":"Product","name":"Completely Different Whiskey","image":"https://www.example-distillery.com/images/unrelated.png","additionalProperty":[{"@type":"PropertyValue","name":"ABV","value":"60%"}]}</script>
+      </head></html>`,
+      source: OFFICIAL_SOURCE,
+      resourceType: "official_product",
+      mediaKind: "bottle",
+      expectedBottleName: "Expected Reserve",
+    });
+
+    expect(parsed.primaryProductMatched).toBe(false);
+    expect(parsed.claims).toEqual([]);
+    expect(parsed.media).toEqual([]);
+  });
+
   it("normalizes only whole-year age units", () => {
     const parseAge = (property: string) => parseSourceDocument({
       url: "https://www.example-distillery.com/products/reserve-10",
@@ -146,6 +166,7 @@ describe("source-backed document extraction", () => {
       source: OFFICIAL_SOURCE,
       resourceType: "official_product",
       mediaKind: "bottle",
+      expectedBottleName: "API Reserve",
     });
 
     expect(parsed.claims).toEqual(expect.arrayContaining([
@@ -330,12 +351,13 @@ describe("source-backed persistence", () => {
     expect((await db.select().from(schema.bottles).where(eq(schema.bottles.id, bottle.id)))[0].status).toBe("verified");
   });
 
-  it("does not persist a source policy change when resource processing fails", async () => {
+  it("does not persist a permissive source policy change when resource processing fails", async () => {
     const bottle = await createTestBottle(db, { id: "failed-policy-change", status: "imported", abv: null });
     const officialUrl = "https://www.example-distillery.com/products/reserve-10";
     const conflictingUrl = "https://www.example-distillery.com/products/conflicting";
+    const restrictedOfficial = { ...OFFICIAL_SOURCE, mediaPolicy: "review_required" as const };
     await ingestSourceManifest(db, {
-      sources: [OFFICIAL_SOURCE],
+      sources: [restrictedOfficial],
       resources: [{ bottleId: bottle.id, sourceId: OFFICIAL_SOURCE.id, url: officialUrl, resourceType: "official_product" }],
     }, { apply: true, fetchImpl: (async () => htmlResponse(PRODUCT_HTML)) as typeof fetch });
     const editorial = {
@@ -350,20 +372,20 @@ describe("source-backed persistence", () => {
       sources: [editorial],
       resources: [{ bottleId: bottle.id, sourceId: editorial.id, url: conflictingUrl, resourceType: "review" }],
     }, { apply: true });
-    const tightened = { ...OFFICIAL_SOURCE, mediaPolicy: "link_only" as const };
+    const permissive = { ...restrictedOfficial, mediaPolicy: "display_remote" as const };
     const conflictingHtml = PRODUCT_HTML.replace(
       '<link rel="canonical" href="https://www.example-distillery.com/products/reserve-10" />',
       `<link rel="canonical" href="${conflictingUrl}" />`,
     );
 
     const report = await ingestSourceManifest(db, {
-      sources: [tightened],
-      resources: [{ bottleId: bottle.id, sourceId: tightened.id, url: officialUrl, resourceType: "official_product" }],
+      sources: [permissive],
+      resources: [{ bottleId: bottle.id, sourceId: permissive.id, url: officialUrl, resourceType: "official_product" }],
     }, { apply: true, fetchImpl: (async () => htmlResponse(conflictingHtml)) as typeof fetch });
 
     expect(report.errors[0]?.error).toMatch(/already associated/i);
     expect((await db.select().from(schema.catalogSources).where(eq(schema.catalogSources.id, OFFICIAL_SOURCE.id)))[0].mediaPolicy)
-      .toBe("display_remote");
+      .toBe("review_required");
     expect((await db.select().from(schema.bottles).where(eq(schema.bottles.id, bottle.id)))[0].status).toBe("verified");
   });
 
@@ -441,12 +463,15 @@ describe("source-backed persistence", () => {
       .mockResolvedValueOnce(htmlResponse(page("https://www.example-distillery.com/products/current"))) as unknown as typeof fetch;
 
     await ingestSourceManifest(db, manifest, { apply: true, fetchImpl });
+    await db.update(schema.bottleVerifications).set({ id: "legacy-random-canonical-verification" });
     await ingestSourceManifest(db, manifest, { apply: true, fetchImpl });
 
     expect(await db.select().from(schema.bottleResources)).toEqual([
       expect.objectContaining({ url: "https://www.example-distillery.com/products/current" }),
     ]);
-    expect(await db.select().from(schema.bottleVerifications)).toHaveLength(1);
+    expect(await db.select().from(schema.bottleVerifications)).toEqual([
+      expect.objectContaining({ url: "https://www.example-distillery.com/products/current" }),
+    ]);
   });
 
   it("keeps a curated canonical override when source facts change", async () => {
@@ -664,6 +689,34 @@ describe("source-backed persistence", () => {
     expect((await db.select().from(schema.bottles).where(eq(schema.bottles.id, bottle.id)))[0].imageUrl).toBeNull();
   });
 
+  it("quarantines media immediately when a restrictive policy refresh cannot fetch", async () => {
+    const bottle = await createTestBottle(db, { id: "media-policy-fetch-failure", status: "imported", imageUrl: null });
+    const resource = {
+      bottleId: bottle.id,
+      sourceId: OFFICIAL_SOURCE.id,
+      url: "https://www.example-distillery.com/products/reserve-10",
+      resourceType: "official_product" as const,
+      mediaKind: "bottle" as const,
+    };
+    await ingestSourceManifest(db, { sources: [OFFICIAL_SOURCE], resources: [resource] }, {
+      apply: true,
+      fetchImpl: (async () => htmlResponse(PRODUCT_HTML)) as typeof fetch,
+    });
+    const unavailableFetch = vi.fn(async () => { throw new Error("origin unavailable"); }) as unknown as typeof fetch;
+    const report = await ingestSourceManifest(db, {
+      sources: [{ ...OFFICIAL_SOURCE, mediaPolicy: "link_only" }],
+      resources: [resource],
+    }, { apply: true, fetchImpl: unavailableFetch });
+
+    expect(report.errors[0]?.error).toMatch(/origin unavailable/i);
+    expect((await db.select().from(schema.catalogSources).where(eq(schema.catalogSources.id, OFFICIAL_SOURCE.id)))[0].mediaPolicy)
+      .toBe("link_only");
+    expect(await db.select().from(schema.bottleMedia)).toEqual([
+      expect.objectContaining({ rights: "link_only", canonicalized: false }),
+    ]);
+    expect((await db.select().from(schema.bottles).where(eq(schema.bottles.id, bottle.id)))[0].imageUrl).toBeNull();
+  });
+
   it("preserves a matching curated image when restricted source media was never canonicalized", async () => {
     const curatedImage = "https://www.example-distillery.com/images/reserve-10.png";
     const bottle = await createTestBottle(db, {
@@ -735,6 +788,34 @@ describe("source-backed persistence", () => {
     ]);
     expect((await db.select().from(schema.bottles).where(eq(schema.bottles.id, bottle.id)))[0].imageUrl)
       .toBe("https://www.example-distillery.com/images/reserve-10.png");
+  });
+
+  it("does not verify a bottle when a structured page has no matching product", async () => {
+    const bottle = await createTestBottle(db, { id: "unmatched-structured-product", name: "Expected Reserve", status: "imported", abv: null, imageUrl: null });
+    const body = `<html><head>
+      <title>Page not found</title>
+      <meta property="og:image" content="https://www.example-distillery.com/images/unrelated.png" />
+      <script type="application/ld+json">{"@type":"Product","name":"Other Reserve","image":"https://www.example-distillery.com/images/unrelated.png","additionalProperty":[{"@type":"PropertyValue","name":"ABV","value":"60%"}]}</script>
+    </head></html>`;
+
+    await ingestSourceManifest(db, {
+      sources: [OFFICIAL_SOURCE],
+      resources: [{
+        bottleId: bottle.id,
+        sourceId: OFFICIAL_SOURCE.id,
+        url: "https://www.example-distillery.com/products/expected-reserve",
+        resourceType: "official_product",
+        mediaKind: "bottle",
+      }],
+    }, { apply: true, fetchImpl: (async () => htmlResponse(body)) as typeof fetch });
+
+    expect((await db.select().from(schema.bottles).where(eq(schema.bottles.id, bottle.id)))[0]).toMatchObject({
+      status: "imported",
+      abv: null,
+      imageUrl: null,
+    });
+    expect(await db.select().from(schema.bottleVerifications)).toEqual([]);
+    expect(await db.select().from(schema.bottleMedia)).toEqual([]);
   });
 
   it("does not verify a bottle from an unfetched official link-only resource", async () => {
@@ -885,7 +966,7 @@ describe("source-backed persistence", () => {
   });
 
   it("resolves relative metadata against the final same-origin redirect URL", async () => {
-    const bottle = await createTestBottle(db, { id: "redirect-relative", status: "imported", imageUrl: null });
+    const bottle = await createTestBottle(db, { id: "redirect-relative", name: "Redirected Bottle", status: "imported", imageUrl: null });
     const manifest: CatalogSourceManifest = {
       sources: [OFFICIAL_SOURCE],
       resources: [{ bottleId: bottle.id, sourceId: OFFICIAL_SOURCE.id, url: "https://www.example-distillery.com/old/page", resourceType: "official_product", mediaKind: "bottle" }],
@@ -894,6 +975,7 @@ describe("source-backed persistence", () => {
       <link rel="canonical" href="./" />
       <meta property="og:title" content="Redirected Bottle" />
       <meta property="og:image" content="bottle.jpg" />
+      <script type="application/ld+json">{"@type":"Product","name":"Redirected Bottle","image":"bottle.jpg"}</script>
     </head></html>`;
     const fetchImpl = vi.fn(async (url: string | URL | Request) => {
       const current = String(url);
@@ -943,6 +1025,10 @@ describe("source-backed persistence", () => {
       apply: true,
       fetchImpl: (async () => htmlResponse(PRODUCT_HTML)) as typeof fetch,
     });
+    await db.update(schema.bottleVerifications).set({
+      id: "legacy-random-verification-id",
+      promotedBottle: true,
+    });
     await db.update(schema.catalogSources).set({ enabled: false }).where(eq(schema.catalogSources.id, OFFICIAL_SOURCE.id));
     const unavailableFetch = vi.fn(async () => { throw new Error("origin unavailable"); }) as unknown as typeof fetch;
     await ingestSourceManifest(db, manifest, { apply: true, fetchImpl: unavailableFetch });
@@ -954,6 +1040,7 @@ describe("source-backed persistence", () => {
       abv: null,
     });
     expect(await db.select().from(schema.bottleClaims)).toEqual([]);
+    expect(await db.select().from(schema.bottleVerifications)).toEqual([]);
 
     await db.update(schema.catalogSources).set({ enabled: true }).where(eq(schema.catalogSources.id, OFFICIAL_SOURCE.id));
     await ingestSourceManifest(db, manifest, {
