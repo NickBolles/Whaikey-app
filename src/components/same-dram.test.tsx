@@ -23,7 +23,7 @@ describe("SameDram", () => {
 
   it("shows the muted invite line when the viewer has notes but no friends have tasted it", () => {
     render(<SameDram viewerTags={{ vanilla: 2 }} producer={null} friends={[]} hasViewerNotes={true} />);
-    expect(screen.getByText(/none of your friends have tasted this yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/none of your friends have tasted it yet/i)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Find friends" })).toHaveAttribute("href", "/friends");
   });
 

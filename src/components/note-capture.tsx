@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Mic, MicOff, Sparkles } from "lucide-react";
 import { FLAVOR_WHEEL, leafLabel, matchLeafIds, wedgeForLeaf } from "@/lib/flavor-wheel";
+import { IntensityDots } from "@/components/flavor-chip";
 
 /**
  * Mirror of the server-side ExtractedTastingNote shape (src/lib/ai/extract.ts).
@@ -370,10 +371,8 @@ export function NoteCapture({
                       style={{ backgroundColor: leafColor(leafId) }}
                       aria-hidden
                     />
-                    <span className="text-foreground/90">
-                      {leafLabel(leafId)}{" "}
-                      <span className="text-accent">{"×".repeat(Math.max(1, Math.min(3, intensity)))}</span>
-                    </span>
+                    <span className="text-foreground/90">{leafLabel(leafId)}</span>
+                    <IntensityDots intensity={intensity} className="text-accent" />
                   </span>
                 </li>
               ))}

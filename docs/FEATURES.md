@@ -343,12 +343,83 @@ Inspired by Vivino's "Wine Adventures" (gamified guided tasting journeys, a Prem
 
 ---
 
-## 11. Stats, Delight & Retention
+## 11. Exploration — the Passport
 
-- 🟡 **Stats page**: pours over time, category breakdown, average rating by region, spend charts.
-- 🔵 **Whiskey Wrapped** (yearly recap, shareable, opt-in on the spend slide 😅).
-- 🔵 Badges: regions explored, categories tried, streaks kept honest (no dark-pattern daily-drinking streaks — badge design must respect the guardrails in §8.3).
-- ⚪ Distillery passport & map; sample-share tracker (2oz samples, who owes whom); home-screen widgets (tonight's pick, collection value).
+The app's progress surface, and the answer to "what do I try next?". Whiskey is enormous; any one drinker's experience of it is small and lopsided. The Passport makes that shape visible and gives the gaps somewhere to go.
+
+**It counts distinct things met, never amounts consumed.** That is what makes it safe to make competitive, shareable and fun: breadth *saturates*. The fiftieth pour of the same bourbon moves nothing; a 15 ml sample of something new moves everything. The cheapest way to fill a passport is to drink less of more — which is precisely the substitute docs/SOCIAL.md §3.2 mandates in place of volume mechanics. Nothing here needs a guardrail relaxed.
+
+### 11.1 The six dimensions (🟡 Phase 3 for counters, 🔵 S3 for badges)
+
+| Dimension | Source | Shape |
+|---|---|---|
+| **Regions** | `bottles.region` | Closed per country (Scotland's six) → completable |
+| **Countries** | `distilleries.country` | Semi-closed (~15 producing countries worth naming) |
+| **Distilleries** | `bottles.distilleryId` | Open-ended → milestone tiers |
+| **Cask types** | `bottles.caskTypes[]` | Semi-closed (sherry, bourbon, port, madeira, virgin oak, mizunara…) |
+| **Categories** | `bottles.category` | Closed (the `WhiskeyCategory` union) |
+| **Descriptors** | `tastingNotes.flavorTags` keys | Closed at ~55 leaves — the *precision* dimension (§5), and the one that rewards attention rather than acquisition |
+
+Every dimension is derivable from data already stored. No new logging step, no new field for the user to fill: **you earn a passport by using the app normally.**
+
+### 11.2 What counts as "met"
+
+A dimension value is met when the user has **either** a logged pour of a bottle carrying it **or** a `tried`/`own` relationship to one. Explicitly:
+
+- **A sample counts.** 15 ml at a bar, a friend's pour, a miniature — identical to a full bottle. Volume never appears in this feature, in any form.
+- **Wishlist does not count.** Wanting is not meeting. (It's the *suggestion* surface instead — see §11.5.)
+- **Repeats never advance anything.** The query is `count(distinct …)`; there is no path where drinking more of what you've had moves a number.
+
+### 11.3 Counters (🟡 Phase 3 — ships first, alone)
+
+The plain numbers, on My Bar and on the profile palate card: *"3 of 6 Scotch regions · 11 distilleries · 4 cask types."* Cheap (`count(distinct)` over existing tables), immediately motivating for a solo user, and it validates the whole idea before a single badge asset is drawn. **Ship this and stop**, until there's enough logged history for a threshold to mean anything.
+
+### 11.4 Badges (🔵 S3)
+
+Three kinds, deliberately different in feel:
+
+- **Completions** — a closed set finished. *All six Scotch regions. Every category. A full flavor wedge named across your own notes.* The satisfying kind, because it can actually end.
+- **Milestones** — tiers on the open sets, at 5 / 10 / 25 / 50 / 100. *"25 distilleries."* Always a next one, never a last one.
+- **Discoveries** — a shape in what you've done rather than a count. *Four cask finishes of the same distillate. A region tried before it was in your recommendations. The same bottle noted a year apart with different descriptors* (that one rewards returning attentively, not consuming).
+
+Rules every badge must pass, checked in review the same way §3.1's bans are:
+
+1. **Distinct-only.** If repeating a pour can advance it, it isn't a badge.
+2. **Volume-blind and strength-blind.** No ml, no ABV, no cask strength as an achievement axis.
+3. **Untimed.** No "this month", no streak, no expiry, no seasonal pressure. A passport is a lifetime object.
+4. **Tasted and visited are different dimensions.** A *tasted* distillery badge means you drank what they made, from anywhere — a bar pour counts. A *visited* badge means you went there, and is its own thing entirely (§11.8). Neither is a drinking-venue badge: bars and restaurants are never counted, in either dimension.
+5. **No nudge may reference proximity to a reward.** "One region to go" as a notification is banned (§3.1 rule 4). The passport shows the gap when the user *opens* it; it never comes to find them.
+
+### 11.5 Gaps as recommendations (🔵 S3)
+
+The empty cells are the most useful thing on the page, because they're a recommendation with a reason already attached: *"You've never had a Campbeltown — Springbank 10 sits in your usual range and leans into the smoke you rate highly."* Passport gaps become an input to `recommendBottles` alongside the palate vector and price band, so an exploration prompt is still a *palate* match — we suggest what to try when you next try something, never that you try something now.
+
+### 11.6 Sharing (🔵 S3) and clubs (🔵 S3.5)
+
+- **Passport card** — a shareable image/link in the existing share-card family, showing the map and the completions. No pour counts on it, ever.
+- **Friend diffing** — *"you've both done Islay; neither of you has touched Japan."* Rendered as a **diff, not a ranking**: what each of you has that the other doesn't, and the shared gap. Deliberately never a "who's met more distilleries" list — an open-ended count *is* partly a consumption proxy (§3.3), and the diff is the more useful artifact anyway, because it turns into a plan: what to open next time you're in the same room.
+- **Club passport** — the union across a club's members, so a group can take on a region together. Aggregate only; no per-member column, which would be the leaderboard by the back door.
+
+### 11.7 Stats, delight & retention (the rest)
+
+- 🟡 **Stats page**: category breakdown, average rating by region, spend charts. (Pours-over-time stays a *private* chart — it's the one consumption view a user may legitimately want about themselves, and it never leaves their own screen.)
+- 🔵 **Whiskey Wrapped** (yearly recap, shareable, opt-in on the spend slide 😅) — built on the passport's breadth story rather than a volume total.
+- ⚪ Sample-share tracker (2oz samples, who owes whom); home-screen widgets (tonight's pick, collection value). The distillery map now lives with visits — §11.8.
+
+### 11.8 Distillery visits — the pilgrimage page (⚪ future)
+
+Whiskey is one of the few hobbies with *destinations*. People plan Islay trips, do the Speyside run, detour an hour off a motorway for a tour. That belongs on the passport, and it is the dimension a drinker is proudest of — so it gets its own page: distilleries visited, on a map, with the date and whatever they want to remember about it.
+
+**Why this is not the banned venue mechanic.** The Untappd badges our guardrails reject pay you to drink at more bars, more often, near where you already are — frequency at places of consumption. A distillery visit is travel: a distinct destination, usually planned months ahead, and completable while drinking nothing at all (plenty of visitors are driving). The mechanic pays you to *go somewhere*, not to *drink more*. Concretely, the rules that keep it on the right side:
+
+- **Distinct destinations only.** Ten trips to the same distillery is one badge, forever. There is no visit-frequency count anywhere in the product.
+- **Distilleries and their visitor centres only.** Never bars, restaurants, festivals or shops — the moment a place is scored for *drinking there*, it's the banned mechanic.
+- **No proximity anything.** No "you're 2 miles from Ardbeg", no background geofence, no notification tied to being near a place. That's SOCIAL.md §3.1 rule 4 wearing a map pin.
+- **A visit is not a pour.** Checking in records that you were there. It never logs a drink, never prompts one, and a visit with no pour attached is completely normal.
+
+**How a visit gets recorded.** Manual entry is the baseline and always sufficient: pick the distillery, pick a date, done — including for trips from years ago. Device location is an *accelerator* on top, governed by SOCIAL.md §8.3: foreground-only and requested at the moment the user taps to check in, coarse accuracy (we're matching a named distillery, not a doorway), platform when-in-use permission with the reason on screen, and **only `(distilleryId, date)` is stored** — the coordinates pick the distillery and are then discarded. Declining the permission costs the user nothing but a few taps.
+
+**On the passport and shared:** visited distilleries render as a distinct state from tasted ones (met · tasted · visited), so a map can show "drank it" and "stood there" differently — and *"tasted 41, visited 6"* is a much better sentence than either number alone. Shared passports show the set, never the dates or any location detail.
 
 ---
 

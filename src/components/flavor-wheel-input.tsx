@@ -21,6 +21,7 @@ import {
   shortLabel,
   warmify,
 } from "@/components/wheel-geometry";
+import { IntensityDots } from "@/components/flavor-chip";
 
 export interface FlavorWheelInputProps {
   /** {leafId: intensity 1-3} */
@@ -477,9 +478,8 @@ export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
                   style={{ backgroundColor: chip.color }}
                   aria-hidden
                 />
-                <span className="text-foreground/90">
-                  {chip.label} <span className="text-accent">{"×".repeat(chip.intensity)}</span>
-                </span>
+                <span className="text-foreground/90">{chip.label}</span>
+                <IntensityDots intensity={chip.intensity} className="text-accent" />
                 <span className="text-muted" aria-hidden>
                   ✕
                 </span>

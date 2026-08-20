@@ -264,6 +264,7 @@ Everything the native shell unlocks, mapped to the product. Ordered by value.
 | **Photo library batch import** | Bulk-import shelf photos for collection onboarding. |
 | **Screen wake lock** | Keep the screen on during a guided tasting. |
 | **NFC shelf tags** | Tap a tag on the shelf to open that bottle. Gimmick, but a cheap one. |
+| **Geolocation** (`@capacitor/geolocation`) | Confirming a distillery check-in for the visit passport (FEATURES.md §11.8) — **and nothing else**. Foreground-only, requested at the tap that uses it, coarse accuracy, never a background or always-on permission, and only `(distilleryId, date)` is persisted (SOCIAL.md §8.3). Web fallback is the browser Geolocation API behind the same rules; the fallback for a refused permission is manual entry, which must always work. |
 
 ---
 

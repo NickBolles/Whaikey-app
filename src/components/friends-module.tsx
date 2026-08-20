@@ -279,9 +279,10 @@ export function FriendsModule({ items, hasProfile, hasFollows }: FriendsModulePr
           <span aria-hidden className="text-3xl">
             🤝
           </span>
-          <p className="font-display text-lg font-semibold">Notes are better shared</p>
+          <p className="font-display text-lg font-semibold">A dram is better shared</p>
           <p className="max-w-xs text-sm text-muted">
-            Follow a few friends to see their tastes alongside yours — a comparison, not a feed.
+            Follow the people you drink with and their notes land beside yours — so every bottle
+            you&rsquo;ve both opened has something to talk about.
           </p>
           <Link href="/friends" className="btn-secondary px-5 py-2.5 text-sm font-medium">
             Find friends
@@ -289,7 +290,12 @@ export function FriendsModule({ items, hasProfile, hasFollows }: FriendsModulePr
         </div>
       ) : items.length === 0 ? (
         <div className="card-flat p-4">
-          <p className="text-sm text-muted">Quiet week — nothing shared yet.</p>
+          {/* Invites sharing, never pouring — the quiet-week nudge points at the
+              note you already wrote, not at the bottle (SOCIAL.md §3.1 rule 4). */}
+          <p className="text-sm text-muted">
+            Quiet week from your friends. Share one of your own — that&rsquo;s usually how the
+            conversation starts.
+          </p>
         </div>
       ) : (
         <ul className="flex flex-col gap-2.5">
