@@ -56,6 +56,20 @@ Bulk-ingested bottles (Iowa/COLA) arrive without flavor profiles, so recommendat
 ### 2.4b Bulk "actually sold" verification — durable queue + worker execution
 Iowa/COLA-imported bottles are label approvals or wholesale SKUs, not proof a consumer product ever shipped — `bottles.status = "imported"` means unverified. **Implemented:** `pnpm verify-sold` (scripts/verify-sold.ts) runs a durable, subscription-only queue (src/lib/ingest/verification-queue.ts): `--dry-run` previews what a snapshot would enqueue (no writes, no Claude calls); `--apply` snapshots imported bottles into per-bottle work rows, then a bounded in-process worker pool (src/lib/ingest/verification-worker.ts, ≤4 concurrent workers) claims leased batches and asks an authenticated Claude Code CLI subscription — never an API key — to confirm each bottle against a real (non-TTB) product page. Every claimed id gets exactly one durable outcome: source-backed evidence promotes the bottle (`src/lib/ingest/verify-sold.ts`'s `persistSoldVerification`) and marks the work row `verified`; an explicit "not sold" answer is durably `not_evidenced` (the bottle stays `imported` and is never re-selected, unlike a naive repeated `status=imported` scan); malformed/missing/duplicate answers and CLI failures bound-retry with backoff before landing on `failed_terminal`. A tiny structured-output smoke probe runs before every `--apply` to catch a logged-out CLI before any lease is claimed. `--report`/`--resume <run-id>` recompute the same seven-field checkpoint (scanned/leased/verified/not_evidenced/retryable/rejected/errors) from durable state, so a crashed invocation is safe to inspect or continue.
 
+### 2.4c Source-backed product and editorial resource graph
+
+Automation and the issue-driven feedback loop are documented in [SUBSCRIPTION_CATALOG_AUTOMATION.md](./SUBSCRIPTION_CATALOG_AUTOMATION.md). The scheduled manifest scan is deterministic and model-free; subscription-backed AI only discovers bounded candidate URLs, which still pass through this parser and its provenance rules.
+
+**Implemented:** `pnpm ingest resources --manifest <file>` parses a curated manifest of exact bottle-to-page matches. It is a dry run unless `--apply` is supplied. The adapter prefers JSON-LD (`Product` / `Review`) and OpenGraph metadata, stores atomic claims with their source URL and retrieval timestamp, and never retains article/review bodies. Official product pages may fill only missing canonical fields and may promote `imported → verified`; editorial pages remain corroborating links and cannot promote or overwrite a bottle. TTB pages are rejected as official product evidence.
+
+Source and image policy are explicit per manifest entry:
+
+- `structured` fetches bounded metadata (2 MB streamed limit, four concurrent fetches by default, HTTPS-only, origin-locked redirects, DNS validation with a pinned public address); `link_only` records an outbound resource without crawling it.
+- `display_remote` permits a remote image to render with attribution; `link_only` and `review_required` media are retained as provenance but never rendered.
+- Stored claims become compact `sourceFacts` for flavor enrichment. Bottles with source facts are removed from the hosted web-search budget, so the LLM formats/synthesizes already-cited evidence instead of researching the product again.
+
+Start with `config/catalog-resource-manifest.example.json`; the respected-source policy registry is in `config/catalog-sources.json`. Exact official producer domains are operator-curated in each manifest rather than guessed by the model.
+
 ### 2.5 Open flavor datasets — recommendation bootstrapping
 - **Classic 86-distillery Scotch dataset**: 86 single malts scored 0–4 on 12 flavor dimensions — small but perfect for bootstrapping flavor-similarity before we have user data.
 - WhiskeyProject/whiskey-api (~370 whiskeys, ~70 flavor tags), 2.2k scraped Whisky Advocate reviews (⚠️ copyright risk if surfaced verbatim — use for internal priors only, if at all).

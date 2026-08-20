@@ -1,6 +1,6 @@
 {
-  "id": "9d29d7b5-0f0c-408d-9b00-4d54825eb6c9",
-  "prevId": "690727e4-49a4-4ab7-a265-115f4b54e082",
+  "id": "08e69e9b-badb-474d-8762-f4c70038be9c",
+  "prevId": "84ea17f3-0a83-4624-904a-1c59193d6082",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -419,6 +419,13 @@
           "notNull": true,
           "default": 1
         },
+        "canonicalized": {
+          "name": "canonicalized",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -575,6 +582,13 @@
           "notNull": true,
           "default": false
         },
+        "canonicalized": {
+          "name": "canonicalized",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -583,11 +597,11 @@
         }
       },
       "indexes": {
-        "bottle_media_bottle_url_uq": {
-          "name": "bottle_media_bottle_url_uq",
+        "bottle_media_resource_url_uq": {
+          "name": "bottle_media_resource_url_uq",
           "columns": [
             {
-              "expression": "bottle_id",
+              "expression": "resource_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -979,6 +993,13 @@
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": true
+        },
+        "promoted_bottle": {
+          "name": "promoted_bottle",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
         },
         "created_at": {
           "name": "created_at",

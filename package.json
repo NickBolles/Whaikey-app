@@ -19,6 +19,7 @@
     "ingest": "tsx scripts/ingest.ts",
     "enrich:claude-code": "tsx scripts/enrich-claude-code.ts",
     "verify-sold": "tsx scripts/verify-sold.ts",
+    "feedback:review": "tsx scripts/review-whiskey-feedback.ts",
     "native:check": "node scripts/native-check.mjs",
     "native:sync": "node scripts/native-sync.mjs",
     "native:assets": "node scripts/native-assets.mjs",

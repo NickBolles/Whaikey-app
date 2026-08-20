@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 560" role="img" aria-labelledby="title desc">
+  <title id="title">Demo whiskey bottle</title>
+  <desc id="desc">A deterministic amber bottle illustration used only by visual tests.</desc>
+  <defs>
+    <linearGradient id="glass" x1="0" x2="1">
+      <stop offset="0" stop-color="#4d2715"/>
+      <stop offset="0.48" stop-color="#b86c26"/>
+      <stop offset="0.75" stop-color="#6c3519"/>
+      <stop offset="1" stop-color="#2b1710"/>
+    </linearGradient>
+    <linearGradient id="shine" x1="0" x2="1">
+      <stop offset="0" stop-color="#fff" stop-opacity="0"/>
+      <stop offset="0.5" stop-color="#fff" stop-opacity=".28"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" width="160%" y="-20%" height="150%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="15"/>
+      <feOffset dy="12"/>
+      <feComponentTransfer><feFuncA type="linear" slope=".32"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <ellipse cx="180" cy="520" rx="122" ry="20" fill="#120d09" opacity=".45"/>
+  <g filter="url(#shadow)">
+    <rect x="131" y="30" width="98" height="70" rx="12" fill="#19130f"/>
+    <rect x="142" y="90" width="76" height="93" rx="20" fill="url(#glass)"/>
+    <path d="M142 154c0 25-19 38-45 52-20 11-29 29-29 58v217c0 26 21 47 47 47h130c26 0 47-21 47-47V264c0-29-9-47-29-58-26-14-45-27-45-52z" fill="url(#glass)" stroke="#d8954b" stroke-opacity=".34" stroke-width="4"/>
+    <path d="M103 225c22-15 47-23 77-23 29 0 56 8 78 23" fill="none" stroke="#edb767" stroke-opacity=".4" stroke-width="4"/>
+    <rect x="94" y="286" width="172" height="144" rx="8" fill="#e8dbc5" stroke="#9d7447" stroke-width="3"/>
+    <path d="M111 306h138M111 405h138" stroke="#9d7447" stroke-width="2" opacity=".65"/>
+    <text x="180" y="337" text-anchor="middle" fill="#34241a" font-family="Georgia,serif" font-size="18" letter-spacing="4">WHAIKEY</text>
+    <text x="180" y="371" text-anchor="middle" fill="#34241a" font-family="Georgia,serif" font-size="29" font-weight="700">DEMO</text>
+    <text x="180" y="397" text-anchor="middle" fill="#6d4d33" font-family="Arial,sans-serif" font-size="12" letter-spacing="3">RESERVE</text>
+    <path d="M103 215c28-12 46-17 57-17v318h-45c-26 0-37-20-37-42V270c0-24 7-42 25-55z" fill="url(#shine)" opacity=".8"/>
+  </g>
+</svg>

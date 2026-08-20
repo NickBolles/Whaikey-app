@@ -1,0 +1,90 @@
+name: Subscription catalog verification
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "Apply verified source-backed updates (false is a no-model dry run)"
+        required: true
+        default: false
+        type: boolean
+      limit:
+        description: "Total bottle budget for this invocation"
+        required: true
+        default: "25"
+        type: string
+      workers:
+        description: "Bounded subscription workers (1-4 recommended)"
+        required: true
+        default: "2"
+        type: string
+      batch_size:
+        description: "Bottles per Claude request"
+        required: true
+        default: "5"
+        type: string
+      model:
+        description: "Authenticated Claude Code model alias"
+        required: true
+        default: sonnet
+        type: choice
+        options: [sonnet, opus]
+
+concurrency:
+  group: subscription-catalog-verification
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    # A private runner with this label must have a persisted Claude Code login.
+    # There is intentionally no Anthropic API-key fallback.
+    runs-on: [self-hosted, linux, whaikey-ai]
+    timeout-minutes: 45
+    environment: catalog-production
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      APPLY: ${{ inputs.apply }}
+      LIMIT: ${{ inputs.limit }}
+      WORKERS: ${{ inputs.workers }}
+      BATCH_SIZE: ${{ inputs.batch_size }}
+      MODEL: ${{ inputs.model }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Validate bounded inputs and configuration
+        run: |
+          test -n "$DATABASE_URL" || { echo "::error::DATABASE_URL is not configured"; exit 1; }
+          case "$LIMIT" in (*[!0-9]*|'') echo "::error::limit must be an integer"; exit 1;; esac
+          case "$WORKERS" in (*[!0-9]*|'') echo "::error::workers must be an integer"; exit 1;; esac
+          case "$BATCH_SIZE" in (*[!0-9]*|'') echo "::error::batch_size must be an integer"; exit 1;; esac
+          test "$LIMIT" -ge 1 -a "$LIMIT" -le 100 || { echo "::error::limit must be 1..100"; exit 1; }
+          test "$WORKERS" -ge 1 -a "$WORKERS" -le 4 || { echo "::error::workers must be 1..4"; exit 1; }
+          test "$BATCH_SIZE" -ge 1 -a "$BATCH_SIZE" -le 10 || { echo "::error::batch_size must be 1..10"; exit 1; }
+          if [ "$APPLY" = "true" ]; then claude auth status --text; fi
+
+      - name: Run bounded verification
+        run: |
+          mode=--dry-run
+          if [ "$APPLY" = "true" ]; then mode=--apply; fi
+          pnpm verify-sold "$mode" --limit "$LIMIT" --workers "$WORKERS" --batch-size "$BATCH_SIZE" --model "$MODEL"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: subscription-catalog-verification-${{ github.run_id }}
+          path: artifacts/verification-runs/
+          retention-days: 14
+          if-no-files-found: warn

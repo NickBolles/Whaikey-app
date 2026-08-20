@@ -14,6 +14,7 @@ import { listPours } from "@/lib/pours";
 import { CategoryChip } from "@/components/category-chip";
 import { FlavorRadar } from "@/components/flavor-radar";
 import { SameDram, type SameDramFriendNote, type SameDramProducer } from "@/components/same-dram";
+import { SourceBackedResources } from "@/components/source-backed-resources";
 import { SmallStars } from "@/components/small-stars";
 import { ShelfActions } from "./shelf-actions";
 import { ShelfDetails } from "./shelf-details";
@@ -58,7 +59,7 @@ export default async function BottleDetailPage({
   const detail = await getBottleDetail(getDb(), id, user?.id);
   if (!detail) notFound();
 
-  const { bottle, distillery, communityStats, userBottle, pairings } = detail;
+  const { bottle, distillery, communityStats, userBottle, pairings, resources, media } = detail;
 
   // Personal taste-match: cosine similarity of the signed palate vs this
   // bottle's flavor profile. Null (hidden) for signed-out users, users with no
@@ -155,6 +156,8 @@ export default async function BottleDetailPage({
           <p className="text-sm text-muted mt-2.5">{metaParts.join(" · ")}</p>
         )}
       </header>
+
+      <SourceBackedResources bottleName={bottle.name} resources={resources} media={media} />
 
       {/* Price row */}
       {(bottle.msrp != null || bottle.avgPrice != null) && (

@@ -31,6 +31,7 @@ const GOOD_EVIDENCE = {
   sold: true,
   evidenceUrl: "https://example-retailer.com/products/eagle-rare-10",
   evidenceLabel: "Example Retailer",
+  evidenceKind: "retailer",
   retailerSku: "ER-10",
   upcs: ["080244002145"],
   abv: 45,
@@ -39,7 +40,7 @@ const GOOD_EVIDENCE = {
   description: "A fine bourbon.",
 };
 
-const NOT_SOLD = { sold: false, evidenceUrl: null, evidenceLabel: null, retailerSku: null, upcs: [], abv: null, ageYears: null, price: null, description: null };
+const NOT_SOLD = { sold: false, evidenceUrl: null, evidenceLabel: null, evidenceKind: null, retailerSku: null, upcs: [], abv: null, ageYears: null, price: null, description: null };
 
 function fakeRunner(handler: (prompt: string) => unknown): ClaudeStructuredRunner {
   return async ({ prompt }) => handler(prompt);

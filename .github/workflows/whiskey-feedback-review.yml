@@ -1,0 +1,109 @@
+name: Whiskey feedback AI review
+
+on:
+  issues:
+    types: [labeled]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "Whiskey feedback issue number"
+        required: true
+        type: number
+      model:
+        description: "Authenticated Claude Code model alias"
+        required: true
+        default: sonnet
+        type: choice
+        options: [sonnet, opus]
+
+concurrency:
+  group: whiskey-feedback-${{ github.event.issue.number || inputs.issue_number }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  review:
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)) ||
+      (github.event.label.name == 'ai-review-approved' && contains(github.event.issue.labels.*.name, 'whiskey-feedback'))
+    # This label must point at a private runner whose Claude Code CLI is logged
+    # into Nick's subscription. Never expose this runner to pull_request jobs.
+    runs-on: [self-hosted, linux, whaikey-ai]
+    timeout-minutes: 20
+    environment: catalog-production
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      ISSUE_NUMBER: ${{ github.event.issue.number || inputs.issue_number }}
+      REVIEW_MODEL: ${{ inputs.model || 'sonnet' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Issue text is untrusted; always run reviewed code from the default branch.
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Validate private runner and configuration
+        run: |
+          test -n "$DATABASE_URL" || { echo "::error::DATABASE_URL is not configured"; exit 1; }
+          claude auth status --text
+
+      - name: Save issue event without shell interpolation
+        id: issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const issueNumber = Number(process.env.ISSUE_NUMBER);
+            if (!Number.isInteger(issueNumber) || issueNumber < 1) throw new Error('Invalid issue number');
+            const { data: issue } = await github.rest.issues.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+            });
+            const labels = issue.labels.map((label) => typeof label === 'string' ? label : label.name);
+            if (!labels.includes('whiskey-feedback')) throw new Error('Issue is not labeled whiskey-feedback');
+            fs.mkdirSync('artifacts/feedback-runs', { recursive: true });
+            fs.writeFileSync('artifacts/feedback-runs/issue-event.json', JSON.stringify({
+              number: issue.number,
+              title: issue.title,
+              body: issue.body || '',
+              url: issue.html_url,
+              author: issue.user?.login || 'unknown',
+            }));
+
+      - name: Run bounded source-backed review
+        run: pnpm feedback:review --issue artifacts/feedback-runs/issue-event.json --apply --model "$REVIEW_MODEL"
+
+      - name: Comment with validated result
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue comment "$ISSUE_NUMBER" --body-file "artifacts/feedback-runs/issue-$ISSUE_NUMBER.md"
+          gh issue edit "$ISSUE_NUMBER" --remove-label ai-review-approved --remove-label needs-ai-review --add-label ai-reviewed
+
+      - name: Mark review failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue comment "$ISSUE_NUMBER" --body "The bounded AI catalog review failed before a validated update completed. A maintainer can inspect the workflow artifact/log and re-apply \`ai-review-approved\` to retry."
+          gh issue edit "$ISSUE_NUMBER" --remove-label ai-review-approved --add-label ai-review-failed || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: whiskey-feedback-${{ env.ISSUE_NUMBER }}
+          path: artifacts/feedback-runs/
+          retention-days: 14
+          if-no-files-found: warn
