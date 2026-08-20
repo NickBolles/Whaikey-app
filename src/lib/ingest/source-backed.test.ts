@@ -276,6 +276,31 @@ describe("source-backed persistence", () => {
       .map((claim) => claim.value)).toEqual([45]);
   });
 
+  it("preserves distinct official product pages from the same source", async () => {
+    const bottle = await createTestBottle(db, { id: "multiple-official-pages", status: "imported", abv: null });
+    const page = (path: string, abv: string) => PRODUCT_HTML
+      .replace("https://www.example-distillery.com/products/reserve-10", `https://www.example-distillery.com/products/${path}`)
+      .replace('"value":"45%"', `"value":"${abv}%"`);
+    const fetchImpl = vi.fn(async (url: string | URL | Request) => {
+      const current = String(url);
+      return htmlResponse(current.endsWith("/single-barrel") ? page("single-barrel", "50") : page("standard", "45"));
+    }) as unknown as typeof fetch;
+
+    await ingestSourceManifest(db, {
+      sources: [OFFICIAL_SOURCE],
+      resources: [
+        { bottleId: bottle.id, sourceId: OFFICIAL_SOURCE.id, url: "https://www.example-distillery.com/products/standard", resourceType: "official_product" },
+        { bottleId: bottle.id, sourceId: OFFICIAL_SOURCE.id, url: "https://www.example-distillery.com/products/single-barrel", resourceType: "official_product" },
+      ],
+    }, { apply: true, fetchImpl });
+
+    expect(await db.select().from(schema.bottleResources)).toHaveLength(2);
+    expect((await db.select().from(schema.bottleClaims))
+      .filter((claim) => claim.field === "abv")
+      .map((claim) => claim.value).sort()).toEqual([45, 50]);
+    expect(await db.select().from(schema.bottleVerifications)).toHaveLength(2);
+  });
+
   it("promotes a remaining official fallback when the owning source removes a canonical fact", async () => {
     const bottle = await createTestBottle(db, { id: "fallback-canonical-fact", status: "imported", abv: null });
     const sourceA = { ...OFFICIAL_SOURCE, id: "official-a" };
@@ -353,6 +378,43 @@ describe("source-backed persistence", () => {
     });
   });
 
+  it("transfers canonical facts when the owning source is reclassified", async () => {
+    const bottle = await createTestBottle(db, { id: "reclassified-fallback", status: "imported", abv: null, ageYears: null });
+    const sourceA = { ...OFFICIAL_SOURCE, id: "reclass-a" };
+    const sourceB = { ...OFFICIAL_SOURCE, id: "reclass-b" };
+    const resource = (sourceId: string, path: string) => ({
+      bottleId: bottle.id,
+      sourceId,
+      url: `https://www.example-distillery.com/products/${path}`,
+      resourceType: "official_product" as const,
+    });
+    const page = (path: string, abv: string, age: string) => PRODUCT_HTML
+      .replace("https://www.example-distillery.com/products/reserve-10", `https://www.example-distillery.com/products/${path}`)
+      .replace('"value":"45%"', `"value":"${abv}%"`)
+      .replace('"value":"10 years"', `"value":"${age} years"`);
+
+    await ingestSourceManifest(db, { sources: [sourceA], resources: [resource(sourceA.id, "a")] }, {
+      apply: true,
+      fetchImpl: (async () => htmlResponse(page("a", "45", "10"))) as typeof fetch,
+    });
+    await ingestSourceManifest(db, { sources: [sourceB], resources: [resource(sourceB.id, "b")] }, {
+      apply: true,
+      fetchImpl: (async () => htmlResponse(page("b", "50", "12"))) as typeof fetch,
+    });
+    await ingestSourceManifest(db, {
+      sources: [sourceA],
+      resources: [{ ...resource(sourceA.id, "a"), resourceType: "review" }],
+    }, { apply: true, fetchImpl: (async () => htmlResponse(page("a", "45", "10"))) as typeof fetch });
+
+    expect((await db.select().from(schema.bottles).where(eq(schema.bottles.id, bottle.id)))[0]).toMatchObject({
+      abv: 50,
+      ageYears: 12,
+    });
+    const fallbackClaims = (await db.select().from(schema.bottleClaims))
+      .filter((claim) => (claim.field === "abv" || claim.field === "ageYears") && claim.canonicalized);
+    expect(fallbackClaims.map((claim) => claim.value).sort()).toEqual([12, 50]);
+  });
+
   it("replaces the extracted snapshot when an unchanged page is reclassified", async () => {
     const bottle = await createTestBottle(db, { id: "reclassified-page", status: "imported", abv: null, ageYears: null, imageUrl: null });
     const resource = {
@@ -407,6 +469,43 @@ describe("source-backed persistence", () => {
     expect(await db.select().from(schema.bottleVerifications)).toEqual([
       expect.objectContaining({ id: "other-verification", promotedBottle: true }),
     ]);
+  });
+
+  it("transfers canonical image ownership when the owning source removes its image", async () => {
+    const bottle = await createTestBottle(db, { id: "fallback-canonical-image", status: "imported", imageUrl: null });
+    const sourceA = { ...OFFICIAL_SOURCE, id: "image-a" };
+    const sourceB = { ...OFFICIAL_SOURCE, id: "image-b" };
+    const resource = (sourceId: string, path: string) => ({
+      bottleId: bottle.id,
+      sourceId,
+      url: `https://www.example-distillery.com/products/${path}`,
+      resourceType: "official_product" as const,
+      mediaKind: "bottle" as const,
+    });
+    const pageA = PRODUCT_HTML.replace(
+      "https://www.example-distillery.com/products/reserve-10",
+      "https://www.example-distillery.com/products/image-a",
+    );
+    const fallbackImage = "https://www.example-distillery.com/images/fallback.png";
+    const pageB = PRODUCT_HTML
+      .replace("https://www.example-distillery.com/products/reserve-10", "https://www.example-distillery.com/products/image-b")
+      .replaceAll("https://www.example-distillery.com/images/reserve-10.png", fallbackImage);
+    const pageAWithoutImage = pageA
+      .replace('  <meta property="og:image" content="https://www.example-distillery.com/images/reserve-10.png" />\n', "")
+      .replace('    "image":"https://www.example-distillery.com/images/reserve-10.png",\n', "");
+
+    await ingestSourceManifest(db, { sources: [sourceA], resources: [resource(sourceA.id, "image-a")] }, {
+      apply: true, fetchImpl: (async () => htmlResponse(pageA)) as typeof fetch,
+    });
+    await ingestSourceManifest(db, { sources: [sourceB], resources: [resource(sourceB.id, "image-b")] }, {
+      apply: true, fetchImpl: (async () => htmlResponse(pageB)) as typeof fetch,
+    });
+    await ingestSourceManifest(db, { sources: [sourceA], resources: [resource(sourceA.id, "image-a")] }, {
+      apply: true, fetchImpl: (async () => htmlResponse(pageAWithoutImage)) as typeof fetch,
+    });
+
+    expect((await db.select().from(schema.bottles).where(eq(schema.bottles.id, bottle.id)))[0].imageUrl).toBe(fallbackImage);
+    expect((await db.select().from(schema.bottleMedia)).find((media) => media.url === fallbackImage)?.canonicalized).toBe(true);
   });
 
   it("tightens persisted media rights even when page content is unchanged", async () => {

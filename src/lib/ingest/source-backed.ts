@@ -658,13 +658,10 @@ export async function ingestSourceManifest(
         mediaKind: resource.mediaKind ?? "bottle",
       }));
       const manifestResourceId = stableId("resource", bottle.id, requestedUrl);
-      const resourceAssociation = source.kind === "official" && resource.resourceType === "official_product"
-        ? or(
-            eq(bottleResources.id, manifestResourceId),
-            eq(bottleResources.url, parsed.canonicalUrl),
-            and(eq(bottleResources.sourceId, source.id), eq(bottleResources.resourceType, "official_product")),
-          )
-        : or(eq(bottleResources.id, manifestResourceId), eq(bottleResources.url, parsed.canonicalUrl));
+      const resourceAssociation = or(
+        eq(bottleResources.id, manifestResourceId),
+        eq(bottleResources.url, parsed.canonicalUrl),
+      );
       const candidates = await db.select({
         id: bottleResources.id,
         url: bottleResources.url,
@@ -822,18 +819,37 @@ export async function ingestSourceManifest(
           clearManagedImage = displayAllowed.length === 0;
         }
       }
-      const [restorableManagedImage] = await db.select({ url: bottleMedia.url }).from(bottleMedia)
+      const fallbackClaim = async (field: "abv" | "ageYears") => {
+        const [claim] = await db.select({ id: bottleClaims.id, value: bottleClaims.value })
+          .from(bottleClaims)
+          .innerJoin(bottleResources, eq(bottleClaims.resourceId, bottleResources.id))
+          .innerJoin(catalogSources, eq(bottleResources.sourceId, catalogSources.id))
+          .where(and(
+            eq(bottleClaims.bottleId, bottle.id),
+            eq(bottleClaims.field, field),
+            eq(bottleClaims.status, "accepted"),
+            ne(bottleClaims.resourceId, resourceId),
+            eq(bottleResources.resourceType, "official_product"),
+            eq(catalogSources.kind, "official"),
+            eq(catalogSources.enabled, true),
+          ))
+          .orderBy(desc(bottleClaims.canonicalized), desc(bottleClaims.createdAt))
+          .limit(1);
+        return claim;
+      };
+      const [restorableManagedImage] = await db.select({ id: bottleMedia.id, url: bottleMedia.url }).from(bottleMedia)
         .innerJoin(bottleResources, eq(bottleMedia.resourceId, bottleResources.id))
         .innerJoin(catalogSources, eq(bottleResources.sourceId, catalogSources.id))
         .where(and(
           eq(bottleMedia.bottleId, bottle.id),
           eq(bottleMedia.kind, "bottle"),
           eq(bottleMedia.rights, "display_remote"),
-          eq(bottleMedia.canonicalized, true),
+          eq(bottleResources.resourceType, "official_product"),
+          eq(catalogSources.kind, "official"),
           eq(catalogSources.enabled, true),
           hasNoEnabledRestrictedTwin,
         ))
-        .orderBy(desc(bottleMedia.isPrimary), desc(bottleMedia.createdAt))
+        .orderBy(desc(bottleMedia.canonicalized), desc(bottleMedia.isPrimary), desc(bottleMedia.createdAt))
         .limit(1);
       const verificationIds = [...new Set([
         ...candidates.map((candidate) => stableId("verification", bottle.id, candidate.url)),
@@ -849,24 +865,6 @@ export async function ingestSourceManifest(
         const value = (field: BottleClaimField) => parsed.claims.find((claim) => claim.field === field)?.value;
         const abv = value("abv");
         const ageYears = value("ageYears");
-        const fallbackClaim = async (field: "abv" | "ageYears") => {
-          const [claim] = await db.select({ id: bottleClaims.id, value: bottleClaims.value })
-            .from(bottleClaims)
-            .innerJoin(bottleResources, eq(bottleClaims.resourceId, bottleResources.id))
-            .innerJoin(catalogSources, eq(bottleResources.sourceId, catalogSources.id))
-            .where(and(
-              eq(bottleClaims.bottleId, bottle.id),
-              eq(bottleClaims.field, field),
-              eq(bottleClaims.status, "accepted"),
-              ne(bottleClaims.resourceId, resourceId),
-              eq(bottleResources.resourceType, "official_product"),
-              eq(catalogSources.kind, "official"),
-              eq(catalogSources.enabled, true),
-            ))
-            .orderBy(desc(bottleClaims.canonicalized), desc(bottleClaims.createdAt))
-            .limit(1);
-          return claim;
-        };
         const fallbackAbv = typeof abv === "number" ? undefined : await fallbackClaim("abv");
         const fallbackAge = typeof ageYears === "number" ? undefined : await fallbackClaim("ageYears");
         const nextAbv = typeof abv === "number" ? abv :
@@ -908,6 +906,10 @@ export async function ingestSourceManifest(
             eq(bottleMedia.resourceId, resourceId), eq(bottleMedia.url, image.url),
           ));
         }
+        if (restorableManagedImage && patch.imageUrl === restorableManagedImage.url) {
+          await db.update(bottleMedia).set({ canonicalized: true })
+            .where(eq(bottleMedia.id, restorableManagedImage.id));
+        }
         for (const previous of candidates) {
           if (previous.url !== parsed.canonicalUrl) {
             await db.delete(bottleVerifications).where(eq(
@@ -934,8 +936,10 @@ export async function ingestSourceManifest(
         });
       } else {
         const revokedCanonical: Partial<typeof bottles.$inferInsert> = {};
-        if (managesAbv) revokedCanonical.abv = null;
-        if (managesAge) revokedCanonical.ageYears = null;
+        const fallbackAbv = managesAbv ? await fallbackClaim("abv") : undefined;
+        const fallbackAge = managesAge ? await fallbackClaim("ageYears") : undefined;
+        if (managesAbv) revokedCanonical.abv = typeof fallbackAbv?.value === "number" ? fallbackAbv.value : null;
+        if (managesAge) revokedCanonical.ageYears = typeof fallbackAge?.value === "number" ? fallbackAge.value : null;
         if (clearManagedImage || managesImage) revokedCanonical.imageUrl = restorableManagedImage?.url ?? null;
         await db.delete(bottleVerifications).where(inArray(bottleVerifications.id, verificationIds));
         const remainingVerification = await db.select({ id: bottleVerifications.id })
@@ -954,6 +958,16 @@ export async function ingestSourceManifest(
         }
         if (Object.keys(revokedCanonical).length > 0) {
           await db.update(bottles).set(revokedCanonical).where(eq(bottles.id, bottle.id));
+        }
+        if (fallbackAbv && revokedCanonical.abv === fallbackAbv.value) {
+          await db.update(bottleClaims).set({ canonicalized: true }).where(eq(bottleClaims.id, fallbackAbv.id));
+        }
+        if (fallbackAge && revokedCanonical.ageYears === fallbackAge.value) {
+          await db.update(bottleClaims).set({ canonicalized: true }).where(eq(bottleClaims.id, fallbackAge.id));
+        }
+        if (restorableManagedImage && revokedCanonical.imageUrl === restorableManagedImage.url) {
+          await db.update(bottleMedia).set({ canonicalized: true })
+            .where(eq(bottleMedia.id, restorableManagedImage.id));
         }
       }
     } catch (error) {
