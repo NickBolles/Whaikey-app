@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
-import { createTestBottle, setupTestDb } from "@/test/helpers";
+import { createTestBottle as createBaseTestBottle, setupTestDb } from "@/test/helpers";
 import {
   ingestSourceManifest,
   isPublicIpAddress,
@@ -11,6 +11,13 @@ import {
   validatePublicSourceUrl,
   type CatalogSourceManifest,
 } from "./source-backed";
+
+async function createTestBottle(
+  db: DB,
+  overrides: Partial<schema.NewBottle> = {},
+): Promise<schema.Bottle> {
+  return createBaseTestBottle(db, { name: "Example Reserve 10 Year", ...overrides });
+}
 
 const OFFICIAL_SOURCE = {
   id: "example-distillery",

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import type { DB } from "@/db";
 import { bottles, catalogSources } from "@/db/schema";
 import {
@@ -189,6 +189,23 @@ export async function reviewWhiskeyFeedback(
     if (disabledOrigins.has(new URL(source.baseUrl).origin)) {
       throw new Error(`Feedback evidence origin is disabled: ${source.baseUrl}`);
     }
+  }
+  const sourceIds = normalized.manifest.sources.map((source) => source.id);
+  const existingSources = sourceIds.length === 0 ? [] : await db.select({
+    id: catalogSources.id,
+    name: catalogSources.name,
+    attribution: catalogSources.attribution,
+    fetchPolicy: catalogSources.fetchPolicy,
+    mediaPolicy: catalogSources.mediaPolicy,
+  }).from(catalogSources).where(inArray(catalogSources.id, sourceIds));
+  const existingById = new Map(existingSources.map((source) => [source.id, source]));
+  for (const source of normalized.manifest.sources) {
+    const existing = existingById.get(source.id);
+    if (!existing) continue;
+    source.name = existing.name;
+    source.attribution = existing.attribution ?? undefined;
+    source.fetchPolicy = existing.fetchPolicy;
+    source.mediaPolicy = existing.mediaPolicy;
   }
   const resolveHost = options.resolveHost ?? (async (hostname: string) => {
     await resolvePublicAddresses(hostname);

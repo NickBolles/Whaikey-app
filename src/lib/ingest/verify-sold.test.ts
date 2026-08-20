@@ -6,6 +6,10 @@ import { createTestBottle, setupTestDb } from "@/test/helpers";
 import { buildSoldVerificationSchema, normalizeSoldVerification, persistSoldVerification } from "./verify-sold";
 import { ingestSourceManifest, type CatalogSourceManifest } from "./source-backed";
 
+function manufacturerPage(name: string, abv = 46): string {
+  return `<html><head><meta property="og:title" content="${name}"><script type="application/ld+json">{"@type":"Product","name":"${name}","additionalProperty":[{"@type":"PropertyValue","name":"ABV","value":"${abv}%"}]}</script></head></html>`;
+}
+
 describe("sold verification", () => {
   it("requires non-TTB product evidence before accepting a sale", () => {
     expect(normalizeSoldVerification({ id: "b", sold: true, evidenceUrl: "https://ttb.gov/cola", evidenceLabel: "TTB", evidenceKind: "manufacturer", retailerSku: null, upcs: [], abv: null, ageYears: null, price: null, description: null })).toBeNull();
@@ -69,7 +73,7 @@ describe("sold verification", () => {
 
   it("classifies manufacturer evidence as official product provenance", async () => {
     const db: DB = await setupTestDb();
-    const bottle = await createTestBottle(db, { id: "manufacturer-resource", status: "imported", abv: null });
+    const bottle = await createTestBottle(db, { id: "manufacturer-resource", name: "Example Bottle", status: "imported", abv: null });
     await db.insert(schema.catalogSources).values({
       id: "trusted-producer",
       name: "Example Producer",
@@ -101,7 +105,12 @@ describe("sold verification", () => {
       description: null,
     })!;
 
-    await persistSoldVerification(db, verification, false);
+    await persistSoldVerification(db, verification, false, {
+      fetchImpl: (async () => new Response(manufacturerPage(bottle.name), {
+        status: 200,
+        headers: { "content-type": "text/html" },
+      })) as typeof fetch,
+    });
 
     expect(await db.select().from(schema.catalogSources)).toEqual([
       expect.objectContaining({ kind: "official" }),
@@ -109,14 +118,14 @@ describe("sold verification", () => {
     expect(await db.select().from(schema.bottleResources)).toEqual([
       expect.objectContaining({ resourceType: "official_product" }),
     ]);
-    expect(await db.select().from(schema.bottleClaims)).toEqual([
+    expect(await db.select().from(schema.bottleClaims)).toEqual(expect.arrayContaining([
       expect.objectContaining({
         resourceId: "existing-canonical-resource",
         field: "abv",
         value: 46,
         canonicalized: true,
       }),
-    ]);
+    ]));
     expect(await db.select().from(schema.bottleVerifications)).toEqual([
       expect.objectContaining({ id: expect.stringMatching(/^verification-/), promotedBottle: true }),
     ]);
@@ -145,6 +154,45 @@ describe("sold verification", () => {
     expect((await db.select().from(schema.bottles).where(eq(schema.bottles.id, bottle.id)))[0]).toMatchObject({
       status: "imported",
       abv: null,
+    });
+    expect(await db.select().from(schema.bottleVerifications)).toEqual([]);
+  });
+
+  it("rejects a curated manufacturer page for a different bottling", async () => {
+    const db: DB = await setupTestDb();
+    const bottle = await createTestBottle(db, { id: "mismatched-manufacturer", name: "Example Reserve 10 Year", status: "imported", abv: null });
+    await db.insert(schema.catalogSources).values({
+      id: "trusted-producer",
+      name: "Example Producer",
+      kind: "official",
+      baseUrl: "https://producer.example",
+      fetchPolicy: "structured",
+      mediaPolicy: "review_required",
+    });
+    const verification = normalizeSoldVerification({
+      id: bottle.id,
+      sold: true,
+      evidenceUrl: "https://producer.example/products/other-bottle",
+      evidenceLabel: "Example Producer",
+      evidenceKind: "manufacturer",
+      retailerSku: null,
+      upcs: [],
+      abv: 60,
+      ageYears: 20,
+      price: null,
+      description: "Wrong bottle",
+    })!;
+
+    expect(await persistSoldVerification(db, verification, false, {
+      fetchImpl: (async () => new Response(manufacturerPage("Example Reserve 12 Year", 60), {
+        status: 200,
+        headers: { "content-type": "text/html" },
+      })) as typeof fetch,
+    })).toBe(false);
+    expect((await db.select().from(schema.bottles).where(eq(schema.bottles.id, bottle.id)))[0]).toMatchObject({
+      status: "imported",
+      abv: null,
+      ageYears: null,
     });
     expect(await db.select().from(schema.bottleVerifications)).toEqual([]);
   });
@@ -253,20 +301,18 @@ describe("sold verification", () => {
       description: "Untrusted description",
     })!;
 
-    expect(await persistSoldVerification(db, verification, false)).toBe(true);
+    expect(await persistSoldVerification(db, verification, false)).toBe(false);
     expect((await db.select().from(schema.bottles).where(eq(schema.bottles.id, bottle.id)))[0]).toMatchObject({
-      status: "verified",
+      status: "imported",
       abv: null,
       ageYears: null,
       description: null,
     });
     expect(await db.select().from(schema.bottleClaims)).toEqual([]);
-    expect(await db.select().from(schema.bottleResources)).toEqual([
-      expect.objectContaining({ resourceType: "producer" }),
-    ]);
+    expect(await db.select().from(schema.bottleResources)).toEqual([]);
   });
 
-  it("keeps uncurated manufacturer claims as non-authoritative producer evidence", async () => {
+  it("rejects uncurated manufacturer evidence", async () => {
     const db: DB = await setupTestDb();
     const bottle = await createTestBottle(db, { id: "uncurated-manufacturer", status: "imported" });
     const verification = normalizeSoldVerification({
@@ -283,14 +329,9 @@ describe("sold verification", () => {
       description: null,
     })!;
 
-    await persistSoldVerification(db, verification, false);
-
-    expect(await db.select().from(schema.catalogSources)).toEqual([
-      expect.objectContaining({ kind: "registry", fetchPolicy: "link_only" }),
-    ]);
-    expect(await db.select().from(schema.bottleResources)).toEqual([
-      expect.objectContaining({ resourceType: "producer" }),
-    ]);
+    expect(await persistSoldVerification(db, verification, false)).toBe(false);
+    expect(await db.select().from(schema.catalogSources)).toEqual([]);
+    expect(await db.select().from(schema.bottleResources)).toEqual([]);
   });
 
   it("quarantines verification evidence from any disabled origin", async () => {

@@ -107,6 +107,20 @@ describe("whiskey feedback review", () => {
 
   it("feeds only validated discovered URLs into deterministic source ingestion", async () => {
     await createTestBottle(db, { id: "eagle-rare-10", name: "Eagle Rare 10", status: "verified" });
+    const existingManifest = normalizeFeedbackReview({
+      bottleId: "eagle-rare-10",
+      summary: "Existing publisher metadata.",
+      resources: [{
+        sourceName: "Existing Review Publisher",
+        sourceKind: "editorial",
+        url: "https://reviews.example/eagle-rare-10",
+      }],
+    }, { id: "eagle-rare-10", name: "Eagle Rare 10" }).manifest;
+    await db.insert(schema.catalogSources).values({
+      ...existingManifest.sources[0],
+      name: "Existing Review Publisher",
+      attribution: null,
+    });
     const claudeRunner = vi.fn(async () => ({
       bottleId: "eagle-rare-10",
       summary: "An attributed review supports a correction request.",
@@ -133,6 +147,9 @@ describe("whiskey feedback review", () => {
     expect(result.ingestion).toMatchObject({ apply: true, resourcesWritten: 1, errors: [] });
     expect(await db.select().from(schema.bottleResources)).toEqual([
       expect.objectContaining({ bottleId: "eagle-rare-10", resourceType: "review" }),
+    ]);
+    expect(await db.select().from(schema.catalogSources)).toEqual([
+      expect.objectContaining({ name: "Existing Review Publisher", attribution: null }),
     ]);
   });
 });

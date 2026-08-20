@@ -337,6 +337,18 @@ function normalizeProductIdentity(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
+function productIdentityMatches(expected: string, candidate: string): boolean {
+  if (!expected || !candidate) return false;
+  if (expected === candidate) return true;
+  const generic = new Set(["year", "years", "old", "whiskey", "whisky", "bourbon"]);
+  const significant = (value: string) => value.split(" ").filter((token) => token && !generic.has(token));
+  const expectedTokens = significant(expected);
+  const candidateTokens = significant(candidate);
+  return expectedTokens.length > 0 &&
+    expectedTokens.length === candidateTokens.length &&
+    expectedTokens.every((token, index) => token === candidateTokens[index]);
+}
+
 function primaryProductForPage(
   products: Record<string, unknown>[],
   html: string,
@@ -352,9 +364,9 @@ function primaryProductForPage(
   for (const product of products) {
     const name = normalizeProductIdentity(stringValue(product.name) ?? "");
     if (!name) continue;
+    if (expected && !productIdentityMatches(expected, name)) continue;
     let score = 0;
-    if (expected === name) score += 2_000;
-    else if (expected && (expected.includes(name) || name.includes(expected))) score += 1_250;
+    if (expected && productIdentityMatches(expected, name)) score += 2_000;
     if (title === name) score += 1_000;
     else if (title.includes(name)) score += 500 + name.length;
     else if (name.includes(title) && title) score += 250 + title.length;

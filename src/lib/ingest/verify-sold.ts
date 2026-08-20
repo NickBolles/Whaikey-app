@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import type { DB } from "@/db";
-import { bottleClaims, bottleResources, bottles, bottleUpcs, bottleVerifications, catalogSources, priceHistory } from "@/db/schema";
+import { bottleResources, bottles, bottleUpcs, bottleVerifications, catalogSources, priceHistory } from "@/db/schema";
 import { isValidUpc } from "@/lib/upc";
-import { validatePublicSourceUrl } from "./source-backed";
+import { ingestSourceManifest, validatePublicSourceUrl } from "./source-backed";
 
 export type VerificationCandidate = {
   id: string;
@@ -115,7 +115,12 @@ function stableVerificationId(bottleId: string, url: string): string {
 }
 
 /** Persist only source-backed, normalized facts; existing curated values always win. */
-export async function persistSoldVerification(db: DB, verification: SoldVerification, dryRun: boolean): Promise<boolean> {
+export async function persistSoldVerification(
+  db: DB,
+  verification: SoldVerification,
+  dryRun: boolean,
+  options: { fetchImpl?: typeof fetch } = {},
+): Promise<boolean> {
   const [current] = await db.select().from(bottles).where(and(eq(bottles.id, verification.id), eq(bottles.status, "imported"))).limit(1);
   if (!current || !verification.evidenceUrl) return false;
   if (dryRun) return true;
@@ -134,6 +139,7 @@ export async function persistSoldVerification(db: DB, verification: SoldVerifica
     ? await db.select({
         id: catalogSources.id,
         name: catalogSources.name,
+        baseUrl: catalogSources.baseUrl,
         attribution: catalogSources.attribution,
         fetchPolicy: catalogSources.fetchPolicy,
         mediaPolicy: catalogSources.mediaPolicy,
@@ -146,21 +152,56 @@ export async function persistSoldVerification(db: DB, verification: SoldVerifica
     : [];
   if (trustedManufacturerCandidates.length > 1) return false;
   const trustedManufacturer = trustedManufacturerCandidates[0];
-  const sourceKind = trustedManufacturer ? "official" as const :
-    claimsManufacturer ? "registry" as const : "retailer" as const;
-  const sourceId = trustedManufacturer?.id ??
-    stableEvidenceId("verification-source", `${sourceKind}\u0000${evidence.origin}`);
+  if (claimsManufacturer) {
+    if (!trustedManufacturer) return false;
+    const [existingResource] = await db.select({
+      sourceId: bottleResources.sourceId,
+      resourceType: bottleResources.resourceType,
+    }).from(bottleResources).where(and(
+      eq(bottleResources.bottleId, current.id),
+      eq(bottleResources.url, verification.evidenceUrl),
+    )).limit(1);
+    if (existingResource && (
+      existingResource.sourceId !== trustedManufacturer.id ||
+      existingResource.resourceType !== "official_product"
+    )) return false;
+
+    const report = await ingestSourceManifest(db, {
+      sources: [{
+        id: trustedManufacturer.id,
+        name: trustedManufacturer.name,
+        kind: "official",
+        baseUrl: trustedManufacturer.baseUrl,
+        fetchPolicy: "structured",
+        mediaPolicy: trustedManufacturer.mediaPolicy,
+        attribution: trustedManufacturer.attribution ?? undefined,
+      }],
+      resources: [{
+        bottleId: current.id,
+        sourceId: trustedManufacturer.id,
+        url: verification.evidenceUrl,
+        resourceType: "official_product",
+        mediaKind: "bottle",
+      }],
+    }, { apply: true, fetchImpl: options.fetchImpl });
+    if (report.errors.length > 0) return false;
+    const [updated] = await db.select({ status: bottles.status }).from(bottles)
+      .where(eq(bottles.id, current.id)).limit(1);
+    return updated?.status === "verified";
+  }
+
+  const sourceKind = "retailer" as const;
+  const sourceId = stableEvidenceId("verification-source", `${sourceKind}\u0000${evidence.origin}`);
   await db.insert(catalogSources).values({
     id: sourceId,
-    name: trustedManufacturer?.name ?? verification.evidenceLabel ?? evidence.hostname,
+    name: verification.evidenceLabel ?? evidence.hostname,
     kind: sourceKind,
     baseUrl: evidence.origin,
-    fetchPolicy: trustedManufacturer?.fetchPolicy ?? "link_only",
-    mediaPolicy: trustedManufacturer?.mediaPolicy ?? "link_only",
-    attribution: trustedManufacturer?.attribution ?? verification.evidenceLabel,
+    fetchPolicy: "link_only",
+    mediaPolicy: "link_only",
+    attribution: verification.evidenceLabel,
   }).onConflictDoNothing();
-  const resourceType = trustedManufacturer ? "official_product" as const :
-    claimsManufacturer ? "producer" as const : "retailer" as const;
+  const resourceType = "retailer" as const;
   const proposedResourceId = stableEvidenceId("resource", `${current.id}\u0000${verification.evidenceUrl}`);
   await db.insert(bottleResources).values({
     id: proposedResourceId,
@@ -183,7 +224,6 @@ export async function persistSoldVerification(db: DB, verification: SoldVerifica
   if (!persistedResource || persistedResource.sourceId !== sourceId || persistedResource.resourceType !== resourceType) {
     return false;
   }
-  const resourceId = persistedResource.id;
 
   await db.insert(bottleVerifications).values({
     id: stableVerificationId(current.id, verification.evidenceUrl),
@@ -195,33 +235,8 @@ export async function persistSoldVerification(db: DB, verification: SoldVerifica
     promotedBottle: true,
   }).onConflictDoNothing();
 
-  if (trustedManufacturer) {
-    const canonicalFacts: Array<{ field: "abv" | "ageYears"; value: number }> = [];
-    if (current.abv == null && verification.abv != null) canonicalFacts.push({ field: "abv", value: verification.abv });
-    if (current.ageYears == null && verification.ageYears != null) canonicalFacts.push({ field: "ageYears", value: verification.ageYears });
-    for (const fact of canonicalFacts) {
-      const valueHash = createHash("sha256").update(JSON.stringify(fact.value)).digest("hex");
-      await db.insert(bottleClaims).values({
-        id: stableEvidenceId("claim", `${resourceId}\u0000${fact.field}\u0000${valueHash}`),
-        bottleId: current.id,
-        resourceId,
-        field: fact.field,
-        value: fact.value,
-        valueHash,
-        status: "accepted",
-        canonicalized: true,
-      }).onConflictDoUpdate({
-        target: [bottleClaims.resourceId, bottleClaims.field, bottleClaims.valueHash],
-        set: { status: "accepted", canonicalized: true },
-      });
-    }
-  }
-
   const patch: Record<string, unknown> = { status: "verified" };
-  if (trustedManufacturer && current.abv == null && verification.abv != null) patch.abv = verification.abv;
-  if (trustedManufacturer && current.ageYears == null && verification.ageYears != null) patch.ageYears = verification.ageYears;
   if (current.avgPrice == null && verification.price != null) patch.avgPrice = verification.price;
-  if (trustedManufacturer && current.description == null && verification.description != null) patch.description = verification.description;
   await db.update(bottles).set(patch).where(eq(bottles.id, current.id));
   for (const upc of verification.upcs) {
     await db.insert(bottleUpcs).values({ id: `${current.id}--verified-${upc}`, bottleId: current.id, upc, source: "verified", confirmedCount: 0 }).onConflictDoNothing();
