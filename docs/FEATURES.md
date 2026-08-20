@@ -331,7 +331,7 @@ Inspired by Vivino's "Wine Adventures" (gamified guided tasting journeys, a Prem
 ### 10.3 Guided tastings — where learning meets the glass (🔵 Phase 3–4)
 - Structured tasting exercises using a bottle you own: step-by-step nosing/tasting prompts, wheel input at each step, then compare your notes to community/expert consensus.
 - **Palate training**: "Can you find the vanilla?" exercises; blind-mode variants with a friend pouring.
-- **Taste-along flights**: curated multi-bottle journeys ("The 5 Scotch regions") — works with what you own, suggests affordable fills for gaps (a natural, honest commerce hook later).
+- **Taste-along flights**: curated multi-bottle journeys ("The Scotch regions" — all six of `SCOTCH_REGIONS`, §11.1) — works with what you own, suggests affordable fills for gaps (a natural, honest commerce hook later).
 - Calibration payoff: guided tastings feed the palate profile with higher-quality signal than casual pours.
 
 ### 10.4 AI tutor mode (🔵)
@@ -353,7 +353,7 @@ The app's progress surface, and the answer to "what do I try next?". Whiskey is 
 
 | Dimension | Source | Shape |
 |---|---|---|
-| **Regions** | `bottles.region` | Closed per country (Scotland's six) → completable |
+| **Regions** | `bottles.region` | Closed per country (Scotland's six — see below) → completable |
 | **Countries** | `distilleries.country` | Semi-closed (~15 producing countries worth naming) |
 | **Distilleries** | `bottles.distilleryId` | Open-ended → milestone tiers |
 | **Cask types** | `bottles.caskTypes[]` | Semi-closed (sherry, bourbon, port, madeira, virgin oak, mizunara…) |
@@ -361,6 +361,12 @@ The app's progress surface, and the answer to "what do I try next?". Whiskey is 
 | **Descriptors** | `tastingNotes.flavorTags` keys | Closed at ~55 leaves — the *precision* dimension (§5), and the one that rewards attention rather than acquisition |
 
 Every dimension is derivable from data already stored. No new logging step, no new field for the user to fill: **you earn a passport by using the app normally.**
+
+**On "Scotland's six".** Two numbers are both true and must not be swapped. The Scotch Whisky Regulations 2009 protect **five** localities — Speyside, Highland, Lowland, Islay, Campbeltown — and formally fold the islands into the Highlands. The shelf disagrees, and so does our catalog: `bottles.region` stores `"Islands"` for Highland Park, Talisker, Arran, Jura and Tobermory. A counter derived from that column therefore has a denominator of **six**, and folding Islands away would tell a Talisker drinker their region doesn't exist.
+
+So: **the product counts six; the lesson teaches that five are protected.** Both live in one place — `src/lib/scotch-regions.ts` exports `SCOTCH_REGIONS`, `SCOTCH_REGION_COUNT` (6) and `PROTECTED_SCOTCH_REGION_COUNT` (5), the regions lesson generates its tour from it, and a test asserts the seeded catalog uses no region name outside the set. Never write either number as a literal, in code or in copy.
+
+One value in that column is not a region: blended Scotch carries `"Scotland"` (`SCOTCH_BLEND_REGION`), because a blend is married from several regions and belongs to none. It renders fine on a bottle page and **never counts** — otherwise a bottle of Johnnie Walker would award a seventh region.
 
 ### 11.2 What counts as "met"
 
