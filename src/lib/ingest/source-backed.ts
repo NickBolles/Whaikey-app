@@ -82,6 +82,7 @@ interface ParseInput {
   source: CatalogSourceDefinition;
   resourceType: BottleResourceType;
   mediaKind?: BottleMediaKind;
+  expectedBottleName?: string;
 }
 
 const MAX_DOCUMENT_BYTES = 2_000_000;
@@ -326,6 +327,38 @@ function productProperties(product: Record<string, unknown>, claims: ExtractedCl
   }
 }
 
+function primaryProductForPage(
+  products: Record<string, unknown>[],
+  html: string,
+  requestedUrl: URL,
+  expectedBottleName?: string,
+): Record<string, unknown> | undefined {
+  if (products.length <= 1) return products[0];
+  const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const title = normalize(metaContent(html, "og:title") ?? pageTitle(html) ?? "");
+  const expected = normalize(expectedBottleName ?? "");
+  const path = normalize(decodeURIComponent(requestedUrl.pathname));
+  let best = products[0];
+  let bestScore = -1;
+  for (const product of products) {
+    const name = normalize(stringValue(product.name) ?? "");
+    if (!name) continue;
+    let score = 0;
+    if (expected === name) score += 2_000;
+    else if (expected && (expected.includes(name) || name.includes(expected))) score += 1_250;
+    if (title === name) score += 1_000;
+    else if (title.includes(name)) score += 500 + name.length;
+    else if (name.includes(title) && title) score += 250 + title.length;
+    const nameTokens = name.split(" ").filter((token) => token.length > 2);
+    score += nameTokens.filter((token) => path.includes(token)).length * 10;
+    if (score > bestScore) {
+      best = product;
+      bestScore = score;
+    }
+  }
+  return best;
+}
+
 /** Extract only bounded metadata/facts; article and review bodies are never returned. */
 export function parseSourceDocument(input: ParseInput): ParsedSourceDocument {
   const requestedUrl = validatePublicSourceUrl(input.url, input.source);
@@ -339,10 +372,12 @@ export function parseSourceDocument(input: ParseInput): ParsedSourceDocument {
       // Malformed JSON remains a valid link resource with no extracted facts.
     }
   }
+  const html = input.contentType.includes("html") ? input.body : "";
   const products = objects.filter((row) => schemaTypes(row).some((type) => type === "Product"));
   const reviews = objects.filter((row) => schemaTypes(row).some((type) => type === "Review"));
+  const primaryProduct = primaryProductForPage(products, html, requestedUrl, input.expectedBottleName);
   const officialProduct = input.source.kind === "official" && input.resourceType === "official_product";
-  for (const product of products) productProperties(product, claims, officialProduct);
+  if (primaryProduct) productProperties(primaryProduct, claims, officialProduct);
   for (const review of reviews) {
     const rating = review.reviewRating;
     if (!rating || typeof rating !== "object") continue;
@@ -352,7 +387,6 @@ export function parseSourceDocument(input: ParseInput): ParsedSourceDocument {
     if (score) pushClaim(claims, "reviewScore", { score, ...(scale ? { scale } : {}) });
   }
 
-  const html = input.contentType.includes("html") ? input.body : "";
   const rawCanonical = canonicalHref(html);
   let canonicalUrl = requestedUrl.toString();
   if (rawCanonical) {
@@ -363,14 +397,13 @@ export function parseSourceDocument(input: ParseInput): ParsedSourceDocument {
     }
   }
 
-  const primaryProduct = products[0];
   const structuredImage = primaryProduct ? imageValue(primaryProduct.image) : null;
   const openGraphImage = metaContent(html, "og:image");
   const rawImage = structuredImage ?? (openGraphImage ? { url: openGraphImage, width: null, height: null } : null);
   if (rawImage && input.mediaKind) {
     try {
       const mediaUrl = new URL(rawImage.url, requestedUrl);
-      if (["http:", "https:"].includes(mediaUrl.protocol) && isPublicHostname(mediaUrl.hostname)) {
+      if (mediaUrl.protocol === "https:" && isPublicHostname(mediaUrl.hostname)) {
         media.push({
           kind: input.mediaKind,
           url: mediaUrl.toString(),
@@ -616,8 +649,37 @@ export async function ingestSourceManifest(
     const source = sourceMap.get(resource.sourceId)!;
     try {
       const requestedUrl = validatePublicSourceUrl(resource.url, source).toString();
+      const [bottle] = await db.select().from(bottles).where(eq(bottles.id, resource.bottleId)).limit(1);
+      if (!bottle) throw new Error(`Unknown bottle id: ${resource.bottleId}`);
+      const manifestResourceId = stableId("resource", resource.bottleId, requestedUrl);
+      const [disabledResource] = apply && disabledSourceIds.has(source.id)
+        ? await db.select({
+            id: bottleResources.id,
+            url: bottleResources.url,
+            title: bottleResources.title,
+            publisher: bottleResources.publisher,
+            contentHash: bottleResources.contentHash,
+          }).from(bottleResources).where(and(
+            eq(bottleResources.bottleId, resource.bottleId),
+            eq(bottleResources.sourceId, source.id),
+            or(eq(bottleResources.id, manifestResourceId), eq(bottleResources.url, requestedUrl)),
+          )).limit(1)
+        : [];
       let parsed: ParsedSourceDocument;
-      if (source.fetchPolicy === "link_only") {
+      if (apply && disabledSourceIds.has(source.id)) {
+        if (!disabledResource) return;
+        // Revocation must not depend on the disabled origin remaining online.
+        // A synthetic empty snapshot drives the normal fallback/ownership path.
+        parsed = {
+          title: disabledResource.title,
+          publisher: disabledResource.publisher,
+          canonicalUrl: disabledResource.url,
+          publishedAt: null,
+          contentHash: hash(`disabled\u0000${disabledResource.contentHash ?? ""}`),
+          claims: [],
+          media: [],
+        };
+      } else if (source.fetchPolicy === "link_only") {
         parsed = {
           title: resource.title ?? null,
           publisher: source.name,
@@ -637,14 +699,12 @@ export async function ingestSourceManifest(
           source,
           resourceType: resource.resourceType,
           mediaKind: resource.mediaKind,
+          expectedBottleName: bottle.name,
         });
       }
       report.claimsExtracted += parsed.claims.length;
       report.mediaExtracted += parsed.media.length;
       if (!apply) return;
-
-      const [bottle] = await db.select().from(bottles).where(eq(bottles.id, resource.bottleId)).limit(1);
-      if (!bottle) throw new Error(`Unknown bottle id: ${resource.bottleId}`);
 
       const extractionHash = hash(JSON.stringify({
         version: 1,
@@ -657,7 +717,6 @@ export async function ingestSourceManifest(
         resourceType: resource.resourceType,
         mediaKind: resource.mediaKind ?? "bottle",
       }));
-      const manifestResourceId = stableId("resource", bottle.id, requestedUrl);
       const resourceAssociation = or(
         eq(bottleResources.id, manifestResourceId),
         eq(bottleResources.url, parsed.canonicalUrl),

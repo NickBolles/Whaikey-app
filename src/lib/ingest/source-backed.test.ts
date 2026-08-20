@@ -74,6 +74,35 @@ describe("source-backed document extraction", () => {
     ]);
   });
 
+  it("extracts canonical facts only from the page's primary product and rejects plaintext media", () => {
+    const parsed = parseSourceDocument({
+      url: "https://www.example-distillery.com/products/primary-reserve",
+      contentType: "text/html",
+      body: `<html><head>
+        <title>Primary Reserve | Example Distillery</title>
+        <meta property="og:title" content="Primary Reserve" />
+        <script type="application/ld+json">[
+          {"@type":"Product","name":"Related Reserve","image":"https://www.example-distillery.com/related.png","additionalProperty":[{"@type":"PropertyValue","name":"ABV","value":"60%"},{"@type":"PropertyValue","name":"Age","value":"18 years"}]},
+          {"@type":"Product","name":"Primary Reserve","image":"http://www.example-distillery.com/primary.png","additionalProperty":[{"@type":"PropertyValue","name":"ABV","value":"45%"},{"@type":"PropertyValue","name":"Age","value":"10 years"}]}
+        ]</script>
+      </head></html>`,
+      source: OFFICIAL_SOURCE,
+      resourceType: "official_product",
+      mediaKind: "bottle",
+    });
+
+    expect(parsed.claims).toEqual(expect.arrayContaining([
+      { field: "name", value: "Primary Reserve" },
+      { field: "abv", value: 45 },
+      { field: "ageYears", value: 10 },
+    ]));
+    expect(parsed.claims).not.toEqual(expect.arrayContaining([
+      { field: "abv", value: 60 },
+      { field: "ageYears", value: 18 },
+    ]));
+    expect(parsed.media).toEqual([]);
+  });
+
   it("normalizes only whole-year age units", () => {
     const parseAge = (property: string) => parseSourceDocument({
       url: "https://www.example-distillery.com/products/reserve-10",
@@ -765,24 +794,27 @@ describe("source-backed persistence", () => {
     expect(report.errors[0]?.error).toMatch(/2 MB limit/i);
   });
 
-  it("preserves operator disablement and records ownership when a source is re-enabled", async () => {
+  it("revokes disabled-source authority without fetching and restores ownership when re-enabled", async () => {
     const bottle = await createTestBottle(db, { id: "disabled-source-refresh", status: "imported", abv: null });
     const manifest: CatalogSourceManifest = {
       sources: [OFFICIAL_SOURCE],
       resources: [{ bottleId: bottle.id, sourceId: OFFICIAL_SOURCE.id, url: "https://www.example-distillery.com/products/reserve-10", resourceType: "official_product" }],
     };
-    await db.insert(schema.catalogSources).values({
-      ...OFFICIAL_SOURCE,
-      baseUrl: new URL(OFFICIAL_SOURCE.baseUrl).origin,
-      enabled: false,
-    });
     await ingestSourceManifest(db, manifest, {
       apply: true,
       fetchImpl: (async () => htmlResponse(PRODUCT_HTML)) as typeof fetch,
     });
+    await db.update(schema.catalogSources).set({ enabled: false }).where(eq(schema.catalogSources.id, OFFICIAL_SOURCE.id));
+    const unavailableFetch = vi.fn(async () => { throw new Error("origin unavailable"); }) as unknown as typeof fetch;
+    await ingestSourceManifest(db, manifest, { apply: true, fetchImpl: unavailableFetch });
 
+    expect(unavailableFetch).not.toHaveBeenCalled();
     expect((await db.select().from(schema.catalogSources).where(eq(schema.catalogSources.id, OFFICIAL_SOURCE.id)))[0].enabled).toBe(false);
-    expect((await db.select().from(schema.bottleClaims).where(eq(schema.bottleClaims.field, "abv")))[0].canonicalized).toBe(false);
+    expect((await db.select().from(schema.bottles).where(eq(schema.bottles.id, bottle.id)))[0]).toMatchObject({
+      status: "imported",
+      abv: null,
+    });
+    expect(await db.select().from(schema.bottleClaims)).toEqual([]);
 
     await db.update(schema.catalogSources).set({ enabled: true }).where(eq(schema.catalogSources.id, OFFICIAL_SOURCE.id));
     await ingestSourceManifest(db, manifest, {

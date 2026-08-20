@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import type { DB } from "@/db";
-import { bottleResources, bottles, bottleUpcs, bottleVerifications, catalogSources, priceHistory } from "@/db/schema";
+import { bottleClaims, bottleResources, bottles, bottleUpcs, bottleVerifications, catalogSources, priceHistory } from "@/db/schema";
 import { isValidUpc } from "@/lib/upc";
 
 export type VerificationCandidate = {
@@ -65,7 +65,7 @@ function safeUrl(value: unknown): string | null {
   if (typeof value !== "string") return null;
   try {
     const url = new URL(value);
-    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    if (url.protocol !== "https:") return null;
     if (url.hostname.endsWith("ttb.gov")) return null;
     return url.toString();
   } catch { return null; }
@@ -102,14 +102,25 @@ function stableEvidenceId(prefix: string, value: string): string {
   return `${prefix}-${createHash("sha256").update(value).digest("hex").slice(0, 24)}`;
 }
 
+function stableVerificationId(bottleId: string, url: string): string {
+  return `verification-${createHash("sha256").update([bottleId, url].join("\u0000")).digest("hex").slice(0, 24)}`;
+}
+
 /** Persist only source-backed, normalized facts; existing curated values always win. */
 export async function persistSoldVerification(db: DB, verification: SoldVerification, dryRun: boolean): Promise<boolean> {
   const [current] = await db.select().from(bottles).where(and(eq(bottles.id, verification.id), eq(bottles.status, "imported"))).limit(1);
   if (!current || !verification.evidenceUrl) return false;
   if (dryRun) return true;
 
+  const evidence = new URL(verification.evidenceUrl);
+  const [disabledOrigin] = await db.select({ id: catalogSources.id }).from(catalogSources).where(and(
+    eq(catalogSources.baseUrl, evidence.origin),
+    eq(catalogSources.enabled, false),
+  )).limit(1);
+  if (disabledOrigin) return false;
+
   await db.insert(bottleVerifications).values({
-    id: randomUUID(),
+    id: stableVerificationId(current.id, verification.evidenceUrl),
     bottleId: current.id,
     url: verification.evidenceUrl,
     label: verification.evidenceLabel,
@@ -120,7 +131,6 @@ export async function persistSoldVerification(db: DB, verification: SoldVerifica
 
   // Bridge the existing verifier into the shared resource graph so every new
   // evidence URL appears on the bottle page without copying source prose.
-  const evidence = new URL(verification.evidenceUrl);
   const claimsManufacturer = verification.evidenceKind === "manufacturer";
   const [trustedManufacturer] = claimsManufacturer
     ? await db.select({
@@ -148,8 +158,9 @@ export async function persistSoldVerification(db: DB, verification: SoldVerifica
     mediaPolicy: trustedManufacturer?.mediaPolicy ?? "link_only",
     attribution: trustedManufacturer?.attribution ?? verification.evidenceLabel,
   }).onConflictDoNothing();
+  const resourceId = stableEvidenceId("resource", `${current.id}\u0000${verification.evidenceUrl}`);
   await db.insert(bottleResources).values({
-    id: stableEvidenceId("resource", `${current.id}\u0000${verification.evidenceUrl}`),
+    id: resourceId,
     bottleId: current.id,
     sourceId,
     resourceType: trustedManufacturer ? "official_product" : claimsManufacturer ? "producer" : "retailer",
@@ -158,6 +169,28 @@ export async function persistSoldVerification(db: DB, verification: SoldVerifica
     publisher: verification.evidenceLabel,
     retrievedAt: new Date(),
   }).onConflictDoNothing();
+
+  if (trustedManufacturer) {
+    const canonicalFacts: Array<{ field: "abv" | "ageYears"; value: number }> = [];
+    if (current.abv == null && verification.abv != null) canonicalFacts.push({ field: "abv", value: verification.abv });
+    if (current.ageYears == null && verification.ageYears != null) canonicalFacts.push({ field: "ageYears", value: verification.ageYears });
+    for (const fact of canonicalFacts) {
+      const valueHash = createHash("sha256").update(JSON.stringify(fact.value)).digest("hex");
+      await db.insert(bottleClaims).values({
+        id: stableEvidenceId("claim", `${resourceId}\u0000${fact.field}\u0000${valueHash}`),
+        bottleId: current.id,
+        resourceId,
+        field: fact.field,
+        value: fact.value,
+        valueHash,
+        status: "accepted",
+        canonicalized: true,
+      }).onConflictDoUpdate({
+        target: [bottleClaims.resourceId, bottleClaims.field, bottleClaims.valueHash],
+        set: { status: "accepted", canonicalized: true },
+      });
+    }
+  }
 
   const patch: Record<string, unknown> = { status: "verified" };
   if (current.abv == null && verification.abv != null) patch.abv = verification.abv;
