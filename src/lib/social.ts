@@ -1352,6 +1352,7 @@ export async function getFriendNotesForBottle(db: DB, viewerId: string, bottleId
 export interface PalateCard {
   wheelHeat: ReturnType<typeof palateWheelHeat> | null;
   signatureLeafIds: string[];
+  countriesCovered: string[];
   regionsCovered: string[];
   stylesCovered: string[];
 }
@@ -1370,15 +1371,26 @@ export async function getPalateCard(db: DB, userId: string): Promise<PalateCard>
     .map(([leafId]) => leafId);
 
   const rows = await db
-    .select({ region: schema.bottles.region, category: schema.bottles.category })
+    .select({
+      country: schema.bottles.country,
+      region: schema.bottles.region,
+      category: schema.bottles.category,
+    })
     .from(schema.userBottles)
     .innerJoin(schema.bottles, eq(schema.userBottles.bottleId, schema.bottles.id))
     .where(and(eq(schema.userBottles.userId, userId), inArray(schema.userBottles.relationship, ["own", "tried"])));
 
-  const regionsCovered = [...new Set(rows.map((r) => r.region).filter((r): r is string => Boolean(r)))].sort();
+  // Two grains, deliberately: country is known for everything (a blend has one
+  // even though it has no region), region is the finer detail where the catalog
+  // has it. Counting them as one field is what used to put "Scotland" in this
+  // list beside "Islay".
+  const distinct = (values: Array<string | null>) =>
+    [...new Set(values.filter((v): v is string => Boolean(v)))].sort();
+  const countriesCovered = distinct(rows.map((r) => r.country));
+  const regionsCovered = distinct(rows.map((r) => r.region));
   const stylesCovered = [...new Set(rows.map((r) => r.category))].sort();
 
-  return { wheelHeat, signatureLeafIds, regionsCovered, stylesCovered };
+  return { wheelHeat, signatureLeafIds, countriesCovered, regionsCovered, stylesCovered };
 }
 
 export interface ProfileView {
@@ -1388,7 +1400,13 @@ export interface ProfileView {
   viewerState: { isSelf: boolean; followState: FollowState | null; followsYou: boolean; blocked: boolean };
 }
 
-const EMPTY_PALATE_CARD: PalateCard = { wheelHeat: null, signatureLeafIds: [], regionsCovered: [], stylesCovered: [] };
+const EMPTY_PALATE_CARD: PalateCard = {
+  wheelHeat: null,
+  signatureLeafIds: [],
+  countriesCovered: [],
+  regionsCovered: [],
+  stylesCovered: [],
+};
 
 async function listRecentVisibleNotes(
   db: DB,

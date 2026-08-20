@@ -4,6 +4,7 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { categoryLabel } from "@/components/category-chip";
 import type { Recommendation } from "@/lib/recommend";
+import { originLabel } from "@/lib/origin";
 
 export interface RecommendationRailProps {
   mode: "discovery" | "tonight";
@@ -139,7 +140,7 @@ export function RecommendationRail({ mode, title }: RecommendationRailProps) {
 }
 
 function RecCard({ rec, mode }: { rec: Recommendation; mode: RecommendationRailProps["mode"] }) {
-  const meta = [rec.distillery, categoryLabel(rec.category), rec.region ?? null]
+  const meta = [rec.distillery, categoryLabel(rec.category), originLabel(rec.region, rec.country)]
     .filter(Boolean)
     .join(" · ");
 

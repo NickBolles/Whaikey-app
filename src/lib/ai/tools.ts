@@ -133,6 +133,7 @@ export interface BottleSearchResult {
   name: string;
   category: schema.WhiskeyCategory;
   region: string | null;
+  country: string | null;
   ageYears: number | null;
   abv: number | null;
   msrp: number | null;
@@ -157,6 +158,7 @@ export async function searchBottlesLike(
       name: schema.bottles.name,
       category: schema.bottles.category,
       region: schema.bottles.region,
+      country: schema.bottles.country,
       ageYears: schema.bottles.ageYears,
       abv: schema.bottles.abv,
       msrp: schema.bottles.msrp,

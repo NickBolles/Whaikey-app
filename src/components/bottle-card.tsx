@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { CategoryChip } from "@/components/category-chip";
+import { originLabel } from "@/lib/origin";
 
 export interface BottleCardProps {
   bottle: {
@@ -8,6 +9,7 @@ export interface BottleCardProps {
     category: string;
     distillery: string | null;
     region?: string | null;
+    country?: string | null;
     ageYears: number | null;
     abv: number | null;
     avgPrice: number | null;
@@ -16,7 +18,9 @@ export interface BottleCardProps {
 
 /** Compact search-result / list row linking to the bottle detail page. */
 export function BottleCard({ bottle }: BottleCardProps) {
-  const origin = [bottle.distillery, bottle.region ?? null].filter(Boolean).join(" · ");
+  const origin = [bottle.distillery, originLabel(bottle.region, bottle.country)]
+    .filter(Boolean)
+    .join(" · ");
   const specs = [
     bottle.ageYears != null ? `${bottle.ageYears} yr` : null,
     bottle.abv != null ? `${bottle.abv}% ABV` : null,
