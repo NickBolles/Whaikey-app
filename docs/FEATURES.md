@@ -387,7 +387,7 @@ Rules every badge must pass, checked in review the same way §3.1's bans are:
 1. **Distinct-only.** If repeating a pour can advance it, it isn't a badge.
 2. **Volume-blind and strength-blind.** No ml, no ABV, no cask strength as an achievement axis.
 3. **Untimed.** No "this month", no streak, no expiry, no seasonal pressure. A passport is a lifetime object.
-4. **Tasted, not visited.** A distillery badge means you drank what they made, from anywhere. Physical distillery *visits* can be added by hand as a memory on the passport — they are never scored, never badged, never ranked. Venue-frequency achievements are banned outright (SOCIAL.md §3.1 rule 5) and dragging location into it buys nothing.
+4. **Tasted and visited are different dimensions.** A *tasted* distillery badge means you drank what they made, from anywhere — a bar pour counts. A *visited* badge means you went there, and is its own thing entirely (§11.8). Neither is a drinking-venue badge: bars and restaurants are never counted, in either dimension.
 5. **No nudge may reference proximity to a reward.** "One region to go" as a notification is banned (§3.1 rule 4). The passport shows the gap when the user *opens* it; it never comes to find them.
 
 ### 11.5 Gaps as recommendations (🔵 S3)
@@ -404,7 +404,22 @@ The empty cells are the most useful thing on the page, because they're a recomme
 
 - 🟡 **Stats page**: category breakdown, average rating by region, spend charts. (Pours-over-time stays a *private* chart — it's the one consumption view a user may legitimately want about themselves, and it never leaves their own screen.)
 - 🔵 **Whiskey Wrapped** (yearly recap, shareable, opt-in on the spend slide 😅) — built on the passport's breadth story rather than a volume total.
-- ⚪ Distillery map (visits as memories, per §11.4 rule 4); sample-share tracker (2oz samples, who owes whom); home-screen widgets (tonight's pick, collection value).
+- ⚪ Sample-share tracker (2oz samples, who owes whom); home-screen widgets (tonight's pick, collection value). The distillery map now lives with visits — §11.8.
+
+### 11.8 Distillery visits — the pilgrimage page (⚪ future)
+
+Whiskey is one of the few hobbies with *destinations*. People plan Islay trips, do the Speyside run, detour an hour off a motorway for a tour. That belongs on the passport, and it is the dimension a drinker is proudest of — so it gets its own page: distilleries visited, on a map, with the date and whatever they want to remember about it.
+
+**Why this is not the banned venue mechanic.** The Untappd badges our guardrails reject pay you to drink at more bars, more often, near where you already are — frequency at places of consumption. A distillery visit is travel: a distinct destination, usually planned months ahead, and completable while drinking nothing at all (plenty of visitors are driving). The mechanic pays you to *go somewhere*, not to *drink more*. Concretely, the rules that keep it on the right side:
+
+- **Distinct destinations only.** Ten trips to the same distillery is one badge, forever. There is no visit-frequency count anywhere in the product.
+- **Distilleries and their visitor centres only.** Never bars, restaurants, festivals or shops — the moment a place is scored for *drinking there*, it's the banned mechanic.
+- **No proximity anything.** No "you're 2 miles from Ardbeg", no background geofence, no notification tied to being near a place. That's SOCIAL.md §3.1 rule 4 wearing a map pin.
+- **A visit is not a pour.** Checking in records that you were there. It never logs a drink, never prompts one, and a visit with no pour attached is completely normal.
+
+**How a visit gets recorded.** Manual entry is the baseline and always sufficient: pick the distillery, pick a date, done — including for trips from years ago. Device location is an *accelerator* on top, governed by SOCIAL.md §8.3: foreground-only and requested at the moment the user taps to check in, coarse accuracy (we're matching a named distillery, not a doorway), platform when-in-use permission with the reason on screen, and **only `(distilleryId, date)` is stored** — the coordinates pick the distillery and are then discarded. Declining the permission costs the user nothing but a few taps.
+
+**On the passport and shared:** visited distilleries render as a distinct state from tasted ones (met · tasted · visited), so a map can show "drank it" and "stood there" differently — and *"tasted 41, visited 6"* is a much better sentence than either number alone. Shared passports show the set, never the dates or any location detail.
 
 ---
 

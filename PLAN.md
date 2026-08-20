@@ -131,14 +131,14 @@ Implementation: LLM with **tool calling** into the app's own APIs (query invento
 
 - **The map, not the meter.** Each dimension renders as territory: Scotland's six regions with two filled, 41 distilleries met of the ones in our catalog, sherry/bourbon/port/virgin-oak casks tried. The empty cells are the feature — they're the recommendation surface with a reason already attached (*"you've never had a Campbeltown"*).
 - **Badges** for meaningful thresholds and completions — all five (well, six) Scotch regions; ten distilleries in one country; four cask finishes of the same distillate; a full flavor wedge named across your notes. Tiered, so there's always a next one, and every tier is reachable by tasting more *kinds*, never more *volume*.
-- **Tasted, not visited.** A distillery badge means you drank something they made, from anywhere — a bar pour, a friend's sample, a 15 ml miniature. We deliberately do **not** badge physical venue check-ins: that's the Untappd venue mechanic our guardrails ban (SOCIAL.md §3.1), and it drags in location privacy for no added meaning. A distillery *visit* can be a proud, manually-added memory on the passport; it is never a scored achievement.
+- **Tasted and visited are separate dimensions.** A *tasted* distillery badge means you drank something they made, from anywhere — a bar pour, a friend's sample, a 15 ml miniature. A *visited* badge means you went there, and it earns its own page and map (FEATURES.md §11.8): whiskey is one of the few hobbies with destinations, and an Islay trip should be worth something in the app. Neither is a drinking-venue badge — bars and restaurants are never counted, visits count distinct destinations rather than frequency, and nothing anywhere reacts to proximity.
 - **Shareable and comparable** — a passport card for friends and clubs, and passport diffing with a friend (*"you've both done Islay; neither of you has touched Japan"*), which turns into a shared plan: what to open next time you're in the same room. Clubs get an aggregate passport, so a group can go after a region together.
 - **Suggests the next step, never the next pour.** Exploration surfaces recommend *what* to try when you next try something — matched to your palate and your price band — and never prompt you to drink now. No notification says "one region to go."
 
 ### 2.10 Extras / Delighters (backlog)
 
 - **Stats & Wrapped** — yearly "Whiskey Wrapped" recap (top bottle, flavor journey, spend… optionally hidden 😅).
-- Distillery map (visits as memories on the passport, not as scored badges — §2.9).
+- (Distillery visits and their map moved into §2.9 — they're a passport dimension, not a delighter.)
 - Sample/bottle-share management (track 2oz samples, who you owe).
 - Insurance export (CSV/PDF of collection with values).
 - Home-screen widgets: "tonight's pour," collection value.
@@ -318,6 +318,7 @@ Each phase ships a loop a user can feel, and the riskiest assumption (sparse not
 - **S2 — Friends & Same Dram:** profiles + handles, palate card, follow graph, per-pour visibility (default *only me*), blocks, the "From your friends" Home module, **Same Dram** (you vs. producer vs. friends), cheers, notification policy, one-tap "make everything private."
 - **S3 — Conversation & groups:** comments + reports, clubs, blind flights end-to-end (no club dependency — flights can lead), taste twins feeding recommendations, bottle shares/samples, **passport badges + friend passport diffing** ("neither of you has touched Japan" → a plan for next time).
 - **S3.5 — Club passports:** an aggregate passport per club, so a group can take on a region together. Depends on clubs; deliberately after the solo passport has proven it motivates anything.
+- **Later — Distillery visits:** the pilgrimage page and map, manual entry first, with an optional foreground-only, coarse, permission-gated location check-in that stores nothing but `(distillery, date)` (US-20; rules in SOCIAL.md §8.3). Needs the native shell's geolocation capability, which is why it sits behind the passport rather than inside it.
 - **S4 — Community scale:** community flavor consensus, crowdsourced availability, moderation tooling, public discovery.
 - In parallel: Wrapped recap, price alerts on wishlist, widgets.
 - Launch premium tier (see §6 Monetization).
@@ -403,7 +404,7 @@ Same logic that keeps scanning free: the graph **is** the growth engine, and a p
 2. iOS-first or simultaneous Android? *Proposal: build cross-platform, but polish/beta iOS first.* (The Capacitor shell makes both one build — see [docs/NATIVE_APP.md](./docs/NATIVE_APP.md) §4.)
 3. Name: "Whaikey" — placeholder or keeper?
 
-**On the social layer:** the open-question list is now a *decision* table — [docs/SOCIAL.md](./docs/SOCIAL.md) §14 records 13 decided calls (asymmetric follow with derived friends; default visibility **Only me** with no system-raised retroactivity; reaction named **"Cheers"**; chronological stream as a Home module; venue tagging not built; and more). Agents build to that table; overturn by editing it. Only two questions remain genuinely open: whole-shelf sharing timing (S3 lean, wants S2 privacy telemetry first) and the jurisdiction checklist before S4 public discovery. S1 needs no decisions at all — its build spec is in SOCIAL.md §16.
+**On the social layer:** the open-question list is now a *decision* table — [docs/SOCIAL.md](./docs/SOCIAL.md) §14 records 14 decided calls (asymmetric follow with derived friends; default visibility **Only me** with no system-raised retroactivity; reaction named **"Cheers"**; chronological stream as a Home module; bar/venue tagging not built, while distillery *visits* are a future passport dimension with permission-gated location; and more). Agents build to that table; overturn by editing it. Only two questions remain genuinely open: whole-shelf sharing timing (S3 lean, wants S2 privacy telemetry first) and the jurisdiction checklist before S4 public discovery. S1 needs no decisions at all — its build spec is in SOCIAL.md §16.
 
 ---
 

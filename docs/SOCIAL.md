@@ -37,7 +37,7 @@ Strava is often mis-copied as "a feed with likes." The mechanics that carry it a
 | **KOM/QOM leaderboards** | Ranks people by performance on the segment. | Ranking people by… drinking the most of a bottle. | **Reject.** No ranking of people by consumption, ever. |
 | **Local Legend** (most *frequent* completions) | Explicitly rewards repetition. | Rewards drinking the same bottle most often. | **Reject outright.** This is the single most dangerous mechanic to port. |
 | **Streaks / weekly volume goals** | Habit formation via consecutive-day pressure. | Consecutive drinking days. | **Reject outright.** |
-| **Heatmaps / route maps** | Location as content. | Bar and home location as content. | Reject as a default; venue tagging is opt-in and coarse (§8). |
+| **Heatmaps / route maps** | Location as content. | Bar and home location as content. | Reject as a default. The one sanctioned use is a distillery check-in (§8.3, §11.8) — destinations you chose to visit, never a trace of where you drink. |
 
 ### 2.1 The substitution that makes it work
 
@@ -70,6 +70,8 @@ A scoping note so this section stays sharp: these bans are the load-bearing guar
 3. No leaderboard whose sort key is a consumption quantity — including note and rating counts, which are consumption proxies (§3.3).
 4. No notification that suggests pouring, or that implies progress toward a reward if the user drinks.
 5. No time-of-day, venue-frequency, or strength-based achievements; no public "who's drinking right now" presence.
+
+**One carve-out, added deliberately (owner decision):** a **distillery visit** is badgeable; a **drinking venue** is not. The distinction is what the mechanic pays you to do. Untappd's venue badges reward drinking at more bars, more often, near where you already are — frequency at places of consumption. Visiting Ardbeg is travel: a distinct destination, usually a trip planned months out, and you can do the whole tour drinking nothing. So distillery visits count **distinct destinations, never frequency**, bars and restaurants are never counted at all, and no visit mechanic may reference proximity — "you're 2 miles from a distillery" is the pour-nudge shape rule 4 bans, wearing a map pin. Spec: [FEATURES.md](./FEATURES.md) §11.8; recorded as decision D14 (§14).
 
 ### 3.2 Encouraged mechanics (the substitutes)
 
@@ -151,9 +153,11 @@ The stories are the contract: each phase in §13 ships a coherent subset, and §
 - **US-16 — Taste twins.** *As a user, I want recommendations to lean on people who taste like me, with the reason stated.*
   ✓ Palate-match % on profiles and notes; recs can cite "your two closest palate matches rated it 4.5+."
 - **US-18 — Passport badges.** *As an explorer, I want the regions, countries, distilleries and cask types I've met turned into something I can look at and finish, so curiosity has a scoreboard.*
-  ✓ Completions, milestones and discoveries per FEATURES.md §11.4; every badge advances only on a *distinct* new thing, is untimed, and is blind to volume and ABV. A distillery counts as tasted, never as visited.
+  ✓ Completions, milestones and discoveries per FEATURES.md §11.4; every badge advances only on a *distinct* new thing, is untimed, and is blind to volume and ABV. Tasted and visited are separate dimensions (US-20), and neither counts a bar.
 - **US-19 — Compare passports.** *As two friends, we want to see what each of us has met that the other hasn't, so "what should we open?" has an answer.*
   ✓ Rendered as a diff — yours, theirs, and the shared gap — never as a ranked list of who has met more. Club passports (S3.5) aggregate the union with no per-member column.
+- **US-20 — Distillery pilgrimages.** *As someone who plans trips around whiskey, I want the distilleries I've actually visited on my passport, so a trip to Islay is worth something in the app.*
+  ✓ Visits are added by hand or confirmed with a foreground, permission-gated location check that stores only `(distilleryId, date)`; badges count distinct distilleries visited, never visit frequency, and never a bar. Declining location still allows a manual visit.
 
 ### Community scale (S4)
 
@@ -317,7 +321,12 @@ Alcohol consumption is sensitive personal data — in some jobs, families, juris
 
 1. **Private by default, at every level.** Visibility is opt-in per pour, with a "default visibility for new pours" preference that ships as **Only me**. **No system action — migration, default change, or feature launch — ever raises the visibility of existing data.** The *owner* may: an explicit, confirmed "make my past pours friends-visible" bulk action is their right, and refusing to build it would be its own kind of paternalism. The ban is on defaults and dark patterns, not on the user's own choices.
 2. **Money never travels.** Purchase price, collection value, spend, and cost-per-pour are excluded from every social projection — no exceptions, no toggle in v1. This is both a privacy and a safety property (a public high-value collection is a burglary target). Enforced structurally: social read paths use a projection type that doesn't carry these columns, mirroring how `getPublicPourShare()` is written today.
-3. **Location is coarse and opt-in.** Venue tagging (if built) is a named place chosen by the user; no GPS, no automatic capture, no heatmaps, nothing at home-address resolution.
+3. **Location is coarse, opt-in, and momentary.** Venue tagging (if built) is a named place chosen by the user. Device location may be used for exactly one thing — confirming you are at a distillery you're checking into (§11.8) — under these rules, which are the price of using it at all:
+   - **Foreground and on-tap only.** The fix is requested when the user taps to check in, never in the background, never on app open, never while the app is closed. No always-on permission is ever requested.
+   - **Platform permission is the gate, and refusal is not a wall.** Standard when-in-use prompts, asked at the moment of use with the reason on screen. Declining still lets the user add the visit by hand — location *speeds up* a check-in, it never authorizes one.
+   - **Reduced accuracy is enough.** We match a named distillery, not a doorway, so request the platform's coarse tier (iOS reduced accuracy, Android `ACCURACY_COARSE`) rather than precise.
+   - **We store the answer, not the reading.** A confirmed visit persists as `(distilleryId, date)`. The coordinates are used to pick the distillery and then discarded — never written to a row, never logged, never sent anywhere else.
+   - **Still no heatmaps, no traces, no presence.** No map of everywhere you've been at pour resolution, no "friends near you", no home-address resolution, and nothing at all inferred from where you *drink*.
 4. **Revocable and enumerable.** Every share link, every follower, every public object is listed in one place and revocable in one tap. Revocation is immediate and hard (row delete/tombstone), and OG images are regenerated/404'd.
 5. **Deletion is real.** Deleting a pour removes it from feeds, links, and comparison aggregates. Account deletion is a hard delete (FEATURES.md §12) — social rows cascade, and content contributed to *aggregates* is either removed or was anonymised at write time.
 6. **Export includes your social data** — your notes, your comments, your graph. Same free-forever rule.
@@ -442,7 +451,8 @@ The first draft left 14 questions open "for a human call before S1 code." Under 
 | D10 | Feed placement | Home module, not a tab; data-driven promotion tripwire (§6.3). **Amended 2026-08 (owner decision):** `/friends` — follow management/discovery, not the feed — now holds a tab-bar slot from the app-wide UX redesign (Search moved into ＋ and the global header). The feed stays a Home module and the tripwire still governs promoting the *feed* itself (§6.3 note). |
 | D11 | Indexing | Shared pages stay `noindex` through S3; revisit at S4 with the jurisdiction review. |
 | D12 | Edited shared notes | Link shows current state with an "edited" marker; deletion revokes. Never a stale public copy. |
-| D13 | Venue/bar tagging | Not building it — the mechanic most implicated in the Untappd critique, and it buys us little. Reopen only with a concrete user need. |
+| D13 | Venue/bar tagging | Not building it — the mechanic most implicated in the Untappd critique, and it buys us little. Reopen only with a concrete user need. **Unchanged by D14:** a bar is still never a place we count. |
+| D14 | Distillery visits + device location | **Building it, as a future item (owner decision, 2026-08).** Distillery *visits* become a passport dimension with badges (US-20, FEATURES.md §11.8) — distinct destinations only, never frequency, never a bar, never proximity-triggered. Device location is permitted solely to confirm a check-in: foreground-only, on-tap, coarse, platform-permission-gated, storing only `(distilleryId, date)` (§8.3). Manual entry always works, so declining the permission costs nothing. |
 
 ### Still open (genuinely)
 
