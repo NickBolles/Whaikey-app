@@ -27,7 +27,7 @@ permissions:
 jobs:
   review:
     if: >-
-      (github.event_name == 'workflow_dispatch' && github.ref_name == github.event.repository.default_branch) ||
+      (github.event_name == 'workflow_dispatch' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)) ||
       (github.event.label.name == 'ai-review-approved' && contains(github.event.issue.labels.*.name, 'whiskey-feedback'))
     # This label must point at a private runner whose Claude Code CLI is logged
     # into Nick's subscription. Never expose this runner to pull_request jobs.
