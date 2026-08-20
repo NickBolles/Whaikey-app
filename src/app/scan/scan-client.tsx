@@ -162,7 +162,6 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
   const [guidance, setGuidance] = useState<Guidance | null>(null);
   /** Highlight box over the detected barcode, in element coordinates. */
   const [lockBox, setLockBox] = useState<Box | null>(null);
-  const [torchSupported, setTorchSupported] = useState(false);
   const [torchOn, setTorchOn] = useState(false);
   const [torchChanging, setTorchChanging] = useState(false);
   const [torchUnavailable, setTorchUnavailable] = useState(false);
@@ -468,7 +467,6 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
       // Torch support can be withdrawn by the device; keep scanning uninterrupted.
       torchSupportedRef.current = false;
       torchOnRef.current = false;
-      setTorchSupported(false);
       setTorchOn(false);
       setTorchUnavailable(true);
     } finally {
@@ -525,7 +523,6 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
       setGuidance(null);
       const torch = await isNativeTorchAvailable();
       torchSupportedRef.current = torch;
-      setTorchSupported(torch);
       setTorchReportedUnsupported(!torch);
     })();
 
@@ -568,11 +565,9 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
           const torchCapability = track?.getCapabilities?.().torch;
           const supported = torchCapability === true;
           torchSupportedRef.current = supported;
-          setTorchSupported(supported);
           setTorchReportedUnsupported(torchCapability === false);
         } catch {
           torchSupportedRef.current = false;
-          setTorchSupported(false);
         }
         const video = videoRef.current;
         if (!video) return;
@@ -647,7 +642,6 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
       torchSupportedRef.current = false;
       torchOnRef.current = false;
       autoTorchAttemptedRef.current = false;
-      setTorchSupported(false);
       setTorchOn(false);
       setTorchChanging(false);
     };
