@@ -74,6 +74,22 @@ describe("whiskey feedback review", () => {
     expect(normalized.manifest.resources[0].resourceType).toBe("producer");
   });
 
+  it("deduplicates feedback URLs after public URL normalization", () => {
+    const normalized = normalizeFeedbackReview({
+      bottleId: "eagle-rare-10",
+      summary: "Duplicate fragments.",
+      resources: [
+        { sourceName: "Producer", sourceKind: "official", url: "https://producer.example/bottle#details" },
+        { sourceName: "Producer variant", sourceKind: "official", url: "https://producer.example/bottle#specs" },
+      ],
+    }, { id: "eagle-rare-10", name: "Eagle Rare 10" });
+
+    expect(normalized.manifest.resources).toEqual([
+      expect.objectContaining({ url: "https://producer.example/bottle" }),
+    ]);
+    expect(normalized.manifest.sources).toHaveLength(1);
+  });
+
   it("rejects AI feedback resources from disabled origins", async () => {
     await createTestBottle(db, { id: "eagle-rare-10", name: "Eagle Rare 10", status: "verified" });
     await db.insert(schema.catalogSources).values({

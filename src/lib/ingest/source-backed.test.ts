@@ -944,6 +944,46 @@ describe("source-backed persistence", () => {
       .toBe("link_only");
   });
 
+  it("requires complete source coverage before a restrictive fetch-policy change", async () => {
+    const bottleA = await createTestBottle(db, { id: "policy-coverage-a", status: "imported", abv: null });
+    const bottleB = await createTestBottle(db, { id: "policy-coverage-b", status: "imported", abv: null });
+    const resources = [
+      { bottleId: bottleA.id, sourceId: OFFICIAL_SOURCE.id, url: "https://www.example-distillery.com/products/a", resourceType: "official_product" as const },
+      { bottleId: bottleB.id, sourceId: OFFICIAL_SOURCE.id, url: "https://www.example-distillery.com/products/b", resourceType: "official_product" as const },
+    ];
+    const page = (url: string) => PRODUCT_HTML.replace(
+      "https://www.example-distillery.com/products/reserve-10",
+      url,
+    );
+    await ingestSourceManifest(db, { sources: [OFFICIAL_SOURCE], resources }, {
+      apply: true,
+      fetchImpl: (async (url) => htmlResponse(page(String(url)))) as typeof fetch,
+    });
+    const linkOnly = { ...OFFICIAL_SOURCE, fetchPolicy: "link_only" as const };
+
+    await expect(ingestSourceManifest(db, {
+      sources: [linkOnly],
+      resources: [resources[0]],
+    }, { apply: true })).rejects.toThrow(/every persisted resource/i);
+    expect((await db.select().from(schema.catalogSources).where(eq(schema.catalogSources.id, OFFICIAL_SOURCE.id)))[0].fetchPolicy)
+      .toBe("structured");
+    expect((await db.select({ id: schema.bottles.id, status: schema.bottles.status }).from(schema.bottles))
+      .sort((a, b) => a.id.localeCompare(b.id))).toEqual([
+      { id: bottleA.id, status: "verified" },
+      { id: bottleB.id, status: "verified" },
+    ]);
+
+    await ingestSourceManifest(db, { sources: [linkOnly], resources }, { apply: true });
+    expect((await db.select().from(schema.catalogSources).where(eq(schema.catalogSources.id, OFFICIAL_SOURCE.id)))[0].fetchPolicy)
+      .toBe("link_only");
+    expect((await db.select({ id: schema.bottles.id, status: schema.bottles.status }).from(schema.bottles))
+      .sort((a, b) => a.id.localeCompare(b.id))).toEqual([
+      { id: bottleA.id, status: "imported" },
+      { id: bottleB.id, status: "imported" },
+    ]);
+    expect(await db.select().from(schema.bottleVerifications)).toEqual([]);
+  });
+
   it("stores editorial resources but cannot verify or overwrite a bottle", async () => {
     const bottle = await createTestBottle(db, { id: "editorial-only", status: "imported", abv: null });
     const source = { ...OFFICIAL_SOURCE, id: "breaking-bourbon", name: "Breaking Bourbon", kind: "editorial" as const, baseUrl: "https://www.breakingbourbon.com", mediaPolicy: "link_only" as const };

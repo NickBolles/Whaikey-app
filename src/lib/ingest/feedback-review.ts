@@ -125,10 +125,6 @@ export function normalizeFeedbackReview(
     if (typeof item.url !== "string") throw new Error("Feedback review resource URL is missing");
     const parsed = new URL(item.url);
     if (parsed.protocol !== "https:") throw new Error("Feedback review resources must use HTTPS");
-    const normalizedUrl = parsed.toString();
-    if (seenUrls.has(normalizedUrl)) continue;
-    seenUrls.add(normalizedUrl);
-
     // Model discovery can suggest a producer page, but cannot grant canonical
     // authority. A maintainer must add it to the curated manifest separately.
     const effectiveKind = normalizedKind === "official" ? "registry" as const : normalizedKind;
@@ -142,7 +138,10 @@ export function normalizeFeedbackReview(
       mediaPolicy: "link_only" as const,
       attribution: sourceName,
     };
-    validatePublicSourceUrl(normalizedUrl, source);
+    const normalizedUrl = validatePublicSourceUrl(parsed.toString(), source).toString();
+    if (seenUrls.has(normalizedUrl)) continue;
+    seenUrls.add(normalizedUrl);
+
     sources.set(sourceId, source);
     resources.push({
       bottleId: bottle.id,

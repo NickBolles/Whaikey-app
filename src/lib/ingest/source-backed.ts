@@ -682,6 +682,29 @@ export async function ingestSourceManifest(
       if (registered && (registered.baseUrl !== baseUrl || registered.kind !== source.kind)) {
         throw new Error(`Catalog source identity drift for ${source.id}; create a new source id`);
       }
+      if (registered?.kind === "official" && registered.fetchPolicy === "structured" && source.fetchPolicy === "link_only") {
+        const persistedResources = await db.select({
+          id: bottleResources.id,
+          bottleId: bottleResources.bottleId,
+          url: bottleResources.url,
+        }).from(bottleResources).where(eq(bottleResources.sourceId, source.id));
+        const submittedResources = manifest.resources
+          .filter((resource) => resource.sourceId === source.id)
+          .map((resource) => {
+            const requestedUrl = validatePublicSourceUrl(resource.url, source).toString();
+            return {
+              id: stableId("resource", resource.bottleId, requestedUrl),
+              bottleId: resource.bottleId,
+              url: requestedUrl,
+            };
+          });
+        const missing = persistedResources.find((persisted) => !submittedResources.some((submitted) =>
+          submitted.bottleId === persisted.bottleId &&
+          (submitted.id === persisted.id || submitted.url === persisted.url)));
+        if (missing) {
+          throw new Error(`Restrictive fetch-policy change must include every persisted resource for source ${source.id}`);
+        }
+      }
       if (registered?.enabled === false) disabledSourceIds.add(source.id);
       if (registered) existingSourceIds.add(source.id);
       if (registered) {
