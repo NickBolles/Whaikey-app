@@ -129,6 +129,42 @@ describe("GET /api/bottles/[id]", () => {
       suggestion: "Dark chocolate",
       rationale: "Stands up to the proof.",
     });
+    await db.insert(schema.catalogSources).values({
+      id: "heaven-hill-official",
+      name: "Heaven Hill",
+      kind: "official",
+      baseUrl: "https://heavenhilldistillery.com",
+      fetchPolicy: "structured",
+      mediaPolicy: "display_remote",
+    });
+    await db.insert(schema.bottleResources).values({
+      id: "ecbp-official",
+      bottleId: bottle.id,
+      sourceId: "heaven-hill-official",
+      resourceType: "official_product",
+      url: "https://heavenhilldistillery.com/elijah-craig-barrel-proof",
+      title: "Elijah Craig Barrel Proof",
+      retrievedAt: new Date("2026-08-18T00:00:00Z"),
+    });
+    await db.insert(schema.bottleClaims).values({
+      id: "ecbp-abv-claim",
+      bottleId: bottle.id,
+      resourceId: "ecbp-official",
+      field: "abv",
+      value: 65.2,
+      valueHash: "abv-hash",
+      status: "accepted",
+    });
+    await db.insert(schema.bottleMedia).values({
+      id: "ecbp-image",
+      bottleId: bottle.id,
+      resourceId: "ecbp-official",
+      kind: "bottle",
+      url: "https://heavenhilldistillery.com/images/ecbp.png",
+      rights: "display_remote",
+      attribution: "Heaven Hill",
+      isPrimary: true,
+    });
 
     const res = await detailGET(searchRequest(""), detailCtx(bottle.id));
     expect(res.status).toBe(200);
@@ -139,6 +175,113 @@ describe("GET /api/bottles/[id]", () => {
     expect(body.userBottle).toBeNull();
     expect(body.pairings).toHaveLength(1);
     expect(body.pairings[0]).toMatchObject({ pairingType: "food", suggestion: "Dark chocolate" });
+    expect(body.resources).toHaveLength(1);
+    expect(body.resources[0]).toMatchObject({
+      resourceType: "official_product",
+      source: { name: "Heaven Hill", kind: "official" },
+    });
+    expect(body.claims).toEqual([expect.objectContaining({ field: "abv", value: 65.2, status: "accepted" })]);
+    expect(body.media).toEqual([expect.objectContaining({ kind: "bottle", rights: "display_remote" })]);
+  });
+
+  it("hides disabled sources and non-displayable claims/media from public details", async () => {
+    const bottle = await createTestBottle(db, { id: "hidden-provenance" });
+    await db.insert(schema.catalogSources).values({
+      id: "disabled-public-source",
+      name: "Disabled source",
+      kind: "registry",
+      baseUrl: "https://registry.example",
+      fetchPolicy: "structured",
+      mediaPolicy: "review_required",
+      enabled: false,
+    });
+    await db.insert(schema.bottleResources).values({
+      id: "disabled-public-resource",
+      bottleId: bottle.id,
+      sourceId: "disabled-public-source",
+      resourceType: "registry",
+      url: "https://registry.example/item",
+      retrievedAt: new Date(),
+    });
+    await db.insert(schema.bottleClaims).values({
+      id: "disabled-public-claim",
+      bottleId: bottle.id,
+      resourceId: "disabled-public-resource",
+      field: "abv",
+      value: 99,
+      valueHash: "disabled-abv",
+      status: "review_required",
+    });
+    await db.insert(schema.bottleMedia).values({
+      id: "disabled-public-media",
+      bottleId: bottle.id,
+      resourceId: "disabled-public-resource",
+      kind: "bottle",
+      url: "https://registry.example/image.png",
+      rights: "review_required",
+    });
+    await db.insert(schema.catalogSources).values({
+      id: "enabled-review-source",
+      name: "Enabled review source",
+      kind: "editorial",
+      baseUrl: "https://reviews.example",
+      fetchPolicy: "structured",
+      mediaPolicy: "review_required",
+      enabled: true,
+    });
+    await db.insert(schema.bottleResources).values({
+      id: "enabled-review-resource",
+      bottleId: bottle.id,
+      sourceId: "enabled-review-source",
+      resourceType: "review",
+      url: "https://reviews.example/item",
+      retrievedAt: new Date(),
+    });
+    await db.insert(schema.bottleClaims).values({
+      id: "enabled-review-claim",
+      bottleId: bottle.id,
+      resourceId: "enabled-review-resource",
+      field: "reviewScore",
+      value: 99,
+      valueHash: "enabled-review-score",
+      status: "review_required",
+    });
+    await db.insert(schema.bottleMedia).values({
+      id: "enabled-review-media",
+      bottleId: bottle.id,
+      resourceId: "enabled-review-resource",
+      kind: "bottle",
+      url: "https://reviews.example/image.png",
+      rights: "review_required",
+    });
+
+    const res = await detailGET(searchRequest(""), detailCtx(bottle.id));
+    const body = await res.json();
+    expect(body.resources).toEqual([
+      expect.objectContaining({ id: "enabled-review-resource" }),
+    ]);
+    expect(body.claims).toEqual([]);
+    expect(body.media).toEqual([]);
+  });
+
+  it("applies the most restrictive enabled policy across source-specific media associations", async () => {
+    const bottle = await createTestBottle(db, { id: "conflicting-media-rights" });
+    await db.insert(schema.catalogSources).values([
+      { id: "display-media-source", name: "Display", kind: "official", baseUrl: "https://display.example", fetchPolicy: "structured", mediaPolicy: "display_remote" },
+      { id: "restricted-media-source", name: "Restricted", kind: "editorial", baseUrl: "https://restricted.example", fetchPolicy: "structured", mediaPolicy: "review_required" },
+    ]);
+    await db.insert(schema.bottleResources).values([
+      { id: "display-media-resource", bottleId: bottle.id, sourceId: "display-media-source", resourceType: "official_product", url: "https://display.example/item", retrievedAt: new Date() },
+      { id: "restricted-media-resource", bottleId: bottle.id, sourceId: "restricted-media-source", resourceType: "review", url: "https://restricted.example/item", retrievedAt: new Date() },
+    ]);
+    const sharedUrl = "https://cdn.example/shared.png";
+    await db.insert(schema.bottleMedia).values([
+      { id: "display-media", bottleId: bottle.id, resourceId: "display-media-resource", kind: "bottle", url: sharedUrl, rights: "display_remote" },
+      { id: "restricted-media", bottleId: bottle.id, resourceId: "restricted-media-resource", kind: "bottle", url: sharedUrl, rights: "review_required" },
+    ]);
+
+    const res = await detailGET(searchRequest(""), detailCtx(bottle.id));
+    expect((await res.json()).media).toEqual([]);
   });
 
   it("includes the signed-in user's shelf relationship", async () => {

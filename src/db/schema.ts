@@ -694,11 +694,122 @@ export const bottleVerifications = pgTable(
     retailerSku: text("retailer_sku"),
     /** When the model retrieved the cited page. */
     retrievedAt: timestamp("retrieved_at", { withTimezone: true, mode: "date" }).notNull(),
+    /** True only when this evidence changed the bottle from imported to verified. */
+    promotedBottle: boolean("promoted_bottle").notNull().default(false),
     createdAt: createdAt(),
   },
   (t) => [
     index("bottle_verifications_bottle_idx").on(t.bottleId),
     uniqueIndex("bottle_verifications_bottle_url_uq").on(t.bottleId, t.url),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// Source-backed catalog resources
+// ---------------------------------------------------------------------------
+
+export const CATALOG_SOURCE_KINDS = ["official", "editorial", "retailer", "registry"] as const;
+export type CatalogSourceKind = (typeof CATALOG_SOURCE_KINDS)[number];
+export const CATALOG_FETCH_POLICIES = ["structured", "link_only"] as const;
+export type CatalogFetchPolicy = (typeof CATALOG_FETCH_POLICIES)[number];
+export const CATALOG_MEDIA_POLICIES = ["display_remote", "link_only", "review_required"] as const;
+export type CatalogMediaPolicy = (typeof CATALOG_MEDIA_POLICIES)[number];
+
+/** Operator-curated source registry and fetch-origin allow list. */
+export const catalogSources = pgTable("catalog_sources", {
+  id: id(),
+  name: text("name").notNull(),
+  kind: text("kind").$type<CatalogSourceKind>().notNull(),
+  baseUrl: text("base_url").notNull(),
+  fetchPolicy: text("fetch_policy").$type<CatalogFetchPolicy>().notNull().default("structured"),
+  mediaPolicy: text("media_policy").$type<CatalogMediaPolicy>().notNull().default("review_required"),
+  attribution: text("attribution"),
+  enabled: boolean("enabled").notNull().default(true),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+
+export const BOTTLE_RESOURCE_TYPES = [
+  "official_product", "producer", "distillery", "review", "retailer", "registry",
+] as const;
+export type BottleResourceType = (typeof BOTTLE_RESOURCE_TYPES)[number];
+
+/** One outbound, source-owned page associated with a canonical bottle. */
+export const bottleResources = pgTable(
+  "bottle_resources",
+  {
+    id: id(),
+    bottleId: text("bottle_id").notNull().references(() => bottles.id, { onDelete: "cascade" }),
+    sourceId: text("source_id").notNull().references(() => catalogSources.id, { onDelete: "restrict" }),
+    resourceType: text("resource_type").$type<BottleResourceType>().notNull(),
+    url: text("url").notNull(),
+    title: text("title"),
+    publisher: text("publisher"),
+    contentHash: text("content_hash"),
+    matchMethod: text("match_method").$type<"manifest" | "gtin" | "exact_name" | "llm_reviewed">().notNull().default("manifest"),
+    confidence: doublePrecision("confidence").notNull().default(1),
+    publishedAt: timestamp("published_at", { withTimezone: true, mode: "date" }),
+    retrievedAt: timestamp("retrieved_at", { withTimezone: true, mode: "date" }).notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("bottle_resources_bottle_url_uq").on(t.bottleId, t.url),
+    index("bottle_resources_bottle_idx").on(t.bottleId),
+    index("bottle_resources_source_idx").on(t.sourceId),
+  ],
+);
+
+export const BOTTLE_CLAIM_FIELDS = [
+  "name", "brand", "description", "gtin", "sku", "abv", "ageYears", "price", "reviewScore",
+] as const;
+export type BottleClaimField = (typeof BOTTLE_CLAIM_FIELDS)[number];
+
+/** Atomic source-scoped facts. Only official-product claims may fill missing canonical fields. */
+export const bottleClaims = pgTable(
+  "bottle_claims",
+  {
+    id: id(),
+    bottleId: text("bottle_id").notNull().references(() => bottles.id, { onDelete: "cascade" }),
+    resourceId: text("resource_id").notNull().references(() => bottleResources.id, { onDelete: "cascade" }),
+    field: text("field").$type<BottleClaimField>().notNull(),
+    value: jsonb("value").$type<string | number | Record<string, string>>().notNull(),
+    valueHash: text("value_hash").notNull(),
+    status: text("status").$type<"accepted" | "corroborating" | "conflict" | "review_required">().notNull(),
+    confidence: doublePrecision("confidence").notNull().default(1),
+    canonicalized: boolean("canonicalized").notNull().default(false),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("bottle_claims_resource_field_value_uq").on(t.resourceId, t.field, t.valueHash),
+    index("bottle_claims_bottle_idx").on(t.bottleId),
+  ],
+);
+
+export const BOTTLE_MEDIA_KINDS = ["bottle", "distillery", "label"] as const;
+export type BottleMediaKind = (typeof BOTTLE_MEDIA_KINDS)[number];
+
+/** Source-bound media reference. The app renders only `display_remote` rows. */
+export const bottleMedia = pgTable(
+  "bottle_media",
+  {
+    id: id(),
+    bottleId: text("bottle_id").notNull().references(() => bottles.id, { onDelete: "cascade" }),
+    resourceId: text("resource_id").notNull().references(() => bottleResources.id, { onDelete: "cascade" }),
+    kind: text("kind").$type<BottleMediaKind>().notNull(),
+    url: text("url").notNull(),
+    alt: text("alt"),
+    rights: text("rights").$type<CatalogMediaPolicy>().notNull(),
+    attribution: text("attribution"),
+    width: integer("width"),
+    height: integer("height"),
+    isPrimary: boolean("is_primary").notNull().default(false),
+    canonicalized: boolean("canonicalized").notNull().default(false),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("bottle_media_resource_url_uq").on(t.resourceId, t.url),
+    index("bottle_media_bottle_idx").on(t.bottleId),
   ],
 );
 
@@ -917,6 +1028,10 @@ export type NewVerificationAttempt = typeof catalogVerificationAttempts.$inferIn
 export type User = typeof user.$inferSelect;
 export type BottleUpc = typeof bottleUpcs.$inferSelect;
 export type BottleVerification = typeof bottleVerifications.$inferSelect;
+export type CatalogSource = typeof catalogSources.$inferSelect;
+export type BottleResource = typeof bottleResources.$inferSelect;
+export type BottleClaim = typeof bottleClaims.$inferSelect;
+export type BottleMedia = typeof bottleMedia.$inferSelect;
 export type Distillery = typeof distilleries.$inferSelect;
 export type Bottle = typeof bottles.$inferSelect;
 export type NewBottle = typeof bottles.$inferInsert;

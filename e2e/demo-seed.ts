@@ -161,6 +161,73 @@ export async function seedDemoUser(db: DB): Promise<void> {
       .where(eq(schema.bottles.id, bottleId));
   }
 
+  // Source-backed catalog fixtures: deterministic links and local artwork prove
+  // the resource/image layout without depending on third-party network state.
+  await db.insert(schema.catalogSources).values([
+    {
+      id: "demo-official-source",
+      name: "Buffalo Trace Distillery",
+      kind: "official",
+      baseUrl: "https://www.buffalotracedistillery.com",
+      fetchPolicy: "structured",
+      mediaPolicy: "display_remote",
+      attribution: "Demo producer fixture",
+      createdAt: D("2026-06-01T12:00:00Z"),
+      updatedAt: D("2026-06-01T12:00:00Z"),
+    },
+    {
+      id: "demo-editorial-source",
+      name: "Breaking Bourbon",
+      kind: "editorial",
+      baseUrl: "https://breakingbourbon.com",
+      fetchPolicy: "link_only",
+      mediaPolicy: "link_only",
+      attribution: "Breaking Bourbon",
+      createdAt: D("2026-06-02T12:00:00Z"),
+      updatedAt: D("2026-06-02T12:00:00Z"),
+    },
+  ]);
+  await db.insert(schema.bottleResources).values([
+    {
+      id: "demo-eagle-official",
+      bottleId: "eagle-rare-10",
+      sourceId: "demo-official-source",
+      resourceType: "official_product",
+      url: "https://www.buffalotracedistillery.com/our-brands/eagle-rare/eagle-rare-10/",
+      title: "Eagle Rare 10 Year",
+      publisher: "Buffalo Trace Distillery",
+      retrievedAt: D("2026-06-01T12:00:00Z"),
+      createdAt: D("2026-06-01T12:00:00Z"),
+      updatedAt: D("2026-06-01T12:00:00Z"),
+    },
+    {
+      id: "demo-eagle-review",
+      bottleId: "eagle-rare-10",
+      sourceId: "demo-editorial-source",
+      resourceType: "review",
+      url: "https://breakingbourbon.com/review/eagle-rare-10-year-single-barrel",
+      title: "Eagle Rare 10 Year Review",
+      publisher: "Breaking Bourbon",
+      retrievedAt: D("2026-06-02T12:00:00Z"),
+      createdAt: D("2026-06-02T12:00:00Z"),
+      updatedAt: D("2026-06-02T12:00:00Z"),
+    },
+  ]);
+  await db.insert(schema.bottleMedia).values({
+    id: "demo-eagle-bottle-image",
+    bottleId: "eagle-rare-10",
+    resourceId: "demo-eagle-official",
+    kind: "bottle",
+    url: "/demo-assets/bottle-silhouette.svg",
+    alt: "Demo bottle artwork for Eagle Rare 10 Year",
+    rights: "display_remote",
+    attribution: "Demo producer fixture",
+    width: 360,
+    height: 560,
+    isPrimary: true,
+    createdAt: D("2026-06-01T12:00:00Z"),
+  });
+
   await db.insert(schema.pours).values([
     // Eagle Rare carries three rated pours on purpose: enough history for the
     // bottle page's rating trend and the bar card's pours-count + range.

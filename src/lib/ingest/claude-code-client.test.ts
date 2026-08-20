@@ -24,7 +24,14 @@ describe("Claude Code enrichment client", () => {
     const defaultArgs = buildClaudeArgs({ schema });
     expect(defaultArgs).not.toContain("--model");
     expect(defaultArgs).toContain("--no-session-persistence");
-    expect(defaultArgs).not.toContain("--disallowedTools");
+    expect(defaultArgs.slice(defaultArgs.indexOf("--tools"), defaultArgs.indexOf("--tools") + 2))
+      .toEqual(["--tools", ""]);
+    expect(defaultArgs).toContain("--strict-mcp-config");
+    expect(defaultArgs).toContain("--disable-slash-commands");
+
+    const webArgs = buildClaudeArgs({ schema, allowWebSearch: true });
+    expect(webArgs.slice(webArgs.indexOf("--tools"), webArgs.indexOf("--tools") + 2))
+      .toEqual(["--tools", "WebSearch,WebFetch"]);
 
     const overriddenArgs = buildClaudeArgs({ schema, model: "sonnet" });
     expect(overriddenArgs.slice(-2)).toEqual(["--model", "sonnet"]);

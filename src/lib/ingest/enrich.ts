@@ -1,7 +1,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import type { DB } from "@/db";
-import { bottles, distilleries, pours, tastingNotes } from "@/db/schema";
+import { bottleClaims, bottleResources, bottles, catalogSources, distilleries, pours, tastingNotes } from "@/db/schema";
 import { activeAiProvider, aiSupportsServerWebSearch, getAnthropic } from "@/lib/ai/client";
 import { parseModelJson, textFromContent } from "@/lib/ai/json";
 import { FLAVOR_WHEEL, WEDGE_IDS, rollUpToWedges } from "@/lib/flavor-wheel";
@@ -56,6 +56,12 @@ export interface EnrichableBottle {
   description: string | null;
   /** Condensed user tasting-note context ("nose: ...; palate: ..."), newest first. */
   userNotes: string[];
+  /** Already-extracted, cited facts. Keeps source-backed bottles off the slow search path. */
+  sourceFacts?: Array<{ field: string; value: unknown; source: string; url: string }>;
+}
+
+function hasFlavorBearingSourceFact(bottle: EnrichableBottle): boolean {
+  return bottle.sourceFacts?.some((fact) => fact.field === "description") ?? false;
 }
 
 export function buildEnrichPrompt(batch: EnrichableBottle[], web: boolean): string {
@@ -70,6 +76,8 @@ export function buildEnrichPrompt(batch: EnrichableBottle[], web: boolean): stri
       ageYears: b.ageYears ?? undefined,
       description: b.description ?? undefined,
       userNotes: b.userNotes.length > 0 ? b.userNotes : undefined,
+      sourceFacts: b.sourceFacts && b.sourceFacts.length > 0 ? b.sourceFacts : undefined,
+      needsFlavorResearch: b.userNotes.length === 0 && !hasFlavorBearingSourceFact(b),
     }),
   );
   return [
@@ -78,13 +86,14 @@ export function buildEnrichPrompt(batch: EnrichableBottle[], web: boolean): stri
     "",
     "Ground each profile in the strongest evidence available, in this order:",
     "1. The bottle's userNotes (real tasting notes from this app's users — weigh these heavily).",
+    "2. The bottle's flavor-bearing sourceFacts, such as a description, when present. Catalog-only facts such as brand, ABV, age, price, or score are context but not tasting evidence.",
     ...(web
       ? [
-          '2. Web search: for each bottle without userNotes that you don\'t already know confidently, search the web to discover published tasting notes (e.g. "<bottle name> tasting notes review") and synthesize the flavors reviewers actually report. At most one search per bottle.',
+          '3. Web search: for rows with needsFlavorResearch=true, search the web to discover published tasting notes (e.g. "<bottle name> tasting notes review"). At most one search per bottle.',
         ]
       : []),
-    `${web ? "3" : "2"}. The bottle's description and what you know about the specific bottling.`,
-    `${web ? "4" : "3"}. Otherwise estimate from category, distillery house style, region, age, proof, and name cues (e.g. 'Port Cask', 'Peated', 'Bottled-in-Bond') — a typical-for-style estimate is expected and useful.`,
+    `${web ? "4" : "3"}. The bottle's description and what you know about the specific bottling.`,
+    `${web ? "5" : "4"}. Otherwise estimate from category, distillery house style, region, age, proof, and name cues (e.g. 'Port Cask', 'Peated', 'Bottled-in-Bond') — a typical-for-style estimate is expected and useful.`,
     "",
     "Return STRICT JSON only — no prose, no markdown fences — an array with one entry per input bottle:",
     '[{"id": "<bottle id>", "profile": {"fruity": n, "floral": n, "grain": n, "sweet": n, "woody": n, "spicy": n, "peaty": n, "feinty": n}}, ...]',
@@ -236,6 +245,34 @@ export async function enrichBottleProfiles(db: DB, opts: EnrichOptions = {}): Pr
     notesByBottle.set(row.bottleId, list);
   }
 
+  // Load only claims for this run in bounded chunks. Cited facts become compact
+  // model context, replacing an independent search for already-sourced bottles.
+  const sourceFactsByBottle = new Map<string, NonNullable<EnrichableBottle["sourceFacts"]>>();
+  for (let i = 0; i < targets.length; i += 500) {
+    const ids = targets.slice(i, i + 500).map((target) => target.id);
+    const rows = await db
+      .select({
+        bottleId: bottleClaims.bottleId,
+        field: bottleClaims.field,
+        value: bottleClaims.value,
+        source: catalogSources.name,
+        url: bottleResources.url,
+      })
+      .from(bottleClaims)
+      .innerJoin(bottleResources, eq(bottleClaims.resourceId, bottleResources.id))
+      .innerJoin(catalogSources, eq(bottleResources.sourceId, catalogSources.id))
+      .where(and(
+        inArray(bottleClaims.bottleId, ids),
+        inArray(bottleClaims.status, ["accepted", "corroborating"]),
+        eq(catalogSources.enabled, true),
+      ));
+    for (const row of rows) {
+      const facts = sourceFactsByBottle.get(row.bottleId) ?? [];
+      if (facts.length < 12) facts.push({ field: row.field, value: row.value, source: row.source, url: row.url });
+      sourceFactsByBottle.set(row.bottleId, facts);
+    }
+  }
+
   const writeProfile = async (id: string, profile: Record<string, number>): Promise<void> => {
     if (report.dryRun) return;
     await db
@@ -256,6 +293,7 @@ export async function enrichBottleProfiles(db: DB, opts: EnrichOptions = {}): Pr
     }
     aiTargets.push({
       ...target,
+      sourceFacts: sourceFactsByBottle.get(target.id),
       userNotes: notes
         .map(noteSnippet)
         .filter((s): s is string => s !== null)
@@ -309,13 +347,16 @@ async function runModelBatch(
   web: boolean,
 ): Promise<string> {
   const prompt = buildEnrichPrompt(batch, web);
+  const searchCandidates = batch.filter((bottle) =>
+    bottle.userNotes.length === 0 && !hasFlavorBearingSourceFact(bottle));
+  const allowSearch = web && searchCandidates.length > 0;
   const base = {
     model,
     max_tokens: 8000,
-    ...(web
+    ...(allowSearch
       ? {
           tools: [
-            { type: "web_search_20260209" as const, name: "web_search" as const, max_uses: batch.length },
+            { type: "web_search_20260209" as const, name: "web_search" as const, max_uses: searchCandidates.length },
           ],
         }
       : {}),
