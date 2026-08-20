@@ -333,6 +333,10 @@ function productProperties(product: Record<string, unknown>, claims: ExtractedCl
   }
 }
 
+function normalizeProductIdentity(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
 function primaryProductForPage(
   products: Record<string, unknown>[],
   html: string,
@@ -340,14 +344,13 @@ function primaryProductForPage(
   expectedBottleName?: string,
 ): Record<string, unknown> | undefined {
   if (products.length === 0) return undefined;
-  const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-  const title = normalize(metaContent(html, "og:title") ?? pageTitle(html) ?? "");
-  const expected = normalize(expectedBottleName ?? "");
-  const path = normalize(decodeURIComponent(requestedUrl.pathname));
+  const title = normalizeProductIdentity(metaContent(html, "og:title") ?? pageTitle(html) ?? "");
+  const expected = normalizeProductIdentity(expectedBottleName ?? "");
+  const path = normalizeProductIdentity(decodeURIComponent(requestedUrl.pathname));
   let best = products[0];
   let bestScore = -1;
   for (const product of products) {
-    const name = normalize(stringValue(product.name) ?? "");
+    const name = normalizeProductIdentity(stringValue(product.name) ?? "");
     if (!name) continue;
     let score = 0;
     if (expected === name) score += 2_000;
@@ -365,6 +368,19 @@ function primaryProductForPage(
   return bestScore >= 250 ? best : undefined;
 }
 
+function reviewMatchesProduct(
+  review: Record<string, unknown>,
+  primaryProduct: Record<string, unknown> | undefined,
+  expectedBottleName?: string,
+): boolean {
+  if (!primaryProduct) return false;
+  if (review.itemReviewed === primaryProduct) return true;
+  const reviewedName = normalizeProductIdentity(namedValue(review.itemReviewed) ?? "");
+  const selectedName = normalizeProductIdentity(stringValue(primaryProduct.name) ?? expectedBottleName ?? "");
+  if (!reviewedName || !selectedName) return false;
+  return reviewedName === selectedName;
+}
+
 /** Extract only bounded metadata/facts; article and review bodies are never returned. */
 export function parseSourceDocument(input: ParseInput): ParsedSourceDocument {
   const requestedUrl = validatePublicSourceUrl(input.url, input.source);
@@ -379,12 +395,21 @@ export function parseSourceDocument(input: ParseInput): ParsedSourceDocument {
     }
   }
   const html = input.contentType.includes("html") ? input.body : "";
-  const products = objects.filter((row) => schemaTypes(row).some((type) => type === "Product"));
   const reviews = objects.filter((row) => schemaTypes(row).some((type) => type === "Review"));
+  const products = objects.filter((row) => schemaTypes(row).some((type) => type === "Product"));
+  for (const review of reviews) {
+    const itemReviewed = review.itemReviewed;
+    if (itemReviewed && typeof itemReviewed === "object" &&
+        schemaTypes(itemReviewed as Record<string, unknown>).some((type) => type === "Product") &&
+        !products.includes(itemReviewed as Record<string, unknown>)) {
+      products.push(itemReviewed as Record<string, unknown>);
+    }
+  }
   const primaryProduct = primaryProductForPage(products, html, requestedUrl, input.expectedBottleName);
   const officialProduct = input.source.kind === "official" && input.resourceType === "official_product";
   if (primaryProduct) productProperties(primaryProduct, claims, officialProduct);
   for (const review of reviews) {
+    if (!reviewMatchesProduct(review, primaryProduct, input.expectedBottleName)) continue;
     const rating = review.reviewRating;
     if (!rating || typeof rating !== "object") continue;
     const row = rating as Record<string, unknown>;

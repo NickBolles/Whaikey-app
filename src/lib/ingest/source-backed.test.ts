@@ -150,12 +150,31 @@ describe("source-backed document extraction", () => {
       source: { ...OFFICIAL_SOURCE, id: "reviews", name: "Reviews Example", kind: "editorial", baseUrl: "https://reviews.example", mediaPolicy: "link_only" },
       resourceType: "review",
       mediaKind: "bottle",
+      expectedBottleName: "Example Reserve",
     });
 
     expect(parsed.claims).toContainEqual({ field: "reviewScore", value: { score: "91", scale: "100" } });
     expect(JSON.stringify(parsed)).not.toContain("copyrighted review");
     expect(JSON.stringify(parsed)).not.toContain("Copyrighted excerpt");
     expect(JSON.stringify(parsed)).not.toContain("Full article body");
+  });
+
+  it("extracts review scores only for the selected bottle", () => {
+    const parsed = parseSourceDocument({
+      url: "https://reviews.example/review/expected-reserve",
+      contentType: "text/html",
+      body: `<html><head><meta property="og:title" content="Expected Reserve Review"><script type="application/ld+json">[
+        {"@type":"Review","itemReviewed":{"@type":"Product","name":"Expected Reserve Cask Strength"},"reviewRating":{"ratingValue":"100","bestRating":"100"}},
+        {"@type":"Review","itemReviewed":{"@type":"Product","name":"Expected Reserve"},"reviewRating":{"ratingValue":"90","bestRating":"100"}}
+      ]</script></head></html>`,
+      source: { ...OFFICIAL_SOURCE, id: "reviews", name: "Reviews Example", kind: "editorial", baseUrl: "https://reviews.example", mediaPolicy: "link_only" },
+      resourceType: "review",
+      expectedBottleName: "Expected Reserve",
+    });
+
+    expect(parsed.claims.filter((claim) => claim.field === "reviewScore")).toEqual([
+      { field: "reviewScore", value: { score: "90", scale: "100" } },
+    ]);
   });
 
   it("extracts Product JSON from application/json responses", () => {
