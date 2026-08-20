@@ -7,6 +7,7 @@ import { getSessionUser } from "@/lib/session";
 import { getProfileView, type SocialNote } from "@/lib/social";
 import { getPalateMatch } from "@/lib/taste-twins";
 import { FLAVOR_WHEEL, leafLabel, wedgeForLeaf } from "@/lib/flavor-wheel";
+import { categoryLabel } from "@/components/category-chip";
 import { FlavorWheel } from "@/components/flavor-wheel";
 import { PalateMatchChip } from "@/components/palate-match-chip";
 import { UserAvatar } from "@/components/user-avatar";
@@ -165,8 +166,8 @@ export default async function ProfilePage({ params }: Props) {
                   <h2 className="section-label">Styles covered</h2>
                   <ul className="flex flex-wrap gap-1.5">
                     {palate.stylesCovered.map((style) => (
-                      <li key={style} className="chip px-2.5 py-1 text-xs capitalize">
-                        {style}
+                      <li key={style} className="chip px-2.5 py-1 text-xs">
+                        {categoryLabel(style)}
                       </li>
                     ))}
                   </ul>

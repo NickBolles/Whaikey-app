@@ -70,6 +70,46 @@ export function systembolagetCategory(p: SystembolagetProduct): WhiskeyCategory 
   }
 }
 
+/**
+ * Swedish country names → the catalog's English names. "Storbritannien"
+ * (Great Britain) is deliberately absent: it doesn't say which whisky nation,
+ * and the category fallback already resolves the Scotch rows to Scotland.
+ * Unknown values return null rather than leaking Swedish into the catalog.
+ */
+const SWEDISH_COUNTRIES: Record<string, string> = {
+  Skottland: "Scotland",
+  England: "England",
+  Wales: "Wales",
+  Irland: "Ireland",
+  USA: "USA",
+  Kanada: "Canada",
+  Japan: "Japan",
+  Taiwan: "Taiwan",
+  Indien: "India",
+  Sverige: "Sweden",
+  Norge: "Norway",
+  Danmark: "Denmark",
+  Finland: "Finland",
+  Island: "Iceland",
+  Tyskland: "Germany",
+  Frankrike: "France",
+  Nederländerna: "Netherlands",
+  Belgien: "Belgium",
+  Schweiz: "Switzerland",
+  Österrike: "Austria",
+  Italien: "Italy",
+  Spanien: "Spain",
+  Tjeckien: "Czechia",
+  Australien: "Australia",
+  "Nya Zeeland": "New Zealand",
+  Sydafrika: "South Africa",
+  Israel: "Israel",
+};
+
+export function systembolagetCountry(p: SystembolagetProduct): string | null {
+  return SWEDISH_COUNTRIES[(p.country ?? "").trim()] ?? null;
+}
+
 export interface SystembolagetAdapterResult {
   scanned: number;
   candidates: CatalogCandidate[];
@@ -104,6 +144,7 @@ export function systembolagetProductsToCandidates(
       name,
       category,
       source: "systembolaget",
+      country: systembolagetCountry(p) ?? undefined,
       ageYears: parseAgeText(name.match(/\b(\d{1,2})\s*(?:år|year)/i)?.[1] ?? null),
       abv: typeof abv === "number" && abv >= 20 && abv <= 80 ? abv : null,
       avgPrice: null,

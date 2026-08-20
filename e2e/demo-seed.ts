@@ -302,6 +302,21 @@ export async function seedDemoUser(db: DB): Promise<void> {
     },
   ]);
 
+  // Sasha's shelf: the three Islay-leaning bottles she has poured, as "tried"
+  // rows. Her palate card's Countries/Regions/Styles covered chips derive from
+  // own/tried shelf rows (getPalateCard), so without these the whole coverage
+  // section is absent from her profile — and from the profile visual baseline.
+  await db.insert(schema.userBottles).values(
+    (["lagavulin-16", "highland-park-12", "ardbeg-10"] as const).map((bottleId, i) => ({
+      id: `demo-friend-ub-${i + 1}`,
+      userId: DEMO_FRIEND_ID,
+      bottleId,
+      relationship: "tried" as const,
+      createdAt: D("2026-07-01T12:00:00Z"),
+      updatedAt: D("2026-07-01T12:00:00Z"),
+    })),
+  );
+
   // Sasha's pour + note on lagavulin-16 — a bottle Jordan already has notes on
   // (demo-note-2: campfire/brine/raisin/chocolate/medicinal) — with tags that
   // overlap (campfire, brine) and diverge (peat, ash hers only; raisin,

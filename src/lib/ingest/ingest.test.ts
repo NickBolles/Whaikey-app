@@ -45,6 +45,29 @@ describe("ingestCandidates", () => {
     });
   });
 
+  it("stores the source's country and drops a region that repeats it", async () => {
+    await ingestCandidates(db, "whiskyedition", [
+      candidate({ name: "Imported Peated Malt", source: "whiskyedition", category: "scotch-single-malt", country: "Scotland", region: "Islay" }),
+      candidate({ name: "Imported Blend", source: "whiskyedition", category: "scotch-blended", country: "Scotland", region: "Scotland" }),
+    ]);
+    const [malt] = await db.select().from(bottles).where(eq(bottles.id, "imported-peated-malt"));
+    expect(malt).toMatchObject({ country: "Scotland", region: "Islay" });
+    // The origin contract: region is sub-national or null, never the country again.
+    const [blend] = await db.select().from(bottles).where(eq(bottles.id, "imported-blend"));
+    expect(blend).toMatchObject({ country: "Scotland", region: null });
+  });
+
+  it("falls back to the category's implied country, and never guesses for ambiguous ones", async () => {
+    await ingestCandidates(db, "iowa", [
+      candidate({ name: "Stateless Bourbon" }), // bourbon is US by law
+      candidate({ name: "Stateless Rye", category: "rye" }), // rye is made in both US and Canada
+    ]);
+    const [bourbon] = await db.select().from(bottles).where(eq(bottles.id, "stateless-bourbon"));
+    expect(bourbon).toMatchObject({ country: "USA", region: null });
+    const [rye] = await db.select().from(bottles).where(eq(bottles.id, "stateless-rye"));
+    expect(rye).toMatchObject({ country: null, region: null });
+  });
+
   it("tags UPC provenance with the source when it is a UpcSource, else seed", async () => {
     await ingestCandidates(db, "bc", [
       candidate({ name: "BC Import Rye", source: "bc", category: "rye", upcs: ["080244002145"] }),
