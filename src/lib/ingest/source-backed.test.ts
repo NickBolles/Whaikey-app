@@ -486,17 +486,25 @@ describe("source-backed persistence", () => {
     );
     const fetchImpl = vi.fn()
       .mockResolvedValueOnce(htmlResponse(page(requestedUrl)))
-      .mockResolvedValueOnce(htmlResponse(page("https://www.example-distillery.com/products/current"))) as unknown as typeof fetch;
+      .mockResolvedValueOnce(htmlResponse(page("https://www.example-distillery.com/products/current")))
+      .mockResolvedValueOnce(htmlResponse(page("https://www.example-distillery.com/products/next"))) as unknown as typeof fetch;
 
     await ingestSourceManifest(db, manifest, { apply: true, fetchImpl });
     await db.update(schema.bottleVerifications).set({ id: "legacy-random-canonical-verification" });
     await ingestSourceManifest(db, manifest, { apply: true, fetchImpl });
+    await ingestSourceManifest(db, {
+      sources: [OFFICIAL_SOURCE],
+      resources: [{
+        ...manifest.resources[0],
+        url: "https://www.example-distillery.com/products/current",
+      }],
+    }, { apply: true, fetchImpl });
 
     expect(await db.select().from(schema.bottleResources)).toEqual([
-      expect.objectContaining({ url: "https://www.example-distillery.com/products/current" }),
+      expect.objectContaining({ url: "https://www.example-distillery.com/products/next" }),
     ]);
     expect(await db.select().from(schema.bottleVerifications)).toEqual([
-      expect.objectContaining({ url: "https://www.example-distillery.com/products/current" }),
+      expect.objectContaining({ url: "https://www.example-distillery.com/products/next" }),
     ]);
   });
 

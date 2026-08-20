@@ -821,6 +821,7 @@ export async function ingestSourceManifest(
       }));
       const resourceAssociation = or(
         eq(bottleResources.id, manifestResourceId),
+        eq(bottleResources.url, requestedUrl),
         eq(bottleResources.url, parsed.canonicalUrl),
       );
       const candidates = await db.select({
