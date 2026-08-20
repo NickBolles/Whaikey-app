@@ -117,6 +117,7 @@ function bottleRow(
       ...bottle,
     },
     personalFlavorTags,
+    pourStats: { pourCount: 0, ratedPourCount: 0, ratingMin: null, ratingMax: null },
   } as unknown as Row;
 }
 
@@ -1107,6 +1108,20 @@ describe("BarClient quick filter line", () => {
     // Own rows carry the fill spine; only the open one reports what's left.
     expect(screen.getAllByTestId("fill-spine").length).toBe(3);
     expect(screen.getByText("60% left")).toBeInTheDocument();
+  });
+
+  it("carries the pour count and rating range through to the row", () => {
+    renderShelf([
+      {
+        ...bottleRow("poured", "Poured Bottle", "own", {}),
+        personalRating: 4,
+        pourStats: { pourCount: 3, ratedPourCount: 2, ratingMin: 3.5, ratingMax: 4.5 },
+      } as Row,
+    ]);
+    const row = screen.getByTestId("bottle-list-row");
+    expect(row).toHaveTextContent("4.0");
+    expect(row).toHaveTextContent("3 pours");
+    expect(row).toHaveTextContent("3.5–4.5");
   });
 
   it("shows the drinker's own top flavor chips on a noted bottle", () => {

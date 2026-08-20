@@ -139,12 +139,31 @@ export function hasPublishedProducerFlavorNotes(bottle: Pick<BarRowBottle, "prod
   );
 }
 
+/** This user's pour history on one bottle, reduced to what a card can show. */
+export interface BottlePourStats {
+  /** Every pour of the bottle by this user, rated or not. */
+  pourCount: number;
+  /** Pours carrying a rating — personalRating averages exactly these. */
+  ratedPourCount: number;
+  /** Lowest / highest rating given; null until a pour is rated. */
+  ratingMin: number | null;
+  ratingMax: number | null;
+}
+
+export const EMPTY_POUR_STATS: BottlePourStats = {
+  pourCount: 0,
+  ratedPourCount: 0,
+  ratingMin: null,
+  ratingMax: null,
+};
+
 /** Personal note tags rolled up per bottle for client-side wheel filtering. */
 export type BarRow = schema.UserBottle & {
   bottle: BarRowBottle;
   personalFlavorTags: Record<string, number>;
   /** Mean rating across this user's pours of the bottle; null if never rated. */
   personalRating: number | null;
+  pourStats: BottlePourStats;
 };
 
 export async function listUserBottles(
@@ -192,18 +211,42 @@ export async function listUserBottles(
     personalTagsByBottle.set(row.bottleId, tags);
   }
 
-  const ratings = await db
-    .select({ bottleId: schema.pours.bottleId, avg: sql<number>`avg(${schema.pours.rating})` })
+  // One pass over the user's pours per bottle: how many, and where the rated
+  // ones landed. min/max/avg skip null ratings in SQL, so an unrated pour
+  // still counts a pour without dragging the rating figures around.
+  const pourAgg = await db
+    .select({
+      bottleId: schema.pours.bottleId,
+      pourCount: sql<number>`count(*)`,
+      ratedPourCount: sql<number>`count(${schema.pours.rating})`,
+      avg: sql<number | null>`avg(${schema.pours.rating})`,
+      min: sql<number | null>`min(${schema.pours.rating})`,
+      max: sql<number | null>`max(${schema.pours.rating})`,
+    })
     .from(schema.pours)
-    .where(and(eq(schema.pours.userId, userId), isNotNull(schema.pours.rating)))
+    .where(eq(schema.pours.userId, userId))
     .groupBy(schema.pours.bottleId);
-  // avg() comes back as a numeric string on Postgres and a number on PGlite.
-  const ratingByBottle = new Map(ratings.map((r) => [r.bottleId, Number(r.avg)]));
+  // Aggregates come back as numeric strings on Postgres and numbers on PGlite.
+  const ratingByBottle = new Map(
+    pourAgg.filter((r) => r.avg != null).map((r) => [r.bottleId, Number(r.avg)]),
+  );
+  const pourStatsByBottle = new Map<string, BottlePourStats>(
+    pourAgg.map((r) => [
+      r.bottleId,
+      {
+        pourCount: Number(r.pourCount),
+        ratedPourCount: Number(r.ratedPourCount),
+        ratingMin: r.min == null ? null : Number(r.min),
+        ratingMax: r.max == null ? null : Number(r.max),
+      },
+    ]),
+  );
 
   return rows.map((r) => ({
     ...r.ub,
     personalFlavorTags: personalTagsByBottle.get(r.bottleId) ?? {},
     personalRating: ratingByBottle.get(r.bottleId) ?? null,
+    pourStats: pourStatsByBottle.get(r.bottleId) ?? EMPTY_POUR_STATS,
     bottle: {
       id: r.bottleId,
       name: r.bottleName,
