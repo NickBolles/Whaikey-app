@@ -668,6 +668,38 @@ export const recExplanations = pgTable(
   ],
 );
 
+export const PASSPORT_FAMILIES = ["country", "region", "style"] as const;
+export type PassportFamily = (typeof PASSPORT_FAMILIES)[number];
+
+/**
+ * Achieved passport badge tiers (docs/FEATURES.md §11.4). One row per
+ * (user, badge, tier) the moment it is first reached — the passport's
+ * permanent record. Tiers are computed from distinct bottles met as a share
+ * of the catalog (src/lib/passport.ts), but the catalog grows; these rows are
+ * why a user is never downgraded when their percentage slips. `achievedAt` is
+ * when the tier was stamped (sync time), so the badge detail view can show a
+ * history. Rows are never updated or deleted, only inserted.
+ */
+export const passportTiers = pgTable(
+  "passport_tiers",
+  {
+    id: id(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    family: text("family").$type<PassportFamily>().notNull(),
+    value: text("value").notNull(),
+    tier: integer("tier").notNull(),
+    achievedAt: timestamp("achieved_at", { withTimezone: true, mode: "date" })
+      .$defaultFn(() => new Date())
+      .notNull(),
+  },
+  (t) => [
+    uniqueIndex("passport_tiers_user_badge_tier_uq").on(t.userId, t.family, t.value, t.tier),
+    index("passport_tiers_user_idx").on(t.userId),
+  ],
+);
+
 export const priceHistory = pgTable(
   "price_history",
   {
@@ -1048,6 +1080,7 @@ export type Distillery = typeof distilleries.$inferSelect;
 export type Bottle = typeof bottles.$inferSelect;
 export type NewBottle = typeof bottles.$inferInsert;
 export type UserBottle = typeof userBottles.$inferSelect;
+export type PassportTierRow = typeof passportTiers.$inferSelect;
 export type Pour = typeof pours.$inferSelect;
 export type CriticNote = typeof criticNotes.$inferSelect;
 export type TastingNote = typeof tastingNotes.$inferSelect;

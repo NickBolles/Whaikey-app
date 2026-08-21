@@ -390,7 +390,7 @@ The plain numbers, on My Bar and on the profile palate card: *"3 of 6 Scotch reg
 Three kinds, deliberately different in feel:
 
 - **Completions** — a closed set finished. *Every Scotch region. Every category. A full flavor wedge named across your own notes.* The satisfying kind, because it can actually end — and the kind that needs a curated denominator first (§11.1).
-- **Milestones** — tiers on the open sets, at 5 / 10 / 25 / 50 / 100. *"25 distilleries."* Always a next one, never a last one.
+- **Milestones** — tiers on the open sets. **Shipped** (owner decision, first badge PR) as a share of the catalog rather than the absolute 5/10/25/50/100 ladder first sketched here: a badge's tier is the fraction of the catalog's distinct bottles carrying its stamp — Oak I on the first bottle, then Copper II / Silver III / Gold IV / Amber V at 10% / 25% / 50% / 80%, with absolute floors (3/6/12/20) so a one-bottle country can't mint the top tier on day one. Percentages keep a 99-bottle Kentucky and a 6-bottle Campbeltown equally fair ladders. Tiers are stamped with the date first reached and **never downgrade** — catalog growth shrinks your share and stretches the road ahead, it never takes back a crest (`passport_tiers`, src/lib/passport.ts). Always a next one, never a last one.
 - **Discoveries** — a shape in what you've done rather than a count. *Four cask finishes of the same distillate. A region tried before it was in your recommendations. The same bottle noted a year apart with different descriptors* (that one rewards returning attentively, not consuming).
 
 Rules every badge must pass, checked in review the same way §3.1's bans are:

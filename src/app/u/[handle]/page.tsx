@@ -6,10 +6,11 @@ import { getDb } from "@/db";
 import { getSessionUser } from "@/lib/session";
 import { getProfileView, type SocialNote } from "@/lib/social";
 import { getPalateMatch } from "@/lib/taste-twins";
+import { getPassport } from "@/lib/passport";
 import { FLAVOR_WHEEL, leafLabel, wedgeForLeaf } from "@/lib/flavor-wheel";
-import { categoryLabel } from "@/components/category-chip";
 import { FlavorWheel } from "@/components/flavor-wheel";
 import { PalateMatchChip } from "@/components/palate-match-chip";
+import { PassportBadgesSection } from "@/components/passport-badges-section";
 import { UserAvatar } from "@/components/user-avatar";
 import { ProfileEditor } from "./profile-editor";
 import { FollowBlockActions } from "./follow-block-actions";
@@ -40,6 +41,11 @@ export default async function ProfilePage({ params }: Props) {
   // Mirrors getProfileView's own canSeeContent gate (docs/SOCIAL.md US-4): a
   // signed-out viewer never sees content, even for a public profile.
   const canSeeContent = signedIn && (viewerState.isSelf || profile.isPublic || viewerState.followState === "accepted");
+  // The owner viewing their own passport is the one moment new tiers get
+  // stamped (and so dated); rendering someone else's profile never writes.
+  const passport = canSeeContent
+    ? await getPassport(getDb(), profile.userId, { stampNewTiers: viewerState.isSelf })
+    : null;
 
   return (
     <div className="mx-auto flex max-w-lg flex-col gap-6 px-4 pb-24 pt-8">
@@ -131,50 +137,11 @@ export default async function ProfilePage({ params }: Props) {
             </section>
           )}
 
-          {(palate.countriesCovered.length > 0 ||
-            palate.regionsCovered.length > 0 ||
-            palate.stylesCovered.length > 0) && (
-            <section className="flex flex-col gap-3">
-              {/* Countries first: every bottle has one, so this is the row that
-                  is never empty — regions are the finer grain beneath it. */}
-              {palate.countriesCovered.length > 0 && (
-                <div className="flex flex-col gap-2">
-                  <h2 className="section-label">Countries covered</h2>
-                  <ul className="flex flex-wrap gap-1.5">
-                    {palate.countriesCovered.map((country) => (
-                      <li key={country} className="chip px-2.5 py-1 text-xs">
-                        {country}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              {palate.regionsCovered.length > 0 && (
-                <div className="flex flex-col gap-2">
-                  <h2 className="section-label">Regions covered</h2>
-                  <ul className="flex flex-wrap gap-1.5">
-                    {palate.regionsCovered.map((region) => (
-                      <li key={region} className="chip px-2.5 py-1 text-xs">
-                        {region}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              {palate.stylesCovered.length > 0 && (
-                <div className="flex flex-col gap-2">
-                  <h2 className="section-label">Styles covered</h2>
-                  <ul className="flex flex-wrap gap-1.5">
-                    {palate.stylesCovered.map((style) => (
-                      <li key={style} className="chip px-2.5 py-1 text-xs">
-                        {categoryLabel(style)}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </section>
-          )}
+          {/* The Passport: countries first — every bottle has one, so it is
+              the row that is never empty; regions are the finer grain beneath
+              it. Badge tiles replace the old text chips (same bounded DISTINCT
+              sets, docs/SOCIAL.md §3.3); counts render for the owner only. */}
+          {passport && <PassportBadgesSection passport={passport} isSelf={viewerState.isSelf} />}
 
           <section className="flex flex-col gap-3">
             <h2 className="section-label">Recent notes</h2>
