@@ -41,7 +41,7 @@
  *            Anthropic-compatible Messages API but does not accept Anthropic
  *            hosted web search, so --no-web is implied there.
  */
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { createDb, resolveDbUrl } from "../src/db";
 import { migrateDb } from "../src/db/migrate";
 import {
@@ -86,12 +86,16 @@ async function main(): Promise<void> {
     }
     const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as CatalogSourceManifest;
     const report = await ingestSourceManifest(db, manifest, { apply: hasFlag("apply") });
-    console.log(
+    const summary =
       `[resources]${report.apply ? "" : " (dry run)"} ${report.resources} resources: ` +
-        `${report.fetched} fetched, ${report.claimsExtracted} claims extracted, ${report.mediaExtracted} media discovered; ` +
-        `${report.resourcesWritten} resources, ${report.claimsWritten} claims, ${report.mediaWritten} media written, ` +
-        `${report.bottlesPromoted} bottles promoted, ${report.errors.length} errors.`,
-    );
+      `${report.fetched} fetched, ${report.claimsExtracted} claims extracted, ${report.mediaExtracted} media discovered; ` +
+      `${report.resourcesWritten} resources, ${report.claimsWritten} claims, ${report.mediaWritten} media written, ` +
+      `${report.bottlesPromoted} bottles promoted, ${report.errors.length} errors.`;
+    console.log(summary);
+    const reportPath = arg("report");
+    if (reportPath) {
+      await writeFile(reportPath, `${JSON.stringify({ summary, ...report }, null, 2)}\n`, "utf8");
+    }
     for (const error of report.errors) console.error(`  ${error.url}: ${error.error}`);
     if (report.errors.length > 0) process.exitCode = 1;
     return;

@@ -62,7 +62,7 @@ jobs:
           mkdir -p artifacts/source-backed-scan
           args=""
           if [ "$APPLY" = "true" ]; then args="--apply"; fi
-          pnpm ingest resources --manifest "$MANIFEST" $args 2>&1 | tee artifacts/source-backed-scan/report.log
+          pnpm ingest resources --manifest "$MANIFEST" --report artifacts/source-backed-scan/report.json $args 2>&1 | tee artifacts/source-backed-scan/report.log
 
       - uses: actions/upload-artifact@v4
         if: always()
