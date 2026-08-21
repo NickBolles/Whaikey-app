@@ -76,6 +76,14 @@ describe("Dashboard", () => {
     expect(container.textContent).not.toMatch(/pours? to go/i);
   });
 
+  it("drops the running-low section entirely when nothing is low", () => {
+    const { container } = render(<Dashboard data={data({ runningLow: [] })} userName="Jordan" />);
+    // An empty section was a heading reporting a non-event, directly under the
+    // month's headline. No bottles low, no section.
+    expect(screen.queryByText("Running low")).not.toBeInTheDocument();
+    expect(container.textContent).not.toMatch(/Nothing running low/i);
+  });
+
   it("renders the greyed skeleton — never hides — under 3 lifetime pours", () => {
     render(
       <Dashboard
@@ -97,8 +105,10 @@ describe("Dashboard", () => {
     // Same skeleton, same order: header, tiles, tracks, plus the unlock card.
     expect(screen.getByText(/still blank — the first note writes it/)).toBeInTheDocument();
     expect(screen.getByText("What you reached for")).toBeInTheDocument();
-    expect(screen.getByText("Running low")).toBeInTheDocument();
     expect(screen.getByText("One note fills this in")).toBeInTheDocument();
+    // Running low is inventory news, not part of the skeleton: a new account
+    // has nothing low, and the unlock card already promises the section.
+    expect(screen.queryByText("Running low")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Scan a bottle/ })).toHaveAttribute("href", "/scan");
     expect(screen.getByText("needs tagged pours")).toBeInTheDocument();
     // The unlock card explains what tagging reveals, never "finish this bottle".

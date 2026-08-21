@@ -175,6 +175,7 @@ My Bar is a **top-2 surface** (with scan/search-to-add) — not a list of rows w
 - Constraints respected: price band (inferred from purchase history, adjustable), availability realism ("grail mode" off by default), category exploration slider (comfort zone ↔ adventurous).
 - **Every rec is explained** in one sentence grounded in the user's actual history.
 - Formats: weekly "3 bottles for you" refresh, "similar to this" rail on bottle pages, "cheaper cousin" callouts.
+- Exploration is a *second* axis on the same card, not a separate surface: Home's discovery rail pairs the palate-match chip with the passport gap the bottle would close (§11.5).
 
 ### 7.2 What to pour tonight (🟡)
 - From *your open bottles*: considers mood/occasion input, recent pours (variety), and local time-of-day context with a personal, explainable cue.
@@ -401,9 +402,13 @@ Rules every badge must pass, checked in review the same way §3.1's bans are:
 4. **Tasted and visited are different dimensions.** A *tasted* distillery badge means you drank what they made, from anywhere — a bar pour counts. A *visited* badge means you went there, and is its own thing entirely (§11.8). Neither is a drinking-venue badge: bars and restaurants are never counted, in either dimension.
 5. **No nudge may reference proximity to a reward.** "One region to go" as a notification is banned (§3.1 rule 4). The passport shows the gap when the user *opens* it; it never comes to find them.
 
-### 11.5 Gaps as recommendations (🔵 S3)
+### 11.5 Gaps as recommendations (🔵 S3 — *first slice shipped: Home's discovery rail*)
 
 The empty cells are the most useful thing on the page, because they're a recommendation with a reason already attached: *"You've never had a Campbeltown — Springbank 10 sits in your usual range and leans into the smoke you rate highly."* Passport gaps become an input to `recommendBottles` alongside the palate vector and price band, so an exploration prompt is still a *palate* match — we suggest what to try when you next try something, never that you try something now.
+
+**Shipped so far** (`src/lib/passport-progress.ts`, discovery mode only): every card in Home's "For your palate" rail carries the crest of the badge that bottle would move, captioned *opens the badge* / *earns Silver III* / *2 more to Silver III*, beside the palate-match chip. One hook per bottle — a stamp never met wins outright, broadest family first (country → region → style); otherwise the stamp closest to its next tier; nothing at all when the next rung is more than three distinct bottles off. Ranking gets a matching nudge (`PASSPORT_NEW_BADGE_BONUS` / `PASSPORT_NEXT_TIER_BONUS`), sized like the taste-twin bonus so a gap reorders bottles the palate already scored level and never promotes one it scored materially lower — the gap is a tie-breaker on top of a palate match, not a substitute for one.
+
+Not yet built here: the "tonight" rail (its candidates are the user's own shelf, so every stamp is already met and no badge can move) and the region/country prose reason of the Campbeltown example above — the shipped caption names the badge and the rung, and leaves the palate argument to the rec's own sentence.
 
 ### 11.6 Sharing (🔵 S3) and clubs (🔵 S3.5)
 

@@ -137,6 +137,94 @@ describe("recommendBottles — discovery", () => {
   });
 });
 
+describe("recommendBottles — passport progress (US-11)", () => {
+  /**
+   * The "explore" half of discovery. Everything asserted here is a count of
+   * DISTINCT things met — a country, a region, a style — so no assertion in
+   * this block can be satisfied by pouring more of anything.
+   */
+  async function pourBourbonFromKentucky(): Promise<void> {
+    const drunk = await createTestBottle(db, {
+      name: "Poured Bourbon",
+      category: "bourbon",
+      country: "USA",
+      region: "Kentucky",
+      flavorProfile: { sweet: 8, woody: 6 },
+    });
+    await logPour(drunk.id, 5, { vanilla: 3, oak: 2 });
+  }
+
+  it("names the badge a pick would open and lifts it over an equal match from ground already covered", async () => {
+    await pourBourbonFromKentucky();
+
+    // Same profile, same price — so palate similarity alone would rank these
+    // level and the alphabetical tie-break would put the familiar one first.
+    const covered = await createTestBottle(db, {
+      name: "Another Kentucky",
+      category: "bourbon",
+      country: "USA",
+      region: "Kentucky",
+      flavorProfile: { sweet: 8, woody: 6 },
+      avgPrice: 60,
+    });
+    const somewhereNew = await createTestBottle(db, {
+      name: "Zed Japanese",
+      category: "japanese",
+      country: "Japan",
+      region: "Hokkaido",
+      flavorProfile: { sweet: 8, woody: 6 },
+      avgPrice: 60,
+    });
+
+    const recs = await recommendBottles(db, userId, { mode: "discovery" });
+    const ids = recs.map((r) => r.bottleId);
+    expect(ids.indexOf(somewhereNew.id)).toBeLessThan(ids.indexOf(covered.id));
+
+    // The broadest unmet stamp wins the chip: a country never visited.
+    expect(recs.find((r) => r.bottleId === somewhereNew.id)!.badgeProgress).toMatchObject({
+      family: "country",
+      value: "Japan",
+      heldTier: 0,
+      targetTier: 1,
+      remaining: 1,
+    });
+  });
+
+  it("counts a familiar pick toward the next tier of a badge already held", async () => {
+    await pourBourbonFromKentucky();
+    const covered = await createTestBottle(db, {
+      name: "Another Kentucky",
+      category: "bourbon",
+      country: "USA",
+      region: "Kentucky",
+      flavorProfile: { sweet: 8, woody: 6 },
+      avgPrice: 60,
+    });
+
+    const recs = await recommendBottles(db, userId, { mode: "discovery" });
+    const progress = recs.find((r) => r.bottleId === covered.id)!.badgeProgress;
+    // Oak I is already held from the poured bottle; Copper II is the next rung.
+    expect(progress).toMatchObject({ heldTier: 1, targetTier: 2, targetName: "Copper" });
+    expect(progress!.remaining).toBeGreaterThan(0);
+  });
+
+  it("carries no badge hook in tonight mode — an open bottle is already met", async () => {
+    await pourBourbonFromKentucky();
+    const openBottle = await createTestBottle(db, {
+      name: "Open Islay",
+      category: "scotch-single-malt",
+      country: "Scotland",
+      region: "Islay",
+      flavorProfile: { sweet: 8, woody: 6 },
+    });
+    await own(openBottle.id, { status: "open", fillLevel: 70 });
+
+    const recs = await recommendBottles(db, userId, { mode: "tonight" });
+    expect(recs.length).toBeGreaterThan(0);
+    for (const rec of recs) expect(rec.badgeProgress).toBeUndefined();
+  });
+});
+
 describe("recommendBottles — tonight", () => {
   it("only returns the user's own OPEN bottles", async () => {
     const drunk = await createTestBottle(db, { flavorProfile: { sweet: 8, woody: 5 } });

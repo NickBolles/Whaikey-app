@@ -5,7 +5,10 @@
  *
  *   - "discovery": new bottles the user does NOT already own/try/wishlist,
  *     ranked by cosine similarity to their palate vector and filtered to their
- *     inferred price band. The "3 bottles for you" surface.
+ *     inferred price band, then nudged by a passport-breadth bias (a bottle
+ *     that opens a badge they have never held, or completes the next tier of
+ *     one they have, rises a little). The "3 bottles for you" surface — it
+ *     answers both "will I like this?" and "where have I not been?".
  *   - "tonight": the user's OWN open bottles, ranked by palate match plus a
  *     kill-list bias (nudge nearly-empty bottles up so they get finished before
  *     they oxidize) and a recent-variety bias (nudge down a category they've
@@ -32,6 +35,8 @@ import {
   type PriceBand,
 } from "@/lib/palate";
 import { getUserPalate, getUserPriceBand } from "@/lib/palate-store";
+import { getPassport } from "@/lib/passport";
+import { badgeProgressFor, type BadgeProgress } from "@/lib/passport-progress";
 import {
   getTasteTwins,
   getTwinEndorsements,
@@ -58,6 +63,13 @@ export interface Recommendation {
   fillLevel?: number | null;
   status?: string | null;
   userBottleId?: string | null;
+  /**
+   * Discovery only: the passport badge this bottle would open or advance
+   * (docs/FEATURES.md §11). Absent in "tonight" mode, where every candidate is
+   * a bottle already on the user's shelf and therefore already met — no badge
+   * can move. Null when the bottle reaches nothing within a tier's reach.
+   */
+  badgeProgress?: BadgeProgress | null;
 }
 
 export type RecMode = "discovery" | "tonight";
@@ -88,6 +100,31 @@ const ENDORSEMENT_LOOKUP_LIMIT = 40;
  * every sign.
  */
 const TWIN_ENDORSEMENT_BONUS = 0.15;
+
+/**
+ * Discovery's breadth thumb on the scale. A bottle that opens a passport badge
+ * the drinker has never held, or that completes the next tier of one they do,
+ * is lifted a little above near-neighbours the palate scored the same — the
+ * rail is "explore, learn" as much as "match" (AGENTS.md §product guardrails).
+ *
+ * Sized like TWIN_ENDORSEMENT_BONUS and for the same reason: enough to reorder
+ * bottles that were already close, never enough to promote one the palate
+ * scored materially lower. Additive, so it is monotone at every sign.
+ *
+ * This axis is breadth, not volume: both bonuses count DISTINCT stamps met, so
+ * they saturate — once you have been to Islay, no amount of pouring Islay
+ * moves either one again.
+ */
+export const PASSPORT_NEW_BADGE_BONUS = 0.12;
+export const PASSPORT_NEXT_TIER_BONUS = 0.08;
+
+/** The score a badge hook is worth, by how much ground it actually covers. */
+export function passportBonus(progress: BadgeProgress | null): number {
+  if (!progress) return 0;
+  if (progress.heldTier === 0) return PASSPORT_NEW_BADGE_BONUS;
+  if (progress.remaining <= 1) return PASSPORT_NEXT_TIER_BONUS;
+  return 0;
+}
 
 const DISCOVERY_LIMIT = 8;
 const TONIGHT_LIMIT = 5;
@@ -373,6 +410,8 @@ export async function recommendBottles(
 
   let scored: ScoredBottle[];
   let ctx: ReasonContext;
+  // Discovery only: which passport badge each candidate would open or advance.
+  const badgeProgress = new Map<string, BadgeProgress>();
   if (mode === "tonight") {
     const { candidates, recentCategories } = await tonightCandidates(db, userId, palate);
     scored = candidates;
@@ -380,6 +419,16 @@ export async function recommendBottles(
   } else {
     scored = await discoveryCandidates(db, userId, palate, band);
     ctx = { band };
+    // Read-only: the rail must never stamp a tier the drinker has not reached.
+    // Every candidate here is outside the user's bar, so none of them is
+    // already met and the hook is honest about what meeting it would move.
+    const passport = await getPassport(db, userId);
+    for (const candidate of scored) {
+      const progress = badgeProgressFor(passport, candidate);
+      if (!progress) continue;
+      badgeProgress.set(candidate.bottleId, progress);
+      candidate.score += passportBonus(progress);
+    }
   }
 
   // US-16: lean on people who taste like you. Twins are looked up once and
@@ -422,7 +471,7 @@ export async function recommendBottles(
       reason: "",
       ...(mode === "tonight"
         ? { fillLevel: s.fillLevel, status: s.status, userBottleId: s.userBottleId }
-        : {}),
+        : { badgeProgress: badgeProgress.get(s.bottleId) ?? null }),
     };
     const detail = buildReasonDetail(mode, rec, palate.vector, ctx);
     rec.reason = detail.reason;
