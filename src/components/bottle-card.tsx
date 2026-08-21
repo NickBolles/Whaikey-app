@@ -56,7 +56,7 @@ export function BottleCard({ bottle }: BottleCardProps) {
           specs onto a second line. Stacked out here the run costs the text
           one crest's width, and the price keeps the text it belongs to
           (src/components/bottle-stamps.tsx). */}
-      <BottleStamps category={bottle.category} region={bottle.region} country={bottle.country} size={20} />
+      <BottleStamps category={bottle.category} region={bottle.region} country={bottle.country} />
     </Link>
   );
 }

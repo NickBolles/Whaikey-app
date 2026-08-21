@@ -34,7 +34,7 @@ export function BottleStamps({
   category,
   region,
   country,
-  size = 24,
+  size = 20,
   className,
 }: BottleStampsProps): ReactElement | null {
   const stamps: Array<{ family: PassportFamily; value: string }> = [];
