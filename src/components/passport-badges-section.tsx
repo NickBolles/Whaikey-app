@@ -5,11 +5,15 @@ import { tierSpec } from "@/lib/passport";
 import { PassportBadgeIcon } from "@/components/passport-badge";
 
 /**
- * The profile's passport: icon-only badge rows for countries, regions and
- * styles met (docs/FEATURES.md §11). Hover/focus raises a tooltip; on the
- * owner's own profile each badge links to its detail page. Distinct-bottle
- * counts render for the owner only — another viewer sees the crest, its tier
- * and the label, never a number (docs/SOCIAL.md §3.3).
+ * The profile's passport: one icon-only badge wall (docs/FEATURES.md §11).
+ * Every badge the user holds sits in a single wrap, ordered coarse to fine —
+ * countries, then regions, then styles — because the families read from their
+ * silhouettes (shield / coin / cask-end) and splitting them into labelled rows
+ * only broke the wall into three near-empty lines. Hover/focus raises a
+ * tooltip naming the badge and its tier; on the owner's own profile each badge
+ * links to its detail page. Distinct-bottle counts render for the owner only —
+ * another viewer sees the crest, its tier and the label, never a number
+ * (docs/SOCIAL.md §3.3).
  */
 
 function badgeHref(badge: PassportBadge): string {
@@ -78,28 +82,20 @@ function BadgeTile({ badge, isSelf }: { badge: PassportBadge; isSelf: boolean })
   );
 }
 
-function BadgeRow({ heading, badges, isSelf }: { heading: string; badges: PassportBadge[]; isSelf: boolean }): ReactElement | null {
+export function PassportBadgesSection({ passport, isSelf }: { passport: Passport; isSelf: boolean }): ReactElement | null {
+  // Coarse to fine: a country is the badge nobody can miss (every bottle has
+  // one), a style the one everybody shares. Within a family getPassport has
+  // already ordered by tier, so the wall reads highest-earned first.
+  const badges = [...passport.countries, ...passport.regions, ...passport.styles];
   if (badges.length === 0) return null;
   return (
-    <div className="flex flex-col gap-2">
-      <h2 className="section-label">{heading}</h2>
-      <ul className="flex flex-wrap gap-1">
+    <section className="flex flex-col gap-2" aria-label="Passport">
+      <h2 className="section-label">Passport</h2>
+      <ul className="flex flex-wrap gap-2.5">
         {badges.map((badge) => (
           <BadgeTile key={`${badge.family}:${badge.value}`} badge={badge} isSelf={isSelf} />
         ))}
       </ul>
-    </div>
-  );
-}
-
-export function PassportBadgesSection({ passport, isSelf }: { passport: Passport; isSelf: boolean }): ReactElement | null {
-  const empty = passport.countries.length === 0 && passport.regions.length === 0 && passport.styles.length === 0;
-  if (empty) return null;
-  return (
-    <section className="flex flex-col gap-3" aria-label="Passport">
-      <BadgeRow heading="Passport · Countries" badges={passport.countries} isSelf={isSelf} />
-      <BadgeRow heading="Regions" badges={passport.regions} isSelf={isSelf} />
-      <BadgeRow heading="Styles" badges={passport.styles} isSelf={isSelf} />
     </section>
   );
 }
