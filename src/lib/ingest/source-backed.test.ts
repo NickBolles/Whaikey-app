@@ -81,6 +81,54 @@ describe("source-backed document extraction", () => {
     ]);
   });
 
+  it("extracts official facts from identity-matched HTML when JSON-LD is absent", () => {
+    const parsed = parseSourceDocument({
+      url: "https://www.example-distillery.com/products/reserve-10",
+      contentType: "text/html",
+      body: `<html><head>
+        <title>Example Reserve 10 Bourbon Whiskey | Example Distillery</title>
+        <meta name="description" content="Example Reserve is aged at least 10 years." />
+        <meta property="og:title" content="Example Reserve 10 Bourbon Whiskey | Example Distillery" />
+        <meta property="og:image" content="https://www.example-distillery.com/images/reserve-10.png" />
+      </head><body>
+        <h1>Example Reserve Aged 10 Years</h1>
+        <div class="info_title">Proof</div>
+        <div class="proof">90 <div class="alc_perc">(45%)</div></div>
+      </body></html>`,
+      source: OFFICIAL_SOURCE,
+      resourceType: "official_product",
+      mediaKind: "bottle",
+      expectedBottleName: "Example Reserve 10",
+    });
+
+    expect(parsed.primaryProductMatched).toBe(true);
+    expect(parsed.claims).toEqual(expect.arrayContaining([
+      { field: "name", value: "Example Reserve Aged 10 Years" },
+      { field: "abv", value: 45 },
+      { field: "ageYears", value: 10 },
+    ]));
+    expect(parsed.media).toEqual([
+      expect.objectContaining({ url: "https://www.example-distillery.com/images/reserve-10.png" }),
+    ]);
+  });
+
+  it("rejects an HTML product fallback for a different expression", () => {
+    const parsed = parseSourceDocument({
+      url: "https://www.example-distillery.com/products/reserve-12",
+      contentType: "text/html",
+      body: `<html><head><meta property="og:image" content="https://www.example-distillery.com/wrong.png" /></head>
+        <body><h1>Example Reserve Aged 12 Years</h1><div class="alc_perc">(60%)</div></body></html>`,
+      source: OFFICIAL_SOURCE,
+      resourceType: "official_product",
+      mediaKind: "bottle",
+      expectedBottleName: "Example Reserve 10",
+    });
+
+    expect(parsed.primaryProductMatched).toBe(false);
+    expect(parsed.claims).toEqual([]);
+    expect(parsed.media).toEqual([]);
+  });
+
   it("extracts canonical facts only from the page's primary product and rejects plaintext media", () => {
     const parsed = parseSourceDocument({
       url: "https://www.example-distillery.com/products/primary-reserve",
@@ -845,9 +893,13 @@ describe("source-backed persistence", () => {
       <title>Page not found</title>
       <meta property="og:image" content="https://www.example-distillery.com/images/unrelated.png" />
       <script type="application/ld+json">{"@type":"Product","name":"Other Reserve","image":"https://www.example-distillery.com/images/unrelated.png","additionalProperty":[{"@type":"PropertyValue","name":"ABV","value":"60%"}]}</script>
-    </head></html>`;
+    </head><body><h1>Expected Reserve</h1></body></html>`;
 
-    await ingestSourceManifest(db, {
+    const matchingBody = `<html><head>
+      <title>Expected Reserve</title>
+      <script type="application/ld+json">{"@type":"Product","name":"Expected Reserve","additionalProperty":[{"@type":"PropertyValue","name":"ABV","value":"45%"}]}</script>
+    </head></html>`;
+    const manifest: CatalogSourceManifest = {
       sources: [OFFICIAL_SOURCE],
       resources: [{
         bottleId: bottle.id,
@@ -856,7 +908,21 @@ describe("source-backed persistence", () => {
         resourceType: "official_product",
         mediaKind: "bottle",
       }],
-    }, { apply: true, fetchImpl: (async () => htmlResponse(body)) as typeof fetch });
+    };
+    await ingestSourceManifest(db, manifest, {
+      apply: true,
+      fetchImpl: (async () => htmlResponse(matchingBody)) as typeof fetch,
+    });
+    expect((await db.select().from(schema.bottles).where(eq(schema.bottles.id, bottle.id)))[0])
+      .toMatchObject({ status: "verified", abv: 45 });
+
+    const report = await ingestSourceManifest(db, manifest, {
+      apply: true,
+      fetchImpl: (async () => htmlResponse(body)) as typeof fetch,
+    });
+    expect(report.errors).toEqual([
+      expect.objectContaining({ error: expect.stringMatching(/identity did not match/i) }),
+    ]);
 
     expect((await db.select().from(schema.bottles).where(eq(schema.bottles.id, bottle.id)))[0]).toMatchObject({
       status: "imported",
@@ -864,6 +930,7 @@ describe("source-backed persistence", () => {
       imageUrl: null,
     });
     expect(await db.select().from(schema.bottleVerifications)).toEqual([]);
+    expect(await db.select().from(schema.bottleClaims)).toEqual([]);
     expect(await db.select().from(schema.bottleMedia)).toEqual([]);
   });
 

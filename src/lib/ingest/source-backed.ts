@@ -215,6 +215,28 @@ function pageTitle(html: string): string | null {
   return match ? decodeHtml(match[1].replace(/\s+/g, " ").trim()).slice(0, 300) : null;
 }
 
+function htmlText(value: string): string {
+  return decodeHtml(value.replace(/<!--[\s\S]*?-->/g, "").replace(/<[^>]+>/g, " "))
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function firstElementText(html: string, tag: string): string | null {
+  const match = html.match(new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)<\\/${tag}>`, "i"));
+  const value = match ? htmlText(match[1]) : "";
+  return value || null;
+}
+
+function firstClassText(html: string, className: string): string | null {
+  const escaped = className.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = html.match(new RegExp(
+    `<([a-z][a-z0-9-]*)\\b[^>]*class=["'][^"']*\\b${escaped}\\b[^"']*["'][^>]*>([\\s\\S]*?)<\\/\\1>`,
+    "i",
+  ));
+  const value = match ? htmlText(match[2]) : "";
+  return value || null;
+}
+
 function jsonLdObjects(html: string): Record<string, unknown>[] {
   const objects: Record<string, unknown>[] = [];
   const scripts = html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi);
@@ -340,7 +362,7 @@ function normalizeProductIdentity(value: string): string {
 function productIdentityMatches(expected: string, candidate: string): boolean {
   if (!expected || !candidate) return false;
   if (expected === candidate) return true;
-  const generic = new Set(["year", "years", "old", "whiskey", "whisky", "bourbon"]);
+  const generic = new Set(["age", "aged", "year", "years", "old", "whiskey", "whisky", "bourbon"]);
   const significant = (value: string) => value.split(" ").filter((token) => token && !generic.has(token));
   const expectedTokens = significant(expected);
   const candidateTokens = significant(candidate);
@@ -380,6 +402,34 @@ function primaryProductForPage(
   return bestScore >= 250 ? best : undefined;
 }
 
+function primaryHtmlProductForPage(
+  html: string,
+  expectedBottleName?: string,
+): Record<string, unknown> | undefined {
+  const name = firstElementText(html, "h1");
+  const expected = normalizeProductIdentity(expectedBottleName ?? "");
+  const candidate = normalizeProductIdentity(name ?? "");
+  if (!name || !expected || !productIdentityMatches(expected, candidate)) return undefined;
+
+  const additionalProperty: Record<string, unknown>[] = [];
+  const abv = numberFrom(firstClassText(html, "alc_perc"));
+  if (abv != null && abv >= 0 && abv <= 100) {
+    additionalProperty.push({ "@type": "PropertyValue", name: "ABV", value: `${abv}%` });
+  }
+  const ageMatch = name.match(/\b(?:aged\s+)?(\d{1,3})\s+years?\b/i);
+  if (ageMatch) {
+    additionalProperty.push({ "@type": "PropertyValue", name: "Age", value: `${ageMatch[1]} years` });
+  }
+
+  return {
+    "@type": "Product",
+    name,
+    description: metaContent(html, "description") ?? undefined,
+    image: metaContent(html, "og:image") ?? undefined,
+    additionalProperty,
+  };
+}
+
 function reviewMatchesProduct(
   review: Record<string, unknown>,
   primaryProduct: Record<string, unknown> | undefined,
@@ -417,8 +467,9 @@ export function parseSourceDocument(input: ParseInput): ParsedSourceDocument {
       products.push(itemReviewed as Record<string, unknown>);
     }
   }
-  const primaryProduct = primaryProductForPage(products, html, requestedUrl, input.expectedBottleName);
   const officialProduct = input.source.kind === "official" && input.resourceType === "official_product";
+  const primaryProduct = primaryProductForPage(products, html, requestedUrl, input.expectedBottleName) ??
+    (officialProduct && products.length === 0 ? primaryHtmlProductForPage(html, input.expectedBottleName) : undefined);
   if (primaryProduct) productProperties(primaryProduct, claims, officialProduct);
   for (const review of reviews) {
     if (!reviewMatchesProduct(review, primaryProduct, input.expectedBottleName)) continue;
@@ -816,6 +867,7 @@ export async function ingestSourceManifest(
           )).limit(1)
         : [];
       let parsed: ParsedSourceDocument;
+      let identityMismatch = false;
       if (apply && disabledSourceIds.has(source.id)) {
         if (!disabledResource) return;
         // Revocation must not depend on the disabled origin remaining online.
@@ -853,13 +905,21 @@ export async function ingestSourceManifest(
           mediaKind: resource.mediaKind,
           expectedBottleName: bottle.name,
         });
+        identityMismatch = source.kind === "official" && resource.resourceType === "official_product" &&
+          !parsed.primaryProductMatched;
       }
       report.claimsExtracted += parsed.claims.length;
       report.mediaExtracted += parsed.media.length;
-      if (!apply) return;
+      if (!apply) {
+        if (identityMismatch) {
+          failedSourceIds.add(source.id);
+          report.errors.push({ url: resource.url, error: `Official product identity did not match ${bottle.name}` });
+        }
+        return;
+      }
 
       const extractionHash = hash(JSON.stringify({
-        version: 1,
+        version: 2,
         document: parsed.contentHash,
         sourceKind: source.kind,
         sourceName: source.name,
@@ -1234,6 +1294,10 @@ export async function ingestSourceManifest(
         if (restorableManagedImage && revokedCanonical.imageUrl === restorableManagedImage.url) {
           await transferImageOwnership(restorableManagedImage.id);
         }
+      }
+      if (identityMismatch) {
+        failedSourceIds.add(source.id);
+        report.errors.push({ url: resource.url, error: `Official product identity did not match ${bottle.name}` });
       }
     } catch (error) {
       failedSourceIds.add(source.id);
