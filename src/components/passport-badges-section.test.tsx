@@ -54,11 +54,22 @@ describe("PassportBadgesSection", () => {
     expect(container.innerHTML).toBe("");
   });
 
-  it("omits empty rows but keeps populated ones", () => {
-    const p = passport({ countries: [badge({ family: "country", value: "Scotland", label: "Scotland" })] });
+  it("puts every family in one wall under a single heading, coarse to fine", () => {
+    const p = passport({
+      countries: [badge({ family: "country", value: "Scotland", label: "Scotland" })],
+      styles: [badge({ family: "style", value: "bourbon", label: "Bourbon" })],
+    });
     render(<PassportBadgesSection passport={p} isSelf={false} />);
-    expect(screen.getByText("Passport · Countries")).toBeInTheDocument();
-    expect(screen.getByText("Regions")).toBeInTheDocument();
+    expect(screen.getByText("Passport")).toBeInTheDocument();
+    // The old per-family row headings are gone — the silhouettes say it.
+    expect(screen.queryByText("Passport · Countries")).toBeNull();
+    expect(screen.queryByText("Regions")).toBeNull();
     expect(screen.queryByText("Styles")).toBeNull();
+    expect(screen.getAllByRole("list")).toHaveLength(1);
+    expect(screen.getAllByRole("img").map((el) => el.getAttribute("aria-label"))).toEqual([
+      "Scotland — Silver III",
+      "Islay — Silver III",
+      "Bourbon — Silver III",
+    ]);
   });
 });

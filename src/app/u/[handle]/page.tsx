@@ -137,10 +137,10 @@ export default async function ProfilePage({ params }: Props) {
             </section>
           )}
 
-          {/* The Passport: countries first — every bottle has one, so it is
-              the row that is never empty; regions are the finer grain beneath
-              it. Badge tiles replace the old text chips (same bounded DISTINCT
-              sets, docs/SOCIAL.md §3.3); counts render for the owner only. */}
+          {/* The Passport: one badge wall, ordered coarse to fine (countries,
+              regions, styles). Badge tiles replace the old text chips (same
+              bounded DISTINCT sets, docs/SOCIAL.md §3.3); counts render for
+              the owner only. */}
           {passport && <PassportBadgesSection passport={passport} isSelf={viewerState.isSelf} />}
 
           <section className="flex flex-col gap-3">

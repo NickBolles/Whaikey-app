@@ -27,6 +27,9 @@ export interface BottleSearchResult {
   name: string;
   category: WhiskeyCategory;
   distillery: string | null;
+  // `resultColumns` has always selected the country; declaring it lets the
+  // callers that want the full origin (a bottle's country stamp) reach it.
+  country: string | null;
   region: string | null;
   ageYears: number | null;
   abv: number | null;

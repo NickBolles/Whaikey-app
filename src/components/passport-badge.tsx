@@ -30,6 +30,11 @@ interface TierMetal {
 }
 
 const TIER_METALS: Record<number, TierMetal> = {
+  // Tier 0 is not a tier anyone earns: it is the unstruck die, for surfaces
+  // that name the stamps a BOTTLE carries rather than a person's progress
+  // (src/components/bottle-stamps.tsx). Deliberately the dullest metal on the
+  // page, so a crest on a search result never reads as a crest you hold.
+  0: { ring0: "#4c4235", ring1: "#2c251b", edge: "#6b5c47", text: "#c9b48f" },
   1: { ring0: "#7d5f3c", ring1: "#4a3823", edge: "#95744c", text: "#e8d7b8" },
   2: { ring0: "#d18a54", ring1: "#7c4322", edge: "#e59d66", text: "#f8dfc9" },
   3: { ring0: "#dde2e7", ring1: "#79848f", edge: "#f2f5f8", text: "#212830" },
@@ -614,7 +619,10 @@ function Laurels(): ReactElement {
 export interface PassportBadgeIconProps {
   family: PassportFamily;
   value: string;
-  /** Held tier 1-5; anything outside clamps into range. */
+  /**
+   * Held tier 1-5, or 0 for the unstruck die — the crest of a stamp shown
+   * without a claim about the viewer's progress. Anything outside clamps in.
+   */
   tier: number;
   /** Rendered size in px (width; height keeps the 72:84 ratio). */
   size?: number;
@@ -630,10 +638,11 @@ export interface PassportBadgeIconProps {
 }
 
 export function PassportBadgeIcon({ family, value, tier, size = 48, count, label, className }: PassportBadgeIconProps): ReactElement {
-  const clamped = Math.min(5, Math.max(1, Math.round(tier)));
+  const clamped = Math.min(5, Math.max(0, Math.round(tier)));
   const metal = TIER_METALS[clamped];
   const spec = tierSpec(clamped);
-  const showBanner = size >= 36;
+  // Tier 0 has no numeral to fly, so it wears no banner at any size.
+  const showBanner = clamped >= 1 && size >= 36;
   const showCount = count != null && size >= 48;
   // Deterministic ids: duplicates on a page are harmless because identical
   // badges declare identical defs.

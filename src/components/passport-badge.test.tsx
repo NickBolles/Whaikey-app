@@ -32,6 +32,13 @@ describe("PassportBadgeIcon", () => {
     expect(small.container.textContent).not.toContain("7");
   });
 
+  it("wears no banner at tier 0 — the unstruck die claims nothing", () => {
+    const { container } = render(<PassportBadgeIcon family="country" value="Scotland" tier={0} size={64} />);
+    expect(container.textContent).toBe("");
+    // Still a country shield, just in the dull metal.
+    expect(container.querySelector("path[d^='M36 4']")).not.toBeNull();
+  });
+
   it("clamps out-of-range tiers instead of crashing", () => {
     const { container } = render(<PassportBadgeIcon family="style" value="bourbon" tier={9} size={48} />);
     expect(container.textContent).toContain("V");
