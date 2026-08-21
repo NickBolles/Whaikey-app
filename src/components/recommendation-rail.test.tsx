@@ -64,6 +64,64 @@ describe("RecommendationRail", () => {
     expect(pourLink).toHaveAttribute("href", "/pour?bottleId=b1");
   });
 
+  it("shows the passport badge a discovery pick would open, beside its palate match", async () => {
+    mockFetchOnce([
+      {
+        ...REC,
+        badgeProgress: {
+          family: "region",
+          value: "Islay",
+          label: "Islay",
+          heldTier: 0,
+          targetTier: 1,
+          targetName: "Oak",
+          targetNumeral: "I",
+          remaining: 1,
+        },
+      },
+    ]);
+    render(<RecommendationRail mode="discovery" title="For your palate" />);
+
+    await waitFor(() => expect(screen.getByText("Smoky Match")).toBeInTheDocument());
+    // Both halves of the pitch: how it reads on the palate, and where it goes.
+    expect(screen.getByText("87% match")).toBeInTheDocument();
+    expect(screen.getByText("Islay")).toBeInTheDocument();
+    expect(screen.getByText("opens the badge")).toBeInTheDocument();
+  });
+
+  it("counts a held badge toward its next tier, never toward a pour total", async () => {
+    mockFetchOnce([
+      {
+        ...REC,
+        badgeProgress: {
+          family: "region",
+          value: "Islay",
+          label: "Islay",
+          heldTier: 2,
+          targetTier: 3,
+          targetName: "Silver",
+          targetNumeral: "III",
+          remaining: 2,
+        },
+      },
+    ]);
+    const { container } = render(<RecommendationRail mode="discovery" title="For your palate" />);
+
+    await waitFor(() => expect(screen.getByText("2 more to Silver III")).toBeInTheDocument());
+    // Guardrail: the ladder counts distinct bottles met, never volume or
+    // frequency (AGENTS.md, docs/SOCIAL.md §3.1).
+    expect(container.textContent).not.toMatch(/pours?\b/i);
+    expect(container.textContent).not.toMatch(/streak|ml\b/i);
+  });
+
+  it("omits the badge row when a pick reaches nothing new", async () => {
+    mockFetchOnce([{ ...REC, badgeProgress: null }]);
+    render(<RecommendationRail mode="discovery" title="For your palate" />);
+
+    await waitFor(() => expect(screen.getByText("Smoky Match")).toBeInTheDocument());
+    expect(screen.queryByText(/opens the badge|more to /)).not.toBeInTheDocument();
+  });
+
   it("renders the empty state when there are no recommendations", async () => {
     mockFetchOnce([]);
     render(<RecommendationRail mode="discovery" title="Bottles for you" />);

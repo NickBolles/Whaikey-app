@@ -1,6 +1,6 @@
 import type { ReactElement } from "react";
 import type { PassportFamily } from "@/db/schema";
-import { tierSpec } from "@/lib/passport";
+import { tierSpec } from "@/lib/passport-tiers";
 
 /**
  * The Passport's badge crests (docs/FEATURES.md §11.4), pure SVG so they

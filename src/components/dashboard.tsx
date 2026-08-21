@@ -42,6 +42,11 @@ function StatTile({ value, label, sub }: { value: string; label: string; sub: st
  * Home's upper half: the month in review. Under 3 lifetime pours it renders
  * the same skeleton in the same order — greyed, with empty tracks and a card
  * explaining what one logged dram unlocks — never hidden.
+ *
+ * The one exception is "Running low", which is inventory news rather than a
+ * month in review: it appears only when a bottle actually is low, in the
+ * skeleton state as much as any other. The unlock card carries the promise
+ * for accounts that have nothing there yet.
  */
 export function Dashboard({
   data,
@@ -132,9 +137,13 @@ export function Dashboard({
         )}
       </div>
 
-      <div>
-        <h3 className="section-label mb-2.5">Running low</h3>
-        {data.runningLow.length > 0 ? (
+      {/* Inventory, and only when there IS inventory news: an empty "Nothing
+          running low." is a row of chrome reporting a non-event, and it sat
+          directly under the month's headline where the eye lands first. The
+          skeleton card below already promises this section to a new account. */}
+      {data.runningLow.length > 0 && (
+        <div>
+          <h3 className="section-label mb-2.5">Running low</h3>
           <ul className="flex flex-col gap-2">
             {data.runningLow.map((row) => (
               <li
@@ -162,12 +171,8 @@ export function Dashboard({
               </li>
             ))}
           </ul>
-        ) : (
-          <p className="px-1 text-sm text-muted">
-            {skeleton ? "Bottles under 30% will surface here." : "Nothing running low."}
-          </p>
-        )}
-      </div>
+        </div>
+      )}
 
       {skeleton && (
         <div className="card p-5">

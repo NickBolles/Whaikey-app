@@ -8,7 +8,8 @@ import { getTonightPourContext } from "@/components/recommendation-rail";
 import type { Recommendation } from "@/lib/recommend";
 
 /**
- * The Home page's single accent moment: tonight's pick IS the primary action.
+ * The Home page's single accent moment: tonight's pick IS the primary action —
+ * held to a compact card, so it reads as one suggestion rather than a banner.
  * Stocked bars fetch the top "tonight" recommendation (same endpoint the rail
  * uses) and lead with "Log this pour" for that bottle; when no pick is
  * available the card falls back to the manual log/add actions, and empty bars
@@ -112,9 +113,8 @@ function TonightHero({ bottleCount, pourCount }: { bottleCount: number; pourCoun
   // waits for that exact text to detach before screenshotting.
   if (!error && recs === null) {
     return (
-      <section aria-label={context.title} className="card flex min-h-[14rem] flex-col p-5">
-        <h2 className="font-display text-xl font-semibold">{context.title}</h2>
-        <p className="mt-1 text-sm text-muted">{context.detail}</p>
+      <section aria-label={context.title} className="card flex min-h-[9.5rem] flex-col p-4">
+        <h2 className="section-label">{context.title}</h2>
         <p role="status" className="py-2 text-sm text-muted">
           Finding bottles…
         </p>
@@ -157,36 +157,44 @@ function TonightHero({ bottleCount, pourCount }: { bottleCount: number; pourCoun
 
   const meta = [pick.distillery, categoryLabel(pick.category)].filter(Boolean).join(" · ");
 
+  // Deliberately light. This card sits directly under the month in review, and
+  // a serif headline plus a mood line plus a full-width gradient button made
+  // one suggestion louder than everything the drinker actually recorded. The
+  // pick keeps the page's single accent (rule 2) — as a pill, not a slab — and
+  // the time-of-day mood line is dropped: the heading already carries it.
   return (
-    <section aria-label={context.title} className="card p-5">
-      <h2 className="font-display text-xl font-semibold">{context.title}</h2>
-      <p className="mt-1 text-sm text-muted">{context.detail}</p>
-
-      <div className="mt-4 flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <p className="font-medium leading-snug">{pick.name}</p>
-          {meta && <p className="mt-0.5 truncate text-xs text-muted">{meta}</p>}
-        </div>
+    <section aria-label={context.title} className="card p-4">
+      {/* The match rides in the header, not in the meta line: the meta truncates
+          against the button and would swallow the one number the pick is
+          actually arguing from. */}
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 className="section-label">{context.title}</h2>
         {pick.matchPercent != null && (
-          <span className="chip chip-active shrink-0 whitespace-nowrap px-2 py-0.5 text-[11px] font-medium text-accent">
+          <span className="shrink-0 text-[11px] font-medium text-accent">
             {pick.matchPercent}% match
           </span>
         )}
       </div>
 
-      <p className="mt-2 text-sm leading-relaxed text-muted">{pick.reason}</p>
-
-      <div className="mt-4 flex items-center gap-3">
+      <div className="mt-2.5 flex items-center gap-3">
+        <div className="min-w-0 flex-1">
+          <p className="font-display text-[17px] font-semibold leading-snug">{pick.name}</p>
+          {meta && <p className="mt-0.5 truncate text-xs text-muted">{meta}</p>}
+        </div>
         <Link
           href={`/pour?bottleId=${pick.bottleId}`}
-          className="btn-primary flex min-h-11 flex-1 items-center justify-center gap-2 px-4 py-3 text-sm"
+          className="btn-primary inline-flex min-h-11 shrink-0 items-center gap-2 px-4 py-2.5 text-sm"
         >
           <GlassWater size={18} strokeWidth={1.8} aria-hidden />
           Log this pour
         </Link>
+      </div>
+
+      <div className="mt-2.5 flex items-end justify-between gap-3">
+        <p className="min-w-0 flex-1 text-[13px] leading-relaxed text-muted">{pick.reason}</p>
         <Link
           href="/pour"
-          className="tap-target shrink-0 px-1 text-sm text-muted transition-colors hover:text-foreground"
+          className="tap-target shrink-0 text-xs text-muted transition-colors hover:text-foreground"
         >
           Pick another
         </Link>

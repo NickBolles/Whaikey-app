@@ -1,4 +1,5 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
+import type { PgColumn } from "drizzle-orm/pg-core";
 import type { DB } from "@/db";
 import {
   bottles,
@@ -9,63 +10,23 @@ import {
   type WhiskeyCategory,
 } from "@/db/schema";
 import { categoryLabel } from "@/components/category-chip";
+import { PASSPORT_TIER_SPECS, tierForCount } from "@/lib/passport-tiers";
 
 export type { PassportFamily } from "@/db/schema";
 
 /**
- * The Passport's badge tiers (docs/FEATURES.md §11.4, docs/SOCIAL.md §3.2).
- *
- * A tier is a share of the CATALOG's distinct bottles carrying the badge's
- * stamp — met 7 of the 24 Islay bottles we stock and you hold whatever tier
- * 29% clears. Percentages keep a 99-bottle Kentucky and a 6-bottle
- * Campbeltown equally fair ladders; the absolute floor per tier keeps a
- * one-bottle country from minting the top tier on day one.
- *
- * Guardrails, checked in review like §3.1's bans: the numerator is distinct
- * bottles met — a repeat pour advances nothing, a 15 ml bar sample counts in
- * full — and tiers are untimed and never downgrade (see `passportTiers`).
+ * The tier ladder (docs/FEATURES.md §11.4, docs/SOCIAL.md §3.2) lives in
+ * src/lib/passport-tiers.ts — pure arithmetic with no DB import, so the badge
+ * crests and the discovery rail's progress chip can share it from the client
+ * bundle. Re-exported here so server callers keep one import.
  */
-export interface PassportTierSpec {
-  tier: number;
-  name: string;
-  numeral: string;
-  /** Fraction of the badge's catalog bottles required (0 for tier I). */
-  pctOfCatalog: number;
-  /** Absolute distinct-bottle floor, so tiny catalogs cap early. */
-  minBottles: number;
-}
-
-export const PASSPORT_TIER_SPECS: readonly PassportTierSpec[] = [
-  { tier: 1, name: "Oak", numeral: "I", pctOfCatalog: 0, minBottles: 1 },
-  { tier: 2, name: "Copper", numeral: "II", pctOfCatalog: 0.1, minBottles: 3 },
-  { tier: 3, name: "Silver", numeral: "III", pctOfCatalog: 0.25, minBottles: 6 },
-  { tier: 4, name: "Gold", numeral: "IV", pctOfCatalog: 0.5, minBottles: 12 },
-  { tier: 5, name: "Amber", numeral: "V", pctOfCatalog: 0.8, minBottles: 20 },
-];
-
-export function tierSpec(tier: number): PassportTierSpec | null {
-  return PASSPORT_TIER_SPECS.find((s) => s.tier === tier) ?? null;
-}
-
-/** Distinct bottles needed for a tier given the badge's catalog total. */
-export function bottlesForTier(spec: PassportTierSpec, catalogTotal: number): number {
-  return Math.max(Math.ceil(spec.pctOfCatalog * catalogTotal), spec.minBottles);
-}
-
-/**
- * The tier `metCount` distinct bottles earns against a catalog of
- * `catalogTotal`. 0 = no badge (nothing met). The catalog can shrink behind a
- * user (bottle removed) or the numerator can include bottles the denominator
- * filter excludes, so metCount above catalogTotal is tolerated, not an error.
- */
-export function tierForCount(metCount: number, catalogTotal: number): number {
-  if (metCount <= 0) return 0;
-  let earned = 0;
-  for (const spec of PASSPORT_TIER_SPECS) {
-    if (metCount >= bottlesForTier(spec, catalogTotal)) earned = spec.tier;
-  }
-  return earned;
-}
+export {
+  PASSPORT_TIER_SPECS,
+  bottlesForTier,
+  tierForCount,
+  tierSpec,
+  type PassportTierSpec,
+} from "@/lib/passport-tiers";
 
 export interface PassportBadge {
   family: PassportFamily;
@@ -133,24 +94,28 @@ async function listMetBottles(db: DB, userId: string): Promise<MetBottleRow[]> {
  * unvetted label rows would silently deflate everyone's percentages.
  */
 async function catalogTotals(db: DB): Promise<Record<PassportFamily, Map<string, number>>> {
-  const rows = await db
-    .select({ country: bottles.country, region: bottles.region, category: bottles.category })
-    .from(bottles)
-    .where(eq(bottles.status, "verified"));
-  const totals: Record<PassportFamily, Map<string, number>> = {
-    country: new Map(),
-    region: new Map(),
-    style: new Map(),
+  // Grouped in SQL rather than counted in JS: getPassport sits on Home's
+  // recommendation path (src/lib/recommend.ts) as well as the profile, and
+  // pulling three columns of every verified bottle to tally them here made
+  // that an O(catalog) scan per page load.
+  const totalsFor = async (column: PgColumn) => {
+    const rows = await db
+      .select({ value: sql<string | null>`${column}`, count: sql<number>`count(*)` })
+      .from(bottles)
+      .where(eq(bottles.status, "verified"))
+      .groupBy(column);
+    const map = new Map<string, number>();
+    for (const row of rows) {
+      if (row.value) map.set(row.value, Number(row.count));
+    }
+    return map;
   };
-  const bump = (map: Map<string, number>, value: string | null) => {
-    if (value) map.set(value, (map.get(value) ?? 0) + 1);
-  };
-  for (const row of rows) {
-    bump(totals.country, row.country);
-    bump(totals.region, row.region);
-    bump(totals.style, row.category);
-  }
-  return totals;
+  const [country, region, style] = await Promise.all([
+    totalsFor(bottles.country),
+    totalsFor(bottles.region),
+    totalsFor(bottles.category),
+  ]);
+  return { country, region, style };
 }
 
 function badgeLabel(family: PassportFamily, value: string): string {

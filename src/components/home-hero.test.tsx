@@ -49,7 +49,9 @@ describe("HomeHero", () => {
     // Time-aware heading comes from the rail's shared context helper.
     const { title, detail } = getTonightPourContext(new Date().getHours());
     expect(screen.getByRole("heading", { name: title })).toBeInTheDocument();
-    expect(screen.getByText(detail)).toBeInTheDocument();
+    // The heading alone carries the time-of-day cue now: the mood line under
+    // it made a single suggestion outweigh the month above it.
+    expect(screen.queryByText(detail)).not.toBeInTheDocument();
 
     expect(screen.getByText("87% match")).toBeInTheDocument();
     expect(screen.getByText(/Islay Distillers/)).toBeInTheDocument();

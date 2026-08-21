@@ -3,7 +3,9 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { categoryLabel } from "@/components/category-chip";
+import { PassportBadgeIcon } from "@/components/passport-badge";
 import type { Recommendation } from "@/lib/recommend";
+import { badgeProgressCaption, type BadgeProgress } from "@/lib/passport-progress";
 import { originLabel } from "@/lib/origin";
 
 export interface RecommendationRailProps {
@@ -139,10 +141,41 @@ export function RecommendationRail({ mode, title }: RecommendationRailProps) {
   );
 }
 
+/**
+ * The passport hook on a discovery card: the crest this bottle would earn (or
+ * move toward) and how far off it is. The two lines answer the question the
+ * match chip cannot — "where have I not been?" — and both halves are DISTINCT
+ * things met, so nothing here can be advanced by pouring more (AGENTS.md
+ * §product guardrails, docs/SOCIAL.md §3.2).
+ */
+function BadgeProgressRow({ progress }: { progress: BadgeProgress }) {
+  const caption = badgeProgressCaption(progress);
+  return (
+    <div className="mt-auto flex items-center gap-2 border-t border-border-subtle pt-2.5">
+      {/* Below the 36px banner threshold on purpose: at this size the crest is
+          a cue beside the words, not a badge to read a numeral off. */}
+      <PassportBadgeIcon
+        family={progress.family}
+        value={progress.value}
+        tier={progress.targetTier}
+        size={22}
+        className="shrink-0"
+      />
+      <span className="min-w-0">
+        <span className="block truncate text-[12.5px] font-medium leading-tight text-foreground/85">
+          {progress.label}
+        </span>
+        <span className="mt-0.5 block truncate text-[11px] leading-tight text-muted">{caption}</span>
+      </span>
+    </div>
+  );
+}
+
 function RecCard({ rec, mode }: { rec: Recommendation; mode: RecommendationRailProps["mode"] }) {
   const meta = [rec.distillery, categoryLabel(rec.category), originLabel(rec.region, rec.country)]
     .filter(Boolean)
     .join(" · ");
+  const progress = rec.badgeProgress;
 
   return (
     <div className="card snap-start shrink-0 w-64 flex flex-col p-4 gap-2">
@@ -164,6 +197,8 @@ function RecCard({ rec, mode }: { rec: Recommendation; mode: RecommendationRailP
         )}
         <p className="text-sm text-muted leading-relaxed">{rec.reason}</p>
       </Link>
+
+      {progress && <BadgeProgressRow progress={progress} />}
 
       {mode === "tonight" && (
         <Link
