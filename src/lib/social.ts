@@ -12,7 +12,7 @@
  * A signed-out viewer (viewerId === null) sees nothing cross-user — share
  * links (src/lib/pour-sharing.ts) are a separate bearer-token mechanism.
  */
-import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, or, sql, type AnyColumn } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, or, sql, type AnyColumn } from "drizzle-orm";
 import { z } from "zod";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
@@ -556,7 +556,7 @@ async function recordPhoneProbe(db: DB, userId: string): Promise<void> {
     const recent = await tx
       .select({ n: sql<number>`count(*)` })
       .from(schema.phoneLookups)
-      .where(and(eq(schema.phoneLookups.userId, userId), sql`${schema.phoneLookups.createdAt} > ${hourAgo}`));
+      .where(and(eq(schema.phoneLookups.userId, userId), gt(schema.phoneLookups.createdAt, hourAgo)));
     if (Number(recent[0]?.n ?? 0) >= PHONE_LOOKUP_LIMIT_PER_HOUR) throw new RateLimitedError();
     await tx.insert(schema.phoneLookups).values({ id: crypto.randomUUID(), userId });
     await tx.delete(schema.phoneLookups).where(lt(schema.phoneLookups.createdAt, hourAgo));
@@ -1694,7 +1694,7 @@ export async function addComment(
     const recent = await tx
       .select({ n: sql<number>`count(*)` })
       .from(schema.comments)
-      .where(and(eq(schema.comments.userId, userId), sql`${schema.comments.createdAt} > ${hourAgo}`));
+      .where(and(eq(schema.comments.userId, userId), gt(schema.comments.createdAt, hourAgo)));
     if (Number(recent[0]?.n ?? 0) >= COMMENT_RATE_LIMIT_PER_HOUR) throw new RateLimitedError();
     return tx
       .insert(schema.comments)
@@ -1819,7 +1819,7 @@ export async function createReport(
     const recent = await tx
       .select({ n: sql<number>`count(*)` })
       .from(schema.reports)
-      .where(and(eq(schema.reports.reporterId, reporterId), sql`${schema.reports.createdAt} > ${hourAgo}`));
+      .where(and(eq(schema.reports.reporterId, reporterId), gt(schema.reports.createdAt, hourAgo)));
     if (Number(recent[0]?.n ?? 0) >= REPORT_RATE_LIMIT_PER_HOUR) throw new RateLimitedError();
     await tx.insert(schema.reports).values({
       id: crypto.randomUUID(),

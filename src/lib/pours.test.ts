@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
 import { createTestBottle, createTestUser, setupTestDb, uid } from "@/test/helpers";
@@ -14,6 +15,7 @@ import {
   listPours,
   logPour,
   updatePourVisibility,
+  visiblePourRateLimitCondition,
 } from "@/lib/pours";
 
 async function createUserBottle(
@@ -293,6 +295,18 @@ describe("listPours / getPour / deletePour", () => {
 
   it("updatePourVisibility returns null for a missing pour", async () => {
     expect(await updatePourVisibility(db, userId, "ghost", "public")).toBeNull();
+  });
+});
+
+describe("visible-pour rate-limit query", () => {
+  it("encodes the rolling-window Date for the production Postgres driver", () => {
+    const since = new Date("2026-08-22T01:06:00.000Z");
+    const query = new PgDialect().sqlToQuery(
+      sql`select count(*) from ${schema.pours} where ${visiblePourRateLimitCondition("user-1", since)}`,
+    );
+
+    expect(query.params).toContain(since.toISOString());
+    expect(query.params).not.toContain(since);
   });
 });
 

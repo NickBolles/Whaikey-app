@@ -1,4 +1,4 @@
-import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
+import { and, desc, eq, gt, isNotNull, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
@@ -88,6 +88,15 @@ function noteHasContent(note: NonNullable<PourInput["note"]>): boolean {
   );
 }
 
+/** Uses column-aware operators so Postgres receives an encoded timestamp string. */
+export function visiblePourRateLimitCondition(userId: string, since: Date) {
+  return and(
+    eq(schema.pours.userId, userId),
+    ne(schema.pours.visibility, "private"),
+    gt(schema.pours.createdAt, since),
+  );
+}
+
 /**
  * Log a pour for a user. Validates input (throws ZodError on bad shape /
  * flavor tags), throws BottleNotFoundError for unknown bottles. The pour is
@@ -135,13 +144,7 @@ export async function logPour(db: DB, userId: string, input: PourInput): Promise
       const recentVisible = await tx
         .select({ n: sql<number>`count(*)` })
         .from(schema.pours)
-        .where(
-          and(
-            eq(schema.pours.userId, userId),
-            sql`${schema.pours.visibility} <> 'private'`,
-            sql`${schema.pours.createdAt} > ${hourAgo}`,
-          ),
-        );
+        .where(visiblePourRateLimitCondition(userId, hourAgo));
       if (Number(recentVisible[0]?.n ?? 0) >= VISIBLE_POUR_LIMIT_PER_HOUR) visibility = "private";
     }
     let userBottle = await tx.query.userBottles.findFirst({
