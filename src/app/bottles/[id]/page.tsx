@@ -11,6 +11,7 @@ import { tasteMatchPercent } from "@/lib/palate";
 import { hasPublishedProducerFlavorNotes } from "@/lib/bar";
 import { getFriendNotesForBottle } from "@/lib/social";
 import { listPours } from "@/lib/pours";
+import { BottleStamps } from "@/components/bottle-stamps";
 import { CategoryChip } from "@/components/category-chip";
 import { FlavorRadar } from "@/components/flavor-radar";
 import { SameDram, type SameDramFriendNote, type SameDramProducer } from "@/components/same-dram";
@@ -155,6 +156,18 @@ export default async function BottleDetailPage({
         {metaParts.length > 0 && (
           <p className="text-sm text-muted mt-2.5">{metaParts.join(" · ")}</p>
         )}
+        {/* The bottle's own passport stamps, laid out in a row rather than the
+            list row's stacked rail: this is the bottle's own page, so the
+            crests are the subject rather than an aside, and there is a full
+            page width to give them (docs/DESIGN.md rule 11). */}
+        <BottleStamps
+          orientation="row"
+          size={34}
+          category={bottle.category}
+          region={bottle.region ?? distillery?.region}
+          country={bottle.country ?? distillery?.country}
+          className="mt-3.5 gap-2"
+        />
       </header>
 
       <SourceBackedResources bottleName={bottle.name} resources={resources} media={media} />

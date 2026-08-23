@@ -27,6 +27,44 @@ describe("BottleListRow", () => {
     expect(screen.getByRole("img", { name: "72% full" })).toBeInTheDocument();
   });
 
+  it("stamps the bottle's origin and style, hidden from assistive tech", () => {
+    const { container } = render(
+      <BottleListRow
+        href="/bottles/lagavulin-16"
+        name="Lagavulin 16"
+        score={4.5}
+        stamps={{ category: "scotch-single-malt", region: "Islay", country: "Scotland" }}
+      />,
+    );
+    // Country, region, style. The row's own text names the origin, so the
+    // crests are decoration (src/components/bottle-stamps.tsx).
+    expect(container.querySelectorAll("[aria-hidden='true'] svg")).toHaveLength(3);
+    // The rating keeps its own label — the stamps must not swallow it.
+    expect(screen.getByLabelText(/Rated 4.5 out of 5/)).toBeInTheDocument();
+  });
+
+  it("renders no stamps for a caller that has no origin to hand", () => {
+    const { container } = render(
+      <BottleListRow href="/bottles/x" name="Mystery" score={4} />,
+    );
+    expect(container.querySelectorAll("[aria-hidden='true'] svg")).toHaveLength(0);
+    expect(screen.getByLabelText(/Rated 4.0 out of 5/)).toBeInTheDocument();
+  });
+
+  it("stamps a bottle the drinker has never rated", () => {
+    // The stamps describe the bottle, not the drinker, so they do not depend
+    // on there being a rating block to hang beneath.
+    const { container } = render(
+      <BottleListRow
+        href="/bottles/x"
+        name="Untouched"
+        stamps={{ category: "bourbon", region: "Kentucky", country: "USA" }}
+      />,
+    );
+    expect(container.querySelectorAll("[aria-hidden='true'] svg")).toHaveLength(3);
+    expect(screen.queryByLabelText(/Rated/)).not.toBeInTheDocument();
+  });
+
   it("shows at most the top 3 of your own flavors, by intensity", () => {
     render(
       <BottleListRow

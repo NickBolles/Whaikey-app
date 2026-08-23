@@ -123,6 +123,11 @@ export interface BarRowBottle {
   name: string;
   category: WhiskeyCategory;
   distilleryName: string | null;
+  // Origin, for the row's passport stamps. The bottle's own values win; the
+  // distillery's stand in when the catalog only knows the origin that way
+  // (same precedence the bottle page uses).
+  region: string | null;
+  country: string | null;
   avgPrice: number | null;
   flavorProfile: Record<string, number> | null;
   producerFlavorTags: Record<string, number> | null;
@@ -182,6 +187,10 @@ export async function listUserBottles(
       bottleName: schema.bottles.name,
       category: schema.bottles.category,
       distilleryName: schema.distilleries.name,
+      region: schema.bottles.region,
+      country: schema.bottles.country,
+      distilleryRegion: schema.distilleries.region,
+      distilleryCountry: schema.distilleries.country,
       avgPrice: schema.bottles.avgPrice,
       flavorProfile: schema.bottles.flavorProfile,
       producerFlavorTags: schema.bottles.producerFlavorTags,
@@ -252,6 +261,8 @@ export async function listUserBottles(
       name: r.bottleName,
       category: r.category,
       distilleryName: r.distilleryName,
+      region: r.region ?? r.distilleryRegion,
+      country: r.country ?? r.distilleryCountry,
       avgPrice: r.avgPrice,
       flavorProfile: r.flavorProfile,
       producerFlavorTags: r.producerFlavorTags,

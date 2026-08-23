@@ -43,6 +43,22 @@ describe("BottleStamps", () => {
     expect(container.firstElementChild?.getAttribute("aria-hidden")).toBe("true");
   });
 
+  it("lays the run out flat when asked, for surfaces with width to spare", () => {
+    const { container } = render(
+      <BottleStamps category="bourbon" region="Kentucky" country="USA" orientation="row" />,
+    );
+    // Same crests, same coarse-to-fine order — only the axis changes.
+    expect(families(container)).toEqual(["country", "region", "style"]);
+    expect(container.firstElementChild?.className).not.toContain("flex-col");
+  });
+
+  it("stacks the run by default, for a list row's gutter", () => {
+    const { container } = render(
+      <BottleStamps category="bourbon" region="Kentucky" country="USA" />,
+    );
+    expect(container.firstElementChild?.className).toContain("flex-col");
+  });
+
   it("renders nothing without a category or an origin", () => {
     const { container } = render(<BottleStamps category="" region={null} country={null} />);
     expect(container.innerHTML).toBe("");
