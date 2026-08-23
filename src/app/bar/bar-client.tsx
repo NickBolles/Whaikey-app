@@ -639,6 +639,11 @@ export function BarClient({
                         : null
                   }
                   spine={own ? { level, bottleId: row.bottleId } : null}
+                  stamps={{
+                    category: row.bottle.category,
+                    region: row.bottle.region,
+                    country: row.bottle.country,
+                  }}
                   flavorTags={row.personalFlavorTags}
                   pours={
                     row.pourStats && row.pourStats.pourCount > 0

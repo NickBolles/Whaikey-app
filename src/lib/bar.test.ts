@@ -215,10 +215,35 @@ describe("listUserBottles", () => {
       category: "bourbon",
       distilleryName: "Buffalo Trace",
       avgPrice: 45,
+      // The row carries origin for its passport stamps. This bottle has no
+      // country of its own, so the distillery's stands in.
+      country: "USA",
     });
 
     const all = await listUserBottles(db, user.id);
     expect(all).toHaveLength(2);
+  });
+
+  it("prefers the bottle's own origin over its distillery's", async () => {
+    const db = await setupTestDb();
+    const user = await createTestUser(db);
+    const [dist] = await db
+      .insert(schema.distilleries)
+      .values({ id: uid("dist"), name: "Speyside co-op", region: "Speyside", country: "Scotland" })
+      .returning();
+    // An Islay-finished bottle from a Speyside house: the bottle knows better
+    // than the distillery does, and its stamps should say so.
+    const bottle = await createTestBottle(db, {
+      name: "Islay Finish",
+      distilleryId: dist.id,
+      region: "Islay",
+    });
+    await seedUserBottle(db, { userId: user.id, bottleId: bottle.id, relationship: "own" });
+
+    const [row] = await listUserBottles(db, user.id);
+    expect(row.bottle.region).toBe("Islay");
+    // The bottle names no country, so the distillery's still stands in.
+    expect(row.bottle.country).toBe("Scotland");
   });
 
   it("summarises the user's pours per bottle: count, average, and range", async () => {

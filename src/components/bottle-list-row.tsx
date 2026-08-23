@@ -2,6 +2,7 @@ import Link from "next/link";
 import { topFlavorTags } from "@/lib/flavor-wheel";
 import { FillSpine, spineTone } from "@/components/fill-spine";
 import { FlavorChip } from "@/components/flavor-chip";
+import { BottleStamps } from "@/components/bottle-stamps";
 
 export interface BottleListRowPours {
   /** Every pour of this bottle, rated or not. */
@@ -30,6 +31,11 @@ export interface BottleListRowProps {
   flavorTags?: Record<string, number> | null;
   /** Pour-history summary; omit (or count 0) for untouched bottles. */
   pours?: BottleListRowPours | null;
+  /**
+   * The bottle's origin and style, for its passport stamps. Omit to render no
+   * stamps at all — a row whose caller has no origin to hand.
+   */
+  stamps?: { category: string; region?: string | null; country?: string | null } | null;
 }
 
 /**
@@ -49,6 +55,7 @@ export function BottleListRow({
   spine,
   flavorTags,
   pours,
+  stamps,
 }: BottleListRowProps) {
   const chips = topFlavorTags(flavorTags, 3);
   const pourCount = pours?.count ?? 0;
@@ -84,25 +91,46 @@ export function BottleListRow({
           </span>
         )}
       </span>
-      {hasRatingBlock && (
-        <span
-          className="flex shrink-0 flex-col items-end justify-center gap-1 text-right"
-          aria-label={ratingBlockLabel(score, pourCount, range)}
-        >
-          {score != null && (
-            <span aria-hidden className="font-mono text-[15px] font-semibold leading-none text-accent">
-              {score.toFixed(1)}
+      {(hasRatingBlock || stamps) && (
+        <span className="flex shrink-0 flex-col items-end justify-center gap-2">
+          {hasRatingBlock && (
+            <span
+              className="flex flex-col items-end gap-1 text-right"
+              aria-label={ratingBlockLabel(score, pourCount, range)}
+            >
+              {score != null && (
+                <span aria-hidden className="font-mono text-[15px] font-semibold leading-none text-accent">
+                  {score.toFixed(1)}
+                </span>
+              )}
+              {range && (
+                <span aria-hidden className="font-mono text-[10px] leading-none text-muted tabular-nums">
+                  {range.min.toFixed(1)}–{range.max.toFixed(1)}
+                </span>
+              )}
+              {pourCount > 0 && (
+                <span aria-hidden className="text-[10px] leading-none text-muted">
+                  {pourCount} pour{pourCount === 1 ? "" : "s"}
+                </span>
+              )}
             </span>
           )}
-          {range && (
-            <span aria-hidden className="font-mono text-[10px] leading-none text-muted tabular-nums">
-              {range.min.toFixed(1)}–{range.max.toFixed(1)}
-            </span>
-          )}
-          {pourCount > 0 && (
-            <span aria-hidden className="text-[10px] leading-none text-muted">
-              {pourCount} pour{pourCount === 1 ? "" : "s"}
-            </span>
+          {/* The bottle's stamps, in a row under the rating rather than the
+              bottle card's stacked rail (docs/DESIGN.md rule 11). This row is
+              short and wide where the card is tall: stacked, three crests
+              spanned its whole height and read as scattered specks, and
+              shrinking them far enough to fit lost the engraving entirely.
+              Laid out flat they group as one set, and they sit here rather
+              than in the leading slot because the fill spine holds that — the
+              one mark on this row carrying state the drinker changes. */}
+          {stamps && (
+            <BottleStamps
+              orientation="row"
+              size={19}
+              category={stamps.category}
+              region={stamps.region}
+              country={stamps.country}
+            />
           )}
         </span>
       )}
