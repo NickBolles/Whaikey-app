@@ -1,9 +1,15 @@
-import type { PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useRef, type PointerEvent as ReactPointerEvent } from "react";
 
-/** Brief enough to feel direct, while a stationary hold and vertical move still scroll natively. */
-export const WHEEL_HOLD_MS = 140;
-/** A small but deliberate sideways nudge unlocks the wheel without stealing a vertical scroll. */
+/**
+ * How long a finger has to rest on the wheel before the wheel takes the touch
+ * over from the page. Long enough that a finger on its way into a scroll is
+ * never mistaken for a hold, short enough that a deliberate hold feels direct.
+ */
+export const WHEEL_HOLD_MS = 200;
+/** Once the wheel owns the touch, this much movement — in any direction — starts the sweep. */
 export const WHEEL_ACTIVATION_DISTANCE = 8;
+/** Movement this far before the hold completes means the touch was a scroll; give it back to the page. */
+export const WHEEL_HOLD_SLOP = 10;
 
 export type WheelPoint = {
   angle: number;
@@ -49,17 +55,35 @@ export function intensityForRadius(radius: number): 1 | 2 | 3 {
   return 1;
 }
 
+type PointerPosition = Pick<ReactPointerEvent<SVGSVGElement>, "clientX" | "clientY">;
+
+function travelled(start: PointerPosition, current: PointerPosition): number {
+  return Math.hypot(current.clientX - start.clientX, current.clientY - start.clientY);
+}
+
 /**
- * A stationary long-press is reserved for normal browser behavior (including
- * scrolling). The wheel only claims a touch after a deliberate sideways drag.
+ * After the hold has claimed the touch, any deliberate movement starts the
+ * sweep. Direction is deliberately not consulted: the wheel's own gesture is
+ * radial, so sweeping out to a descriptor at twelve o'clock is a straight
+ * *vertical* drag — the very motion an axis test would refuse.
  */
 export function shouldActivateWheelGesture(
-  start: Pick<ReactPointerEvent<SVGSVGElement>, "clientX" | "clientY">,
-  current: Pick<ReactPointerEvent<SVGSVGElement>, "clientX" | "clientY">,
+  start: PointerPosition,
+  current: PointerPosition,
 ): boolean {
-  const horizontal = Math.abs(current.clientX - start.clientX);
-  const vertical = Math.abs(current.clientY - start.clientY);
-  return horizontal >= WHEEL_ACTIVATION_DISTANCE && horizontal > vertical;
+  return travelled(start, current) >= WHEEL_ACTIVATION_DISTANCE;
+}
+
+/**
+ * Before the hold completes, the page still owns the touch. A finger that has
+ * already moved is scrolling, so the wheel drops the hold rather than arming
+ * behind the scroll and stealing the rest of the gesture.
+ */
+export function shouldAbandonWheelHold(
+  start: PointerPosition,
+  current: PointerPosition,
+): boolean {
+  return travelled(start, current) >= WHEEL_HOLD_SLOP;
 }
 
 export function shouldStartWheelGesture(
@@ -68,4 +92,38 @@ export function shouldStartWheelGesture(
   // Mouse keeps ordinary click behavior. Touch and pen get the one-handed
   // tasting gesture without stealing desktop selection/focus semantics.
   return event.pointerType !== "mouse" && (event.button === 0 || event.button === -1);
+}
+
+/**
+ * Lets a wheel hand the page back its scroll until a hold claims the touch.
+ *
+ * `touch-action` alone cannot express that: the browser latches it when the
+ * finger lands, so an element that scrolls the page on touch-down can never
+ * take that touch back. A non-passive `touchmove` listener can — preventing
+ * the first move after the hold stops the page before it has scrolled a pixel,
+ * and keeps it still for the rest of the sweep. Until the wheel locks, nothing
+ * is prevented and the page scrolls exactly as it would anywhere else.
+ */
+export function useWheelScrollLock<T extends Element>() {
+  const wheelRef = useRef<T | null>(null);
+  const locked = useRef(false);
+
+  useEffect(() => {
+    const node = wheelRef.current;
+    if (!node) return;
+    const onTouchMove = (event: Event) => {
+      if (locked.current && event.cancelable) event.preventDefault();
+    };
+    node.addEventListener("touchmove", onTouchMove, { passive: false });
+    return () => node.removeEventListener("touchmove", onTouchMove);
+  }, []);
+
+  const lockScroll = useCallback(() => {
+    locked.current = true;
+  }, []);
+  const releaseScroll = useCallback(() => {
+    locked.current = false;
+  }, []);
+
+  return { wheelRef, lockScroll, releaseScroll };
 }

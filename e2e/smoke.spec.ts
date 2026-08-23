@@ -220,3 +220,72 @@ test.describe("whiskey school", () => {
     await expect(page.getByText("Butterscotch")).toBeVisible();
   });
 });
+
+/**
+ * The reported bug lives in the browser's own touch pipeline: the page scrolled
+ * out from under the wheel, so a held sweep never landed. jsdom cannot see that
+ * — only a real touch on a real scrollable page can.
+ */
+test.describe("flavor wheel touch gesture", () => {
+  test.use({ hasTouch: true });
+
+  test("a held sweep tags a flavor and the page holds still, while a plain swipe still scrolls", async ({
+    context,
+    page,
+    baseURL,
+  }) => {
+    await signIn(context, baseURL!, SCAN_SESSION_TOKEN);
+    await page.goto("/pour?bottleId=eagle-rare-10");
+
+    const wheel = page.getByRole("application", { name: "Flavor wheel" });
+    await wheel.scrollIntoViewIfNeeded();
+    const box = (await wheel.boundingBox())!;
+    const unit = box.width / 340; // the wheel's viewBox is 340 wide
+    const cx = box.x + box.width / 2;
+    const cy = box.y + box.height / 2;
+    // Straight down the six o'clock line: from a family in the inner ring out
+    // through the descriptor ring. Purely vertical — the same motion as a
+    // scroll, which is exactly what used to make this gesture impossible.
+    const from = { x: cx, y: cy + 85 * unit };
+
+    const cdp = await context.newCDPSession(page);
+    const touch = (type: "touchStart" | "touchMove" | "touchEnd", point?: { x: number; y: number }) =>
+      cdp.send("Input.dispatchTouchEvent", {
+        type,
+        touchPoints: point ? [{ x: point.x, y: point.y }] : [],
+      });
+
+    const chips = page.getByRole("list", { name: "Selected flavors" });
+
+    // A swipe with no hold belongs to the page.
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await touch("touchStart", from);
+    for (let step = 1; step <= 6; step += 1) {
+      await touch("touchMove", { x: from.x, y: from.y - step * 18 });
+    }
+    await touch("touchEnd");
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+    await expect(chips).toHaveCount(0);
+
+    // Hold first, and the wheel takes the touch over: the sweep registers and
+    // the page stays exactly where it was.
+    await wheel.scrollIntoViewIfNeeded();
+    const held = (await wheel.boundingBox())!;
+    const holdFrom = { x: held.x + held.width / 2, y: held.y + held.height / 2 + 85 * unit };
+    const holdTo = { x: holdFrom.x, y: held.y + held.height / 2 + 155 * unit };
+    const before = await page.evaluate(() => window.scrollY);
+
+    await touch("touchStart", holdFrom);
+    await page.waitForTimeout(400);
+    for (let step = 1; step <= 6; step += 1) {
+      await touch("touchMove", {
+        x: holdFrom.x,
+        y: holdFrom.y + ((holdTo.y - holdFrom.y) * step) / 6,
+      });
+    }
+    await touch("touchEnd");
+
+    await expect(chips.getByRole("button")).toHaveCount(1);
+    expect(await page.evaluate(() => window.scrollY)).toBe(before);
+  });
+});

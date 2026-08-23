@@ -6,6 +6,22 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 const { haptic } = vi.hoisted(() => ({ haptic: vi.fn() }));
 vi.mock("@/lib/native/haptics", () => ({ haptic }));
 import { FlavorWheelInput } from "@/components/flavor-wheel-input";
+import { WHEEL_HOLD_MS } from "@/components/wheel-gesture";
+
+/** Pin the wheel's box so client coordinates map onto its 340×340 viewBox. */
+function stubWheelBox(wheel: SVGSVGElement) {
+  vi.spyOn(wheel, "getBoundingClientRect").mockReturnValue({
+    bottom: 340,
+    height: 340,
+    left: 0,
+    right: 340,
+    top: 0,
+    width: 340,
+    x: 0,
+    y: 0,
+    toJSON: () => ({}),
+  });
+}
 
 afterEach(() => {
   cleanup();
@@ -88,22 +104,12 @@ describe("FlavorWheelInput", () => {
     const onChange = vi.fn();
     const { container } = render(<FlavorWheelInput value={{}} onChange={onChange} />);
     const wheel = container.querySelector("svg")!;
-    vi.spyOn(wheel, "getBoundingClientRect").mockReturnValue({
-      bottom: 340,
-      height: 340,
-      left: 0,
-      right: 340,
-      top: 0,
-      width: 340,
-      x: 0,
-      y: 0,
-      toJSON: () => ({}),
-    });
+    stubWheelBox(wheel);
 
     // Hold Sweet (lower-right), then deliberately sweep sideways and outward to a descriptor at 3×.
     fireEvent.pointerDown(wheel, { pointerType: "touch", pointerId: 1, clientX: 270, clientY: 270 });
     act(() => {
-      vi.advanceTimersByTime(140);
+      vi.advanceTimersByTime(WHEEL_HOLD_MS);
     });
     fireEvent.pointerMove(wheel, { pointerType: "touch", pointerId: 1, clientX: 286, clientY: 274 });
     fireEvent.pointerUp(wheel, { pointerType: "touch", pointerId: 1, clientX: 286, clientY: 274 });
@@ -125,7 +131,7 @@ describe("FlavorWheelInput", () => {
     expect(screen.getByText("hold to taste")).toBeInTheDocument();
 
     act(() => {
-      vi.advanceTimersByTime(140);
+      vi.advanceTimersByTime(WHEEL_HOLD_MS);
     });
     expect(screen.getByText("sweep to taste")).toBeInTheDocument();
 
@@ -134,26 +140,83 @@ describe("FlavorWheelInput", () => {
     vi.useRealTimers();
   });
 
-  it("leaves a stationary long press alone so the page can scroll", () => {
+  it("saves a straight vertical sweep, the shape of reaching the flavors above and below", () => {
+    // The reason the gesture felt broken: sweeping out to a descriptor is a
+    // radial move, so for half the wheel it is a vertical drag — the exact
+    // motion a page scroll also is. Once the hold lands, the wheel owns it.
     vi.useFakeTimers();
     const onChange = vi.fn();
     const { container } = render(<FlavorWheelInput value={{}} onChange={onChange} />);
     const wheel = container.querySelector("svg")!;
-    vi.spyOn(wheel, "getBoundingClientRect").mockReturnValue({
-      bottom: 340,
-      height: 340,
-      left: 0,
-      right: 340,
-      top: 0,
-      width: 340,
-      x: 0,
-      y: 0,
-      toJSON: () => ({}),
-    });
+    stubWheelBox(wheel);
 
     fireEvent.pointerDown(wheel, { pointerType: "touch", pointerId: 1, clientX: 270, clientY: 270 });
     act(() => {
-      vi.advanceTimersByTime(140);
+      vi.advanceTimersByTime(WHEEL_HOLD_MS);
+    });
+    fireEvent.pointerMove(wheel, { pointerType: "touch", pointerId: 1, clientX: 270, clientY: 330 });
+    fireEvent.pointerUp(wheel, { pointerType: "touch", pointerId: 1, clientX: 270, clientY: 330 });
+
+    expect(onChange).toHaveBeenCalledWith({ honey: 3 });
+    vi.useRealTimers();
+  });
+
+  it("gives the touch back to the page when the finger moves before the hold lands", () => {
+    vi.useFakeTimers();
+    const onChange = vi.fn();
+    const { container } = render(<FlavorWheelInput value={{}} onChange={onChange} />);
+    const wheel = container.querySelector("svg")!;
+    stubWheelBox(wheel);
+
+    fireEvent.pointerDown(wheel, { pointerType: "touch", pointerId: 1, clientX: 270, clientY: 270 });
+    expect(screen.getByText("hold to taste")).toBeInTheDocument();
+    // A scroll: moving before the hold completes drops the wheel's claim, cue and all.
+    fireEvent.pointerMove(wheel, { pointerType: "touch", pointerId: 1, clientX: 272, clientY: 210 });
+    expect(screen.queryByText("hold to taste")).not.toBeInTheDocument();
+
+    act(() => {
+      vi.advanceTimersByTime(WHEEL_HOLD_MS);
+    });
+    fireEvent.pointerMove(wheel, { pointerType: "touch", pointerId: 1, clientX: 272, clientY: 140 });
+    fireEvent.pointerUp(wheel, { pointerType: "touch", pointerId: 1, clientX: 272, clientY: 140 });
+
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.queryByText("sweep to taste")).not.toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
+  it("only blocks the page scroll once the hold has claimed the touch", () => {
+    vi.useFakeTimers();
+    const { container } = render(<FlavorWheelInput value={{}} onChange={vi.fn()} />);
+    const wheel = container.querySelector("svg")!;
+    stubWheelBox(wheel);
+
+    fireEvent.pointerDown(wheel, { pointerType: "touch", pointerId: 1, clientX: 270, clientY: 270 });
+    const duringHold = fireEvent.touchMove(wheel, { touches: [{ clientX: 270, clientY: 250 }] });
+    expect(duringHold).toBe(true); // not prevented: the page is still free to scroll
+
+    act(() => {
+      vi.advanceTimersByTime(WHEEL_HOLD_MS);
+    });
+    const afterHold = fireEvent.touchMove(wheel, { touches: [{ clientX: 270, clientY: 250 }] });
+    expect(afterHold).toBe(false); // prevented: the sweep owns the touch
+
+    fireEvent.pointerUp(wheel, { pointerType: "touch", pointerId: 1, clientX: 270, clientY: 270 });
+    const afterRelease = fireEvent.touchMove(wheel, { touches: [{ clientX: 270, clientY: 250 }] });
+    expect(afterRelease).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it("commits nothing when a hold is released without a sweep", () => {
+    vi.useFakeTimers();
+    const onChange = vi.fn();
+    const { container } = render(<FlavorWheelInput value={{}} onChange={onChange} />);
+    const wheel = container.querySelector("svg")!;
+    stubWheelBox(wheel);
+
+    fireEvent.pointerDown(wheel, { pointerType: "touch", pointerId: 1, clientX: 270, clientY: 270 });
+    act(() => {
+      vi.advanceTimersByTime(WHEEL_HOLD_MS);
     });
     fireEvent.pointerUp(wheel, { pointerType: "touch", pointerId: 1, clientX: 270, clientY: 270 });
 

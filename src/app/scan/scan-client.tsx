@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useScrollLock } from "@/lib/scroll-lock";
 import Link from "next/link";
 import {
   Aperture,
@@ -166,6 +167,8 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
   const [torchChanging, setTorchChanging] = useState(false);
   const [torchUnavailable, setTorchUnavailable] = useState(false);
   const [torchReportedUnsupported, setTorchReportedUnsupported] = useState(false);
+  // Both sheets below cover the whole screen; the page behind them holds still.
+  useScrollLock(capture !== null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -1184,6 +1187,7 @@ function DecisionSheet({
 }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<BottleSearchResult[]>([]);
+  useScrollLock(true);
   const searchRef = useRef<HTMLInputElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
