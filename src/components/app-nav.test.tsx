@@ -33,4 +33,19 @@ describe("AppNav", () => {
     expect(screen.queryByRole("dialog", { name: "Quick actions" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Open quick actions" })).toHaveFocus();
   });
+
+  it("holds the page still behind the quick-actions sheet and restores it on close", () => {
+    render(<AppNav />);
+    expect(document.body.style.position).toBe("");
+
+    fireEvent.click(screen.getByRole("button", { name: "Open quick actions" }));
+    // The sheet covers the screen; without this the page scrolls under it and
+    // the sheet's own scroll chains into the page at either end.
+    expect(document.body.style.position).toBe("fixed");
+    expect(document.body.style.overflow).toBe("hidden");
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(document.body.style.position).toBe("");
+    expect(document.body.style.overflow).toBe("");
+  });
 });

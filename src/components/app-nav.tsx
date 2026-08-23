@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { GlassWater, Home, MessageCircle, Plus, ScanLine, Search, Users, Wine, X } from "lucide-react";
+import { useScrollLock } from "@/lib/scroll-lock";
 
 // Search lives in the global header and the ＋ quick-actions sheet, not here
 // (2026-08 IA redesign; docs/SOCIAL.md §6.3 amendment covers the Friends slot).
@@ -25,6 +26,7 @@ export function AppNav() {
   const [actionsOpen, setActionsOpen] = useState(false);
   const actionsPanelRef = useRef<HTMLDivElement>(null);
   const actionsTriggerRef = useRef<HTMLButtonElement>(null);
+  useScrollLock(actionsOpen);
 
   const closeActions = () => {
     actionsTriggerRef.current?.focus();

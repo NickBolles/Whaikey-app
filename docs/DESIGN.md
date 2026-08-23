@@ -59,6 +59,8 @@ The feel: **a well-lit whiskey lounge, not a dashboard.** Clean and sleek, warm 
     - **Bottle card** (tall, narrow text column) — `column`, 20px, outboard of the price. Stacked, the run costs the text one crest's width instead of three.
     - **My Bar row** (short, wide, gutters already spoken for) — `row`, 19px, under the rating block. Stacked here, three crests spanned the whole row height and read as scattered specks, and shrinking them far enough to fit lost the engraving.
     - **Bottle detail hero** (full page width) — `row`, 34px, under the meta line. This is the bottle's own page, so the crests are the subject rather than an aside and can be large enough to actually read.
+12. **Touch gestures say who owns the finger, and say it once.** A surface that both scrolls the page and runs its own drag — the flavor wheels — cannot settle that with `touch-action` alone: the browser latches it when the finger lands, so an element that scrolls on touch-down can never take that touch back. The pattern is a hold: the page keeps the touch until `WHEEL_HOLD_MS` of stillness passes, then `useWheelScrollLock` claims it (non-passive `touchmove` + `preventDefault`) and the drag runs in **any** direction — a radial sweep is a vertical drag for half the wheel, so an axis test refuses the very gesture it is meant to allow. Movement before the hold lands gives the touch back whole, cue and all.
+13. **A full-screen sheet holds the page still behind it** — `useScrollLock` from `src/lib/scroll-lock.ts`. Without it the page scrolls under the sheet and the sheet's own scroll chains into the page at either end.
 
 ## Screenshot workflow (how to iterate on UI)
 

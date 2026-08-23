@@ -3,7 +3,15 @@
 import { useRef, useState, type PointerEvent } from "react";
 import { FLAVOR_WHEEL } from "@/lib/flavor-wheel";
 import { haptic } from "@/lib/native/haptics";
-import { WHEEL_HOLD_MS, shouldActivateWheelGesture, shouldStartWheelGesture, wheelIndex, wheelPointFromPointer } from "@/components/wheel-gesture";
+import {
+  WHEEL_HOLD_MS,
+  shouldAbandonWheelHold,
+  shouldActivateWheelGesture,
+  shouldStartWheelGesture,
+  useWheelScrollLock,
+  wheelIndex,
+  wheelPointFromPointer,
+} from "@/components/wheel-gesture";
 import { WEDGE_NOTES } from "@/lib/education";
 import {
   SERIF,
@@ -37,11 +45,13 @@ export function FlavorWheelExplorer() {
   const activePointerId = useRef<number | null>(null);
   const gestureCategoryId = useRef<string | null>(null);
   const suppressClick = useRef(false);
+  const { wheelRef, lockScroll, releaseScroll } = useWheelScrollLock<SVGSVGElement>();
   const selected = FLAVOR_WHEEL.find((w) => w.id === selectedId) ?? null;
   const note = selected ? WEDGE_NOTES[selected.id] : null;
   const span = 360 / FLAVOR_WHEEL.length;
 
   const clearGesture = () => {
+    releaseScroll();
     if (holdTimer.current) clearTimeout(holdTimer.current);
     holdTimer.current = null;
     gestureActive.current = false;
@@ -66,7 +76,10 @@ export function FlavorWheelExplorer() {
     activationStart.current = { clientX, clientY };
     gestureCategoryId.current = FLAVOR_WHEEL[wheelIndex(wheelPointFromPointer(event, SIZE).angle, FLAVOR_WHEEL.length)].id;
     holdTimer.current = setTimeout(() => {
+      // The hold survived, so the wheel takes the touch over from the page and
+      // the sweep can run in any direction.
       holdElapsed.current = true;
+      lockScroll();
     }, WHEEL_HOLD_MS);
   };
 
@@ -74,7 +87,13 @@ export function FlavorWheelExplorer() {
     if (activePointerId.current !== event.pointerId) return;
     if (!gestureActive.current) {
       const start = activationStart.current;
-      if (!holdElapsed.current || !start || !shouldActivateWheelGesture(start, event)) return;
+      if (!start) return;
+      if (!holdElapsed.current) {
+        // Moved before the hold landed: the touch was a scroll, so hand it back.
+        if (shouldAbandonWheelHold(start, event)) clearGesture();
+        return;
+      }
+      if (!shouldActivateWheelGesture(start, event)) return;
       gestureActive.current = true;
       event.currentTarget.setPointerCapture?.(event.pointerId);
       haptic("lock");
@@ -102,6 +121,7 @@ export function FlavorWheelExplorer() {
   return (
     <div className="flex flex-col gap-4">
       <svg
+        ref={wheelRef}
         viewBox={`0 0 ${SIZE} ${SIZE}`}
         className="w-full max-w-[360px] self-center select-none touch-pan-y"
         role="application"

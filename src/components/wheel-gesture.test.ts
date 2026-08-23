@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { intensityForRadius, shouldActivateWheelGesture, wheelIndex } from "@/components/wheel-gesture";
+import {
+  intensityForRadius,
+  shouldAbandonWheelHold,
+  shouldActivateWheelGesture,
+  wheelIndex,
+} from "@/components/wheel-gesture";
 
 describe("tasting-wheel gesture helpers", () => {
   it("maps a wheel angle to a stable segment", () => {
@@ -9,11 +14,20 @@ describe("tasting-wheel gesture helpers", () => {
     expect(wheelIndex(359.9, 8)).toBe(7);
   });
 
-  it("does not activate for a long press or vertical scroll, but accepts a deliberate sideways drag", () => {
+  it("activates on a deliberate sweep in any direction, since the gesture is radial", () => {
     const start = { clientX: 170, clientY: 170 };
     expect(shouldActivateWheelGesture(start, { clientX: 170, clientY: 170 })).toBe(false);
-    expect(shouldActivateWheelGesture(start, { clientX: 172, clientY: 220 })).toBe(false);
+    expect(shouldActivateWheelGesture(start, { clientX: 173, clientY: 172 })).toBe(false);
     expect(shouldActivateWheelGesture(start, { clientX: 182, clientY: 173 })).toBe(true);
+    // Reaching the descriptors at twelve o'clock is a straight vertical drag.
+    expect(shouldActivateWheelGesture(start, { clientX: 171, clientY: 140 })).toBe(true);
+  });
+
+  it("abandons the hold once the finger has travelled, so the page keeps its scroll", () => {
+    const start = { clientX: 170, clientY: 170 };
+    expect(shouldAbandonWheelHold(start, { clientX: 172, clientY: 174 })).toBe(false);
+    expect(shouldAbandonWheelHold(start, { clientX: 170, clientY: 200 })).toBe(true);
+    expect(shouldAbandonWheelHold(start, { clientX: 200, clientY: 170 })).toBe(true);
   });
 
   it("turns outward drag distance into expressive intensity", () => {

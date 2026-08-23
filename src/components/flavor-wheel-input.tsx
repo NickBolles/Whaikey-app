@@ -6,8 +6,10 @@ import { FLAVOR_WHEEL } from "@/lib/flavor-wheel";
 import {
   WHEEL_HOLD_MS,
   intensityForRadius,
+  shouldAbandonWheelHold,
   shouldActivateWheelGesture,
   shouldStartWheelGesture,
+  useWheelScrollLock,
   wheelIndex,
   wheelPointFromPointer,
 } from "@/components/wheel-gesture";
@@ -68,6 +70,7 @@ export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
   const hapticCategoryId = useRef<string | null>(null);
   const hapticIntensity = useRef<1 | 2 | 3 | null>(null);
   const suppressClick = useRef(false);
+  const { wheelRef, lockScroll, releaseScroll } = useWheelScrollLock<SVGSVGElement>();
   const selectedWedge = FLAVOR_WHEEL.find((w) => w.id === selectedWedgeId) ?? null;
 
   const wedgeCounts = useMemo(() => {
@@ -119,6 +122,7 @@ export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
   };
 
   const clearGesture = () => {
+    releaseScroll();
     if (holdTimer.current) clearTimeout(holdTimer.current);
     holdTimer.current = null;
     activeGesture.current = false;
@@ -183,7 +187,12 @@ export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
     gestureWedgeId.current = wedge.id;
     setHoldState("filling");
     holdTimer.current = setTimeout(() => {
+      // The hold survived: the wheel owns this touch now, so the page stops
+      // scrolling and the sweep can run in any direction — including straight
+      // up or down, which is what reaching the descriptors at twelve and six
+      // o'clock actually is.
       holdElapsed.current = true;
+      lockScroll();
       setHoldState("ready");
     }, WHEEL_HOLD_MS);
   };
@@ -192,7 +201,14 @@ export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
     if (activePointerId.current !== event.pointerId) return;
     if (!activeGesture.current) {
       const start = activationStart.current;
-      if (!holdElapsed.current || !start || !shouldActivateWheelGesture(start, event)) return;
+      if (!start) return;
+      if (!holdElapsed.current) {
+        // Moved before the hold landed: this was a scroll. Let go of it whole,
+        // so the hold cue disappears instead of hovering over a moving page.
+        if (shouldAbandonWheelHold(start, event)) clearGesture();
+        return;
+      }
+      if (!shouldActivateWheelGesture(start, event)) return;
       activeGesture.current = true;
       setHoldState("active");
       event.currentTarget.setPointerCapture?.(event.pointerId);
@@ -231,6 +247,7 @@ export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
   return (
     <div className="flex flex-col items-center gap-3">
       <svg
+        ref={wheelRef}
         viewBox={`0 0 ${SIZE} ${SIZE}`}
         className="w-full max-w-[360px] select-none touch-pan-y"
         role="application"
