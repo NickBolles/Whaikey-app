@@ -31,6 +31,23 @@ test.describe("signed-out smoke", () => {
     await expect(page.getByText(/Lagavulin/i).first()).toBeVisible();
   });
 
+  // The visual baselines cannot police this. Three 19px crests are ~0.4% of a
+  // 390x844 page, well under the suite's 2% maxDiffPixelRatio, so a shot of a
+  // list that silently lost its stamps still passes. Assert the count.
+  test("a bottle's passport stamps ride its detail page and its search card", async ({ page }) => {
+    await page.goto("/search");
+    await page.getByRole("searchbox").first().fill("lagavulin 16");
+    const card = page.locator("a[href^='/bottles/']").first();
+    await expect(card).toBeVisible();
+    // Country, region, style — decorative, so the origin is not read twice.
+    await expect(card.locator("[aria-hidden='true'] svg")).toHaveCount(3);
+
+    await card.click();
+    await expect(page).toHaveURL(/\/bottles\//);
+    const hero = page.locator("header").filter({ has: page.getByRole("heading", { level: 1 }) });
+    await expect(hero.locator("[aria-hidden='true'] svg")).toHaveCount(3);
+  });
+
   test("bottom nav keeps destinations focused and exposes quick actions", async ({ page }) => {
     await page.goto("/");
     const nav = page.getByRole("navigation", { name: "Primary" });
