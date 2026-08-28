@@ -26,11 +26,7 @@ export const MOVE_CLOSER_AFTER_MS = 6000;
  * neighbors: crisp barcode edges score high, blur scores low.
  */
 export function frameStats(data: Uint8ClampedArray, width: number, height: number): FrameStats {
-  const lumas = new Float32Array(width * height);
-  for (let i = 0; i < width * height; i++) {
-    const o = i * 4;
-    lumas[i] = 0.299 * data[o] + 0.587 * data[o + 1] + 0.114 * data[o + 2];
-  }
+  const lumas = frameLumas(data, width, height);
   let sum = 0;
   for (let i = 0; i < lumas.length; i++) sum += lumas[i];
 
@@ -46,6 +42,61 @@ export function frameStats(data: Uint8ClampedArray, width: number, height: numbe
     brightness: sum / lumas.length,
     sharpness: gradCount > 0 ? grad / gradCount : 0,
   };
+}
+
+/** Per-pixel luma plane for a downscaled RGBA frame. */
+export function frameLumas(data: Uint8ClampedArray, width: number, height: number): Float32Array {
+  const lumas = new Float32Array(width * height);
+  for (let i = 0; i < width * height; i++) {
+    const o = i * 4;
+    lumas[i] = 0.299 * data[o] + 0.587 * data[o + 1] + 0.114 * data[o + 2];
+  }
+  return lumas;
+}
+
+/**
+ * Mean |Δluma| between two sampled frames — how much the scene has changed.
+ * Mismatched sizes count as a full scene change (camera restarted/rotated).
+ */
+export function lumaDelta(a: Float32Array, b: Float32Array): number {
+  if (a.length !== b.length || a.length === 0) return 255;
+  let sum = 0;
+  for (let i = 0; i < a.length; i++) sum += Math.abs(a[i] - b[i]);
+  return sum / a.length;
+}
+
+// ---------------------------------------------------------------------------
+// Live label ID pacing: when the barcode loop is coming up dry, the camera can
+// read the label instead. These gates keep that automatic — but frugal: only a
+// well-lit, steady frame is worth an AI call, and the same scene is never sent
+// twice.
+// ---------------------------------------------------------------------------
+
+/** No barcode for this long before the label reader takes a turn. */
+export const AUTO_ID_QUIET_MS = 2500;
+/** Floor between automatic label reads, whatever the scene does. */
+export const AUTO_ID_MIN_INTERVAL_MS = 8000;
+/** Mean |Δluma| below which the frame is "the same scene" as the last read. */
+export const SCENE_CHANGE_MIN = 10;
+
+export interface AutoIdSignals {
+  /** ms since a barcode was last decoded (Infinity = never). */
+  msSinceDetection: number;
+  /** ms since the last automatic label read (Infinity = none yet). */
+  msSinceLastId: number;
+  stats: FrameStats | null;
+  /** Scene change vs. the frame last sent for ID; null = nothing sent yet. */
+  sceneDelta: number | null;
+}
+
+/** Whether this frame earns an automatic label-read. */
+export function shouldAutoId(s: AutoIdSignals): boolean {
+  if (!s.stats) return false;
+  if (s.stats.brightness < BRIGHTNESS_MIN || s.stats.sharpness < SHARPNESS_MIN) return false;
+  if (s.msSinceDetection < AUTO_ID_QUIET_MS) return false;
+  if (s.msSinceLastId < AUTO_ID_MIN_INTERVAL_MS) return false;
+  if (s.sceneDelta !== null && s.sceneDelta < SCENE_CHANGE_MIN) return false;
+  return true;
 }
 
 export type GuidanceKind = "ok" | "hint" | "warn";

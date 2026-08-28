@@ -15,6 +15,7 @@ import {
   Loader2,
   RefreshCw,
   ScanLine,
+  Sparkles,
   Undo2,
   X,
 } from "lucide-react";
@@ -34,9 +35,12 @@ import {
 import {
   BRIGHTNESS_MIN,
   captureWarning,
+  frameLumas,
   frameStats,
   guidanceFor,
+  lumaDelta,
   scaleBoxToCover,
+  shouldAutoId,
   type Box,
   type FrameStats,
   type Guidance,
@@ -48,8 +52,11 @@ import {
  * background while you keep scanning. Unique matches shelve themselves;
  * ambiguous ones pile up as "needs you" items you can settle after the last
  * bottle is back on the shelf. Dual-mode camera: the barcode loop runs
- * continuously and a shutter button captures a framed label photo (confirmed
- * on-device before anything is uploaded) for AI identification.
+ * continuously, and when it comes up dry on a good frame the live label
+ * reader takes a turn — an automatic AI read (paced and scene-gated in
+ * guidance.ts) that surfaces one-tap suggestions in realtime. The shutter
+ * remains for a deliberate framed shot; a clean capture goes straight into
+ * the queue, and only a dark/blurry one asks for confirmation first.
  *
  * Two scanning engines sit behind one UI (docs/NATIVE_APP.md §3.1): inside the
  * native shell, MLKit renders the camera behind the WebView and pushes barcodes
@@ -113,6 +120,7 @@ const RELATIONSHIP_LABELS: Record<Relationship, string> = {
 // Minimal typings for the (Chromium-only, for now) shape-detection API.
 interface DetectedBarcode {
   rawValue: string;
+  format?: string;
   boundingBox?: Box;
 }
 interface BarcodeDetectorLike {
@@ -120,16 +128,37 @@ interface BarcodeDetectorLike {
 }
 type BarcodeDetectorCtor = new (opts: { formats: string[] }) => BarcodeDetectorLike;
 
-type TorchTrack = Pick<MediaStreamTrack, "applyConstraints"> & {
-  getCapabilities?: () => { torch?: boolean };
+type CameraTrack = Pick<MediaStreamTrack, "applyConstraints"> & {
+  getCapabilities?: () => { torch?: boolean; focusMode?: string[] };
 };
 
-const BARCODE_FORMATS = ["upc_a", "upc_e", "ean_13", "ean_8"];
+/**
+ * Retail GTIN symbologies plus the ones whiskey actually wears: ITF-14 on
+ * gift boxes/cases and Code 128 GTINs on craft bottlings. Non-GTIN payloads
+ * are filtered out by UPC validation before they reach the queue.
+ */
+const BARCODE_FORMATS = ["upc_a", "upc_e", "ean_13", "ean_8", "itf", "code_128"];
+const RETAIL_FORMATS = new Set(["upc_a", "upc_e", "ean_13", "ean_8"]);
 /** Ignore re-detections of the same code within this window (ms). */
 const REPEAT_MS = 4000;
 const DETECT_INTERVAL_MS = 300;
 /** Longest edge for uploaded label captures. */
 const CAPTURE_MAX_PX = 1280;
+/** Longest edge for automatic live-ID frames (smaller: they're frequent). */
+const LIVE_ID_MAX_PX = 1024;
+
+/** Downscale the current video frame to a JPEG data URL (null = not ready). */
+function frameDataUrl(video: HTMLVideoElement, maxPx: number): string | null {
+  if (video.readyState < 2 || video.videoWidth === 0) return null;
+  const scale = Math.min(1, maxPx / Math.max(video.videoWidth, video.videoHeight));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(video.videoWidth * scale);
+  canvas.height = Math.round(video.videoHeight * scale);
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/jpeg", 0.85);
+}
 
 function barcodeDetectorCtor(): BarcodeDetectorCtor | null {
   if (typeof window === "undefined") return null;
@@ -167,6 +196,13 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
   const [torchChanging, setTorchChanging] = useState(false);
   const [torchUnavailable, setTorchUnavailable] = useState(false);
   const [torchReportedUnsupported, setTorchReportedUnsupported] = useState(false);
+  /** Realtime label reading (web engine only — MLKit owns the native camera). */
+  const [liveIdOn, setLiveIdOn] = useState(true);
+  const [liveReading, setLiveReading] = useState(false);
+  const [liveSuggest, setLiveSuggest] = useState<{
+    guess: string | null;
+    options: BottleSearchResult[];
+  } | null>(null);
   // Both sheets below cover the whole screen; the page behind them holds still.
   useScrollLock(capture !== null);
 
@@ -183,6 +219,14 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
   const autoTorchAttemptedRef = useRef(false);
   const sampleCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Live-ID pacing state, owned by the detector loop.
+  const liveIdOnRef = useRef(true);
+  const liveIdBusyRef = useRef(false);
+  /** Set on 503/429 — AI is off or the budget is spent; stop trying this session. */
+  const liveIdDisabledRef = useRef(false);
+  const lastIdAtRef = useRef<number | null>(null);
+  /** Luma plane of the frame last sent for ID, for the same-scene gate. */
+  const lastIdLumasRef = useRef<Float32Array | null>(null);
   // Mirrors for the detector loop, which runs outside React's render cycle.
   const pausedRef = useRef(false);
   const relationshipRef = useRef(relationship);
@@ -197,7 +241,8 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
     pausedRef.current = capture !== null || reviewId !== null;
     relationshipRef.current = relationship;
     itemsRef.current = items;
-  }, [capture, reviewId, relationship, items]);
+    liveIdOnRef.current = liveIdOn;
+  }, [capture, reviewId, relationship, items, liveIdOn]);
 
   const showToast = useCallback((text: string, kind: "ok" | "warn" = "ok") => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -414,24 +459,124 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
     [patchItem, processLabelItem],
   );
 
-  /** Sample a tiny downscaled frame for on-device brightness/sharpness stats. */
-  const sampleFrameStats = useCallback((video: HTMLVideoElement): FrameStats | null => {
-    try {
-      if (!sampleCanvasRef.current) {
-        sampleCanvasRef.current = document.createElement("canvas");
-        sampleCanvasRef.current.width = 64;
-        sampleCanvasRef.current.height = 48;
+  /** Sample a tiny downscaled frame: brightness/sharpness stats + luma plane. */
+  const sampleFrame = useCallback(
+    (video: HTMLVideoElement): { stats: FrameStats; lumas: Float32Array } | null => {
+      try {
+        if (!sampleCanvasRef.current) {
+          sampleCanvasRef.current = document.createElement("canvas");
+          sampleCanvasRef.current.width = 64;
+          sampleCanvasRef.current.height = 48;
+        }
+        const canvas = sampleCanvasRef.current;
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+        if (!ctx) return null;
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        return {
+          stats: frameStats(img.data, canvas.width, canvas.height),
+          lumas: frameLumas(img.data, canvas.width, canvas.height),
+        };
+      } catch {
+        return null;
       }
-      const canvas = sampleCanvasRef.current;
-      const ctx = canvas.getContext("2d", { willReadFrequently: true });
-      if (!ctx) return null;
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      return frameStats(img.data, canvas.width, canvas.height);
-    } catch {
-      return null;
-    }
-  }, []);
+    },
+    [],
+  );
+
+  /**
+   * Realtime label ID: when the barcode loop is coming up dry on a good frame,
+   * read the label instead — no shutter press needed. One read in flight at a
+   * time, paced and scene-gated by `shouldAutoId`, and switched off for the
+   * session the moment the server says AI is unconfigured or the budget is
+   * spent (an AI failure must never block the manual core loop).
+   */
+  const maybeAutoId = useCallback(
+    (
+      video: HTMLVideoElement,
+      sample: { stats: FrameStats; lumas: Float32Array } | null,
+      msSinceDetection: number,
+    ) => {
+      if (!liveIdOnRef.current || liveIdDisabledRef.current || liveIdBusyRef.current) return;
+      if (!sample) return;
+      const now = Date.now();
+      const wanted = shouldAutoId({
+        msSinceDetection,
+        msSinceLastId: lastIdAtRef.current === null ? Infinity : now - lastIdAtRef.current,
+        stats: sample.stats,
+        sceneDelta: lastIdLumasRef.current ? lumaDelta(sample.lumas, lastIdLumasRef.current) : null,
+      });
+      if (!wanted) return;
+      const dataUrl = frameDataUrl(video, LIVE_ID_MAX_PX);
+      if (!dataUrl) return;
+      liveIdBusyRef.current = true;
+      lastIdAtRef.current = now;
+      lastIdLumasRef.current = sample.lumas;
+      setLiveReading(true);
+      void (async () => {
+        try {
+          const res = await fetch("/api/scan-label", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              imageBase64: dataUrl.split(",", 2)[1] ?? "",
+              mediaType: "image/jpeg",
+            }),
+          });
+          if (res.status === 503 || res.status === 429) {
+            liveIdDisabledRef.current = true;
+            setLiveIdOn(false);
+            showToast(
+              res.status === 429
+                ? "AI budget used for now — live label ID paused"
+                : "AI label reading isn't configured — live ID off",
+              "warn",
+            );
+            return;
+          }
+          if (!res.ok) return; // transient — the pacing gate retries later
+          const data = (await res.json()) as {
+            extracted: { brandGuess: string | null; expressionGuess: string | null };
+            candidates: BottleSearchResult[];
+          };
+          const guess = [data.extracted.brandGuess, data.extracted.expressionGuess]
+            .filter(Boolean)
+            .join(" ");
+          if (guess || data.candidates.length > 0) {
+            setLiveSuggest({ guess: guess || null, options: data.candidates });
+            haptic("lock");
+          }
+        } catch {
+          // Offline blip — the loop tries again once the pacing gate reopens.
+        } finally {
+          liveIdBusyRef.current = false;
+          setLiveReading(false);
+        }
+      })();
+    },
+    [showToast],
+  );
+
+  /** One tap from the live strip: shelve the bottle, no sheets in between. */
+  const addSuggestion = useCallback(
+    (bottle: BottleSearchResult) => {
+      const item: QueueItem = {
+        id: newId(),
+        kind: "label",
+        upc: null,
+        thumb: null,
+        status: "resolving",
+        title: "",
+        subtitle: null,
+        options: [],
+        added: null,
+      };
+      setItems((prev) => [item, ...prev]);
+      setLiveSuggest(null);
+      void confirmAdd(item.id, null, bottle);
+    },
+    [confirmAdd],
+  );
 
   /**
    * Toggle the rear camera's hardware torch. Under MLKit the camera belongs to
@@ -457,7 +602,7 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
       return;
     }
 
-    const track = streamRef.current?.getVideoTracks()[0] as TorchTrack | undefined;
+    const track = streamRef.current?.getVideoTracks()[0] as CameraTrack | undefined;
     if (!track?.applyConstraints) return;
     const next = !torchOnRef.current;
     torchChangingRef.current = true;
@@ -475,6 +620,36 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
     } finally {
       torchChangingRef.current = false;
       setTorchChanging(false);
+    }
+  }, []);
+
+  /**
+   * Tap-to-refocus for the web engine: kick off a single-shot AF sweep where
+   * the camera supports it (then hand control back to continuous), otherwise
+   * re-assert continuous AF — either jolts a lens that's hunting or stuck.
+   */
+  const refocus = useCallback(async () => {
+    const track = streamRef.current?.getVideoTracks()[0] as CameraTrack | undefined;
+    if (!track?.applyConstraints) return;
+    setGuidance({ kind: "hint", message: "Refocusing…" });
+    try {
+      const modes = track.getCapabilities?.().focusMode ?? [];
+      if (modes.includes("single-shot")) {
+        await track.applyConstraints({
+          advanced: [{ focusMode: "single-shot" } as MediaTrackConstraintSet],
+        });
+        setTimeout(() => {
+          track
+            .applyConstraints({ advanced: [{ focusMode: "continuous" } as MediaTrackConstraintSet] })
+            .catch(() => {});
+        }, 1200);
+      } else if (modes.includes("continuous")) {
+        await track.applyConstraints({
+          advanced: [{ focusMode: "continuous" } as MediaTrackConstraintSet],
+        });
+      }
+    } catch {
+      // The camera refused; the guidance line keeps coaching instead.
     }
   }, []);
 
@@ -553,7 +728,13 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
       }
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: cameraFacing } },
+          // Ask for a real resolution: the browser default (often 640×480)
+          // starves the detector of pixels at bottle distance.
+          video: {
+            facingMode: { ideal: cameraFacing },
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+          },
           audio: false,
         });
         if (cancelled) {
@@ -563,15 +744,47 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
         streamRef.current = stream;
         setTorchUnavailable(false);
         setTorchReportedUnsupported(false);
-        const track = stream.getVideoTracks()[0] as TorchTrack | undefined;
+        const track = stream.getVideoTracks()[0] as CameraTrack | undefined;
+
+        // Chrome on Android reports an empty capability set until the track
+        // has fully started — probing only once at startup is why the torch
+        // looked unsupported. Re-probe as the track settles and only trust an
+        // explicit yes/no; if torch never surfaces, the button stays live and
+        // an actual attempt decides (toggleTorch degrades gracefully).
+        void (async () => {
+          for (const wait of [0, 400, 1500]) {
+            if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+            if (cancelled || streamRef.current !== stream) return;
+            try {
+              const torch = track?.getCapabilities?.().torch;
+              if (torch === true) {
+                torchSupportedRef.current = true;
+                setTorchReportedUnsupported(false);
+                return;
+              }
+              if (torch === false) {
+                torchSupportedRef.current = false;
+                setTorchReportedUnsupported(true);
+                return;
+              }
+            } catch {
+              return;
+            }
+          }
+        })();
+
+        // Barcode decoding lives and dies by focus — ask for continuous AF
+        // when the browser exposes it instead of whatever the camera picked.
         try {
-          const torchCapability = track?.getCapabilities?.().torch;
-          const supported = torchCapability === true;
-          torchSupportedRef.current = supported;
-          setTorchReportedUnsupported(torchCapability === false);
+          if (track?.getCapabilities?.().focusMode?.includes("continuous")) {
+            await track.applyConstraints({
+              advanced: [{ focusMode: "continuous" } as MediaTrackConstraintSet],
+            });
+          }
         } catch {
-          torchSupportedRef.current = false;
+          // Focus stays camera-chosen; scanning still works.
         }
+
         const video = videoRef.current;
         if (!video) return;
         video.srcObject = stream;
@@ -587,27 +800,44 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
           tick++;
           try {
             const codes = await detector.detect(v);
-            const hit = codes[0];
-            if (hit?.rawValue) {
-              lastDetectionAtRef.current = Date.now();
+            if (codes.length > 0 && codes[0]?.rawValue) {
+              // A label can carry several codes (serials, case codes) — take
+              // the one that decodes to a real GTIN, not just the first hit.
+              const decoded = codes
+                .map((c) => ({ c, code: normalizeUpc(c.rawValue ?? "") }))
+                .find((d): d is { c: DetectedBarcode; code: string } =>
+                  Boolean(d.code && isValidUpc(d.code)),
+                );
+              const hit = decoded?.c ?? codes[0];
               if (hit.boundingBox) flashLockBox(hit.boundingBox, v);
-
-              const code = normalizeUpc(hit.rawValue);
-              if (!code || !isValidUpc(code)) {
-                setGuidance({
-                  kind: "warn",
-                  message: "Found a barcode but couldn't read it — hold steady",
-                });
+              if (!decoded) {
+                // Deliberately NOT counted as a detection: if the only code in
+                // view can't become a GTIN, the live label reader should still
+                // get its turn below.
+                setGuidance(
+                  hit.format && !RETAIL_FORMATS.has(hit.format)
+                    ? {
+                        kind: "hint",
+                        message: "That's a different code — find the retail barcode",
+                      }
+                    : {
+                        kind: "warn",
+                        message: "Found a barcode but couldn't read it — hold steady",
+                      },
+                );
                 return;
               }
-              if (!acceptCode(code)) return;
-              setGuidance({ kind: "ok", message: `Got it · ${code}` });
+              lastDetectionAtRef.current = Date.now();
+              if (!acceptCode(decoded.code)) return;
+              setGuidance({ kind: "ok", message: `Got it · ${decoded.code}` });
               return;
             }
             // No barcode this frame: every other tick, analyze the frame
-            // locally and coach the user (light → steadiness → distance).
+            // locally, coach the user (light → steadiness → distance), and
+            // give the live label reader its chance.
             if (tick % 2 === 0) {
-              const stats = sampleFrameStats(v);
+              const sample = sampleFrame(v);
+              const stats = sample?.stats ?? null;
               const since =
                 lastDetectionAtRef.current === null
                   ? Infinity
@@ -625,6 +855,7 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
                 autoTorchAttemptedRef.current = false;
               }
               setGuidance(guidanceFor(stats, since));
+              maybeAutoId(v, sample, since);
             }
           } catch {
             // Detection hiccups (tab hidden, etc.) — just try the next frame.
@@ -645,10 +876,12 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
       torchSupportedRef.current = false;
       torchOnRef.current = false;
       autoTorchAttemptedRef.current = false;
+      liveIdBusyRef.current = false;
+      setLiveReading(false);
       setTorchOn(false);
       setTorchChanging(false);
     };
-  }, [scanEngine, cameraFacing, acceptCode, flashLockBox, sampleFrameStats, toggleTorch]);
+  }, [scanEngine, cameraFacing, acceptCode, flashLockBox, sampleFrame, maybeAutoId, toggleTorch]);
 
   /** Shutter: grab the current frame for on-device framing confirmation. */
   const captureFrame = useCallback(
@@ -663,20 +896,20 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
       }
       const video = videoRef.current;
       if (!video || video.readyState < 2) return;
-      const scale = Math.min(1, CAPTURE_MAX_PX / Math.max(video.videoWidth, video.videoHeight));
-      const canvas = document.createElement("canvas");
-      canvas.width = Math.round(video.videoWidth * scale);
-      canvas.height = Math.round(video.videoHeight * scale);
-      canvas.getContext("2d")?.drawImage(video, 0, 0, canvas.width, canvas.height);
-      setCapture({
-        dataUrl: canvas.toDataURL("image/jpeg", 0.85),
-        mediaType: "image/jpeg",
-        forItemId,
-        // Same on-device analysis as the live guidance, applied to the shot.
-        warning: captureWarning(sampleFrameStats(video)),
-      });
+      const dataUrl = frameDataUrl(video, CAPTURE_MAX_PX);
+      if (!dataUrl) return;
+      // Same on-device analysis as the live guidance, applied to the shot.
+      const warning = captureWarning(sampleFrame(video)?.stats ?? null);
+      if (!warning) {
+        // A deliberate, well-framed shutter press needs no second look —
+        // straight into the queue; only a dark/blurry shot asks first.
+        enqueueLabel(dataUrl, "image/jpeg", forItemId);
+        showToast("Reading the label…");
+        return;
+      }
+      setCapture({ dataUrl, mediaType: "image/jpeg", forItemId, warning });
     },
-    [sampleFrameStats],
+    [enqueueLabel, sampleFrame, showToast],
   );
 
   const onManualSubmit = (e: React.FormEvent) => {
@@ -776,9 +1009,27 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
           ) : (
             <video ref={videoRef} playsInline muted className="w-full aspect-[4/3] object-cover" />
           )}
+          {scanEngine === "web" && cameraState === "on" && (
+            <button
+              type="button"
+              onClick={() => void refocus()}
+              aria-label="Tap to refocus"
+              title="Tap to refocus"
+              className="absolute inset-0 w-full cursor-default bg-transparent"
+            />
+          )}
           <div aria-hidden className="absolute inset-0 pointer-events-none flex items-center justify-center">
             <div className="w-3/4 h-1/3 rounded-2xl border-2 border-accent/70 shadow-[0_0_24px_rgba(232,161,60,0.25)]" />
           </div>
+          {liveReading && (
+            <div
+              role="status"
+              className="absolute top-3 right-3 flex items-center gap-1.5 rounded-full bg-black/60 px-3 py-1.5 text-xs text-foreground/90"
+            >
+              <Loader2 size={14} strokeWidth={1.8} aria-hidden className="animate-spin" />
+              Reading label…
+            </div>
+          )}
           {/* Live lock: outlines the barcode the detector just saw, in place. */}
           {lockBox && (
             <div
@@ -833,6 +1084,25 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
               >
                 <Keyboard size={16} strokeWidth={1.8} aria-hidden /> Type it
               </button>
+              {scanEngine === "web" && (
+                <button
+                  type="button"
+                  onClick={() => setLiveIdOn((v) => !v)}
+                  disabled={cameraState !== "on"}
+                  aria-pressed={liveIdOn}
+                  aria-label={liveIdOn ? "Turn off live label ID" : "Turn on live label ID"}
+                  title={
+                    liveIdOn
+                      ? "Live label ID on — labels are read automatically"
+                      : "Live label ID off"
+                  }
+                  className={`btn-secondary p-2.5 rounded-full disabled:opacity-50 ${
+                    liveIdOn ? "text-accent" : ""
+                  }`}
+                >
+                  <Sparkles size={18} strokeWidth={1.8} aria-hidden />
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => void toggleTorch()}
@@ -872,6 +1142,56 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Realtime label suggestions — one tap to shelve, no sheet. */}
+      {liveSuggest && (
+        <section aria-label="Live label match" className="card-flat p-3.5 flex flex-col gap-2.5">
+          <div className="flex items-start justify-between gap-3">
+            <p className="text-sm text-muted leading-relaxed min-w-0">
+              <Sparkles size={14} strokeWidth={1.8} aria-hidden className="inline mr-1.5 text-accent" />
+              {liveSuggest.guess ? (
+                <>
+                  Label reads{" "}
+                  <span className="text-foreground font-medium">&ldquo;{liveSuggest.guess}&rdquo;</span>
+                </>
+              ) : (
+                "Read the label"
+              )}
+              {liveSuggest.options.length === 0 &&
+                " — no catalog match yet. Keep the barcode in frame or search below."}
+            </p>
+            <button
+              type="button"
+              onClick={() => setLiveSuggest(null)}
+              aria-label="Dismiss label suggestions"
+              className="btn-secondary p-1.5 rounded-full shrink-0"
+            >
+              <X size={14} strokeWidth={2} aria-hidden />
+            </button>
+          </div>
+          {liveSuggest.options.length > 0 && (
+            <ul className="flex flex-col gap-2">
+              {liveSuggest.options.map((b) => (
+                <li key={b.id} className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="font-medium truncate">{b.name}</div>
+                    <div className="text-xs text-muted truncate mt-0.5">
+                      {[b.distillery, originLabel(b.region, b.country)].filter(Boolean).join(" · ")}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => addSuggestion(b)}
+                    className="btn-primary shrink-0 px-4 py-2 text-sm font-medium"
+                  >
+                    Add
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
       )}
 
       {cameraState === "unavailable" && (

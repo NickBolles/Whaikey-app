@@ -131,7 +131,17 @@ export async function startNativeScan(
       formats:
         options.formats === "qr"
           ? [BarcodeFormat.QrCode]
-          : [BarcodeFormat.UpcA, BarcodeFormat.UpcE, BarcodeFormat.Ean13, BarcodeFormat.Ean8],
+          : [
+              BarcodeFormat.UpcA,
+              BarcodeFormat.UpcE,
+              BarcodeFormat.Ean13,
+              BarcodeFormat.Ean8,
+              // Whiskey labels are wilder than grocery shelves: gift boxes and
+              // cases carry ITF-14, some craft bottlers print Code 128 GTINs.
+              // Non-GTIN payloads are filtered by the caller's UPC validation.
+              BarcodeFormat.Itf,
+              BarcodeFormat.Code128,
+            ],
       lensFacing: options.facing === "front" ? LensFacing.Front : LensFacing.Back,
     });
 

@@ -1,11 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
+  AUTO_ID_MIN_INTERVAL_MS,
+  AUTO_ID_QUIET_MS,
   BRIGHTNESS_MIN,
   MOVE_CLOSER_AFTER_MS,
+  SCENE_CHANGE_MIN,
   captureWarning,
+  frameLumas,
   frameStats,
   guidanceFor,
+  lumaDelta,
   scaleBoxToCover,
+  shouldAutoId,
 } from "./guidance";
 
 /** Build RGBA data for a WxH frame from a per-pixel gray-value function. */
@@ -57,6 +63,64 @@ describe("captureWarning", () => {
     expect(captureWarning({ brightness: 150, sharpness: 1 })).toMatch(/blurry/i);
     expect(captureWarning({ brightness: 150, sharpness: 40 })).toBeNull();
     expect(captureWarning(null)).toBeNull();
+  });
+});
+
+describe("lumaDelta", () => {
+  it("is zero for identical frames and grows with scene change", () => {
+    const a = frameLumas(gray(8, 8, () => 100), 8, 8);
+    const b = frameLumas(gray(8, 8, () => 100), 8, 8);
+    const c = frameLumas(gray(8, 8, () => 180), 8, 8);
+    expect(lumaDelta(a, b)).toBe(0);
+    expect(lumaDelta(a, c)).toBeCloseTo(80, 0);
+  });
+
+  it("treats mismatched frame sizes as a full scene change", () => {
+    const a = frameLumas(gray(8, 8, () => 100), 8, 8);
+    const b = frameLumas(gray(4, 4, () => 100), 4, 4);
+    expect(lumaDelta(a, b)).toBe(255);
+  });
+});
+
+describe("shouldAutoId", () => {
+  const goodFrame = { brightness: 150, sharpness: 40 };
+  const ready = {
+    msSinceDetection: AUTO_ID_QUIET_MS,
+    msSinceLastId: Infinity,
+    stats: goodFrame,
+    sceneDelta: null,
+  };
+
+  it("fires on a good quiet frame with no prior read", () => {
+    expect(shouldAutoId(ready)).toBe(true);
+  });
+
+  it("waits while barcodes are still being found", () => {
+    expect(shouldAutoId({ ...ready, msSinceDetection: AUTO_ID_QUIET_MS - 1 })).toBe(false);
+  });
+
+  it("never spends an AI call on a dark or blurry frame", () => {
+    expect(shouldAutoId({ ...ready, stats: null })).toBe(false);
+    expect(shouldAutoId({ ...ready, stats: { brightness: 20, sharpness: 40 } })).toBe(false);
+    expect(shouldAutoId({ ...ready, stats: { brightness: 150, sharpness: 1 } })).toBe(false);
+  });
+
+  it("paces reads and skips an unchanged scene", () => {
+    expect(shouldAutoId({ ...ready, msSinceLastId: AUTO_ID_MIN_INTERVAL_MS - 1 })).toBe(false);
+    expect(
+      shouldAutoId({
+        ...ready,
+        msSinceLastId: AUTO_ID_MIN_INTERVAL_MS,
+        sceneDelta: SCENE_CHANGE_MIN - 1,
+      }),
+    ).toBe(false);
+    expect(
+      shouldAutoId({
+        ...ready,
+        msSinceLastId: AUTO_ID_MIN_INTERVAL_MS,
+        sceneDelta: SCENE_CHANGE_MIN,
+      }),
+    ).toBe(true);
   });
 });
 

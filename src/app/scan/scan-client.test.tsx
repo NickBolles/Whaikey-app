@@ -104,6 +104,103 @@ describe("ScanClient (manual fallback mode)", () => {
     expect(enabledFlashlight).not.toBeDisabled();
   });
 
+  it("applies continuous autofocus when the camera supports it", async () => {
+    const applyConstraints = vi.fn().mockResolvedValue(undefined);
+    const track = {
+      getCapabilities: () => ({ torch: true, focusMode: ["continuous"] }),
+      applyConstraints,
+      stop: vi.fn(),
+    };
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: {
+        getUserMedia: vi.fn().mockResolvedValue({
+          getTracks: () => [track],
+          getVideoTracks: () => [track],
+        }),
+      },
+    });
+    Object.defineProperty(HTMLMediaElement.prototype, "srcObject", {
+      configurable: true,
+      set: () => undefined,
+    });
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    mockFetch(() => scanMiss());
+    render(<ScanClient />);
+
+    await waitFor(() =>
+      expect(applyConstraints).toHaveBeenCalledWith({
+        advanced: [{ focusMode: "continuous" }],
+      }),
+    );
+  });
+
+  it("re-probes torch support after the track settles instead of trusting the first read", async () => {
+    // Chrome on Android reports {} until the camera has started; only a later
+    // read carries the real answer. Here that answer is an explicit "no".
+    let reads = 0;
+    const track = {
+      getCapabilities: () => (++reads < 3 ? {} : { torch: false }),
+      applyConstraints: vi.fn().mockResolvedValue(undefined),
+      stop: vi.fn(),
+    };
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: {
+        getUserMedia: vi.fn().mockResolvedValue({
+          getTracks: () => [track],
+          getVideoTracks: () => [track],
+        }),
+      },
+    });
+    Object.defineProperty(HTMLMediaElement.prototype, "srcObject", {
+      configurable: true,
+      set: () => undefined,
+    });
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    mockFetch(() => scanMiss());
+    render(<ScanClient />);
+
+    const flashlight = await screen.findByRole(
+      "button",
+      { name: /flashlight unavailable/i },
+      { timeout: 3000 },
+    );
+    expect(flashlight).toBeDisabled();
+  });
+
+  it("offers the live label ID toggle on the web engine", async () => {
+    const track = {
+      getCapabilities: () => ({ torch: true }),
+      applyConstraints: vi.fn().mockResolvedValue(undefined),
+      stop: vi.fn(),
+    };
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: {
+        getUserMedia: vi.fn().mockResolvedValue({
+          getTracks: () => [track],
+          getVideoTracks: () => [track],
+        }),
+      },
+    });
+    Object.defineProperty(HTMLMediaElement.prototype, "srcObject", {
+      configurable: true,
+      set: () => undefined,
+    });
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    mockFetch(() => scanMiss());
+    const user = userEvent.setup();
+    render(<ScanClient />);
+
+    const toggle = await screen.findByRole("button", { name: /turn off live label id/i });
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+    await user.click(toggle);
+    expect(
+      await screen.findByRole("button", { name: /turn on live label id/i }),
+    ).toHaveAttribute("aria-pressed", "false");
+  });
+
   it("keeps the flashlight disabled when the camera explicitly reports no torch", async () => {
     const applyConstraints = vi.fn().mockResolvedValue(undefined);
     const track = {
