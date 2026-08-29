@@ -457,6 +457,33 @@ describe("ScanClient (manual fallback mode)", () => {
     expect(screen.getByText(/scanned this session \(1\)/i)).toBeTruthy();
   });
 
+  it("retries a failed save by re-confirming the picked bottle, not re-identifying", async () => {
+    let upcCalls = 0;
+    let confirmCalls = 0;
+    mockFetch((url) => {
+      if (url.includes("/api/scan/upc")) {
+        upcCalls += 1;
+        return { upc: UPC, matches: [EAGLE], candidates: [], externalName: null };
+      }
+      confirmCalls += 1;
+      if (confirmCalls === 1) return new Response(null, { status: 500 });
+      return confirmResponse(EAGLE, "ub-retry");
+    });
+    const user = userEvent.setup();
+    render(<ScanClient />);
+
+    await user.type(screen.getByLabelText(/barcode number/i), UPC);
+    await user.click(screen.getByRole("button", { name: "Scan" }));
+
+    expect(await screen.findByText(/couldn't save — tap to retry/i)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: /retry/i }));
+
+    expect(await screen.findByText(/scanned this session \(1\)/i)).toBeTruthy();
+    // The bottle was already identified: the retry goes straight to confirm.
+    expect(upcCalls).toBe(1);
+    expect(confirmCalls).toBe(2);
+  });
+
   it("undo removes the shelf row and the queue entry", async () => {
     const deletes: string[] = [];
     mockFetch((url, init) => {

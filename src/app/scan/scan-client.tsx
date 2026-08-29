@@ -103,6 +103,8 @@ interface QueueItem {
   subtitle: string | null;
   options: BottleSearchResult[];
   added: AddedInfo | null;
+  /** Bottle picked for a failed save, so Retry re-confirms it directly. */
+  pendingBottle?: BottleSearchResult | null;
 }
 
 interface Capture {
@@ -290,6 +292,7 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
         const updated = res.status !== 201;
         patchItem(itemId, {
           status: "added",
+          pendingBottle: null,
           added: {
             userBottleId: data.userBottle?.id ?? null,
             bottleId: bottle.id,
@@ -302,7 +305,14 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
         haptic("success");
         showToast(updated ? `${bottle.name} — shelf updated` : `Added ${bottle.name}`);
       } catch {
-        patchItem(itemId, { status: "failed", subtitle: "Couldn't save — tap to retry." });
+        // Keep the picked bottle on the item: Retry then re-confirms it
+        // directly — vital for live suggestions, which have no upc or photo
+        // to re-identify from.
+        patchItem(itemId, {
+          status: "failed",
+          subtitle: "Couldn't save — tap to retry.",
+          pendingBottle: bottle,
+        });
         haptic("warning");
         showToast("Couldn't save that one", "warn");
       }
@@ -1018,6 +1028,11 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
   };
 
   const retry = (item: QueueItem) => {
+    if (item.pendingBottle) {
+      // The bottle is already identified — only the save failed.
+      void confirmAdd(item.id, item.upc, item.pendingBottle);
+      return;
+    }
     if (item.kind === "upc" && item.upc) {
       patchItem(item.id, { status: "resolving" });
       void processUpcItem(item.id, item.upc);
