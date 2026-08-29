@@ -571,7 +571,13 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
             );
             return;
           }
-          if (!res.ok) return; // transient — the pacing gate retries later
+          if (!res.ok) {
+            // Transient server error: forget the submitted scene (unless a
+            // newer read owns it) so the unchanged bottle is eligible again
+            // once the pacing gate reopens.
+            if (req === liveIdReqRef.current) lastIdSceneRef.current = null;
+            return;
+          }
           const data = (await res.json()) as {
             extracted: { brandGuess: string | null; expressionGuess: string | null };
             candidates: BottleSearchResult[];
@@ -587,7 +593,9 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
             haptic("lock");
           }
         } catch {
-          // Offline blip — the loop tries again once the pacing gate reopens.
+          // Offline blip: same as above — without forgetting the scene, the
+          // same-scene gate would suppress the retry the pacing gate allows.
+          if (req === liveIdReqRef.current) lastIdSceneRef.current = null;
         } finally {
           // Only the read that owns the busy flag may clear it — a read
           // retired by a camera restart must not release a newer one's lock.
