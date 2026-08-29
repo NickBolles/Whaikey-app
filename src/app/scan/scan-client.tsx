@@ -234,6 +234,12 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
    * for the previous bottle under the current viewfinder.
    */
   const liveIdGenRef = useRef(0);
+  /**
+   * Identity of the current in-flight read. A camera restart bumps it while
+   * clearing the busy flag, so a retired read's `finally` can't clear state
+   * that now belongs to a newer read started by the restarted camera.
+   */
+  const liveIdReqRef = useRef(0);
   // Mirrors for the detector loop, which runs outside React's render cycle.
   const pausedRef = useRef(false);
   const relationshipRef = useRef(relationship);
@@ -525,6 +531,7 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
       lastIdLumasRef.current = sample.lumas;
       setLiveReading(true);
       const gen = liveIdGenRef.current;
+      const req = ++liveIdReqRef.current;
       void (async () => {
         try {
           const res = await fetch("/api/scan-label", {
@@ -564,8 +571,12 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
         } catch {
           // Offline blip — the loop tries again once the pacing gate reopens.
         } finally {
-          liveIdBusyRef.current = false;
-          setLiveReading(false);
+          // Only the read that owns the busy flag may clear it — a read
+          // retired by a camera restart must not release a newer one's lock.
+          if (req === liveIdReqRef.current) {
+            liveIdBusyRef.current = false;
+            setLiveReading(false);
+          }
         }
       })();
     },
@@ -894,9 +905,12 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
       torchSupportedRef.current = false;
       torchOnRef.current = false;
       autoTorchAttemptedRef.current = false;
-      liveIdBusyRef.current = false;
-      // Camera restart (facing switch, unmount) — retire in-flight reads.
+      // Camera restart (facing switch, unmount) — retire in-flight reads:
+      // their results are discarded (gen) and their completion no longer
+      // clears the busy flag (req), which is released here instead.
       liveIdGenRef.current += 1;
+      liveIdReqRef.current += 1;
+      liveIdBusyRef.current = false;
       setLiveReading(false);
       setTorchOn(false);
       setTorchChanging(false);
@@ -1089,14 +1103,14 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
             {/* Icon-only round controls: five of these plus the guidance text
                 must fit a 375px viewport without clipping (the card is
                 overflow-hidden, so anything wider simply disappears). */}
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex items-center gap-1.5 shrink-0">
               <button
                 type="button"
                 onClick={() => setCameraFacing((facing) => facing === "environment" ? "user" : "environment")}
                 disabled={cameraState !== "on"}
                 aria-label={cameraFacing === "environment" ? "Switch to front camera" : "Use rear camera"}
                 title={cameraFacing === "environment" ? "Switch to front camera" : "Use rear camera"}
-                className="btn-secondary p-2.5 rounded-full disabled:opacity-50"
+                className="btn-secondary min-w-11 min-h-11 flex items-center justify-center rounded-full disabled:opacity-50"
               >
                 <SwitchCamera size={18} strokeWidth={1.8} aria-hidden />
               </button>
@@ -1106,7 +1120,7 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
                 aria-pressed={manualOpen}
                 aria-label="Type in the barcode"
                 title="Type in the barcode"
-                className={`btn-secondary p-2.5 rounded-full ${manualOpen ? "text-accent" : ""}`}
+                className={`btn-secondary min-w-11 min-h-11 flex items-center justify-center rounded-full ${manualOpen ? "text-accent" : ""}`}
               >
                 <Keyboard size={18} strokeWidth={1.8} aria-hidden />
               </button>
@@ -1122,7 +1136,7 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
                       ? "Live label ID on — labels are read automatically"
                       : "Live label ID off"
                   }
-                  className={`btn-secondary p-2.5 rounded-full disabled:opacity-50 ${
+                  className={`btn-secondary min-w-11 min-h-11 flex items-center justify-center rounded-full disabled:opacity-50 ${
                     liveIdOn ? "text-accent" : ""
                   }`}
                 >
@@ -1148,7 +1162,7 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
                       : "Turn flashlight on"
                 }
                 disabled={cameraState !== "on" || torchChanging || torchUnavailable || torchReportedUnsupported}
-                className={`btn-secondary p-2.5 rounded-full disabled:opacity-50 ${torchOn ? "text-accent" : ""}`}
+                className={`btn-secondary min-w-11 min-h-11 flex items-center justify-center rounded-full disabled:opacity-50 ${torchOn ? "text-accent" : ""}`}
               >
                 {torchOn ? (
                   <FlashlightOff size={18} strokeWidth={1.8} aria-hidden />
@@ -1161,7 +1175,7 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
                 onClick={() => captureFrame(null)}
                 disabled={cameraState !== "on"}
                 aria-label="Capture the label"
-                className="btn-primary p-2.5 rounded-full disabled:opacity-50"
+                className="btn-primary min-w-11 min-h-11 flex items-center justify-center rounded-full disabled:opacity-50"
               >
                 <Aperture size={20} strokeWidth={1.8} aria-hidden />
               </button>
