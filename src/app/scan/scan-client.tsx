@@ -42,6 +42,7 @@ import {
   lumaDelta,
   SCENE_CHANGE_MIN,
   scaleBoxToCover,
+  sceneFingerprint,
   shouldAutoId,
   type Box,
   type FrameStats,
@@ -227,8 +228,8 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
   /** Set on 503/429 — AI is off or the budget is spent; stop trying this session. */
   const liveIdDisabledRef = useRef(false);
   const lastIdAtRef = useRef<number | null>(null);
-  /** Luma plane of the frame last sent for ID, for the same-scene gate. */
-  const lastIdLumasRef = useRef<Float32Array | null>(null);
+  /** Scene fingerprint of the frame last sent for ID (same-scene gate). */
+  const lastIdSceneRef = useRef<Float32Array | null>(null);
   /**
    * Bumped when the scene has definitively moved on (a barcode was queued, or
    * the camera restarted) so an in-flight label read can't land suggestions
@@ -477,9 +478,9 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
     [patchItem, processLabelItem],
   );
 
-  /** Sample a tiny downscaled frame: brightness/sharpness stats + luma plane. */
+  /** Sample a tiny downscaled frame: quality stats + a scene fingerprint. */
   const sampleFrame = useCallback(
-    (video: HTMLVideoElement): { stats: FrameStats; lumas: Float32Array } | null => {
+    (video: HTMLVideoElement): { stats: FrameStats; scene: Float32Array } | null => {
       try {
         if (!sampleCanvasRef.current) {
           sampleCanvasRef.current = document.createElement("canvas");
@@ -491,9 +492,10 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
         if (!ctx) return null;
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
         const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const lumas = frameLumas(img.data, canvas.width, canvas.height);
         return {
           stats: frameStats(img.data, canvas.width, canvas.height),
-          lumas: frameLumas(img.data, canvas.width, canvas.height),
+          scene: sceneFingerprint(lumas, canvas.width, canvas.height),
         };
       } catch {
         return null;
@@ -512,37 +514,36 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
   const maybeAutoId = useCallback(
     (
       video: HTMLVideoElement,
-      sample: { stats: FrameStats; lumas: Float32Array } | null,
+      sample: { stats: FrameStats; scene: Float32Array } | null,
       msSinceDetection: number,
     ) => {
       if (!liveIdOnRef.current || liveIdDisabledRef.current) return;
-      if (liveIdBusyRef.current) {
-        // The scene drifted away from the frame a read is in flight for —
-        // its result would describe a bottle no longer in view, so retire it
-        // rather than let it surface under the wrong viewfinder.
-        if (
-          sample &&
-          lastIdLumasRef.current &&
-          lumaDelta(sample.lumas, lastIdLumasRef.current) >= SCENE_CHANGE_MIN
-        ) {
-          liveIdGenRef.current += 1;
-        }
-        return;
+      const sceneDelta =
+        sample && lastIdSceneRef.current
+          ? lumaDelta(sample.scene, lastIdSceneRef.current)
+          : null;
+      if (sceneDelta !== null && sceneDelta >= SCENE_CHANGE_MIN) {
+        // The camera is aimed at something new: whatever the last read
+        // produced — still in flight or already on screen — no longer
+        // describes the viewfinder, so retire it and clear the strip.
+        // (Fingerprints, not raw pixels, so hand tremor doesn't trip this.)
+        liveIdGenRef.current += 1;
+        setLiveSuggest(null);
       }
-      if (!sample) return;
+      if (liveIdBusyRef.current || !sample) return;
       const now = Date.now();
       const wanted = shouldAutoId({
         msSinceDetection,
         msSinceLastId: lastIdAtRef.current === null ? Infinity : now - lastIdAtRef.current,
         stats: sample.stats,
-        sceneDelta: lastIdLumasRef.current ? lumaDelta(sample.lumas, lastIdLumasRef.current) : null,
+        sceneDelta,
       });
       if (!wanted) return;
       const dataUrl = frameDataUrl(video, LIVE_ID_MAX_PX);
       if (!dataUrl) return;
       liveIdBusyRef.current = true;
       lastIdAtRef.current = now;
-      lastIdLumasRef.current = sample.lumas;
+      lastIdSceneRef.current = sample.scene;
       setLiveReading(true);
       const gen = liveIdGenRef.current;
       const req = ++liveIdReqRef.current;

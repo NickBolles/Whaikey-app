@@ -55,7 +55,7 @@ export function frameLumas(data: Uint8ClampedArray, width: number, height: numbe
 }
 
 /**
- * Mean |Δluma| between two sampled frames — how much the scene has changed.
+ * Mean |Δluma| between two equal-length luma planes or fingerprints.
  * Mismatched sizes count as a full scene change (camera restarted/rotated).
  */
 export function lumaDelta(a: Float32Array, b: Float32Array): number {
@@ -63,6 +63,39 @@ export function lumaDelta(a: Float32Array, b: Float32Array): number {
   let sum = 0;
   for (let i = 0; i < a.length; i++) sum += Math.abs(a[i] - b[i]);
   return sum / a.length;
+}
+
+/** Scene fingerprint grid — coarse on purpose (see sceneFingerprint). */
+const SCENE_GRID_W = 8;
+const SCENE_GRID_H = 6;
+
+/**
+ * Motion-tolerant scene fingerprint: block-mean luma over a coarse grid.
+ * Comparing raw luma planes is useless on a handheld camera — shifting a
+ * sharp label by a single pixel changes per-pixel deltas by roughly the
+ * frame's sharpness score, reading as a "new scene". An 8×8-pixel block's
+ * mean barely moves under that shift, while a different bottle or
+ * background moves most blocks — so fingerprints (compared via lumaDelta)
+ * detect re-aiming, not hand tremor.
+ */
+export function sceneFingerprint(
+  lumas: Float32Array,
+  width: number,
+  height: number,
+): Float32Array {
+  const sums = new Float32Array(SCENE_GRID_W * SCENE_GRID_H);
+  const counts = new Float32Array(SCENE_GRID_W * SCENE_GRID_H);
+  for (let y = 0; y < height; y++) {
+    const gy = Math.min(SCENE_GRID_H - 1, Math.floor((y * SCENE_GRID_H) / height));
+    for (let x = 0; x < width; x++) {
+      const gx = Math.min(SCENE_GRID_W - 1, Math.floor((x * SCENE_GRID_W) / width));
+      const i = gy * SCENE_GRID_W + gx;
+      sums[i] += lumas[y * width + x];
+      counts[i] += 1;
+    }
+  }
+  for (let i = 0; i < sums.length; i++) sums[i] = counts[i] > 0 ? sums[i] / counts[i] : 0;
+  return sums;
 }
 
 // ---------------------------------------------------------------------------
@@ -76,7 +109,11 @@ export function lumaDelta(a: Float32Array, b: Float32Array): number {
 export const AUTO_ID_QUIET_MS = 2500;
 /** Floor between automatic label reads, whatever the scene does. */
 export const AUTO_ID_MIN_INTERVAL_MS = 8000;
-/** Mean |Δluma| below which the frame is "the same scene" as the last read. */
+/**
+ * Mean |Δ| between scene fingerprints below which the frame is "the same
+ * scene" as the last read. Fingerprint deltas, not raw luma deltas — see
+ * sceneFingerprint for why.
+ */
 export const SCENE_CHANGE_MIN = 10;
 
 export interface AutoIdSignals {
