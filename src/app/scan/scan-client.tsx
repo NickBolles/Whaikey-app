@@ -201,6 +201,8 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
   const [torchReportedUnsupported, setTorchReportedUnsupported] = useState(false);
   /** Realtime label reading (web engine only — MLKit owns the native camera). */
   const [liveIdOn, setLiveIdOn] = useState(true);
+  /** Mirrors liveIdDisabledRef so the toggle greys out instead of lying. */
+  const [liveIdDisabled, setLiveIdDisabled] = useState(false);
   const [liveReading, setLiveReading] = useState(false);
   const [liveSuggest, setLiveSuggest] = useState<{
     guess: string | null;
@@ -559,6 +561,7 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
           });
           if (res.status === 503 || res.status === 429) {
             liveIdDisabledRef.current = true;
+            setLiveIdDisabled(true);
             setLiveIdOn(false);
             showToast(
               res.status === 429
@@ -825,11 +828,16 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
         } catch {
           // Focus stays camera-chosen; scanning still works.
         }
+        // The awaits above yield: a camera flip meanwhile ran this effect's
+        // cleanup, which stopped the stream — starting the preview and the
+        // detector loop now would leave an interval no cleanup owns.
+        if (cancelled) return;
 
         const video = videoRef.current;
         if (!video) return;
         video.srcObject = stream;
         await video.play();
+        if (cancelled) return;
         setCameraState("on");
         lastDetectionAtRef.current = Date.now(); // don't nag "move closer" instantly
 
@@ -1092,7 +1100,9 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
               }}
             />
           )}
-          <div className="absolute bottom-0 inset-x-0 p-3 flex items-center justify-between gap-2 bg-gradient-to-t from-black/70 to-transparent">
+          {/* Mobile stacks guidance above the controls: five 44px controls
+              leave a one-row footer no room for a readable coaching line. */}
+          <div className="absolute bottom-0 inset-x-0 p-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between bg-gradient-to-t from-black/80 to-transparent">
             <span
               role="status"
               aria-live="polite"
@@ -1118,7 +1128,7 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
             {/* Icon-only round controls: five of these plus the guidance text
                 must fit a 375px viewport without clipping (the card is
                 overflow-hidden, so anything wider simply disappears). */}
-            <div className="flex items-center gap-1.5 shrink-0">
+            <div className="flex items-center justify-between gap-1.5 shrink-0 sm:justify-end">
               <button
                 type="button"
                 onClick={() => setCameraFacing((facing) => facing === "environment" ? "user" : "environment")}
@@ -1153,13 +1163,21 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
                       setLiveReading(false);
                     }
                   }}
-                  disabled={cameraState !== "on"}
+                  disabled={cameraState !== "on" || liveIdDisabled}
                   aria-pressed={liveIdOn}
-                  aria-label={liveIdOn ? "Turn off live label ID" : "Turn on live label ID"}
+                  aria-label={
+                    liveIdDisabled
+                      ? "Live label ID unavailable"
+                      : liveIdOn
+                        ? "Turn off live label ID"
+                        : "Turn on live label ID"
+                  }
                   title={
-                    liveIdOn
-                      ? "Live label ID on — labels are read automatically"
-                      : "Live label ID off"
+                    liveIdDisabled
+                      ? "Live label ID is unavailable right now"
+                      : liveIdOn
+                        ? "Live label ID on — labels are read automatically"
+                        : "Live label ID off"
                   }
                   className={`btn-secondary min-w-11 min-h-11 flex items-center justify-center rounded-full disabled:opacity-50 ${
                     liveIdOn ? "text-accent" : ""

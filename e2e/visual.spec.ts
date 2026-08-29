@@ -294,6 +294,82 @@ test.describe("signed in (demo collector)", () => {
     await expect(page).toHaveScreenshot(shot("scan"), { fullPage: true });
   });
 
+  test("scan (live camera, label suggestion)", async ({ page }) => {
+    // Deterministic fake camera: a statically painted "bottle label" streamed
+    // from a canvas, so the live viewfinder (controls, guidance, suggestion
+    // strip) renders without hardware. BarcodeDetector is removed so every
+    // environment takes the same barcode-free live-ID path, and the label
+    // reader's API is stubbed for a stable one-tap suggestion.
+    await page.addInitScript(() => {
+      delete (window as { BarcodeDetector?: unknown }).BarcodeDetector;
+      const canvas = document.createElement("canvas");
+      canvas.width = 640;
+      canvas.height = 480;
+      const draw = () => {
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+        ctx.fillStyle = "#241a12"; // dark shelf
+        ctx.fillRect(0, 0, 640, 480);
+        ctx.fillStyle = "#e8d9b5"; // paper label
+        ctx.fillRect(200, 110, 240, 280);
+        ctx.fillStyle = "#5a3a1a"; // banner
+        ctx.fillRect(220, 140, 200, 44);
+        ctx.fillStyle = "#1d130b";
+        // High-contrast bars so the on-device sharpness gate passes.
+        for (let x = 232; x < 408; x += 16) ctx.fillRect(x, 320, 8, 48);
+        ctx.font = "bold 26px serif";
+        ctx.fillText("EAGLE RARE", 226, 230);
+        ctx.font = "18px serif";
+        ctx.fillText("10 YEARS OLD", 248, 264);
+      };
+      draw();
+      setInterval(draw, 100); // identical pixels, but frames keep flowing
+      const stream = canvas.captureStream(10);
+      Object.defineProperty(navigator, "mediaDevices", {
+        configurable: true,
+        value: { getUserMedia: async () => stream },
+      });
+    });
+    await page.route("**/api/scan-label", (route) =>
+      route.fulfill({
+        json: {
+          extracted: {
+            brandGuess: "Eagle Rare",
+            expressionGuess: "10 Year",
+            ageStatement: "10 Year",
+            proof: 90,
+          },
+          candidates: [
+            {
+              id: "eagle-rare-10",
+              name: "Eagle Rare 10 Year",
+              category: "bourbon",
+              country: "USA",
+              region: "Kentucky",
+              ageYears: 10,
+              abv: 45,
+              msrp: 40,
+              avgPrice: 55,
+              distillery: "Buffalo Trace Distillery",
+            },
+          ],
+        },
+      }),
+    );
+    await page.goto("/scan");
+    // Wait for the live viewfinder (the toggle enables once the camera is on).
+    await expect(page.getByRole("button", { name: /turn off live label id/i })).toBeEnabled();
+    // This suite pins Date.now(), which also freezes the live reader's
+    // "quiet for 2.5s" gate — hop the fixed clock forward to open it
+    // deterministically instead of sleeping.
+    await page.clock.setFixedTime(new Date("2026-07-19T19:30:10Z"));
+    await expect(page.getByRole("region", { name: "Live label match" })).toBeVisible({
+      timeout: 20_000,
+    });
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("scan-live"), { fullPage: true });
+  });
+
   test("import (paste step)", async ({ page }) => {
     await page.goto("/import");
     await expect(page.getByLabel(/paste csv/i)).toBeVisible();
