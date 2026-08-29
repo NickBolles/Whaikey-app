@@ -55,6 +55,15 @@ describe("guidanceFor", () => {
     expect(guidanceFor(bright, 100).message).toMatch(/center the barcode/i);
     expect(guidanceFor(null, 100).message).toMatch(/center the barcode/i);
   });
+
+  it("never chases barcodes on a browser that can't decode them", () => {
+    // Light and steadiness still coach; barcode-hunting hints do not.
+    expect(guidanceFor({ brightness: 20, sharpness: 1 }, Infinity, false).message).toMatch(
+      /too dark/i,
+    );
+    expect(guidanceFor(bright, Infinity, false).message).toMatch(/point at the label/i);
+    expect(guidanceFor(bright, 100, false).message).toMatch(/point at the label/i);
+  });
 });
 
 describe("captureWarning", () => {

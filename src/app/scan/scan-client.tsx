@@ -16,6 +16,7 @@ import {
   RefreshCw,
   ScanLine,
   Sparkles,
+  SwitchCamera,
   Undo2,
   X,
 } from "lucide-react";
@@ -227,6 +228,12 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
   const lastIdAtRef = useRef<number | null>(null);
   /** Luma plane of the frame last sent for ID, for the same-scene gate. */
   const lastIdLumasRef = useRef<Float32Array | null>(null);
+  /**
+   * Bumped when the scene has definitively moved on (a barcode was queued, or
+   * the camera restarted) so an in-flight label read can't land suggestions
+   * for the previous bottle under the current viewfinder.
+   */
+  const liveIdGenRef = useRef(0);
   // Mirrors for the detector loop, which runs outside React's render cycle.
   const pausedRef = useRef(false);
   const relationshipRef = useRef(relationship);
@@ -407,6 +414,10 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
         added: null,
       };
       setItems((prev) => [item, ...prev]);
+      // A barcode hit supersedes whatever the label reader was working on —
+      // retire in-flight reads and any suggestions still on screen.
+      liveIdGenRef.current += 1;
+      setLiveSuggest(null);
       haptic("lock");
       void processUpcItem(item.id, code);
       return true;
@@ -513,6 +524,7 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
       lastIdAtRef.current = now;
       lastIdLumasRef.current = sample.lumas;
       setLiveReading(true);
+      const gen = liveIdGenRef.current;
       void (async () => {
         try {
           const res = await fetch("/api/scan-label", {
@@ -539,6 +551,9 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
             extracted: { brandGuess: string | null; expressionGuess: string | null };
             candidates: BottleSearchResult[];
           };
+          // The user scanned or moved on while this read was in flight — a
+          // suggestion for the previous bottle must never reach the screen.
+          if (gen !== liveIdGenRef.current) return;
           const guess = [data.extracted.brandGuess, data.extracted.expressionGuess]
             .filter(Boolean)
             .join(" ");
@@ -792,14 +807,18 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
         setCameraState("on");
         lastDetectionAtRef.current = Date.now(); // don't nag "move closer" instantly
 
-        if (!Detector) return; // camera preview + shutter still work; no barcode loop
-        const detector = new Detector({ formats: BARCODE_FORMATS });
+        // Without `BarcodeDetector` (Safari, Firefox) the loop still runs —
+        // guidance and the live label reader are what identify bottles there;
+        // only barcode decoding is skipped.
+        const detector = Detector ? new Detector({ formats: BARCODE_FORMATS }) : null;
         interval = setInterval(async () => {
           if (pausedRef.current || !videoRef.current || videoRef.current.readyState < 2) return;
           const v = videoRef.current;
           tick++;
           try {
-            const codes = await detector.detect(v);
+            const codes = detector ? await detector.detect(v) : [];
+            /** A code was seen but none decoded to a GTIN — keep its hint. */
+            let invalidCodeGuidance: Guidance | null = null;
             if (codes.length > 0 && codes[0]?.rawValue) {
               // A label can carry several codes (serials, case codes) — take
               // the one that decodes to a real GTIN, not just the first hit.
@@ -810,31 +829,30 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
                 );
               const hit = decoded?.c ?? codes[0];
               if (hit.boundingBox) flashLockBox(hit.boundingBox, v);
-              if (!decoded) {
-                // Deliberately NOT counted as a detection: if the only code in
-                // view can't become a GTIN, the live label reader should still
-                // get its turn below.
-                setGuidance(
-                  hit.format && !RETAIL_FORMATS.has(hit.format)
-                    ? {
-                        kind: "hint",
-                        message: "That's a different code — find the retail barcode",
-                      }
-                    : {
-                        kind: "warn",
-                        message: "Found a barcode but couldn't read it — hold steady",
-                      },
-                );
+              if (decoded) {
+                lastDetectionAtRef.current = Date.now();
+                if (!acceptCode(decoded.code)) return;
+                setGuidance({ kind: "ok", message: `Got it · ${decoded.code}` });
                 return;
               }
-              lastDetectionAtRef.current = Date.now();
-              if (!acceptCode(decoded.code)) return;
-              setGuidance({ kind: "ok", message: `Got it · ${decoded.code}` });
-              return;
+              // Deliberately NOT counted as a detection, and NOT a dead end:
+              // fall through so the live label reader gets its turn on
+              // exactly these bottles (QR-only labels, serial Code 128s).
+              invalidCodeGuidance =
+                hit.format && !RETAIL_FORMATS.has(hit.format)
+                  ? {
+                      kind: "hint",
+                      message: "That's a different code — find the retail barcode",
+                    }
+                  : {
+                      kind: "warn",
+                      message: "Found a barcode but couldn't read it — hold steady",
+                    };
+              setGuidance(invalidCodeGuidance);
             }
-            // No barcode this frame: every other tick, analyze the frame
-            // locally, coach the user (light → steadiness → distance), and
-            // give the live label reader its chance.
+            // No usable barcode this frame: every other tick, analyze the
+            // frame locally, coach the user (light → steadiness → distance),
+            // and give the live label reader its chance.
             if (tick % 2 === 0) {
               const sample = sampleFrame(v);
               const stats = sample?.stats ?? null;
@@ -854,7 +872,7 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
               } else {
                 autoTorchAttemptedRef.current = false;
               }
-              setGuidance(guidanceFor(stats, since));
+              if (!invalidCodeGuidance) setGuidance(guidanceFor(stats, since, detector !== null));
               maybeAutoId(v, sample, since);
             }
           } catch {
@@ -877,6 +895,8 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
       torchOnRef.current = false;
       autoTorchAttemptedRef.current = false;
       liveIdBusyRef.current = false;
+      // Camera restart (facing switch, unmount) — retire in-flight reads.
+      liveIdGenRef.current += 1;
       setLiveReading(false);
       setTorchOn(false);
       setTorchChanging(false);
@@ -1066,6 +1086,9 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
                   : (guidance?.message ?? "Center the barcode, or shutter for the label")}
               </span>
             </span>
+            {/* Icon-only round controls: five of these plus the guidance text
+                must fit a 375px viewport without clipping (the card is
+                overflow-hidden, so anything wider simply disappears). */}
             <div className="flex items-center gap-2 shrink-0">
               <button
                 type="button"
@@ -1073,16 +1096,19 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
                 disabled={cameraState !== "on"}
                 aria-label={cameraFacing === "environment" ? "Switch to front camera" : "Use rear camera"}
                 title={cameraFacing === "environment" ? "Switch to front camera" : "Use rear camera"}
-                className="btn-secondary px-3 py-2 text-xs font-medium disabled:opacity-50"
+                className="btn-secondary p-2.5 rounded-full disabled:opacity-50"
               >
-                {cameraFacing === "environment" ? "Rear camera" : "Use rear camera"}
+                <SwitchCamera size={18} strokeWidth={1.8} aria-hidden />
               </button>
               <button
                 type="button"
                 onClick={() => setManualOpen((v) => !v)}
-                className="btn-secondary px-3 py-2 text-xs font-medium flex items-center gap-1.5"
+                aria-pressed={manualOpen}
+                aria-label="Type in the barcode"
+                title="Type in the barcode"
+                className={`btn-secondary p-2.5 rounded-full ${manualOpen ? "text-accent" : ""}`}
               >
-                <Keyboard size={16} strokeWidth={1.8} aria-hidden /> Type it
+                <Keyboard size={18} strokeWidth={1.8} aria-hidden />
               </button>
               {scanEngine === "web" && (
                 <button
@@ -1165,9 +1191,9 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
               type="button"
               onClick={() => setLiveSuggest(null)}
               aria-label="Dismiss label suggestions"
-              className="btn-secondary p-1.5 rounded-full shrink-0"
+              className="btn-secondary rounded-full shrink-0 min-w-11 min-h-11 flex items-center justify-center"
             >
-              <X size={14} strokeWidth={2} aria-hidden />
+              <X size={16} strokeWidth={2} aria-hidden />
             </button>
           </div>
           {liveSuggest.options.length > 0 && (

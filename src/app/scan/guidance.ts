@@ -109,13 +109,23 @@ export interface Guidance {
 /**
  * One hint at a time, most-fixable first: light before steadiness before
  * distance. `msSinceDetection` is Infinity when nothing was ever detected.
+ * `barcodeCapable` is false where no barcode detector exists (Safari,
+ * Firefox) — the camera then only feeds the label reader, so barcode-chasing
+ * hints would send the user on a fool's errand.
  */
-export function guidanceFor(stats: FrameStats | null, msSinceDetection: number): Guidance {
+export function guidanceFor(
+  stats: FrameStats | null,
+  msSinceDetection: number,
+  barcodeCapable = true,
+): Guidance {
   if (stats && stats.brightness < BRIGHTNESS_MIN) {
     return { kind: "warn", message: "Too dark — find more light" };
   }
   if (stats && stats.sharpness < SHARPNESS_MIN) {
     return { kind: "warn", message: "Hold steady…" };
+  }
+  if (!barcodeCapable) {
+    return { kind: "hint", message: "Point at the label — Whaikey reads it automatically" };
   }
   if (msSinceDetection >= MOVE_CLOSER_AFTER_MS) {
     return { kind: "hint", message: "Move closer — fill the frame with the barcode" };
