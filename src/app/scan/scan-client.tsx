@@ -856,8 +856,14 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
             if (codes.length > 0 && codes[0]?.rawValue) {
               // A label can carry several codes (serials, case codes) — take
               // the one that decodes to a real GTIN, not just the first hit.
+              // Only fully numeric payloads qualify: a lot/serial Code 128
+              // like "LOT080244002145" would otherwise pass GTIN validation
+              // once normalization strips the letters.
               const decoded = codes
-                .map((c) => ({ c, code: normalizeUpc(c.rawValue ?? "") }))
+                .map((c) => ({
+                  c,
+                  code: /^\d+$/.test(c.rawValue ?? "") ? normalizeUpc(c.rawValue ?? "") : null,
+                }))
                 .find((d): d is { c: DetectedBarcode; code: string } =>
                   Boolean(d.code && isValidUpc(d.code)),
                 );

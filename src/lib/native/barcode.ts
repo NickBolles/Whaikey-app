@@ -114,7 +114,13 @@ export async function startNativeScan(
 
     const listener = await BarcodeScanner.addListener("barcodesScanned", (event) => {
       for (const barcode of event.barcodes) {
-        if (barcode.rawValue) options.onBarcode(barcode.rawValue);
+        if (!barcode.rawValue) continue;
+        // Product mode: a lot/serial Code 128 ("LOT080244002145") would pass
+        // GTIN validation once normalization strips its letters, enqueueing an
+        // unrelated bottle — only fully numeric payloads are product codes.
+        // QR mode forwards everything (friend links are URLs).
+        if (options.formats !== "qr" && /\D/.test(barcode.rawValue)) continue;
+        options.onBarcode(barcode.rawValue);
       }
     });
     const errorListener = options.onError
