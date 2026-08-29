@@ -40,6 +40,7 @@ import {
   frameStats,
   guidanceFor,
   lumaDelta,
+  SCENE_CHANGE_MIN,
   scaleBoxToCover,
   shouldAutoId,
   type Box,
@@ -514,7 +515,20 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
       sample: { stats: FrameStats; lumas: Float32Array } | null,
       msSinceDetection: number,
     ) => {
-      if (!liveIdOnRef.current || liveIdDisabledRef.current || liveIdBusyRef.current) return;
+      if (!liveIdOnRef.current || liveIdDisabledRef.current) return;
+      if (liveIdBusyRef.current) {
+        // The scene drifted away from the frame a read is in flight for —
+        // its result would describe a bottle no longer in view, so retire it
+        // rather than let it surface under the wrong viewfinder.
+        if (
+          sample &&
+          lastIdLumasRef.current &&
+          lumaDelta(sample.lumas, lastIdLumasRef.current) >= SCENE_CHANGE_MIN
+        ) {
+          liveIdGenRef.current += 1;
+        }
+        return;
+      }
       if (!sample) return;
       const now = Date.now();
       const wanted = shouldAutoId({
@@ -1127,7 +1141,17 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
               {scanEngine === "web" && (
                 <button
                   type="button"
-                  onClick={() => setLiveIdOn((v) => !v)}
+                  onClick={() => {
+                    const next = !liveIdOn;
+                    setLiveIdOn(next);
+                    if (!next) {
+                      // Off must mean off: retire any in-flight read and
+                      // drop whatever it already put on screen.
+                      liveIdGenRef.current += 1;
+                      setLiveSuggest(null);
+                      setLiveReading(false);
+                    }
+                  }}
                   disabled={cameraState !== "on"}
                   aria-pressed={liveIdOn}
                   aria-label={liveIdOn ? "Turn off live label ID" : "Turn on live label ID"}
@@ -1223,7 +1247,7 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
                   <button
                     type="button"
                     onClick={() => addSuggestion(b)}
-                    className="btn-primary shrink-0 px-4 py-2 text-sm font-medium"
+                    className="btn-primary shrink-0 min-h-11 px-4 text-sm font-medium flex items-center"
                   >
                     Add
                   </button>
