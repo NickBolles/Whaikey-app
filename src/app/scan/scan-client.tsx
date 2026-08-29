@@ -594,7 +594,12 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
           };
           // The user scanned or moved on while this read was in flight — a
           // suggestion for the previous bottle must never reach the screen.
-          if (gen !== liveIdGenRef.current) return;
+          // The discarded read's scene must not keep gating either: the user
+          // may have drifted and come straight back to this very bottle.
+          if (gen !== liveIdGenRef.current) {
+            if (req === liveIdReqRef.current) lastIdSceneRef.current = null;
+            return;
+          }
           const guess = [data.extracted.brandGuess, data.extracted.expressionGuess]
             .filter(Boolean)
             .join(" ");
