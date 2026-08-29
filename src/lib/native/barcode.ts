@@ -114,7 +114,13 @@ export async function startNativeScan(
 
     const listener = await BarcodeScanner.addListener("barcodesScanned", (event) => {
       for (const barcode of event.barcodes) {
-        if (barcode.rawValue) options.onBarcode(barcode.rawValue);
+        if (!barcode.rawValue) continue;
+        // Product mode: a lot/serial Code 128 ("LOT080244002145") would pass
+        // GTIN validation once normalization strips its letters, enqueueing an
+        // unrelated bottle — only fully numeric payloads are product codes.
+        // QR mode forwards everything (friend links are URLs).
+        if (options.formats !== "qr" && /\D/.test(barcode.rawValue)) continue;
+        options.onBarcode(barcode.rawValue);
       }
     });
     const errorListener = options.onError
@@ -131,7 +137,17 @@ export async function startNativeScan(
       formats:
         options.formats === "qr"
           ? [BarcodeFormat.QrCode]
-          : [BarcodeFormat.UpcA, BarcodeFormat.UpcE, BarcodeFormat.Ean13, BarcodeFormat.Ean8],
+          : [
+              BarcodeFormat.UpcA,
+              BarcodeFormat.UpcE,
+              BarcodeFormat.Ean13,
+              BarcodeFormat.Ean8,
+              // Whiskey labels are wilder than grocery shelves: gift boxes and
+              // cases carry ITF-14, some craft bottlers print Code 128 GTINs.
+              // Non-GTIN payloads are filtered by the caller's UPC validation.
+              BarcodeFormat.Itf,
+              BarcodeFormat.Code128,
+            ],
       lensFacing: options.facing === "front" ? LensFacing.Front : LensFacing.Back,
     });
 
