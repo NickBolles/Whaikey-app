@@ -192,6 +192,43 @@ describe("/api/pours", () => {
     expect(pours).toHaveLength(2);
   });
 
+  /**
+   * The offline queue picks entries by an author captured at render, but the
+   * fetch carries whatever cookie is current — so an account switch part-way
+   * through a flush would post the rest of one person's pours into the other's
+   * account. No amount of client-side care closes that race; the server
+   * refusing the write does.
+   */
+  it("POST refuses a pour whose stated author is not the session", async () => {
+    const other = await createTestUser(db);
+    const res = await POST(
+      jsonRequest("/api/pours", "POST", {
+        bottleId: bottle.id,
+        rating: 4,
+        expectedUserId: other.id,
+      }),
+    );
+
+    expect(res.status).toBe(409);
+    await expect(db.select().from(schema.pours)).resolves.toHaveLength(0);
+  });
+
+  it("POST accepts a pour that names the session as its author", async () => {
+    const res = await POST(
+      jsonRequest("/api/pours", "POST", {
+        bottleId: bottle.id,
+        rating: 4,
+        expectedUserId: user.id,
+      }),
+    );
+    expect(res.status).toBe(201);
+  });
+
+  it("POST still accepts a pour that names no author, for callers that have none", async () => {
+    const res = await POST(jsonRequest("/api/pours", "POST", { bottleId: bottle.id, rating: 4 }));
+    expect(res.status).toBe(201);
+  });
+
   it("GET lists only own pours, newest first, with bottle name + note", async () => {
     const other = await createTestUser(db);
     await db.insert(schema.pours).values({

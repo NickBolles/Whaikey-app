@@ -250,8 +250,12 @@ function bodyFor(entry: QueuedPour): unknown {
   const body = entry.body;
   if (typeof body !== "object" || body === null || Array.isArray(body)) return body;
   const record = body as Record<string, unknown>;
-  if (typeof record.clientId === "string" && record.clientId) return body;
-  return { ...record, clientId: entry.id };
+  const clientId =
+    typeof record.clientId === "string" && record.clientId ? record.clientId : entry.id;
+  // `expectedUserId` is the server's chance to refuse: the account can change
+  // between picking this entry and the request landing, and the cookie the
+  // fetch carries is whatever is current, not whatever we selected against.
+  return { ...record, clientId, expectedUserId: entry.userId };
 }
 
 /**
@@ -298,9 +302,10 @@ async function runFlush(userId: string | undefined): Promise<FlushResult> {
       continue;
     }
 
-    if (response.status === 401) {
-      // Signed out: not the pour's fault, and retrying just burns attempts.
-      // Hold everything until there's a session again.
+    if (response.status === 401 || response.status === 409) {
+      // Signed out (401), or signed in as somebody else (409) — in both cases
+      // not the pour's fault, and retrying just burns attempts. Hold
+      // everything until its author is back.
       break;
     }
 

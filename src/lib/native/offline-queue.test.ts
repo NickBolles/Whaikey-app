@@ -196,6 +196,25 @@ describe("whose pour it is", () => {
     expect((await readQueue())[0].attempts).toBe(0);
   });
 
+  it("holds a pour the server says belongs to another account", async () => {
+    // The account changed under an in-flight flush; the server refused. Not the
+    // pour's fault, so it must not burn an attempt toward being quarantined.
+    await enqueuePour({ body: { bottleId: "a" }, bottleName: "A", userId: ME });
+    mockFetchSequence(status(409));
+
+    await expect(flushPourQueue(ME)).resolves.toMatchObject({ synced: 0, remaining: 1 });
+    expect((await readQueue())[0].attempts).toBe(0);
+  });
+
+  it("tells the server whose pour it thinks it is sending", async () => {
+    await enqueuePour({ body: { bottleId: "a" }, bottleName: "A", userId: ME });
+    const fetchMock = mockFetchSequence(ok());
+
+    await flushPourQueue(ME);
+
+    expect(sentBody(fetchMock).expectedUserId).toBe(ME);
+  });
+
   it("sends it once its owner is back", async () => {
     await enqueuePour({ body: { bottleId: "a" }, bottleName: "A", userId: "alice" });
     mockFetchSequence(ok());
@@ -282,7 +301,11 @@ describe("legacy entries", () => {
 
     await flushPourQueue("bob");
 
-    expect(sentBody(fetchMock)).toEqual({ bottleId: "a", clientId: "legacy-1" });
+    expect(sentBody(fetchMock)).toEqual({
+      bottleId: "a",
+      clientId: "legacy-1",
+      expectedUserId: "bob",
+    });
   });
 
   it("leaves a key the caller already minted alone", async () => {

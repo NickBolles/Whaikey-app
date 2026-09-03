@@ -351,6 +351,8 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
       note: hasNote ? noteFields : undefined,
       visibility,
       clientId,
+      // Refused server-side if the session isn't this user any more.
+      expectedUserId: userId,
     };
 
     try {

@@ -71,6 +71,17 @@ export const pourInputSchema = z.object({
    * to the user, so one client cannot collide with another's.
    */
   clientId: z.string().min(1).max(100).optional(),
+  /**
+   * Who the client believes it is writing as. The server refuses the write if
+   * that isn't the session making it.
+   *
+   * The offline queue picks entries by an author it captured when the page
+   * rendered, but `fetch` carries whatever cookie is current — so an account
+   * switch part-way through a multi-entry flush would post the rest of one
+   * person's pours into the other's account. Client-side care cannot close
+   * that race; refusing the write can, and it holds for the direct save too.
+   */
+  expectedUserId: z.string().min(1).max(100).optional(),
 });
 
 export type PourInput = z.infer<typeof pourInputSchema>;
