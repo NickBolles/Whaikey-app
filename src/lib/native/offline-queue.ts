@@ -230,7 +230,7 @@ export interface FlushResult {
   unclaimed: number;
 }
 
-let inFlight: Promise<FlushResult> | null = null;
+let inFlight: { userId: string | undefined; run: Promise<FlushResult> } | null = null;
 
 /**
  * Try to send everything in the queue that belongs to `userId`.
@@ -238,14 +238,26 @@ let inFlight: Promise<FlushResult> | null = null;
  * There is exactly one flush at a time. Three things call this — mount,
  * `online`, and returning to the app — and they routinely fire together when
  * signal comes back; without the guard each would read the same queue and POST
- * the same pours. Callers all get the same result, so none of them has to know
- * it wasn't the one doing the work.
+ * the same pours. Callers for the same account all get the same result, so none
+ * of them has to know it wasn't the one doing the work.
+ *
+ * A request for a *different* account waits and then runs its own pass rather
+ * than sharing that result. Sharing it would be quietly wrong: the running pass
+ * skips entries it doesn't own, so the newly signed-in user would be handed a
+ * result about somebody else's pours and their own would sit unsent on an
+ * online, foregrounded tab until some other event happened to fire.
  */
 export function flushPourQueue(userId?: string): Promise<FlushResult> {
-  inFlight ??= runFlush(userId).finally(() => {
+  const current = inFlight;
+  if (current) {
+    if (current.userId === userId) return current.run;
+    return current.run.catch(() => undefined).then(() => flushPourQueue(userId));
+  }
+  const run = runFlush(userId).finally(() => {
     inFlight = null;
   });
-  return inFlight;
+  inFlight = { userId, run };
+  return run;
 }
 
 /**
@@ -357,6 +369,12 @@ async function runFlush(userId: string | undefined): Promise<FlushResult> {
   // removed; everything else in storage stays, in the order it is in now.
   const attempts = new Map(queue.map((entry) => [entry.id, entry.attempts]));
   const remaining = await serialize(async () => {
+    // Quarantine first, remove second. Between these two writes the process can
+    // die, Preferences can reject, or localStorage can silently fail — and the
+    // order decides what that costs. This way the worst case is an entry in
+    // both places, which a recovery surface can dedupe by id; the other way the
+    // worst case is a note the user was told was saved, gone.
+    await quarantine(discarded);
     const current = await readQueue();
     const kept = current
       .filter((entry) => !handled.has(entry.id))
@@ -367,8 +385,6 @@ async function runFlush(userId: string | undefined): Promise<FlushResult> {
     await writeQueue(kept);
     return kept;
   });
-
-  await serialize(() => quarantine(discarded));
 
   return { synced, remaining: remaining.length, discarded, unclaimed };
 }

@@ -31,9 +31,12 @@ vi.mock("@/lib/native/app-chrome", () => ({
 // These tests pose as a device, so the real plugins would be reached. Preferences
 // is where the in-flight state and verifier live; back it with localStorage so
 // the store behaves like the device's and the test can seed it.
+const prefsGet = vi.fn<(opts: { key: string }) => Promise<{ value: string | null }>>(
+  async ({ key }) => ({ value: localStorage.getItem(key) }),
+);
 vi.mock("@capacitor/preferences", () => ({
   Preferences: {
-    get: async ({ key }: { key: string }) => ({ value: localStorage.getItem(key) }),
+    get: prefsGet,
     set: async ({ key, value }: { key: string; value: string }) => {
       localStorage.setItem(key, value);
     },
@@ -55,6 +58,7 @@ const assign = vi.fn();
 beforeEach(() => {
   localStorage.clear();
   vi.clearAllMocks();
+  prefsGet.mockImplementation(async ({ key }) => ({ value: localStorage.getItem(key) }));
   // The shell only wires deep links on a device.
   Object.defineProperty(window, "Capacitor", {
     value: { getPlatform: () => "ios", isNativePlatform: () => true },
@@ -90,7 +94,7 @@ function startedSignIn() {
 describe("NativeShell auth callback", () => {
   it("redeems a callback that matches the sign-in this app started", async () => {
     startedSignIn();
-    render(<NativeShell />);
+    render(<NativeShell userId={null} />);
 
     deliverDeepLink("/auth/callback", `whaikey://auth/callback?code=abc123&state=${STATE}`);
 
@@ -102,7 +106,7 @@ describe("NativeShell auth callback", () => {
   });
 
   it("ignores a code pushed at the app when no sign-in was started", async () => {
-    render(<NativeShell />);
+    render(<NativeShell userId={null} />);
 
     deliverDeepLink("/auth/callback", "whaikey://auth/callback?code=attacker-code&state=whatever");
 
@@ -113,7 +117,7 @@ describe("NativeShell auth callback", () => {
 
   it("ignores a code whose state is not the one this app is waiting for", async () => {
     startedSignIn();
-    render(<NativeShell />);
+    render(<NativeShell userId={null} />);
 
     deliverDeepLink(
       "/auth/callback",
@@ -127,7 +131,7 @@ describe("NativeShell auth callback", () => {
   it("ignores a code that carries no state at all", async () => {
     // What an attacker who has never seen our nonce can actually produce.
     startedSignIn();
-    render(<NativeShell />);
+    render(<NativeShell userId={null} />);
 
     deliverDeepLink("/auth/callback", "whaikey://auth/callback?code=attacker-code");
 
@@ -142,7 +146,7 @@ describe("NativeShell auth callback", () => {
    */
   it("leaves the pending sign-in intact when a forged callback is dropped", async () => {
     startedSignIn();
-    render(<NativeShell />);
+    render(<NativeShell userId={null} />);
 
     deliverDeepLink("/auth/callback", "whaikey://auth/callback?code=attacker&state=wrong-nonce");
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -159,7 +163,7 @@ describe("NativeShell auth callback", () => {
 
   it("accepts one callback per sign-in, so a replayed link is inert", async () => {
     startedSignIn();
-    render(<NativeShell />);
+    render(<NativeShell userId={null} />);
     const link = `whaikey://auth/callback?code=abc123&state=${STATE}`;
 
     deliverDeepLink("/auth/callback", link);
@@ -172,7 +176,7 @@ describe("NativeShell auth callback", () => {
 
   it("shows a matched failure at sign-in, with the return target kept", async () => {
     startedSignIn();
-    render(<NativeShell />);
+    render(<NativeShell userId={null} />);
 
     deliverDeepLink(
       "/auth/callback",
@@ -185,8 +189,30 @@ describe("NativeShell auth callback", () => {
     expect(pushed).toContain("next=%2Fadd%2Fsasha");
   });
 
+  /**
+   * The callback arrives once. A storage read that rejected used to escape the
+   * `void handleAuthCallback(...)` with no handler, leaving sign-in on
+   * "Connecting…" until the code expired and nothing anyone could act on.
+   */
+  it("recovers to sign-in when the pending state cannot be read", async () => {
+    // Only the pending-sign-in read fails; the queue's own reads are unaffected,
+    // so this exercises the callback path rather than the flush.
+    prefsGet.mockImplementation(async ({ key }) => {
+      if (key === PENDING_KEY) throw new Error("native storage unavailable");
+      return { value: localStorage.getItem(key) };
+    });
+    startedSignIn();
+    render(<NativeShell userId={null} />);
+
+    deliverDeepLink("/auth/callback", `whaikey://auth/callback?code=abc123&state=${STATE}`);
+
+    await waitFor(() => expect(router.push).toHaveBeenCalled());
+    expect(String(router.push.mock.calls[0][0])).toContain("/sign-in?error=");
+    expect(assign).not.toHaveBeenCalled();
+  });
+
   it("still routes ordinary deep links", async () => {
-    render(<NativeShell />);
+    render(<NativeShell userId={null} />);
     deliverDeepLink("/bottles/123", "whaikey://bottles/123");
     await waitFor(() => expect(router.push).toHaveBeenCalledWith("/bottles/123"));
   });

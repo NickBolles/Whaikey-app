@@ -143,6 +143,31 @@ describe("flushPourQueue", () => {
    * — must never be the thing that destroys writing the user was told was
    * saved, so a pour the server keeps rejecting goes to quarantine.
    */
+  /**
+   * Between the two writes the process can die or storage can reject. The
+   * order decides whether that costs a duplicate (recoverable, dedupe by id)
+   * or the note itself (not).
+   */
+  it("writes the quarantine copy before removing the entry from the queue", async () => {
+    await enqueuePour({ body: POUR, bottleName: "Ardbeg 10", userId: ME });
+    const writes: string[] = [];
+    const realSetItem = localStorage.setItem.bind(localStorage);
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation((key: string, value: string) => {
+      writes.push(key);
+      realSetItem(key, value);
+    });
+
+    for (let attempt = 0; attempt < 5; attempt++) {
+      mockFetchSequence(status(400));
+      await flushPourQueue(ME);
+    }
+
+    const quarantineFirst = writes.indexOf("whaikey.pour-queue.failed.v1");
+    const queueAfter = writes.lastIndexOf("whaikey.pour-queue.v1");
+    expect(quarantineFirst).toBeGreaterThanOrEqual(0);
+    expect(quarantineFirst).toBeLessThan(queueAfter);
+  });
+
   it("quarantines a pour it gives up on rather than destroying it", async () => {
     await enqueuePour({ body: POUR, bottleName: "Ardbeg 10", userId: ME });
 
@@ -341,6 +366,40 @@ describe("concurrent flushes", () => {
     expect(first).toMatchObject({ synced: 2, remaining: 0 });
     expect(second).toBe(first);
     expect(third).toBe(first);
+    await expect(queueDepth()).resolves.toBe(0);
+  });
+
+  /**
+   * The running pass skips entries it doesn't own, so handing its result to a
+   * newly signed-in user would report on somebody else's pours and leave theirs
+   * unsent on an online, foregrounded tab until some other event fired.
+   */
+  it("does not hand one account's in-flight pass to another account", async () => {
+    await enqueuePour({ body: { bottleId: "a" }, bottleName: "Alice's", userId: "alice" });
+    await enqueuePour({ body: { bottleId: "b" }, bottleName: "Bob's", userId: "bob" });
+
+    let release: () => void = () => {};
+    const sent = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let call = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        if (call++ === 0) await sent;
+        return ok();
+      }),
+    );
+
+    const alice = flushPourQueue("alice");
+    const bob = flushPourQueue("bob");
+    expect(bob).not.toBe(alice);
+    release();
+
+    await expect(alice).resolves.toMatchObject({ synced: 1 });
+    // Bob's pass runs after Alice's and sends Bob's pour, rather than reporting
+    // on hers and leaving his queued.
+    await expect(bob).resolves.toMatchObject({ synced: 1 });
     await expect(queueDepth()).resolves.toBe(0);
   });
 

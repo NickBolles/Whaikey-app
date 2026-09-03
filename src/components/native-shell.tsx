@@ -100,7 +100,14 @@ export function NativeShell({ userId }: { userId?: string | null }) {
     const unsubscribeDeepLink = onDeepLink((path, rawUrl) => {
       const callback = parseAuthCallback(rawUrl);
       if (callback) {
-        void handleAuthCallback(callback);
+        // Nothing in here may reject unhandled: the callback arrives once, so a
+        // storage read that fails would leave sign-in on "Connecting…" until
+        // the code expired, with no error anyone could act on.
+        void handleAuthCallback(callback).catch((err: unknown) => {
+          console.warn("[native] could not handle the sign-in callback", err);
+          void closeNativeSignIn();
+          router.push(`/sign-in?error=${encodeURIComponent("Sign-in didn't complete. Please try again.")}`);
+        });
         return;
       }
       router.push(path);
