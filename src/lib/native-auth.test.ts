@@ -279,6 +279,33 @@ describe("pending sign-in requests", () => {
     for (const id of ids) expect(id.length).toBeGreaterThanOrEqual(40);
   });
 
+  /**
+   * `/start` takes no credentials — it cannot, it is what a not-yet-signed-in
+   * app calls — so expiring old rows bounds nothing against a burst inside the
+   * ten-minute window. The cap is what makes the table's size a constant.
+   */
+  it("caps how many live requests can pile up, keeping the newest", async () => {
+    const { MAX_LIVE_AUTH_REQUESTS } = await import("@/lib/native-auth");
+    // Stand in for a flood: rows already present, all live, all older.
+    const old = new Date(Date.now() - 60_000);
+    await db.insert(schema.nativeAuthRequests).values(
+      Array.from({ length: MAX_LIVE_AUTH_REQUESTS }, (_, i) => ({
+        id: `flood-${i}`,
+        codeChallenge: CHALLENGE,
+        state: "s",
+        expiresAt: new Date(Date.now() + REQUEST_TTL_MS),
+        createdAt: old,
+      })),
+    );
+
+    const mine = await startNativeAuthRequest({ codeChallenge: CHALLENGE, state: "s" });
+
+    const rows = await db.select().from(schema.nativeAuthRequests);
+    expect(rows).toHaveLength(MAX_LIVE_AUTH_REQUESTS);
+    // The newest survives — a real sign-in starting during a flood still works.
+    await expect(consumeNativeAuthRequest(mine)).resolves.not.toBeNull();
+  });
+
   it("sweeps requests abandoned mid-OAuth", async () => {
     const stale = new Date(Date.now() - 2 * REQUEST_TTL_MS);
     await startNativeAuthRequest({ codeChallenge: CHALLENGE, state: "s", now: stale });

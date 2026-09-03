@@ -39,6 +39,23 @@ export const CODE_TTL_MS = 60_000;
  */
 export const REQUEST_TTL_MS = 10 * 60_000;
 
+/**
+ * Ceiling on live pending sign-ins.
+ *
+ * `/api/auth/native/start` takes no credentials — it cannot, it is what a
+ * not-yet-signed-in app calls — so anything can make it write a row that lives
+ * for ten minutes, and expiring old rows does not bound what a burst can add
+ * inside that window. The cap does: past it the oldest are pruned, so the table
+ * is bounded by a constant rather than by an attacker's patience.
+ *
+ * Generous on purpose. Real concurrent sign-ins are a handful; reaching this
+ * means a flood, and the cost of being pruned is one retried sign-in, not a
+ * lost anything. A proper per-IP throttle wants a store this codebase does not
+ * have yet (`ai_rate_limits` is keyed to a user row) — that belongs with
+ * SEC-M3's unauthenticated-endpoint throttling in WP-25.
+ */
+export const MAX_LIVE_AUTH_REQUESTS = 5_000;
+
 /** The scheme registered in Info.plist and AndroidManifest.xml. */
 export const NATIVE_CALLBACK_SCHEME = "whaikey";
 
@@ -148,6 +165,18 @@ export async function startNativeAuthRequest(params: NativeAuthRequestInit): Pro
   await db
     .delete(schema.nativeAuthRequests)
     .where(lt(schema.nativeAuthRequests.expiresAt, now));
+
+  // Expiry alone bounds nothing inside the TTL window, and this endpoint is
+  // unauthenticated. Keep the newest MAX_LIVE_AUTH_REQUESTS and drop the rest,
+  // so a burst costs a constant amount of table rather than an unbounded one.
+  await db.execute(sql`
+    delete from ${schema.nativeAuthRequests}
+    where ${schema.nativeAuthRequests.id} in (
+      select ${schema.nativeAuthRequests.id} from ${schema.nativeAuthRequests}
+      order by ${schema.nativeAuthRequests.createdAt} desc
+      offset ${MAX_LIVE_AUTH_REQUESTS}
+    )
+  `);
 
   return id;
 }

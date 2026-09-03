@@ -71,7 +71,17 @@ async function readRaw(key: string): Promise<string | null> {
   }
 }
 
-async function writeRaw(key: string, value: string): Promise<void> {
+/**
+ * `strict` decides who owns a storage failure.
+ *
+ * Writing the queue back can swallow one: the entries are still in memory for
+ * this pass and still in storage from the last, so the cost is a retry. Writing
+ * the *quarantine* cannot, because the caller is about to delete the only other
+ * copy — a swallowed failure there is the deleted note this whole mechanism
+ * exists to prevent, and a quota error is exactly when it happens (the smaller
+ * queue value still fits after the larger quarantine value did not).
+ */
+async function writeRaw(key: string, value: string, strict = false): Promise<void> {
   const plugin = await loadPlugin(() => import("@capacitor/preferences"));
   if (plugin) {
     await plugin.Preferences.set({ key, value });
@@ -79,7 +89,8 @@ async function writeRaw(key: string, value: string): Promise<void> {
   }
   try {
     localStorage.setItem(key, value);
-  } catch {
+  } catch (err) {
+    if (strict) throw err;
     // Quota or disabled storage; nothing useful to do but keep the app working.
   }
 }
@@ -152,11 +163,15 @@ async function writeQueue(queue: QueuedPour[]): Promise<void> {
   await writeRaw(STORAGE_KEY, JSON.stringify(queue));
 }
 
-/** Move entries out of the send path without destroying them. */
+/**
+ * Move entries out of the send path without destroying them. Throws if the copy
+ * did not land, so the caller keeps the originals rather than deleting them on
+ * the strength of a write that failed.
+ */
 async function quarantine(entries: QueuedPour[]): Promise<void> {
   if (entries.length === 0) return;
   const existing = await readQuarantine();
-  await writeRaw(QUARANTINE_KEY, JSON.stringify([...existing, ...entries]));
+  await writeRaw(QUARANTINE_KEY, JSON.stringify([...existing, ...entries]), true);
 }
 
 // --- queue operations -------------------------------------------------------
@@ -368,13 +383,22 @@ async function runFlush(userId: string | undefined): Promise<FlushResult> {
   // silently drop it. Only the entries this flush actually settled are
   // removed; everything else in storage stays, in the order it is in now.
   const attempts = new Map(queue.map((entry) => [entry.id, entry.attempts]));
+  let quarantined = discarded;
   const remaining = await serialize(async () => {
-    // Quarantine first, remove second. Between these two writes the process can
-    // die, Preferences can reject, or localStorage can silently fail — and the
-    // order decides what that costs. This way the worst case is an entry in
-    // both places, which a recovery surface can dedupe by id; the other way the
-    // worst case is a note the user was told was saved, gone.
-    await quarantine(discarded);
+    // Quarantine first, remove second, and only remove what the copy actually
+    // took. Between these two writes the process can die, Preferences can
+    // reject, or a quota can bite — and a quota bites here in particular,
+    // because the smaller queue value still fits after the larger quarantine
+    // value did not. If the copy fails the entries stay queued: a note that
+    // keeps being retried is a nuisance, a note deleted on the strength of a
+    // write that silently failed is the thing this mechanism exists to prevent.
+    try {
+      await quarantine(discarded);
+    } catch (err) {
+      console.warn("[pours] could not quarantine rejected pours; keeping them queued", err);
+      quarantined = [];
+      for (const entry of discarded) handled.delete(entry.id);
+    }
     const current = await readQueue();
     const kept = current
       .filter((entry) => !handled.has(entry.id))
@@ -386,7 +410,7 @@ async function runFlush(userId: string | undefined): Promise<FlushResult> {
     return kept;
   });
 
-  return { synced, remaining: remaining.length, discarded, unclaimed };
+  return { synced, remaining: remaining.length, discarded: quarantined, unclaimed };
 }
 
 /** Whether the device currently believes it has a connection. */

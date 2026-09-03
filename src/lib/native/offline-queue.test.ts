@@ -168,6 +168,32 @@ describe("flushPourQueue", () => {
     expect(quarantineFirst).toBeLessThan(queueAfter);
   });
 
+  /**
+   * Quarantining first only helps if the copy actually landed. `writeRaw`
+   * swallows a localStorage quota error, and a quota error is exactly when this
+   * matters: the smaller queue value still fits after the larger quarantine
+   * value did not, so the note would be deleted on the strength of a write that
+   * silently failed.
+   */
+  it("keeps the pour queued when the quarantine copy cannot be written", async () => {
+    await enqueuePour({ body: POUR, bottleName: "Ardbeg 10", userId: ME });
+    const realSetItem = localStorage.setItem.bind(localStorage);
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation((key: string, value: string) => {
+      if (key === "whaikey.pour-queue.failed.v1") throw new Error("QuotaExceededError");
+      realSetItem(key, value);
+    });
+
+    let result;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      mockFetchSequence(status(400));
+      result = await flushPourQueue(ME);
+    }
+
+    // Not reported as discarded, because it wasn't — it is still in the queue.
+    expect(result?.discarded).toEqual([]);
+    expect((await readQueue()).map((entry) => entry.bottleName)).toEqual(["Ardbeg 10"]);
+  });
+
   it("quarantines a pour it gives up on rather than destroying it", async () => {
     await enqueuePour({ body: POUR, bottleName: "Ardbeg 10", userId: ME });
 
