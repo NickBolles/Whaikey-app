@@ -144,6 +144,23 @@ export async function logPour(db: DB, userId: string, input: PourInput): Promise
   const amountMl = parsed.amountMl ?? DEFAULT_POUR_ML;
   let visibility: PourVisibility =
     parsed.visibility ?? (await getSocialPrefs(db, userId)).defaultPourVisibility;
+
+  /**
+   * A pour of a bottle nobody has reviewed is private, whatever was asked for
+   * (PLAN-A1/WP-16).
+   *
+   * The submission is visible to its submitter alone, but a pour of it is not
+   * only a pour: the friend feed, a shared note and a profile's recent notes
+   * all join the bottle for its name, and none of them checks its status. So
+   * a public pour of a pending bottle would publish the bottle through the
+   * side door — the one thing the submission rule exists to prevent.
+   *
+   * Held down rather than filtered on read: this is one place instead of every
+   * social projection, and it fails closed. It also stays honest about the
+   * stance — the system never *raises* a visibility, so when the bottle is
+   * promoted the note stays where it is until its owner chooses otherwise.
+   */
+  if (bottle.status === "user_submitted") visibility = "private";
   const { pour, note } = await db.transaction(async (tx) => {
     if (parsed.clientId) {
       // Serialize replays of the same key so two in-flight retries can't both

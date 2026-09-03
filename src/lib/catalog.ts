@@ -102,6 +102,23 @@ export interface SubmittedBottle {
 }
 
 /**
+ * Raised when the name is already in the catalog and the caller has not said
+ * it means to add a new one anyway.
+ *
+ * Thrown from *inside* the write's advisory lock rather than checked before
+ * it: two identical requests arriving together would both pass a check made
+ * outside, then queue up on the lock and insert one after the other. The
+ * prompt has to be the same critical section as the insert or it is only a
+ * prompt most of the time.
+ */
+export class DuplicateBottleError extends Error {
+  constructor(readonly duplicates: BottleSearchResult[]) {
+    super("A bottle with that name is already in the catalog");
+    this.name = "DuplicateBottleError";
+  }
+}
+
+/**
  * Write a user-submitted bottle and its review-queue row.
  *
  * Rate limiting is a durable count under a per-user advisory lock, the same
@@ -111,7 +128,10 @@ export interface SubmittedBottle {
 export async function submitBottle(
   db: DB,
   userId: string,
-  input: BottleSubmissionInput,
+  input: BottleSubmissionInput & {
+    /** Set once the user has seen the near-matches and said none of them is it. */
+    confirmNew?: boolean;
+  },
   now = new Date(),
 ): Promise<SubmittedBottle> {
   const name = input.name.trim();
@@ -123,6 +143,11 @@ export async function submitBottle(
 
   const bottle = await db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`bottle-submit:${userId}`}))`);
+    if (!input.confirmNew) {
+      const nearby = await findSubmissionDuplicates(tx, userId, name);
+      const exact = nearby.filter((b) => looksLikeDuplicate(name, b.name));
+      if (exact.length > 0) throw new DuplicateBottleError(exact);
+    }
     await assertUnderSubmissionLimit(tx, userId, now);
 
     const [row] = await tx

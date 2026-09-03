@@ -7,8 +7,8 @@ import { readJsonWithinLimit } from "@/lib/body-limit";
 import { upsertUserBottle } from "@/lib/bar";
 import { isValidUpc, normalizeUpc } from "@/lib/scan";
 import {
+  DuplicateBottleError,
   findSubmissionDuplicates,
-  looksLikeDuplicate,
   submitBottle,
   SubmissionRateLimitedError,
 } from "@/lib/catalog";
@@ -78,27 +78,24 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     const db = getDb();
 
+    // Loose near-matches, for the "you may already have this" list. The
+    // refusal is decided inside the write's lock instead (below), because two
+    // identical requests can both clear a check made out here.
     const nearby = await findSubmissionDuplicates(db, user.id, input.name);
-    if (!input.confirmNew && nearby.length > 0) {
-      // Only an actual name collision blocks. A list of loose search hits is
-      // worth showing, never worth refusing over — the whole point of this
-      // route is that the catalog is incomplete.
-      const exact = nearby.filter((b) => looksLikeDuplicate(input.name, b.name));
-      if (exact.length > 0) {
-        return NextResponse.json(
-          {
-            error: "That bottle may already be in the catalog",
-            duplicates: exact,
-          },
-          { status: 409 },
-        );
-      }
-    }
 
     let created;
     try {
       created = await submitBottle(db, user.id, { ...input, upc });
     } catch (err) {
+      if (err instanceof DuplicateBottleError) {
+        // Only an actual name collision blocks. Loose search hits are worth
+        // showing and never worth refusing over — the premise of this route is
+        // that the catalog is incomplete.
+        return NextResponse.json(
+          { error: "That bottle may already be in the catalog", duplicates: err.duplicates },
+          { status: 409 },
+        );
+      }
       if (err instanceof SubmissionRateLimitedError) {
         return NextResponse.json(
           { error: "That's a lot of new bottles at once — try again in a bit." },

@@ -237,17 +237,17 @@ test.describe("signed-in scan flow", () => {
     await page.getByRole("button", { name: /needs you/i }).click();
     const sheet = page.getByRole("dialog");
     await sheet.getByRole("searchbox").fill("Faraway Farm Barrel Pick");
-    await sheet.getByRole("link", { name: /not in the catalog/i }).click();
+    await sheet.getByRole("button", { name: /not in the catalog/i }).click();
 
-    // It arrives as a confirmation, not a blank form: the barcode and the
-    // words already typed came with it.
-    await expect(page.getByLabel(/bottle name/i)).toHaveValue("Faraway Farm Barrel Pick");
-    await expect(page.getByText("012345678912")).toBeVisible();
-    await page.getByRole("button", { name: /^Bourbon$/ }).click();
-    await page.getByRole("button", { name: /add this bottle/i }).click();
+    // In the sheet, not a page away: the scanner is a batch tool and its queue
+    // lives in component state, so navigating off would discard every other
+    // scan in flight. Pre-filled with what was already typed.
+    await expect(sheet.getByLabel(/bottle name/i)).toHaveValue("Faraway Farm Barrel Pick");
+    await sheet.getByLabel(/^category$/i).selectOption("bourbon");
+    await sheet.getByRole("button", { name: /add and use it/i }).click();
 
-    // Back where the scan left off, with the bottle now on the shelf.
-    await expect(page).toHaveURL(/\/scan$/);
+    // Straight onto the shelf, the same way picking a bottle would.
+    await expect(page.getByRole("button", { name: /undo/i })).toBeVisible();
     await page.goto("/bar");
     await expect(page.getByText("Faraway Farm Barrel Pick")).toBeVisible();
 

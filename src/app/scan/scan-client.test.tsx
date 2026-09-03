@@ -8,6 +8,7 @@ const initialMediaDevices = Object.getOwnPropertyDescriptor(navigator, "mediaDev
 const initialSrcObject = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "srcObject");
 
 const UPC = "080244002145"; // valid check digit
+const SECOND_UPC = "096749001613"; // a different valid code, for batch cases
 const EAGLE = {
   id: "eagle-rare-10",
   name: "Eagle Rare 10 Year",
@@ -439,11 +440,17 @@ describe("ScanClient (manual fallback mode)", () => {
    * The scanned code and whatever was typed travel to the form, so it opens as
    * a confirmation rather than a blank page.
    */
-  it("offers the submission path on a total miss, carrying the barcode and the query", async () => {
-    mockFetch((url) => {
+  it("adds a bottle the catalog lacks without leaving the scanner", async () => {
+    const NEW_BOTTLE = { ...EAGLE, id: "new-bottle", name: "Barrell Dovetail" };
+    const bodies: Array<Record<string, unknown>> = [];
+    mockFetch((url, init) => {
       if (url.includes("/api/scan/upc")) return scanMiss();
       if (url.includes("/api/bottles/search")) return { results: [] };
-      return confirmResponse(EAGLE, "ub-7");
+      if (url.includes("/api/bottles")) {
+        bodies.push(JSON.parse(String(init?.body ?? "{}")));
+        return { bottle: NEW_BOTTLE };
+      }
+      return confirmResponse(NEW_BOTTLE, "ub-7");
     });
     const user = userEvent.setup();
     render(<ScanClient />);
@@ -452,12 +459,55 @@ describe("ScanClient (manual fallback mode)", () => {
     await user.click(screen.getByRole("button", { name: "Scan" }));
     await user.click(await screen.findByRole("button", { name: /needs you/i }));
     await user.type(screen.getByLabelText(/search the catalog/i), "barrell dovetail");
+    await user.click(screen.getByRole("button", { name: /not in the catalog/i }));
 
-    const link = await screen.findByRole("link", { name: /not in the catalog/i });
-    expect(link).toHaveAttribute(
-      "href",
-      `/bottles/new?source=scan&upc=${UPC}&name=barrell%20dovetail&next=%2Fscan`,
+    // Pre-filled from what was already typed, and carrying the scanned code.
+    expect(screen.getByLabelText(/bottle name/i)).toHaveValue("barrell dovetail");
+    await user.selectOptions(screen.getByLabelText(/^category$/i), "bourbon");
+    await user.click(screen.getByRole("button", { name: /add and use it/i }));
+
+    await screen.findByText(/scanned this session \(1\)/i);
+    expect(bodies[0]).toMatchObject({ category: "bourbon", upc: UPC, source: "scan" });
+  });
+
+  /**
+   * The scanner is a batch tool and its queue lives in component state, so an
+   * add flow that navigated away would throw away every other scan in flight.
+   */
+  it("keeps the rest of the batch while adding an unknown bottle", async () => {
+    const NEW_BOTTLE = { ...EAGLE, id: "new-bottle", name: "Barrell Dovetail" };
+    mockFetch((url) => {
+      if (url.includes("/api/scan/upc")) {
+        return url.includes("x") ? scanMiss() : scanMiss();
+      }
+      if (url.includes("/api/bottles/search")) return { results: [] };
+      if (url.includes("/api/bottles")) return { bottle: NEW_BOTTLE };
+      return confirmResponse(NEW_BOTTLE, "ub-8");
+    });
+    const user = userEvent.setup();
+    render(<ScanClient />);
+
+    // Two misses queued up, then the first one resolved by adding a bottle.
+    await user.type(screen.getByLabelText(/barcode number/i), UPC);
+    await user.click(screen.getByRole("button", { name: "Scan" }));
+    await user.clear(screen.getByLabelText(/barcode number/i));
+    await user.type(screen.getByLabelText(/barcode number/i), SECOND_UPC);
+    await user.click(screen.getByRole("button", { name: "Scan" }));
+    await waitFor(() =>
+      expect(screen.getAllByRole("button", { name: /needs you/i })).toHaveLength(2),
     );
+
+    await user.click(screen.getAllByRole("button", { name: /needs you/i })[0]);
+    await user.click(screen.getByRole("button", { name: /not in the catalog/i }));
+    await user.type(screen.getByLabelText(/bottle name/i), "Barrell Dovetail");
+    await user.selectOptions(screen.getByLabelText(/^category$/i), "bourbon");
+    await user.click(screen.getByRole("button", { name: /add and use it/i }));
+
+    // One resolved — and the other is still queued rather than thrown away.
+    await screen.findByRole("button", { name: /undo/i });
+    expect(screen.getAllByRole("button", { name: /needs you/i })).toHaveLength(1);
+    // One added, one still waiting — the header counts both.
+    expect(screen.getByText(/scanned this session \(1 · 1 need you\)/i)).toBeTruthy();
   });
 
   it("skips a barcode already scanned this session", async () => {

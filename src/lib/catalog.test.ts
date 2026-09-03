@@ -4,6 +4,7 @@ import type { DB } from "@/db";
 import * as schema from "@/db/schema";
 import { setupTestDb, createTestBottle, createTestUser, uid } from "@/test/helpers";
 import {
+  DuplicateBottleError,
   SUBMISSION_LIMIT_PER_HOUR,
   SubmissionRateLimitedError,
   findSubmissionDuplicates,
@@ -31,6 +32,36 @@ beforeEach(async () => {
 });
 
 describe("submitBottle", () => {
+  /**
+   * Two identical requests arriving together used to clear a duplicate check
+   * made outside the write's lock and then insert one after the other. The
+   * prompt has to be in the same critical section as the insert.
+   */
+  it("refuses a name already in the catalog, from inside the write's lock", async () => {
+    await createTestBottle(db, { name: "Blanton's Single Barrel", category: "bourbon" });
+    await expect(
+      submitBottle(db, alice.id, { name: "Blantons Single Barrel", category: "bourbon" }),
+    ).rejects.toBeInstanceOf(DuplicateBottleError);
+    expect(await db.select().from(schema.bottleSubmissions)).toHaveLength(0);
+
+    await expect(
+      submitBottle(db, alice.id, {
+        name: "Blantons Single Barrel",
+        category: "bourbon",
+        confirmNew: true,
+      }),
+    ).resolves.toBeTruthy();
+  });
+
+  it("refuses a second identical submission from the same account", async () => {
+    await submitBottle(db, alice.id, { name: "Faraway Farm Pick", category: "bourbon" });
+    // The first submission is itself in the catalog the check searches, so the
+    // duplicate prompt covers a double-tap as well as a real collision.
+    await expect(
+      submitBottle(db, alice.id, { name: "Faraway Farm Pick", category: "bourbon" }),
+    ).rejects.toBeInstanceOf(DuplicateBottleError);
+  });
+
   it("writes a usable bottle and a pending review row", async () => {
     const { bottle, submissionId } = await submitBottle(db, alice.id, {
       name: "Barrell Dovetail",
@@ -227,6 +258,42 @@ describe("the concierge sees the same catalog the user does", () => {
     await logPour(db, alice.id, { bottleId: poured.id, rating: 5 });
     const forAlice = await recommendBottles(db, alice.id, { mode: "discovery" });
     expect(forAlice.map((r) => r.bottleId)).toContain(bottle.id);
+  });
+});
+
+describe("a pour of an unreviewed bottle", () => {
+  /**
+   * The submission is the submitter's alone, but a pour of it is not only a
+   * pour: the friend feed, a shared note and a profile's recent notes all join
+   * the bottle for its name and none of them checks its status. A public pour
+   * would publish the bottle through the side door.
+   */
+  it("is private whatever was asked for, and stays that way after promotion", async () => {
+    const { logPour } = await import("@/lib/pours");
+    const { bottle } = await submitBottle(db, alice.id, {
+      name: "Alice's Barrel Pick",
+      category: "bourbon",
+    });
+
+    const { pour } = await logPour(db, alice.id, { bottleId: bottle.id, visibility: "public" });
+    expect(pour.visibility).toBe("private");
+
+    // Promotion does not raise it: the system never raises a visibility, and
+    // its owner can publish the note themselves once the bottle is shared.
+    await db
+      .update(schema.bottles)
+      .set({ status: "verified" })
+      .where(eq(schema.bottles.id, bottle.id));
+    const [stored] = await db
+      .select()
+      .from(schema.pours)
+      .where(eq(schema.pours.id, pour.id));
+    expect(stored.visibility).toBe("private");
+
+    // A pour of an ordinary catalog bottle is untouched.
+    const shared = await createTestBottle(db, { name: "Shared Rye", category: "rye" });
+    const other = await logPour(db, alice.id, { bottleId: shared.id, visibility: "public" });
+    expect(other.pour.visibility).toBe("public");
   });
 });
 
