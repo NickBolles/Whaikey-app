@@ -6,6 +6,20 @@ The visual style does not change. DESIGN.md's tokens, recipes and rules all stan
 
 ---
 
+## Boards at a glance
+
+Each board is one 390×844 viewport, rendered from the app's own tokens and recipes. The primary action of every screen is above the fold. An editable canvas version of these boards was published alongside the September 2026 review; the renders below are the reference.
+
+| Home | Bar | Log a pour (sheet) | Bottle |
+|---|---|---|---|
+| ![Home](./storyboard/home.png) | ![Bar](./storyboard/bar.png) | ![Log a pour](./storyboard/log-pour.png) | ![Bottle](./storyboard/bottle.png) |
+
+| Explore | You | Journal |
+|---|---|---|
+| ![Explore](./storyboard/explore.png) | ![You](./storyboard/you.png) | ![Journal](./storyboard/journal.png) |
+
+---
+
 ## 0. The diagnosis in one paragraph
 
 The app is not clunky because screens are unfinished. Each screen is well crafted. It is clunky because the four highest-traffic screens (Home, My Bar, Log a pour, Bottle) are two to three and a half viewports long with their primary action at the bottom; because the bottom nav spends two of five slots on the two thinnest surfaces (Friends, Chat) while Explore, Learn, Search and the Journal have no home; because there is no way back, no edit, no delete, no settings and no sign-out; and because the same job is drawn several different ways (three search UIs, six bottle-row anatomies, two sharing controls per journal row). The three screens that already work (Learn hub, Compare, Note discussion) are one screen, one action, one payoff. That is the target for everything else.
