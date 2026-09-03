@@ -3,7 +3,7 @@ import { and, eq } from "drizzle-orm";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
 import { createTestBottle, createTestUser, setupTestDb, uid } from "@/test/helpers";
-import { executeTool, searchBottlesLike } from "./tools";
+import { executeTool, isWriteTool, searchBottlesLike } from "./tools";
 
 let db: DB;
 let user: schema.User;
@@ -319,5 +319,24 @@ describe("dispatcher", () => {
   it("returns {error} for an unknown tool name", async () => {
     const result = (await executeTool(db, user.id, "launch_rockets", {})) as { error?: string };
     expect(result.error).toMatch(/unknown tool/i);
+  });
+});
+
+describe("write tools", () => {
+  /**
+   * The chat turn races a slow tool against its budget and answers without it.
+   * That is right for a read — the model can answer around a missing pairing —
+   * and wrong for a write, whose work keeps running after the race is lost, so
+   * the bottle lands on the shelf while the answer says it didn't.
+   */
+  it("names the tools that change the user's data", () => {
+    expect(isWriteTool("add_to_wishlist")).toBe(true);
+    // Reads, including the slow one the budget exists for.
+    expect(isWriteTool("get_pairings")).toBe(false);
+    expect(isWriteTool("search_bottles")).toBe(false);
+    expect(isWriteTool("get_my_bar")).toBe(false);
+    expect(isWriteTool("get_bottle_details")).toBe(false);
+    expect(isWriteTool("get_pour_history")).toBe(false);
+    expect(isWriteTool("get_tasting_notes")).toBe(false);
   });
 });

@@ -51,11 +51,16 @@ test.describe("security headers", () => {
     await expect(community).toContainText("3 rated pours");
   });
 
-  test("a bottle only its owner has poured shows no community average at all", async ({ page }) => {
-    // Nothing published, so there is no plural to report — and on a bottle with
-    // one or two public raters an "average" would just be their rating.
+  test("a bottle below the floor reports nothing, and does not claim nobody has poured", async ({
+    page,
+  }) => {
+    // The count is suppressed with the average, so this state covers both
+    // "nobody" and "one or two people" — the copy must not assert either, and
+    // must not invite a pour on the false premise of being first.
     await page.goto("/bottles/blantons-original");
-    await expect(page.getByLabel("Community rating")).toContainText("No community ratings yet");
+    const community = page.getByLabel("Community rating");
+    await expect(community).toContainText("Not enough ratings yet");
+    await expect(community).not.toContainText("be first");
   });
 
   test("the scan page loads and asks for the camera under the policy", async ({ page }) => {

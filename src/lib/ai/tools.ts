@@ -189,6 +189,23 @@ export async function searchBottlesLike(
 // Executors
 // ---------------------------------------------------------------------------
 
+/**
+ * Tools that change the user's data.
+ *
+ * The chat turn's budget races a slow tool and answers without it, which is
+ * right for a read — `get_pairings` can wait on a generation lease and the
+ * model can answer around a missing suggestion. It is wrong for a write: the
+ * work keeps running after the race is lost, so the bottle lands on the shelf
+ * while the answer says the request could not finish. Writes are awaited
+ * instead; they are ordinary database calls, not the slow ones the budget
+ * exists for.
+ */
+const WRITE_TOOLS = new Set<string>(["add_to_wishlist"]);
+
+export function isWriteTool(name: string): boolean {
+  return WRITE_TOOLS.has(name);
+}
+
 type ToolError = { error: string };
 const toolError = (error: string): ToolError => ({ error });
 

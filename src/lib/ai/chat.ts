@@ -10,7 +10,7 @@ import {
   remainingBudget,
   withinBudget,
 } from "./client";
-import { executeTool, TOOL_DEFINITIONS } from "./tools";
+import { executeTool, isWriteTool, TOOL_DEFINITIONS } from "./tools";
 
 /** Max number of tool-executing iterations per user turn. */
 const MAX_TOOL_ITERATIONS = 6;
@@ -193,13 +193,14 @@ export async function runChat(
     const results: Anthropic.Messages.ToolResultBlockParam[] = [];
     for (const toolUse of toolUses) {
       // The budget covers tools too: a `get_pairings` miss can wait on a 60s
-      // generation lease, which outlives the route's deadline on its own.
-      const result =
-        (await withinBudget(
-          startedAt,
-          AI_LOOP_BUDGET_MS,
-          () => executeTool(db, userId, toolUse.name, toolUse.input),
-        )) ?? TOOL_TIMED_OUT;
+      // generation lease, which outlives the route's deadline on its own. A
+      // write is awaited instead — abandoning one leaves it to land after the
+      // answer said it hadn't.
+      const result = isWriteTool(toolUse.name)
+        ? await executeTool(db, userId, toolUse.name, toolUse.input)
+        : ((await withinBudget(startedAt, AI_LOOP_BUDGET_MS, () =>
+            executeTool(db, userId, toolUse.name, toolUse.input),
+          )) ?? TOOL_TIMED_OUT);
       toolCalls.push({ name: toolUse.name, input: toolUse.input, result });
       results.push({
         type: "tool_result",
@@ -392,12 +393,11 @@ export async function* runChatStream(
         input = {};
       }
       yield { type: "tool", name: toolUse.name };
-      const result =
-        (await withinBudget(
-          startedAt,
-          AI_LOOP_BUDGET_MS,
-          () => executeTool(db, userId, toolUse.name, input),
-        )) ?? TOOL_TIMED_OUT;
+      const result = isWriteTool(toolUse.name)
+        ? await executeTool(db, userId, toolUse.name, input)
+        : ((await withinBudget(startedAt, AI_LOOP_BUDGET_MS, () =>
+            executeTool(db, userId, toolUse.name, input),
+          )) ?? TOOL_TIMED_OUT);
       toolCalls.push({ name: toolUse.name, input, result });
       results.push({
         type: "tool_result",

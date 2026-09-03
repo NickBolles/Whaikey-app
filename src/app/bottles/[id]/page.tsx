@@ -233,7 +233,11 @@ export default async function BottleDetailPage({
           </div>
         ) : (
           <span className="text-sm text-muted">
-            No community ratings yet — pour one and be first.
+            {/* Deliberately silent about how many: below the floor the count is
+                suppressed too, so this renders identically for nobody and for
+                two people. "Be first" would be false in the second case, and
+                would be nudging a pour on a false premise. */}
+            Not enough ratings yet to show a community average.
           </span>
         )}
       </section>
