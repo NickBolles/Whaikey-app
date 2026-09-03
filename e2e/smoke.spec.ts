@@ -30,6 +30,30 @@ test.describe("security headers", () => {
     expect(csp).toContain("img-src 'self' data: https:");
   });
 
+  /**
+   * The visual baselines cannot police this: the community average is two
+   * characters on a 390x844 page, far under the suite's 2% maxDiffPixelRatio,
+   * so a screenshot of a bottle whose average had silently absorbed private
+   * pours would still pass. Assert the number (review SEC-M2).
+   */
+  test("the bottle page's community rating counts only published pours", async ({ page }) => {
+    await page.goto("/bottles/eagle-rare-10");
+    const community = page.getByLabel("Community rating");
+
+    // e2e/demo-seed.ts: three public raters at 4, 4 and 4.5. Jordan's own three
+    // pours on this bottle are private and must not appear here at all — with
+    // them the average was 4.0 over 3 "rated pours", which is what shipped.
+    await expect(community).toContainText("4.2");
+    await expect(community).toContainText("3 rated pours");
+  });
+
+  test("a bottle only its owner has poured shows no community average at all", async ({ page }) => {
+    // Nothing published, so there is no plural to report — and on a bottle with
+    // one or two public raters an "average" would just be their rating.
+    await page.goto("/bottles/blantons-original");
+    await expect(page.getByLabel("Community rating")).toContainText("No community ratings yet");
+  });
+
   test("the scan page loads and asks for the camera under the policy", async ({ page }) => {
     const violations: string[] = [];
     page.on("console", (msg) => {
