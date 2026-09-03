@@ -13,6 +13,7 @@ import {
   ImageUp,
   Keyboard,
   Loader2,
+  Plus,
   RefreshCw,
   ScanLine,
   Sparkles,
@@ -20,10 +21,10 @@ import {
   Undo2,
   X,
 } from "lucide-react";
-import { RELATIONSHIPS, type Relationship } from "@/db/schema";
+import { RELATIONSHIPS, WHISKEY_CATEGORIES, type Relationship } from "@/db/schema";
 import { isValidUpc, normalizeUpc } from "@/lib/upc";
 import type { BottleSearchResult } from "@/lib/ai/tools";
-import { CategoryChip } from "@/components/category-chip";
+import { CategoryChip, categoryLabel } from "@/components/category-chip";
 import { haptic } from "@/lib/native/haptics";
 import { isNativeApp } from "@/lib/native/platform";
 import { originLabel } from "@/lib/origin";
@@ -1624,6 +1625,9 @@ function DecisionSheet({
 }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<BottleSearchResult[]>([]);
+  const [addOpen, setAddOpen] = useState(false);
+  /** Near-matches the server refused over, shown as options rather than an error. */
+  const [duplicates, setDuplicates] = useState<BottleSearchResult[] | null>(null);
   useScrollLock(true);
   const searchRef = useRef<HTMLInputElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -1656,7 +1660,7 @@ function DecisionSheet({
     };
   }, [query]);
 
-  const options = query.trim() ? results : item.options;
+  const options = duplicates ?? (query.trim() ? results : item.options);
 
   return (
     <div
@@ -1756,6 +1760,34 @@ function DecisionSheet({
             <ImageUp size={18} strokeWidth={1.8} aria-hidden />
             Snap the label instead
           </button>
+          {/*
+            The end of the dead end (review PLAN-A1). A barcode we don't know
+            and a catalog that doesn't have it used to leave "Skip this one" as
+            the only honest option.
+
+            In the sheet rather than a link to /bottles/new: this screen is a
+            batch scanner and its queue lives in component state, so navigating
+            away to add one bottle would throw away every other scan in flight.
+            Same route underneath, same dedupe prompt.
+          */}
+          {addOpen ? (
+            <AddUnknownBottle
+              initialName={query.trim()}
+              upc={item.upc ?? null}
+              onAdded={onPick}
+              onDuplicates={setDuplicates}
+              onCancel={() => setAddOpen(false)}
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={() => setAddOpen(true)}
+              className="btn-secondary px-4 py-3 text-sm font-medium flex items-center justify-center gap-2"
+            >
+              <Plus size={18} strokeWidth={1.8} aria-hidden />
+              It&apos;s not in the catalog — add it
+            </button>
+          )}
           <button
             type="button"
             onClick={onRemove}
@@ -1764,6 +1796,139 @@ function DecisionSheet({
             Skip this one
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Add a bottle the catalog lacks, without leaving the scanner (PLAN-A1).
+ *
+ * Deliberately two fields. The scanner is a batch tool — somebody is standing
+ * at a shelf with a phone — and a form that asks for cask type before it will
+ * take a bottle is the dead end again in nicer clothes. The bottle is created
+ * and then handed to the same confirm path a picked bottle takes, so the
+ * shelf row, the toast and the undo are all the ones that already existed.
+ */
+function AddUnknownBottle({
+  initialName,
+  upc,
+  onAdded,
+  onDuplicates,
+  onCancel,
+}: {
+  initialName: string;
+  upc: string | null;
+  onAdded: (bottle: BottleSearchResult) => void;
+  onDuplicates: (duplicates: BottleSearchResult[]) => void;
+  onCancel: () => void;
+}) {
+  const [name, setName] = useState(initialName);
+  const [category, setCategory] = useState<string>("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  /** True once the server has refused this exact name as a duplicate. */
+  const [refused, setRefused] = useState(false);
+
+  async function add(confirmNew = false) {
+    if (name.trim().length < 2) {
+      setError("Give it a name — a couple of characters is enough.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/bottles", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name: name.trim(),
+          category,
+          upc: upc ?? undefined,
+          source: "scan",
+          confirmNew,
+        }),
+      });
+      if (res.status === 409) {
+        const data = (await res.json()) as { duplicates?: BottleSearchResult[] };
+        onDuplicates(data.duplicates ?? []);
+        // Kept on screen with a way through it: a genuinely different bottle
+        // can share a normalized name, and without this the same payload gets
+        // the same 409 forever.
+        setRefused(true);
+        setBusy(false);
+        return;
+      }
+      if (!res.ok) throw new Error(`add failed (${res.status})`);
+      const data = (await res.json()) as { bottle: BottleSearchResult };
+      onAdded(data.bottle);
+    } catch {
+      setError("Couldn't add that one — try again.");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="card-flat flex flex-col gap-3 p-3.5">
+      <p className="text-xs text-muted leading-relaxed">
+        It&apos;s yours right away. It joins the shared catalog once someone has checked it over.
+      </p>
+      <label htmlFor="scan-add-name" className="section-label">
+        Bottle name
+      </label>
+      <input
+        id="scan-add-name"
+        value={name}
+        onChange={(e) => {
+          setName(e.target.value);
+          setRefused(false);
+        }}
+        placeholder="Elijah Craig Barrel Proof B524"
+        className="w-full rounded-xl border border-border-subtle bg-surface py-2.5 px-3 text-sm text-foreground placeholder:text-muted focus:outline-none focus:border-accent/70"
+      />
+      <label htmlFor="scan-add-category" className="section-label">
+        Category
+      </label>
+      <select
+        id="scan-add-category"
+        value={category}
+        onChange={(e) => setCategory(e.target.value)}
+        className="w-full rounded-xl border border-border-subtle bg-surface py-2.5 px-3 text-sm text-foreground focus-visible:ring-2 focus-visible:ring-accent/60"
+      >
+        <option value="">Pick a category…</option>
+        {WHISKEY_CATEGORIES.map((c) => (
+          <option key={c} value={c}>
+            {categoryLabel(c)}
+          </option>
+        ))}
+      </select>
+      {error && (
+        <p role="alert" className="text-xs text-danger">
+          {error}
+        </p>
+      )}
+      {refused && (
+        <p className="text-xs text-muted leading-relaxed">
+          We may already have this one — it&apos;s in the list above. If yours is a different
+          bottle with the same name, add it anyway.
+        </p>
+      )}
+      <div className="flex gap-2">
+        <button
+          type="button"
+          disabled={busy || !category}
+          onClick={() => void add(refused)}
+          className="btn-primary flex-1 px-4 py-2.5 text-sm font-medium disabled:opacity-50"
+        >
+          {busy ? "Adding…" : refused ? "None of these — add mine" : "Add and use it"}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="btn-secondary px-4 py-2.5 text-sm font-medium"
+        >
+          Cancel
+        </button>
       </div>
     </div>
   );

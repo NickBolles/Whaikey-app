@@ -2,7 +2,17 @@ import { eq } from "drizzle-orm";
 import type { DB } from "../src/db/index";
 import * as schema from "../src/db/schema";
 import { hashPhone, normalizePhone } from "../src/lib/phone";
-import { DEMO_SESSION_TOKEN, DEMO_USER_ID, E2E_SECRET, SCAN_SESSION_TOKEN, SCAN_USER_ID } from "./fixtures";
+import {
+  DEMO_SESSION_TOKEN,
+  DEMO_USER_ID,
+  E2E_SECRET,
+  GATE_MINOR_SESSION_TOKEN,
+  GATE_MINOR_USER_ID,
+  GATE_SESSION_TOKEN,
+  GATE_USER_ID,
+  SCAN_SESSION_TOKEN,
+  SCAN_USER_ID,
+} from "./fixtures";
 
 const D = (iso: string) => new Date(iso);
 
@@ -70,6 +80,49 @@ export async function seedDemoUser(db: DB): Promise<void> {
     createdAt: D("2026-07-01T12:00:00Z"),
     updatedAt: D("2026-07-01T12:00:00Z"),
   });
+
+  // Signed in, and have never answered the age gate — deliberately left
+  // unanswered so the gate itself can be walked end to end. Two of them,
+  // because answering is once per account (see e2e/fixtures.ts).
+  for (const [userId, token, name] of [
+    [GATE_USER_ID, GATE_SESSION_TOKEN, "Alex Newcomer"],
+    [GATE_MINOR_USER_ID, GATE_MINOR_SESSION_TOKEN, "Robin Newcomer"],
+  ] as const) {
+    await db.insert(schema.user).values({
+      id: userId,
+      name,
+      email: `${userId}@whaikey.app`,
+      emailVerified: true,
+      createdAt: D("2026-09-01T12:00:00Z"),
+      updatedAt: D("2026-09-01T12:00:00Z"),
+    });
+    await db.insert(schema.session).values({
+      id: `${userId}-session`,
+      token,
+      userId,
+      expiresAt: D("2030-01-01T00:00:00Z"),
+      createdAt: D("2026-09-01T12:00:00Z"),
+      updatedAt: D("2026-09-01T12:00:00Z"),
+    });
+  }
+
+  /**
+   * Both demo accounts are through the age gate (PLAN.md §9.1). Without this
+   * every signed-in test lands on /age instead of the screen it came for —
+   * which is exactly what the gate is supposed to do, and exactly why the
+   * fixture has to say so out loud rather than the gate being off in tests.
+   */
+  for (const userId of [DEMO_USER_ID, SCAN_USER_ID]) {
+    await db.insert(schema.ageVerifications).values({
+      userId,
+      birthDate: "1988-04-12",
+      market: "US",
+      minimumAge: 21,
+      passed: true,
+      eligibleOn: null,
+      createdAt: D("2026-01-15T12:00:00Z"),
+    });
+  }
 
   const ub = (
     id: string,

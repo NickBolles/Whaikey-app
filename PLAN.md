@@ -54,6 +54,8 @@ An AI-native whiskey tracking app, inspired by wine apps like **Vivino** (social
 - **Whiskey School:** 9 lessons with quizzes and a flavor-wheel explorer.
 - **Catalog pipeline:** 9 source adapters (TTB COLA, Iowa, Oregon, Utah, BC, Systembolaget, Vinmonopolet, WHISKY:EDITION, CSV), enrichment, sold-verification queue with a subscription-CLI worker, a source-provenance graph, issue-driven feedback review, 4 scheduled workflows.
 - **Native:** Capacitor shell loading the deployed site, capability layer with web fallbacks, PKCE + state-bound device-code sign-in, offline pour queue, push-token registration, Android debug + iOS compile in CI, release workflow awaiting credentials.
+- **Adding a bottle the catalog lacks:** `POST /api/bottles` with a dedupe prompt, reached from the search empty state, the scan decision sheet and an unmatched import row (`/bottles/new`). See §2.2 for what "added" means before review.
+- **Age gate:** date of birth + market at first authenticated use, per-market minimum, answered once (§9.1); `/responsible` is the resources page it links to.
 
 ### 2.2 Live but weaker than it reads
 
@@ -63,12 +65,12 @@ An AI-native whiskey tracking app, inspired by wine apps like **Vivino** (social
 - **Passport** counts 3 of 6 dimensions and is reachable only from a claimed social profile; no counters on My Bar.
 - **Learn progress** lives in localStorage.
 - **Reports** are written and never read; no moderation surface exists.
+- **User-submitted bottles** are added instantly and usable instantly, but stay private to their submitter: `bottle_submissions` holds the review queue and **nothing promotes a row yet** (that is the moderation surface above). A submission is excluded from passport badges and never teaches the barcode scanner until it is promoted.
 - **Community consensus** is live at `/bottles/[id]/compare` ahead of the jurisdiction review SOCIAL.md §14 makes its precondition.
 
 ### 2.3 Not built, and load-bearing
 
-- **No way to add a bottle the catalog lacks** — no `POST /api/bottles`; a scan, search or import miss is a dead end.
-- **No age gate, no data export, no account deletion, no Terms, no Privacy Policy, no billing or entitlements, no analytics, no error monitoring, no settings page, no sign-out control, no moderation queue.**
+- **No data export, no account deletion, no Terms, no Privacy Policy, no billing or entitlements, no analytics, no error monitoring, no settings page, no sign-out control, no moderation queue.**
 - No clubs, blind flights, samples, distillery visits, passport diffing, palate share card, flights/blind mode, 100-point rating mode, similar-bottles rail, chat tools `log_pour_draft` / `recommend_bottles` / `get_price_info`.
 - No `minShellVersion` kill switch for the native shell; no reviewer demo account (the app is social-login-only).
 
@@ -78,7 +80,6 @@ Screens are individually well crafted but the four highest-traffic ones (Home, M
 
 ### 2.5 Do not trust until rewritten
 
-- `docs/SOCIAL.md` §8 principle 7, `docs/FEATURES.md` §8.3 and §12: all assert an age gate that does not exist.
 - `docs/APP_STORE_SETUP.md` §6.2 says to answer "no UGC"; the app ships profiles, feeds and comments today. §1/§6.4 demand a password demo account the app forbids.
 - `docs/SOCIAL.md` §6.1's nav list contradicts its own §6.3 amendment, and both predate STORYBOARD.md §1.1.
 - `docs/FEATURES.md` §2.1 (fuzzy search), §4.2 (100-point storage), §11.3 (counters on My Bar): promised, not shipped.
@@ -107,7 +108,7 @@ v1 ships to a store when every box is ticked. Nothing on this list is optional a
 - [ ] Settings page: account, sign-out, rating scale, units, privacy defaults, notifications.
 
 **Legal to operate**
-- [ ] Age gate at signup; store availability aligned to markets.
+- [x] Age gate at signup (WP-17); store availability still to be aligned to the markets in `MINIMUM_AGE_BY_MARKET`.
 - [ ] Privacy Policy and Terms live, covering AI processing (and the provider), photos, the user-photo licence grant, community opt-in.
 - [ ] Moderation queue an operator can work; report and block flows (shipped) documented for store review.
 - [ ] Support URL and an in-app feedback path.
@@ -386,7 +387,11 @@ Nothing sends today (`push_devices` stores tokens; no sender exists). When one d
 ## 9. Compliance, trust & operations
 
 ### 9.1 Age gate & jurisdiction
-Date-of-birth or attestation at signup with a per-market minimum (21 US, 18 most others; align store availability to markets we can serve). One gate covers social; no re-check at first social action. Under-age existing accounts: social off, export offered, deletion after notice. **Not built** — WP-17.
+Date-of-birth or attestation at signup with a per-market minimum (21 US, 18 most others; align store availability to markets we can serve). One gate covers social; no re-check at first social action. **Built — WP-17.**
+
+Shipped shape: `src/lib/age-gate.ts` holds the market table (21 US, 20 JP, 19 KR, 19 CA, 18 everywhere else — the rule for the table is **the highest minimum anywhere in that market**, since the gate asks for a country rather than an address: Canada is 19 in most provinces and 18 in three, so it is 19 — anything unlisted falls back to 18 rather than to a guess, and extending it is a per-market decision taken here). The answer is a date of birth plus a market, asked once and **never rewritten**: an answer that fails is kept, so "I'm 19" cannot be retried into "I'm 22", and the stored answer is re-read against today so a block lasts until a birthday rather than forever. Enforced in two places and no others: the root layout (every page the app renders) and `requireUser` (every API write), so nothing has to remember to apply it. `/responsible` is the resources page.
+
+Still owed: under-age *existing* accounts (social off, export offered, deletion after notice) — nothing pre-dates the gate today, so this becomes real when the app has accounts that pre-date a market's minimum changing. Export and deletion are §9.2's, not built.
 
 ### 9.2 Privacy: export, deletion, retention
 - Export: JSON + CSV of bottles, pours, notes, chat, profile (minus phone hash), shares, passport; one tap, free forever.

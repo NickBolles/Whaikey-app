@@ -3,7 +3,7 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import { requireUser, withErrorHandling } from "@/lib/session";
 import { createPourShare, revokePourShare } from "@/lib/pour-sharing";
-import { SocialDisabledError } from "@/lib/pours";
+import { PendingBottleError, SocialDisabledError } from "@/lib/pours";
 
 const inputSchema = z.object({ locationLabel: z.string().max(80).optional().nullable() });
 
@@ -23,6 +23,15 @@ export async function POST(_request: Request, ctx: Ctx) {
     } catch (err) {
       if (err instanceof SocialDisabledError) {
         return NextResponse.json({ error: "social_disabled" }, { status: 409 });
+      }
+      if (err instanceof PendingBottleError) {
+        return NextResponse.json(
+          {
+            error: "pending_bottle",
+            message: "That bottle is waiting to be reviewed, so this note can't be shared yet.",
+          },
+          { status: 409 },
+        );
       }
       throw err;
     }

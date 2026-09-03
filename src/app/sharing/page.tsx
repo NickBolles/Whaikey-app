@@ -77,6 +77,19 @@ export default async function SharingPage() {
         initialAllowComments={prefs.allowComments}
         initialSocialEnabled={profile?.socialEnabled ?? false}
       />
+
+      {/*
+        PLAN.md §9.8 asks for the resources page to be linked from Settings.
+        There is no settings screen yet (it lands with WP-18), and this is the
+        nearest thing the app has — the page people already come to when they
+        want to change how much of themselves is on show.
+      */}
+      <p className="text-xs text-muted leading-relaxed">
+        <Link href="/responsible" className="text-accent font-medium">
+          Drinking responsibly
+        </Link>{" "}
+        — what this app will and won&apos;t do, and where to find help.
+      </p>
     </div>
   );
 }

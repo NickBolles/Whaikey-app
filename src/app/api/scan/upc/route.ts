@@ -33,7 +33,7 @@ const bodySchema = z.object({
  */
 export async function POST(request: Request) {
   return withErrorHandling(async () => {
-    await requireUser();
+    const user = await requireUser();
 
     const body = await request.json().catch(() => null);
     const parsed = bodySchema.safeParse(body);
@@ -61,7 +61,7 @@ export async function POST(request: Request) {
       const product = await lookupExternalUpc(upc);
       if (product) {
         externalName = product.name;
-        candidates = await candidatesFromExternalName(db, product.name);
+        candidates = await candidatesFromExternalName(db, product.name, user.id);
       }
     }
 

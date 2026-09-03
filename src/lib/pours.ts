@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
 import { POUR_VISIBILITIES, SERVING_STYLES, type Pour, type PourVisibility, type TastingNote } from "@/db/schema";
+import { canViewBottle } from "@/lib/catalog-visibility";
 import { isValidLeaf } from "@/lib/flavor-wheel";
 import { refreshUserPalate } from "@/lib/palate-store";
 import { getSocialPrefs } from "@/lib/social";
@@ -136,11 +137,30 @@ export async function logPour(db: DB, userId: string, input: PourInput): Promise
   const bottle = await db.query.bottles.findFirst({
     where: eq(schema.bottles.id, parsed.bottleId),
   });
-  if (!bottle) throw new BottleNotFoundError(parsed.bottleId);
+  // Unknown and "somebody else's unreviewed submission" are the same answer
+  // here (PLAN-A1): a pour can only be logged against a bottle the user can see.
+  if (!bottle || !canViewBottle(bottle, userId)) throw new BottleNotFoundError(parsed.bottleId);
 
   const amountMl = parsed.amountMl ?? DEFAULT_POUR_ML;
   let visibility: PourVisibility =
     parsed.visibility ?? (await getSocialPrefs(db, userId)).defaultPourVisibility;
+
+  /**
+   * A pour of a bottle nobody has reviewed is private, whatever was asked for
+   * (PLAN-A1/WP-16).
+   *
+   * The submission is visible to its submitter alone, but a pour of it is not
+   * only a pour: the friend feed, a shared note and a profile's recent notes
+   * all join the bottle for its name, and none of them checks its status. So
+   * a public pour of a pending bottle would publish the bottle through the
+   * side door — the one thing the submission rule exists to prevent.
+   *
+   * Held down rather than filtered on read: this is one place instead of every
+   * social projection, and it fails closed. It also stays honest about the
+   * stance — the system never *raises* a visibility, so when the bottle is
+   * promoted the note stays where it is until its owner chooses otherwise.
+   */
+  if (bottle.status === "user_submitted") visibility = "private";
   const { pour, note } = await db.transaction(async (tx) => {
     if (parsed.clientId) {
       // Serialize replays of the same key so two in-flight retries can't both
@@ -311,6 +331,18 @@ export class SocialDisabledError extends Error {
 }
 
 /**
+ * Raised when a pour of an unreviewed submission is asked to become visible.
+ * The bottle is its submitter's alone until somebody reviews it, and a public
+ * pour would publish it through the side door.
+ */
+export class PendingBottleError extends Error {
+  constructor() {
+    super("That bottle is still waiting to be reviewed");
+    this.name = "PendingBottleError";
+  }
+}
+
+/**
  * Update a pour's social visibility. Owner-scoped; returns null for
  * missing/others'. While the owner is stepped back (socialEnabled=false),
  * non-private updates are rejected — otherwise a stale History tab could
@@ -324,6 +356,21 @@ export async function updatePourVisibility(
   visibility: PourVisibility,
 ): Promise<Pour | null> {
   return db.transaction(async (tx) => {
+    if (visibility !== "private") {
+      /**
+       * A pour of a bottle nobody has reviewed cannot be published later
+       * either (PLAN-A1/WP-16). `logPour` holds it private at write time; this
+       * is the other door into the same room, and a public projection here
+       * would carry the pending bottle's name into the feed just the same.
+       */
+      const [row] = await tx
+        .select({ status: schema.bottles.status })
+        .from(schema.pours)
+        .innerJoin(schema.bottles, eq(schema.bottles.id, schema.pours.bottleId))
+        .where(and(eq(schema.pours.id, pourId), eq(schema.pours.userId, userId)))
+        .limit(1);
+      if (row?.status === "user_submitted") throw new PendingBottleError();
+    }
     if (visibility !== "private") {
       // Same lock as makeEverythingPrivate: the check and the write are
       // atomic w.r.t. a concurrent US-11 reset.

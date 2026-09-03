@@ -245,6 +245,8 @@ Keep the existing design (day groups, cards with serving · size · time, note e
 
 Reached from Bar → + Add. Redesigned viewfinder-first: the camera fills the screen; the relationship radios (I own it · Tried it · Wishlist) float over the top; manual code entry and "Snap the label" are a compact bottom strip; the session tray is a collapsed chip ("Scanned 4 · Undo last") that expands on tap. "Done → My Bar" stays. Import moves to Bar → + Add and Settings → Data.
 
+The decision sheet for a miss carries **three** ways out, not two: pick from the catalog, snap the label, or **add the bottle right there** (§3.13) — in the sheet, because the queue is the screen's state and leaving loses it.
+
 ### 3.10 Friends (tab)
 
 Header row: "Friends" · **Show my code** · settings icon (opens **How you're found**, the existing discovery settings, as a sheet). One search field "@handle or phone number" with the **scan-code** button at its trailing edge (D15). Then Following / Followers / Requests, then the full "From your friends" feed (Q4).
@@ -252,6 +254,23 @@ Header row: "Friends" · **Show my code** · settings icon (opens **How you're f
 ### 3.11 Compare, Note discussion, Learn — unchanged. These remain the reference compositions.
 
 ### 3.12 Public share page `/s/[code]` — add the signed-out CTA ("Track your own pours — free") with a return-to-page sign-in.
+
+### 3.13 Adding a bottle the catalog lacks (`/bottles/new`; WP-16)
+
+A miss is an ordinary answer on a catalog this size, so it has somewhere to go. Two required fields — **name** and **category** — and nothing else required; distillery, age and ABV are optional. Arrives pre-filled from whatever the miss already knew (the words typed, the barcode read) and returns to where it came from.
+
+- **Where it is a page**: the search empty state ("Add it yourself" beside "Start over") and, for a signed-out visitor, behind a sign-in that returns to this same pre-filled URL.
+- **Where it is *not* a page**: the **batch scanner** and the **import match step** add in place. Both hold their state in the screen — a scan queue, a table of parsed rows — and navigating away to add one bottle throws the rest of it away. Same route underneath, same dedupe prompt, no navigation. This is the "sheets over pages for short tasks" rule (§1.2) with a specific reason attached.
+- **Dedupe**: a name already in the catalog comes back as a prompt with the near-matches and a way through it ("None of these — add mine"), because two different bottles can share a name. Looser near-matches are shown and never block.
+- **Not here**: photos, ABV/cask/mash detail, distillery creation, anything about the review queue beyond one line of copy. The bottle is the user's immediately and everyone else's once a person has looked at it; the copy says exactly that and promises no date.
+
+### 3.14 Age gate (`/age`) and Drinking responsibly (`/responsible`; WP-17)
+
+**`/age` is a blocking screen and looks like one**: no header, no bottom nav, because every tab behind it redirects straight back to it. One question — where are you, and when were you born — with the minimum for the selected market stated *before* the answer, not after. Asked once per account and kept.
+
+- **Blocked state**: says the date the account becomes eligible, offers the resources page, and offers a **real sign-out** (not a link to `/sign-in`, which leaves the session live). No second attempt at the question.
+- **`/responsible`** is an ordinary content page reachable signed-out: what the app will not do, what a pour contains, and named organisations. Linked from the gate, the blocked state, sign-in and `/sharing`. It moves to **Settings → About** when Settings exists.
+- **Not here**: identity verification, a re-check at first social action, any claim the app cannot honour today (the export line says it is not built yet, because it is not).
 
 ---
 

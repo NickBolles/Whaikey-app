@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { Search as SearchIcon } from "lucide-react";
 import { WHISKEY_CATEGORIES } from "@/db/schema";
 import { BottleCard } from "@/components/bottle-card";
@@ -108,16 +109,31 @@ export default function SearchPage() {
             Try fewer or shorter words — &quot;eagle&quot; instead of &quot;eagle rare bourbon&quot;
             {category ? ", or clear the category filter" : ""}.
           </p>
-          <button
-            type="button"
-            onClick={() => {
-              setQuery("");
-              setCategory(null);
-            }}
-            className="btn-secondary mt-3 px-5 py-2.5 text-sm font-medium"
-          >
-            Start over
-          </button>
+          <div className="mt-3 flex flex-col items-center gap-2">
+            {/*
+              A search that finds nothing used to end here (review PLAN-A1).
+              The catalog is 269 bottles; "not in there" is an ordinary answer,
+              so the ordinary answer needs somewhere to go.
+            */}
+            <Link
+              href={`/bottles/new?source=search${
+                query.trim() ? `&name=${encodeURIComponent(query.trim())}` : ""
+              }`}
+              className="btn-primary px-5 py-2.5 text-sm font-medium"
+            >
+              Add it yourself
+            </Link>
+            <button
+              type="button"
+              onClick={() => {
+                setQuery("");
+                setCategory(null);
+              }}
+              className="btn-secondary px-5 py-2.5 text-sm font-medium"
+            >
+              Start over
+            </button>
+          </div>
         </div>
       )}
 

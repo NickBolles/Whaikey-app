@@ -167,6 +167,55 @@ export const bottles = pgTable(
   (t) => [index("bottles_category_idx").on(t.category), index("bottles_name_idx").on(t.name)],
 );
 
+/**
+ * A bottle somebody added because the catalog lacked it (review PLAN-A1).
+ *
+ * The bottle row itself is real and usable the instant it is written — the
+ * whole point of the submission path is that a scan/search/import miss stops
+ * being a dead end — but it carries `status: "user_submitted"`, which
+ * `catalogVisibleTo` keeps to its submitter until a moderator promotes it.
+ * This table is the queue behind that promotion, in the same split the
+ * verification queue uses: catalog state lives on `bottles.status`, review
+ * state lives here.
+ *
+ * `distilleryText` is what the submitter typed. User input never creates a
+ * `distilleries` row — the distillery is linked only on an exact name match,
+ * and otherwise the typed name is parked here for whoever reviews it.
+ */
+export const BOTTLE_SUBMISSION_STATES = ["pending", "approved", "rejected", "duplicate"] as const;
+export type BottleSubmissionState = (typeof BOTTLE_SUBMISSION_STATES)[number];
+
+export const bottleSubmissions = pgTable(
+  "bottle_submissions",
+  {
+    id: id(),
+    bottleId: text("bottle_id")
+      .notNull()
+      .references(() => bottles.id, { onDelete: "cascade" }),
+    submittedBy: text("submitted_by")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    state: text("state").$type<BottleSubmissionState>().notNull().default("pending"),
+    /** The distillery name as typed, when it matched nothing we already had. */
+    distilleryText: text("distillery_text"),
+    /** The barcode that missed, when the submission came out of a scan. */
+    upc: text("upc"),
+    /** Where the submission came from, for triage: scan, search, import, direct. */
+    source: text("source"),
+    reviewedBy: text("reviewed_by").references(() => user.id),
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true, mode: "date" }),
+    /** Set when a reviewer marks this a duplicate of an existing catalog bottle. */
+    duplicateOfBottleId: text("duplicate_of_bottle_id").references(() => bottles.id),
+    reviewNote: text("review_note"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("bottle_submissions_bottle_uq").on(t.bottleId),
+    index("bottle_submissions_state_idx").on(t.state, t.createdAt),
+    index("bottle_submissions_user_idx").on(t.submittedBy, t.createdAt),
+  ],
+);
+
 export const bottleAliases = pgTable(
   "bottle_aliases",
   {
@@ -386,6 +435,36 @@ export const pourShares = pgTable(
  * signup. The profile IS the palate card (docs/SOCIAL.md §7.1): social
  * surfaces render palate data, never spend, value, or pour counts.
  */
+/**
+ * The legal-age gate (PLAN.md §9.1, review PLAN-C8/PLAN-A7).
+ *
+ * Three documents asserted an age gate that did not exist; this is it. One
+ * row per account, written once and never rewritten: an answer that fails the
+ * minimum is *kept*, so "I'm 19" cannot be walked back into "I'm 22" on the
+ * next screen. `eligibleOn` is the date that answer stops failing, which is
+ * what lets an account come back on its birthday rather than being dead.
+ *
+ * The birth date is stored as a plain `YYYY-MM-DD` string, not a timestamp:
+ * a birthday is a calendar fact with no time and no zone, and storing it as
+ * an instant makes it shift by a day depending on where it is read.
+ */
+export const ageVerifications = pgTable("age_verifications", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => user.id, { onDelete: "cascade" }),
+  /** ISO `YYYY-MM-DD`, as entered. */
+  birthDate: text("birth_date").notNull(),
+  /** ISO 3166-1 alpha-2, whichever market the user said they are in. */
+  market: text("market").notNull(),
+  /** The minimum that applied when the answer was given, kept for the record. */
+  minimumAge: integer("minimum_age").notNull(),
+  /** True when the answer met the minimum. False rows are blocks, not retries. */
+  passed: boolean("passed").notNull(),
+  /** `YYYY-MM-DD` this account becomes eligible; null once it already is. */
+  eligibleOn: text("eligible_on"),
+  createdAt: createdAt(),
+});
+
 export const userProfiles = pgTable("user_profiles", {
   userId: text("user_id")
     .primaryKey()
@@ -1140,6 +1219,8 @@ export type BottleClaim = typeof bottleClaims.$inferSelect;
 export type BottleMedia = typeof bottleMedia.$inferSelect;
 export type Distillery = typeof distilleries.$inferSelect;
 export type Bottle = typeof bottles.$inferSelect;
+export type BottleSubmission = typeof bottleSubmissions.$inferSelect;
+export type AgeVerification = typeof ageVerifications.$inferSelect;
 export type NewBottle = typeof bottles.$inferInsert;
 export type UserBottle = typeof userBottles.$inferSelect;
 export type PassportTierRow = typeof passportTiers.$inferSelect;

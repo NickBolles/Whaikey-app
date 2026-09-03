@@ -8,6 +8,7 @@ import {
   type Relationship,
 } from "@/db/schema";
 import { requireUser, withErrorHandling } from "@/lib/session";
+import { canViewBottle } from "@/lib/catalog-visibility";
 import { listUserBottles, upsertUserBottle, userBottleCreateSchema } from "@/lib/bar";
 
 export const dynamic = "force-dynamic";
@@ -60,7 +61,9 @@ export async function POST(req: Request) {
     const bottle = await db.query.bottles.findFirst({
       where: eq(schema.bottles.id, input.bottleId),
     });
-    if (!bottle) {
+    // A bottle somebody else submitted and nobody has reviewed is not in this
+    // user's catalog at all (PLAN-A1), so it cannot go on their shelf.
+    if (!bottle || !canViewBottle(bottle, user.id)) {
       return NextResponse.json({ error: "Bottle not found" }, { status: 404 });
     }
 

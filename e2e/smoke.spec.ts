@@ -1,5 +1,10 @@
 import { expect, test } from "@playwright/test";
-import { SCAN_SESSION_TOKEN, signIn } from "./fixtures";
+import {
+  GATE_MINOR_SESSION_TOKEN,
+  GATE_SESSION_TOKEN,
+  SCAN_SESSION_TOKEN,
+  signIn,
+} from "./fixtures";
 
 /**
  * Review SEC-H3: the app shipped with no security headers at all. These run
@@ -218,6 +223,40 @@ test.describe("signed-in scan flow", () => {
     await expect(page.getByRole("status")).toContainText(/already scanned/i);
   });
 
+  /**
+   * Review PLAN-A1. The catalog is 269 bottles, so "we don't have it" is an
+   * ordinary answer — and it used to be the last one. This walks the whole way
+   * out: a barcode nobody knows, a catalog that has nothing like it, and a
+   * bottle on the shelf at the end of it.
+   */
+  test("a bottle the catalog lacks can be added and used straight away", async ({ page }) => {
+    await page.goto("/scan");
+    await page.getByLabel(/barcode number/i).fill("012345678912");
+    await page.getByRole("button", { name: "Scan" }).click();
+
+    await page.getByRole("button", { name: /needs you/i }).click();
+    const sheet = page.getByRole("dialog");
+    await sheet.getByRole("searchbox").fill("Faraway Farm Barrel Pick");
+    await sheet.getByRole("button", { name: /not in the catalog/i }).click();
+
+    // In the sheet, not a page away: the scanner is a batch tool and its queue
+    // lives in component state, so navigating off would discard every other
+    // scan in flight. Pre-filled with what was already typed.
+    await expect(sheet.getByLabel(/bottle name/i)).toHaveValue("Faraway Farm Barrel Pick");
+    await sheet.getByLabel(/^category$/i).selectOption("bourbon");
+    await sheet.getByRole("button", { name: /add and use it/i }).click();
+
+    // Straight onto the shelf, the same way picking a bottle would.
+    await expect(page.getByRole("button", { name: /undo/i })).toBeVisible();
+    await page.goto("/bar");
+    await expect(page.getByText("Faraway Farm Barrel Pick")).toBeVisible();
+
+    // And it is searchable for its submitter, who is the only one it exists for.
+    await page.goto("/search");
+    await page.getByRole("searchbox").fill("faraway farm");
+    await expect(page.getByText("Faraway Farm Barrel Pick")).toBeVisible();
+  });
+
   test("a bad code gets a clear inline error", async ({ page }) => {
     await page.goto("/scan");
     await page.getByLabel(/barcode number/i).fill("1234");
@@ -361,5 +400,83 @@ test.describe("flavor wheel touch gesture", () => {
 
     await expect(chips.getByRole("button")).toHaveCount(1);
     expect(await page.evaluate(() => window.scrollY)).toBe(before);
+  });
+});
+
+/**
+ * The legal-age gate (PLAN.md §9.1, review PLAN-C8 / PLAN-A7). Three documents
+ * asserted a gate that did not exist; this walks the one that does.
+ */
+test.describe("age gate", () => {
+  test.beforeEach(async ({ context, baseURL }) => {
+    await signIn(context, baseURL!, GATE_SESSION_TOKEN);
+  });
+
+  test("stands in front of the whole app until it is answered", async ({ page }) => {
+    // Not one page each: the gate lives in the root layout, so every route the
+    // app renders is behind it without anyone having to remember.
+    for (const path of ["/", "/bar", "/scan", "/search"]) {
+      await page.goto(path);
+      await expect(page).toHaveURL(/\/age\?next=/);
+      await expect(page.getByRole("heading", { name: /one thing before we start/i })).toBeVisible();
+    }
+
+    // The resources page is reachable from inside the gate — the moment it is
+    // most worth reading is the moment somebody has just been turned away.
+    await expect(page.getByRole("link", { name: /drinking responsibly/i })).toBeVisible();
+
+    // And nothing else is: every tab behind the gate redirects back to it, so
+    // a nav here would be five ways to end up in the same place.
+    await expect(page.getByRole("navigation", { name: "Primary" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "My Bar" })).toHaveCount(0);
+  });
+
+  test("lets an adult through, back to where they were going", async ({ page }) => {
+    await page.goto("/bar");
+    await expect(page).toHaveURL(/\/age\?next=%2Fbar/);
+
+    await page.getByLabel(/where are you/i).selectOption("US");
+    await expect(page.getByText(/the minimum there is 21/i)).toBeVisible();
+    await page.getByLabel(/date of birth/i).fill("1988-04-12");
+    await page.getByRole("button", { name: /continue/i }).click();
+
+    await expect(page).toHaveURL(/\/bar$/);
+    // And it stays open on the next navigation, rather than asking again.
+    await page.goto("/");
+    await expect(page).not.toHaveURL(/\/age/);
+  });
+
+  test("turns away someone under the minimum and says when that changes", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    // Its own account: the test above has answered for the other one, and an
+    // answer is deliberately not repeatable.
+    await signIn(context, baseURL!, GATE_MINOR_SESSION_TOKEN);
+    await page.goto("/");
+    await page.getByLabel(/where are you/i).selectOption("US");
+    await page.getByLabel(/date of birth/i).fill("2012-04-12");
+    await page.getByRole("button", { name: /continue/i }).click();
+
+    await expect(page.getByRole("heading", { name: /not just yet/i })).toBeVisible();
+    await expect(page.getByText(/April 12, 2033/)).toBeVisible();
+
+    // The answer is kept: reloading the gate does not offer another go at it.
+    await page.goto("/age");
+    await expect(page.getByRole("heading", { name: /not just yet/i })).toBeVisible();
+    await expect(page.getByLabel(/date of birth/i)).toHaveCount(0);
+  });
+
+  test("the resources page says what the app will not do, and reaches real help", async ({
+    page,
+  }) => {
+    await page.goto("/responsible");
+    await expect(page.getByRole("heading", { name: /drinking responsibly/i })).toBeVisible();
+    await expect(page.getByText(/no streaks/i)).toBeVisible();
+    await expect(page.getByRole("link", { name: /SAMHSA National Helpline/i })).toHaveAttribute(
+      "href",
+      "https://www.samhsa.gov/find-help/national-helpline",
+    );
   });
 });

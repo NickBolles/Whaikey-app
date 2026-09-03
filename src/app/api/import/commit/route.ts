@@ -5,6 +5,7 @@ import { getDb, schema } from "@/db";
 import { RELATIONSHIPS, BOTTLE_STATUSES } from "@/db/schema";
 import { requireUser, withErrorHandling } from "@/lib/session";
 import { readJsonWithinLimit } from "@/lib/body-limit";
+import { catalogVisibleTo } from "@/lib/catalog-visibility";
 import { toUserBottleValues } from "@/lib/bar";
 import { isValidUpc, normalizeUpc } from "@/lib/scan";
 
@@ -71,8 +72,21 @@ export async function POST(request: Request) {
     const db = getDb();
     const ids = [...new Set(items.map((i) => i.bottleId))];
     const { added, updated, upcsTaught, skipped } = await db.transaction(async (tx) => {
-      const known = new Set(
-        (await tx.select({ id: schema.bottles.id }).from(schema.bottles).where(inArray(schema.bottles.id, ids))).map((r) => r.id),
+      const visible = await tx
+        .select({ id: schema.bottles.id, status: schema.bottles.status })
+        .from(schema.bottles)
+        // A row can only be imported against a bottle this user can see —
+        // their own submissions included, nobody else's (PLAN-A1).
+        .where(and(inArray(schema.bottles.id, ids), catalogVisibleTo(user.id)));
+      const known = new Set(visible.map((r) => r.id));
+      /**
+       * A `bottle_upcs` row is crowdsourced truth every other scanner resolves
+       * against, so it may only point at a bottle everyone can see. Importing
+       * against your own pending submission still puts it on your shelf; the
+       * barcode waits with the submission.
+       */
+      const teachable = new Set(
+        visible.filter((r) => r.status !== "user_submitted").map((r) => r.id),
       );
       const valid = items.filter((item) => known.has(item.bottleId));
       const existing = new Set(
@@ -131,6 +145,7 @@ export async function POST(request: Request) {
           .onConflictDoUpdate({ target: [schema.userBottles.userId, schema.userBottles.bottleId], set: update });
       }
       const upcs = valid
+        .filter((item) => teachable.has(item.bottleId))
         .map((item) => ({ ...item, upc: item.upc ? normalizeUpc(item.upc) : null }))
         .filter((item): item is typeof item & { upc: string } => Boolean(item.upc && isValidUpc(item.upc)));
       if (upcs.length > 0) {

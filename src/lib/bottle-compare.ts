@@ -13,6 +13,7 @@
 
 import { and, desc, eq, ne, sql } from "drizzle-orm";
 import type { DB } from "@/db";
+import { canViewBottle } from "@/lib/catalog-visibility";
 import { schema } from "@/db";
 import { hasPublishedProducerFlavorNotes } from "@/lib/bar";
 import { contributorVisibleSql, getFriendNotesForBottle } from "@/lib/social";
@@ -36,7 +37,8 @@ export async function getBottleComparison(
   bottleId: string,
 ): Promise<BottleComparison | null> {
   const bottle = await db.query.bottles.findFirst({ where: eq(schema.bottles.id, bottleId) });
-  if (!bottle) return null;
+  // Somebody else's unreviewed submission compares to nothing (PLAN-A1).
+  if (!bottle || !canViewBottle(bottle, viewerId)) return null;
 
   // --- The viewer's own note: union max across every pour of this bottle. ---
   const viewerRows = await db

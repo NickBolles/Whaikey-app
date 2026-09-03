@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
-import { getDb } from "@/db";
-import { requireUser, withErrorHandling } from "@/lib/session";
+import { eq } from "drizzle-orm";
+import { getDb, schema } from "@/db";
+import { getSessionUser, requireUser, withErrorHandling } from "@/lib/session";
+import { canViewBottle } from "@/lib/catalog-visibility";
 import { getCachedPairings, getOrGeneratePairings } from "@/lib/ai/pairings";
 import { reserveAiRequest } from "@/lib/ai/rate-limit";
 
@@ -18,6 +20,16 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   return withErrorHandling(async () => {
     const { id } = await params;
     const db = getDb();
+    // This route is public, and a 404-vs-200 answer is itself an existence
+    // check — so a bottle somebody else submitted must 404 here too (PLAN-A1).
+    const viewer = await getSessionUser();
+    const bottle = await db.query.bottles.findFirst({
+      columns: { status: true, submittedBy: true },
+      where: eq(schema.bottles.id, id),
+    });
+    if (!bottle || !canViewBottle(bottle, viewer?.id)) {
+      return NextResponse.json({ error: "Bottle not found" }, { status: 404 });
+    }
     const cached = await getCachedPairings(db, id);
     if (cached === null) {
       return NextResponse.json({ error: "Bottle not found" }, { status: 404 });

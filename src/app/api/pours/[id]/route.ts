@@ -3,7 +3,13 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import { POUR_VISIBILITIES } from "@/db/schema";
 import { requireUser, withErrorHandling } from "@/lib/session";
-import { SocialDisabledError, deletePour, getPour, updatePourVisibility } from "@/lib/pours";
+import {
+  PendingBottleError,
+  SocialDisabledError,
+  deletePour,
+  getPour,
+  updatePourVisibility,
+} from "@/lib/pours";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -47,6 +53,15 @@ export async function PATCH(req: Request, ctx: Ctx) {
     } catch (err) {
       if (err instanceof SocialDisabledError) {
         return NextResponse.json({ error: "social_disabled" }, { status: 409 });
+      }
+      if (err instanceof PendingBottleError) {
+        return NextResponse.json(
+          {
+            error: "pending_bottle",
+            message: "That bottle is waiting to be reviewed, so this note stays private for now.",
+          },
+          { status: 409 },
+        );
       }
       throw err;
     }

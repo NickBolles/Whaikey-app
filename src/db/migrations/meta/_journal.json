@@ -169,6 +169,20 @@
       "when": 1788456594737,
       "tag": "0023_premium_virginia_dare",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1788465755358,
+      "tag": "0024_supreme_darkhawk",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1788471483773,
+      "tag": "0025_jittery_maelstrom",
+      "breakpoints": true
     }
   ]
 }

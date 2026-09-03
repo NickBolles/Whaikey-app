@@ -5,6 +5,7 @@ import { getDb, schema } from "@/db";
 import { RELATIONSHIPS } from "@/db/schema";
 import { requireUser, withErrorHandling } from "@/lib/session";
 import { upsertUserBottle } from "@/lib/bar";
+import { canViewBottle } from "@/lib/catalog-visibility";
 import { confirmUpcMapping, isValidUpc, normalizeUpc } from "@/lib/scan";
 
 export const runtime = "nodejs";
@@ -49,11 +50,22 @@ export async function POST(request: Request) {
     const bottle = await db.query.bottles.findFirst({
       where: eq(schema.bottles.id, input.bottleId),
     });
-    if (!bottle) {
+    // Someone else's pending submission does not exist as far as this user is
+    // concerned (PLAN-A1) — 404 rather than 403, which would confirm the id.
+    if (!bottle || !canViewBottle(bottle, user.id)) {
       return NextResponse.json({ error: "Bottle not found" }, { status: 404 });
     }
 
-    const mapping = upc ? await confirmUpcMapping(db, upc, input.bottleId) : null;
+    /**
+     * A confirmation teaches every future scanner, so it may only be recorded
+     * against a bottle everyone can see. Confirming your own submission still
+     * puts it on your shelf below; the barcode is held on the submission and
+     * published when the bottle is (`publishSubmissionUpc`).
+     */
+    const mapping =
+      upc && bottle.status !== "user_submitted"
+        ? await confirmUpcMapping(db, upc, input.bottleId)
+        : null;
 
     let userBottle: schema.UserBottle | null = null;
     let created = false;
