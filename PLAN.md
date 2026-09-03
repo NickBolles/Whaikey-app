@@ -441,7 +441,7 @@ Enforced as mechanic bans in review (SOCIAL §3.1; §1's never-build list), veri
 
 ## 11. Surfaces
 
-Target IA and per-screen boards: [docs/STORYBOARD.md](./docs/STORYBOARD.md). Nav: **Home · Bar · ＋ (pour sheet) · Explore · You**. Routes that must exist and do not yet: `/settings`, `/passport` (index), `/admin/reports`, `loading.tsx` / `error.tsx` / `not-found.tsx`. Routes that demote: `/friends` and `/chat` become sections and affordances rather than tabs.
+Target IA and per-screen boards: [docs/STORYBOARD.md](./docs/STORYBOARD.md) (v2, owner decisions in its §0). Nav: **Home · Bar · ＋ (pour sheet, scan-first) · Explore · Friends**; the profile lives behind the header avatar. Routes that must exist and do not yet: `/passport` (index), settings inside the profile, `/admin/reports`, `loading.tsx` / `error.tsx` / `not-found.tsx`. `/chat` demotes from a tab to affordances on Home, the bottle page and Explore.
 
 ---
 

@@ -1,69 +1,90 @@
-# Whaikey — UX Storyboard (September 2026)
+# Whaikey — UX Storyboard (v2, September 2026)
 
 Companion to [PLAN.md](../PLAN.md) §1 and the [September 2026 review](./REVIEW_2026-09.md). This is the target shape of the app's screens and flows after the focus-and-polish pass. It is **binding for UI work the same way DESIGN.md is binding for styling**: a screen that grows past its board here needs the board changed first.
 
 The visual style does not change. DESIGN.md's tokens, recipes and rules all stand. What changes is **priority, density and navigation**: which thing each screen is for, what sits above the fold, and how you get back.
 
+> **v2 (2026-09-03) supersedes v1's nav and several boards after an owner review.** The owner's decisions are collected in §0 so an implementing agent can read them in one place; every board below is already updated to match them. Where v1 proposed something the owner rejected, the rejection is stated so it is not re-proposed.
+
+---
+
+## 0. Owner decisions (read first)
+
+| # | Decision | What it replaces |
+|---|---|---|
+| D1 | **Bottom nav is Home · Bar · ＋ · Explore · Friends.** The profile ("You") is **not** a tab; it lives behind the **avatar in the top-right of the header** on every tab route. Chat leaves the nav and becomes an affordance (§1.1). | v1's Home · Bar · ＋ · Explore · You |
+| D2 | **Home keeps the "For your palate" rail**, and the rail's header links to Explore. Home calls Explore out; it does not absorb it. | v1 moved the rail off Home |
+| D3 | **Log a pour is a sheet that opens fully expanded and keeps every piece of the current pour page's richness**: say-what-you-taste + dictate + auto-fill, nose/palate/finish, the interactive flavor wheel with tap-and-hold-and-drag intensity, serving, size, people, visibility. Nothing is hidden behind a disclosure. | v1's minimal "stars + Save + Add detail" sheet |
+| D4 | **In the pour sheet you can start taking notes before choosing a bottle; the bottle is required before Save.** | v1 required the bottle first |
+| D5 | **Bottle selection starts with scan**, in a compact viewfinder, with an obvious way to type directly beneath it. The current full-page scan screen is too big for this job. | v1's search-first picker |
+| D6 | **＋ means "explore or pour a bottle."** Scanning a bottle you are holding (at a store, at a friend's) shows an immediate **bottle breakdown** card, from which you can log a pour, add it to your bar, wishlist it, or just look. | v1's "＋ opens the pour sheet, scan is a fallback" |
+| D7 | **Keep the current profile page's structure**, but: shrink the palate wheel when it is display-only, put a one-line description and the signature-descriptor chips beside it, **place the avatar in the centre of the wheel**, and **decorate the avatar with a slim colour-coded intensity ring** made from the palate. Condense the top of the page. Settings and sharing controls stay in the profile. | v1's "You" hub |
+| D8 | **Passport, Journal and Friends appear in the profile as summaries with a link to the full page.** The passport summary shows earned crests **and the next unearned ones greyed beside them**. | v1's plain list rows |
+| D9 | **Keep the existing journal design.** Add the ⋯ menu per row (Share and Visibility move into it), keep filters at the top, and make the journal **deep-linkable by bottle**. The **"shared with friends" label on a row is good**; visibility gets **quick-select tags in the pour sheet**. | v1's redrawn compact journal |
+| D10 | **Explore is a dedicated tab**, and Home links to it. | (agreed with v1) |
+
+Open questions the owner has not decided (implementing agent: pick the recommended default, flag it in the PR):
+
+| Q | Question | Recommended default |
+|---|---|---|
+| Q1 | Does ＋ open the pour sheet directly, or a two-choice sheet (Pour · Add to bar)? | **Directly.** The bottle breakdown card (§3.4) offers Add to bar and Wishlist, so a second menu is redundant. |
+| Q2 | If the pour sheet is swiped down with content in it, is the draft kept? | **Kept**, as a "Resume your pour" pill above the nav for 24 h; one draft at a time. This is what makes "notes before bottle" safe. |
+| Q3 | Palate ring on the avatar: how is intensity encoded? | **Arc length** per wedge (a wedge with more of your palate gets a longer segment), constant 4 px stroke, wedge colours from `flavor-wheel.ts`. Opacity is too subtle at 32 px. |
+| Q4 | Does the Friends tab hold the full friends feed, or does the feed stay a Home module? | **Both**: Home keeps the 3-item module; the Friends tab has the full list beneath the people controls. |
+| Q5 | Does the batch "Scan your shelf" mode survive? | **Yes**, reached from Bar → **+ Add**, redesigned as a viewfinder-first screen (§3.9). It is for shelving many bottles; ＋ is for one. |
+
 ---
 
 ## Boards at a glance
 
-Each board is one 390×844 viewport, rendered from the app's own tokens and recipes. The primary action of every screen is above the fold. An editable canvas version of these boards was published alongside the September 2026 review; the renders below are the reference.
+Each board is one 390×844 viewport, rendered from the app's own tokens and recipes. The primary action of every screen is above the fold.
 
-| Home | Bar | Log a pour (sheet) | Bottle |
+| Home | Bar | Pour sheet (empty) | Pour sheet (filled) |
 |---|---|---|---|
-| ![Home](./storyboard/home.png) | ![Bar](./storyboard/bar.png) | ![Log a pour](./storyboard/log-pour.png) | ![Bottle](./storyboard/bottle.png) |
+| ![Home](./storyboard/home.png) | ![Bar](./storyboard/bar.png) | ![Pour sheet, before a bottle is chosen](./storyboard/pour-empty.png) | ![Pour sheet with bottle, notes and wheel](./storyboard/pour-filled.png) |
 
-| Explore | You | Journal |
-|---|---|---|
-| ![Explore](./storyboard/explore.png) | ![You](./storyboard/you.png) | ![Journal](./storyboard/journal.png) |
+| Bottle breakdown (from a scan) | Bottle | Explore | Profile |
+|---|---|---|---|
+| ![Bottle breakdown](./storyboard/breakdown.png) | ![Bottle](./storyboard/bottle.png) | ![Explore](./storyboard/explore.png) | ![Profile](./storyboard/profile.png) |
 
----
-
-## 0. The diagnosis in one paragraph
-
-The app is not clunky because screens are unfinished. Each screen is well crafted. It is clunky because the four highest-traffic screens (Home, My Bar, Log a pour, Bottle) are two to three and a half viewports long with their primary action at the bottom; because the bottom nav spends two of five slots on the two thinnest surfaces (Friends, Chat) while Explore, Learn, Search and the Journal have no home; because there is no way back, no edit, no delete, no settings and no sign-out; and because the same job is drawn several different ways (three search UIs, six bottle-row anatomies, two sharing controls per journal row). The three screens that already work (Learn hub, Compare, Note discussion) are one screen, one action, one payoff. That is the target for everything else.
+| Journal | Friends |
+|---|---|
+| ![Journal](./storyboard/journal.png) | ![Friends](./storyboard/friends.png) |
 
 ---
 
 ## 1. Information architecture
 
-### 1.1 Bottom nav: one slot per verb
+### 1.1 Bottom nav (D1)
 
 | Slot | Label | Verb (PLAN.md §1) | Holds |
 |---|---|---|---|
-| 1 | **Home** | orientation | Tonight's pick · last pours · one thing from friends or discovery |
-| 2 | **Bar** | Track | The shelf, first. Search/sort/filter in one line. Flavor map behind one tap. **+ Add** in the header |
-| 3 | **＋** | Track (the core loop) | Opens the **pour sheet** directly, not a menu. The sheet's first step already offers scan, search and recents |
-| 4 | **Explore** | Explore + Learn | Catalog search · Passport · "For your palate" · Whiskey School |
-| 5 | **You** | Refine + Share | Palate card · Journal · Month in review · Friends and feed · Sharing · Settings |
+| 1 | **Home** | orientation | Tonight's pick · last pours · **For your palate** (→ Explore) · From your friends · concierge input |
+| 2 | **Bar** | Track | The shelf, first. Search/sort/filter in one line. Flavor map behind one tap. **+ Add** (batch scan / search / import) in the header |
+| 3 | **＋** | Track + Explore | Opens the **pour sheet**, fully expanded, with the scan-first bottle slot at the top. Scanning an unknown bottle shows the **bottle breakdown** card (§3.4): pour it, add it, wishlist it, or just look |
+| 4 | **Explore** | Explore + Learn | Catalog search (with a scan button) · Passport · "For your palate" · Whiskey School |
+| 5 | **Friends** | Share | Find people · following / followers / requests · the full friends feed · comparisons |
 
-What leaves the nav: **Friends** becomes a section of You (the tab is a near-empty room until the graph is dense; SOCIAL.md §6.3's tripwire has not fired). **Chat** becomes a persistent affordance rather than a destination: an "Ask about your bar" input on Home, "Ask about this bottle" on the bottle page, and a Concierge row in Explore. `/chat` remains as the full conversation view those entry points open. When AI is not configured, the affordances are hidden entirely; the developer setup card never appears in production navigation.
+**Header**: on tab routes, wordmark left, **avatar right → Profile** (`/u/[handle]`, or the profile-claim flow when no handle exists). On non-tab routes: **← back** (labelled with where you came from) · page title · one contextual action. Search and the journal icon leave the header: search lives in Explore and Bar, the journal is reached from Home ("Journal →"), the profile and the bottle page.
 
-### 1.2 Header
+**Chat** is an affordance, not a tab: an "Ask about your bar…" input at the bottom of Home, "Ask about this bottle" on the bottle page, and a Concierge row in Explore. All open `/chat`. When AI is not configured they are hidden; the developer setup card never appears in navigation.
 
-Three slots: **leading**, **title**, **trailing**.
+The header and the nav are hidden on `/sign-in`, `/welcome` and `/s/[code]`. Every non-tab route has back, and the iOS shell enables swipe-back.
 
-- On a tab route: wordmark · (nothing) · avatar → You.
-- On any other route: **← back** (labelled with where you came from when known, else the parent tab) · page title · one contextual action (e.g. Share on a note, ⋯ on a bottle).
-- Search and Journal leave the header; they live in Explore and You.
-- The header and the bottom nav are both hidden on `/sign-in`, `/welcome`, and `/s/[code]`.
-
-Back is a **first-class requirement**: every non-tab route has a back affordance, and the iOS shell enables swipe-back (`allowsBackForwardNavigationGestures`).
-
-### 1.3 Global patterns (build once, use everywhere)
+### 1.2 Global patterns (build once, use everywhere)
 
 | Pattern | Rule |
 |---|---|
-| **Toast with undo** | Every mutation that can be undone (log a pour, add/remove a bottle, delete a pour, change visibility, revoke a link) confirms with a 4-second toast carrying **Undo**. The scan screen already implements this; promote it to an app-level region. |
+| **Toast with undo** | Every reversible mutation (log a pour, add/remove a bottle, delete a pour, change visibility, revoke a link) confirms with a 4-second toast carrying **Undo**. The scan screen already does this; promote it to an app-level region. |
 | **Optimistic writes** | Shelf and journal mutations render immediately and reconcile; errors roll back into the toast. |
-| **Sheets over pages for short tasks** | Logging a pour, editing shelf details, sharing, and the ＋ actions are bottom sheets so the user never loses their place. Sheets use `useScrollLock`, a drag handle, and a single primary button. |
-| **One search component** | `<BottleSearch onPick doorLabel />` is the only search UI. The door label says what picking does ("Log a pour", "Add to bar", "View"). Used in Explore, the pour sheet, Bar → Add, and first run. |
-| **One bottle row** | `<BottleRow>` with `leading` (fill spine / shot / crest), body (name, distillery, one meta line), `trailing` (rating / price / action). Density variants `compact` and `default`. Replaces the six anatomies. |
-| **Destructive = confirm or undo** | Never both absent. Remove-from-shelf and delete-pour get undo; delete-account gets typed confirmation. |
-| **Loading, error, not-found** | `loading.tsx` skeletons for Home, Bar, Bottle, Journal; a root `error.tsx` and `not-found.tsx`. A tab tap must paint something within 100 ms. |
-| **Copy** | One name per thing: *My Bar* (not Mine/your shelf), *Journal* (not history/tasting journal), *Concierge* (not chat), *Log a pour* (the verb) and *Save* (the button). Jargon gets a first-use gloss: "blind spot: the label names it, you didn't". |
-| **Type floor** | 12 px minimum; muted text at full `--muted`, never `/50`–`/80` opacity variants. |
+| **Sheets over pages for short tasks** | The pour sheet, shelf-detail edits, and the share sheet are bottom sheets so the user never loses their place. Drag handle, `useScrollLock`, one primary button in a sticky footer. |
+| **One bottle picker** | `<BottlePicker>`: compact viewfinder on top (barcode loop + label ID), a text field directly beneath, recent bottles as chips. Used in the pour sheet, Bar → Add, Explore's scan button and first run. `<BottleSearch>` (the text half) is the only search UI; the door label says what picking does. |
+| **One bottle row** | `<BottleRow>` with `leading`, body, `trailing` slots and `compact`/`default` density. Replaces the six anatomies. |
+| **One breakdown card** | `<BottleBreakdown>`: the immediate "what is this and what is it to me" card shown after a scan or search pick, with the four actions. Also the top of the bottle page. |
+| **Destructive = confirm or undo** | Never both absent. |
+| **Loading, error, not-found** | `loading.tsx` skeletons for Home, Bar, Bottle, Journal, Profile; a root `error.tsx` and `not-found.tsx`. A tab tap paints within 100 ms. |
+| **Copy** | One name per thing: *My Bar*, *Journal*, *Concierge*, *Log a pour* (verb) and *Save pour* (button). First-use glosses for blind spot, signature, calibration, Same Dram, taste twin. |
+| **Type floor** | 12 px minimum; muted text at full `--muted`. |
 
 ---
 
@@ -71,57 +92,71 @@ Back is a **first-class requirement**: every non-tab route has a back affordance
 
 | Flow | Today | Target |
 |---|---|---|
-| First run → one bottle on the shelf | 8 taps, 6 screens, phone number asked on screen 3 | **4 taps**: sign in → scan or search → tap a result → Home |
-| Log a pour (from Home's tonight pick) | 3 taps + ~1,300 px scroll to reach the stars | **2 taps, no scroll**: tap card → tap star (auto-saves, undo toast) |
-| Log a pour (from ＋) | 5 taps + scroll | **3 taps**: ＋ → recent bottle → star |
-| Add a bottle from search | 3 taps + ~2,500 px scroll to "I own it" | **3 taps, no scroll**: Explore → result → "Add to bar" in the sticky action bar (or inline on the result) |
-| Edit or delete a pour | impossible | **2 taps**: row ⋯ → Edit / Delete (undo) |
-| Share a pour | two unrelated controls per row | **2 taps**: row Share → sheet (who can see + get a link) |
-| Sign out | impossible | You → Settings → Sign out |
-| Find the Passport | profile only, via a crest | Explore tab, second block |
+| Log a pour of a bottle in front of you (＋) | 5 taps + scroll | **＋ → point camera (auto-identifies) → star → Save = 3 taps**, no typing |
+| Log a pour from Home's tonight card or a Pour button | 3 taps + ~1,300 px scroll | **tap → star → Save = 3 taps**, no scroll (bottle prefilled; rating is directly under it) |
+| Start notes at a tasting before you know the bottle | impossible | ＋ → type or dictate → tap the wheel → scan the label when you can → Save |
+| At a store: what is this bottle? | search → bottle page → scroll | **＋ → point camera → breakdown card** (1 tap + camera) |
+| Add a bottle from search | 3 taps + ~2,500 px scroll | Explore → result → **Add to bar** on the breakdown card = 3 taps |
+| Edit, share or delete a pour | impossible / stacked controls | row **⋯** → Edit / Share / Visibility / Delete (undo) = 2 taps |
+| Journal for one bottle | impossible | bottle page "All 3 pours →" or Bar row → `/history?bottleId=` |
+| Profile | header avatar (only when a handle exists) | header avatar, always |
+| Sign out / settings / export | impossible | Profile → Settings |
+| First run → one bottle on the shelf | 8 taps, phone number on screen 3 | sign in → scan or type → tap result → Home = **4 taps** |
 
-### 2.1 First run (storyboard)
+### 2.1 First run
 
-1. **Sign-in** — wordmark, one line of promise, Google / Apple. No nav, no header. (`signed-out-sign-in.png` minus the bottom nav.)
-2. **Your first bottle** — the full-screen search with the scan button on top. "Whatever's on your shelf, or the one you're wishing for. One is plenty." Tapping a result adds it to the bar with an undo toast and advances. Skippable.
-3. **Home**, with the tonight card already pointing at that bottle: "Pour it when you're ready."
+1. **Sign-in**: wordmark, one line, Google / Apple. No nav, no header.
+2. **Your first bottle**: the `<BottlePicker>` full-screen (viewfinder on top, type beneath). Tapping a result adds it with an undo toast. Skippable.
+3. **Home**, with the tonight card pointing at that bottle.
 
-Profile handle and friends are **not** in first run. The handle is claimed at the first social action (SOCIAL.md §7.1). Friends are offered from You, and from the first shared link. The "You're set" interstitial is deleted. Target: under 60 seconds and one bottle. The `/welcome` wizard shrinks to step 2 above.
+Handle and friends are **not** in first run (SOCIAL.md §7.1: handle at first social action). The "You're set" interstitial is deleted. `/welcome` shrinks to step 2.
 
-### 2.2 Log a pour (storyboard)
+### 2.2 The pour sheet (D3, D4, D5)
 
-The pour sheet slides up from wherever you are and returns you there.
+The sheet opens **fully expanded** from ＋, from any Pour button, from the tonight card and from the bottle page, and returns you where you were. It is the current pour page's content, reordered, in a sheet. Section order, top to bottom:
 
 ```
-┌──────────────────────────────┐
-│ ─── handle                   │
-│ Eagle Rare 10 Year    Change │  ← prefilled from context, or step 0 (search/scan/recents)
-│                              │
-│   ☆   ☆   ☆   ☆   ☆          │  ← thumb-sized; tapping a star enables Save
-│                              │
-│ [        Save pour        ]  │
-│                              │
-│ Add detail ▾                 │  ← ONE disclosure; everything below is optional
-│   Say what you taste  🎤     │
-│   Nose · Palate · Finish     │
-│   Flavor wheel               │
-│   Neat · Rocks · Splash …    │
-│   Pour size (default hidden) │
-│   With · Where               │
-│   Who can see this  🔒       │
-└──────────────────────────────┘
+┌────────────────────────────────────┐
+│ ─── handle           Log a pour   ✕│
+│ ┌──────────────────────────────┐   │  1. BOTTLE SLOT — empty state:
+│ │ ▣ compact viewfinder (150px) │   │     live barcode loop + label ID
+│ └──────────────────────────────┘   │     "or type a name" field under it
+│ 🔍 or type a name…                 │     recent bottles as chips
+│ [Eagle Rare 10] [Lagavulin 16] …   │     filled state: bottle row + Change
+│                                    │
+│ ☆ ☆ ☆ ☆ ☆                         │  2. RATING (optional)
+│                                    │
+│ SAY WHAT YOU TASTE     🎤 Dictate  │  3. FREEFORM + AI (unchanged)
+│ ┌──────────────────────────────┐   │     Auto-fill from notes → chips,
+│ │ Loads of vanilla and oak…    │   │     rating suggestion, N/P/F split
+│ └──────────────────────────────┘   │
+│ Heard so far ● Vanilla ● Oak  Add  │
+│                                    │
+│ Nose · Palate · Finish             │  4. THE WHEEL (unchanged, full width)
+│        ╭────────╮                  │     tap a wedge → leaves; hold → intensity;
+│       │  wheel   │                 │     drag; the signature interaction
+│        ╰────────╯                  │
+│ Neat  Rocks  Splash  Cocktail  👤  │  5. SERVING + PEOPLE
+│ Pour size   15 · 25 · 30 · 45 · 60 │  6. SIZE (compact chips, not a slider headline)
+│ Who can see  🔒 Only me · Friends · Followers · Public │  7. VISIBILITY quick tags (D9)
+├────────────────────────────────────┤
+│ [        Save pour         ]       │  sticky footer; disabled until a bottle is set,
+│  Pick a bottle to save · Discard   │  with the reason shown inline
+└────────────────────────────────────┘
 ```
 
-- Exactly one Save. The sticky-header Save and "Just drinking? Log without notes" are removed; an unrated pour is allowed (Save is enabled once a bottle is chosen) and the toast says "Poured · no rating yet · Undo".
-- After Save: toast, sheet closes, you are where you were. The "Poured." celebration page is removed. The journal row is the record and can be enriched later.
-- Pour size lives inside the disclosure and defaults silently. It is never larger on screen than the rating. (Volume is a private detail, not a headline.)
-- Dictate and Auto-fill stay, inside the disclosure, as the first row: they are the AI-native path and must remain one tap from the stars.
+Rules:
+- **Everything is visible; nothing is behind a disclosure.** The sheet scrolls; the footer is sticky.
+- **Order is bottle → rating → words → wheel → context → visibility.** The bottle slot is first because it is the one required thing, but it does not block anything below it: you can type, dictate, tap the wheel and rate with the slot still empty (D4). Save stays disabled with "Pick a bottle to save" until it is filled; ✕ or swipe-down with content keeps a draft (Q2).
+- **Scan is the default way to fill the slot** (D5): the viewfinder is live as soon as the sheet opens (permission already granted) and about 150 px tall; a barcode hit or a confident label match fills the slot with a toast and an Undo; the text field is directly beneath for typing; recents are one tap. When a bottle is prefilled (Pour button, tonight card), the slot renders as a bottle row with **Change**.
+- **Scanning a bottle you don't own** swaps the slot for the **bottle breakdown** card (§3.4) with Log a pour / Add to bar / Wishlist / Just looking. "Log a pour" collapses it back to the filled slot and continues in the same sheet.
+- **One Save.** The sticky-header Save, the second "Save pour" and "Just drinking? Log without notes" go away. An unrated pour is allowed.
+- **After Save**: toast with Undo, sheet closes, you are where you were. The "Poured." page is deleted. Edit reopens the same sheet prefilled.
+- Pour size stays (it is useful data) but as a compact chip row below the wheel, never larger than the rating.
 
-### 2.3 Add a bottle
+### 2.3 ＋ at a store (D6)
 
-- **From Explore search**: results carry an inline **+** that opens a 3-option mini-sheet (Add to bar · Wishlist · Log a pour). Tapping the row opens the bottle.
-- **From Bar → + Add**: a sheet with Scan (primary) and Search, using the same `<BottleSearch>`.
-- **From Scan**: unchanged; it is already the best flow in the app. Its toast+undo pattern is the model for the rest.
+＋ → the sheet opens on the empty bottle slot → the camera identifies the label → the **breakdown card** renders in place: name, distillery, origin · age · ABV · cask, a mini flavor radar with your match %, price shown as a range, your history if any ("You rated this 4.0 · 3 pours"), the passport hook ("opens Islands"), and four actions. From there: **Log a pour** (continue in the sheet), **Add to bar**, **Wishlist**, **Just looking** (closes with nothing saved). The same card is the top of the bottle page and the result of a pick in Explore's search, so the store flow and the shelf flow share one component.
 
 ---
 
@@ -129,116 +164,108 @@ The pour sheet slides up from wherever you are and returns you there.
 
 Each board: purpose · primary action · above the fold (390×844) · below the fold · **not here** · states.
 
-### 3.1 Home — "what's worth doing right now"
+### 3.1 Home
 
-- **Purpose**: orient in three seconds.
+- **Purpose**: orient in three seconds; every module answers "what's next?".
 - **Primary action**: log tonight's pick.
-- **Above the fold**: greeting line → **Tonight's pour** card (bottle, one-line reason, match chip, `[Log this pour]`, "Pick another") → your last three pours as compact rows with a one-tap re-pour.
-- **Below the fold**: one card, whichever is newer: a friend's note (with the comparison hook) or a discovery pick with its passport hook. Then the concierge input ("Ask about your bar…") when AI is configured.
-- **Not here**: the month-in-review sentence and stat tiles (→ You), "what you reached for" bars (→ You), Running low (→ Bar, as a filter), the full discovery rail (→ Explore), the Whiskey School row (→ Explore), the greyed skeleton unlock card.
-- **Length target**: ≤ 1.5 viewports. Today: 3.1.
-- **States**: no bottles → one card: "Add your first bottle" (scan / search). Bottles but no pours → tonight card says "Pour it when you're ready". No friends → nothing about friends at all (no invite card on Home; the invite lives in You).
-- **Guardrail note**: the tonight card's reason line must be a palate or occasion reason, never a fill-level reason. "Only 15% left — finish it before it fades" is a finish-first nudge and is removed. Low fill is shown in Bar as a fact, without a verb.
+- **Blocks, in order**: greeting → **Tonight's pour** card (bottle, one-line palate/occasion reason, match chip, `[Log this pour]`, Pick another) → **Your last pours** (three compact rows, one-tap Pour, "Journal →") → **For your palate** rail (three cards: match chip, passport hook; header link **"Explore →"**, D2) → **From your friends** (up to three cards, "Friends →") → concierge input.
+- **Not here**: the month-in-review sentence, stat tiles and reached-for bars (→ Profile); Running low / Restock (→ Bar filter); the Whiskey School row (→ Explore); the greyed skeleton unlock card.
+- **Length target**: ≤ 2 viewports (the rail and friends module are allowed to push it past 1.5). Today: 3.1.
+- **States**: no bottles → one card: "Add your first bottle" (scan / type). Bottles but no pours → tonight card says "Pour it when you're ready". No friends → the friends module is absent (the invite lives in Friends).
+- **Guardrail**: the tonight reason is palate/occasion only; "only 15 % left — finish it before it fades" is removed. Low fill is a Bar fact.
 
-### 3.2 Bar — "I'm standing at my shelf"
+### 3.2 Bar
 
 - **Purpose**: find a bottle you own and act on it.
-- **Primary action**: open a bottle, or pour from a row.
-- **Header**: "My Bar · 47" · trailing **+ Add**.
-- **Above the fold**: one control line: `[Search your bar]  Sort ▾  Filter` → segmented collection: **Bar · Wishlist · Tasted** (Tasted is derived from pours and labelled so) → the shelf list begins.
-- **Row** (`<BottleRow>` default): fill spine · name · distillery · your top three flavor chips · trailing: your rating + pour count, a small **Pour** button. Crests move to the bottle page; on rows they are unreadable at 19 px.
-- **Below the fold**: the list continues; a footer strip `Spent $295 · Est. value $330 (range) · Flavor map →`.
-- **Flavor map**: its own view, reached from the footer strip or the ⋯ menu. It keeps every lens (Mine · Label · Compare) and the legend, and it is the surface the wheel investment deserves. It is no longer between the user and their shelf.
-- **Filters**: one vocabulary. Collection (Bar/Wishlist/Tasted) is the segmented control; Open/Sealed/Running low, category, region are checkboxes in a bottom sheet, not a panel that pushes the page.
-- **Sort**: rating · recently poured · recently added · fill · price · name.
-- **Not here**: four dollar figures at the top; the wheel and its 15-chip legend above the list; "Weight by rating".
-- **States**: empty → one card with Scan (primary), Search, Import.
+- **Header row**: "My Bar · 47" · **+ Add** (opens a small sheet: **Scan your shelf** (batch, §3.9) · Type a name · Import).
+- **Above the fold**: control line `[Search your bar] Sort ▾ Filter` → segmented **Bar · Wishlist · Tasted** (Tasted derived from pours) → the shelf list.
+- **Row**: fill spine · name · distillery · top three flavor chips · your rating + pour count · a **Pour** button. Tapping the rating/pour count opens `/history?bottleId=` (D9).
+- **Footer strip**: `Spent $295 · Est. value $300–360 · Flavor map →`. The flavor map is its own view with every lens and the legend.
+- **Filters**: one vocabulary (collection = segmented control; Open/Sealed/Running low, category, region in a bottom sheet). **Sort**: rating · recently poured · recently added · fill · price · name.
+- **Not here**: four dollar figures at the top; the wheel above the list; "Weight by rating".
 
-### 3.3 Log a pour — see §2.2.
+### 3.3 Pour sheet — see §2.2.
 
-### 3.4 Bottle — "what is this, and what is it to me?"
+### 3.4 Bottle breakdown card (new; D6)
 
-- **Purpose**: decide your relationship to the bottle and act on it.
-- **Primary action**: Log a pour / Add to bar.
-- **Above the fold**: hero (name, distillery, category chip, origin · age · ABV · cask, crests at 34 px, the bottle shot if any) → **sticky action bar**: `[Log a pour]` · `On your shelf ▾` (Own / Wishlist / Remove, plus "Edit details" opening the shelf sheet) → your history: average, sparkline, last three pours.
-- **Below the fold, in order**: flavor profile radar + "84% match" → Same Dram (you vs. label vs. friends) with `Compare →` → community rating (only when there are ≥ 3 public raters) → price block as a **range** with "your paid" → description → pairings → sources and reviews (last; they are provenance, not content).
-- **Shelf details** (fill level, paid, store, location, notes) open as a sheet from "Edit details". Fill auto-decrements on pours; the sheet says so ("Updated automatically when you log a pour — adjust any time").
-- **Tried** is not a button. It is a derived state shown in the history block ("Tasted · 3 pours"). Logging a pour is trying it.
-- **Not here**: sources above the fold; an inline edit form; a separate "I've tried it" button; a primary action 2,500 px down.
+`<BottleBreakdown>` — the "what is this, and what is it to me?" card:
+- Name (Fraunces 22), distillery, category chip, origin · age · ABV · cask, crests at 34 px.
+- Mini flavor radar (~110 px) with the palate-match chip and one sentence ("Sweet and woody, a little fruit").
+- Price as a range with source label; your history line if any; the passport hook ("opens Islands · you've met 3 of 6 Scotch regions").
+- Actions: `[Log a pour]` primary · `Add to bar` · `♡ Wishlist` · "Just looking" text link. If already on the shelf: `On your shelf ▾` (Edit details · Remove) replaces Add.
+- Shown: in the pour sheet after a scan or search pick; as the top block of the bottle page; after a pick in Explore search.
 
-### 3.5 Explore — "widen what you've met"
+### 3.5 Bottle page
 
-- **Purpose**: find the next bottle, by search or by gap.
-- **Primary action**: search.
-- **Above the fold**: search field (the one component; door label "View") with category chips that **wrap**, not overflow → **Passport strip**: four counters (countries · regions · distilleries · casks) as the plan's §11.3 counters, each opening its territory view where unmet cells link to filtered search.
-- **Below the fold**: "For your palate" rail (match chip + passport hook, as shipped) → **Whiskey School** row with real progress ("3 of 9") → Concierge row when configured.
-- **Passport** (`/passport`, new index): countries and regions as territory with met/unmet cells; distilleries and casks as milestone tiers; the badge wall. A gap cell reads "You haven't met Campbeltown — 4 bottles in your range" and links to search. No counts of pours anywhere.
-- **Not here**: anything counting pours, volume or frequency; a friends leaderboard.
+- **Above the fold**: the breakdown card (§3.4) with its action bar sticky.
+- **Below**: Your history (average, sparkline, last three, "All N pours →" deep-linking the journal) → Same Dram + Compare → community rating (≥ 3 public raters only) → description → pairings → sources and reviews last → "Ask about this bottle".
+- Shelf details (fill, paid, store, location, notes) open as a sheet from "Edit details". Fill auto-decrements on pours and the sheet says so.
+- **Not here**: sources above the fold; an inline edit form; a standalone "I've tried it" button (Tasted is derived).
 
-### 3.6 You — "who you are as a taster, and every control over it"
+### 3.6 Explore
 
-- **Purpose**: hub. No single primary action.
-- **Blocks, in order**: identity row (avatar, name, @handle or "Claim a handle") → **Palate card** (wheel, signature descriptors, match text) → **This month** (the sentence, three tiles and the bars moved from Home) → **Journal** (link + last three) → **Passport** (badge wall summary, → Explore/Passport) → **Friends** (following · followers · find people · feed) → **Sharing** (shared links) → **Settings**.
-- The public profile `/u/[handle]` is this card minus the private blocks (month, journal, settings), which is already how it renders.
+- **Above the fold**: search field **with a scan button inside it** (the same `<BottlePicker>` opens) → category chips that wrap → **Your passport** strip (countries · regions · distilleries · casks) with a gap card ("You haven't met Campbeltown — 4 bottles in your range").
+- **Below**: **For your palate** rail (full) → Whiskey School row with real progress → Concierge row.
+- `/passport` index: countries/regions as territory, distilleries/casks as tiers, the badge wall with unearned crests greyed. No pour counts anywhere.
 
-### 3.7 Journal (`/history`) — "find and fix what you recorded"
+### 3.7 Profile (`/u/[handle]`; own view from the header avatar; D7, D8)
 
-- **Purpose**: the record.
-- **Primary action**: open a note.
-- **Above the fold**: filter line (bottle · rating · month) → day-grouped rows.
-- **Row** (`<BottleRow compact>`): name · rating · serving + time · note excerpt · up to three flavor chips · trailing **⋯** (Edit · Share · Visibility · Delete). No per-row visibility chip and Share button stacked; the row's lock icon appears only when the pour is *not* private, because private is the default and needs no badge.
-- **Edit** opens the pour sheet prefilled. **Delete** removes with undo.
-- **Share sheet** (one sheet, two sections): *Who can see this* (Only me · Friends · Followers · Public) and *Send a link* (creates the bearer link; shows revoke if one exists). One mental model; the two shipped systems become two sections of one sheet.
+Keep the current page's structure and copy; change the top and the summaries.
 
-### 3.8 Settings (`/settings`, new)
+- **Top block (condensed)**: one card, ~150 px: on the left the **palate ring avatar** at 96 px (the avatar in the centre of a slim 8-wedge ring whose segment lengths follow the palate; tapping it expands the full wheel); on the right the name (Fraunces 20), @handle, and the one-line palate description ("Sweet and fruity, warming up to peat"), then the **signature descriptor chips** (up to six, wedge-coloured). For another user: the match chip ("63 % palate match") and Follow / Following · Follows you · ⋯ under it. Bio and location on one muted line beneath the card.
+- **This month** (own view only): the sentence + three small tiles (moved from Home).
+- **Passport summary**: heading "Passport · 5 countries · 3 regions · 4 badges" → one row of crests: earned first, then **the next two or three unearned greyed** (dashed frame, no numeral) → "View passport →".
+- **Journal summary** (own view: all pours; public: recent public notes): three compact rows → "View journal →".
+- **Friends summary**: avatars row (palate rings) + "Following 1 · Followers 1" → "Find people →".
+- **Sharing** (own): shared links count, default visibility → the existing controls.
+- **Settings** (own): account · sign out · rating scale · units · privacy · export · delete.
+- **Palate ring avatar** is a shared component used wherever an avatar appears (header, comments, friends, feed) at 28–96 px. Ring = 4 px stroke, 8 segments in `flavor-wheel.ts` wedge colours, arc length ∝ wedge share of the palate vector (Q3), 2 px gaps, no ring until the palate has ≥ 3 rated pours.
 
-- **Account**: name, email, sign-in provider, **Sign out**, **Delete account** (typed confirmation).
-- **Preferences**: rating scale (5 stars / 100-pt), units (ml / oz), theme.
-- **Privacy**: default visibility for new pours, allow comments, phone discoverability, **Make everything private**.
-- **Data**: **Export** (CSV / JSON), Import.
-- **Notifications**: the allow-list toggles (new follower, cheers/comments, friend tasted the same bottle, club/flight events, sample tasted). Nothing else is offered.
-- **About**: version, licences, responsible-drinking resources, terms and privacy links.
+### 3.8 Journal (`/history`; D9)
 
-### 3.9 Scan — unchanged in shape
+Keep the existing design (day groups, cards with serving · size · time, note excerpt, intensity-dotted flavor chips). Changes:
+- **Filter line at the top**: Bottle ▾ · Rating ▾ · Month ▾ · Visibility ▾, plus the pour count. `?bottleId=` (already supported) pre-selects the bottle filter and shows a clearable chip.
+- **Per-row ⋯ menu**: Edit (opens the pour sheet prefilled) · Share link · Visibility (Only me / Friends / Followers / Public) · Delete (undo toast). The stacked visibility chip and Share button are removed from the card body.
+- **Row label**: a small muted "Shared with friends" / "Public" label appears only when the pour is not private (private is the default and needs no badge).
+- Deep links: bottle page "All N pours →", Bar row rating, profile Journal summary.
 
-Already the best flow: relationship radios, live guidance, background queue, toast + undo, "Done → My Bar". Two adjustments: the header gets back; the "Have a spreadsheet?" line moves to Settings → Data and Bar's empty state.
+### 3.9 Scan your shelf (batch; Q5)
 
-### 3.10 Compare, Note discussion, Learn — unchanged in shape
+Reached from Bar → + Add. Redesigned viewfinder-first: the camera fills the screen; the relationship radios (I own it · Tried it · Wishlist) float over the top; manual code entry and "Snap the label" are a compact bottom strip; the session tray is a collapsed chip ("Scanned 4 · Undo last") that expands on tap. "Done → My Bar" stays. Import moves to Bar → + Add and Settings → Data.
 
-These are the reference screens. Their composition (back link, one control, one payoff, two actions) is what the boards above copy.
+### 3.10 Friends (tab)
 
-### 3.11 Public share page `/s/[code]`
+The existing `/friends` page minus the profile card (the profile is in the header): Find people (handle / phone / QR) · following · followers · requests · the full "From your friends" feed (Q4) · comparisons you've opened.
 
-Add the growth loop: a signed-out viewer sees the note, then "You've tasted this too? Track your own pours — free" with the bottle preview, and a sign-in that returns to the same page. Today every viewer affordance is gated behind sign-in.
+### 3.11 Compare, Note discussion, Learn — unchanged. These remain the reference compositions.
+
+### 3.12 Public share page `/s/[code]` — add the signed-out CTA ("Track your own pours — free") with a return-to-page sign-in.
 
 ---
 
-## 4. Guardrail-sensitive UI (what the polish pass must not reintroduce)
+## 4. Guardrail-sensitive UI
 
-| Shipped today | Problem | Board says |
-|---|---|---|
-| "Running low · Restock" card on Home | A standalone finish-first list (PLAN §2.2 says low fill may only *inform* a recommendation) | Low fill is a Bar filter and a row fact; no Home card |
-| "Only 15% left — a good one to finish before it fades" | A finish-this nudge in the primary CTA | Reason lines are palate/occasion only |
-| One-tap **Pour** on Home journal rows with no confirm | Accidental logging; the fastest possible path to "log again" | Keep one-tap re-pour, but always with an undo toast, and never as a push or badge |
-| Pour-size slider above the fold, larger than the rating | Volume as a headline | Inside "Add detail", default hidden |
-| Four dollar figures at the top of Bar | False precision on estimates | Footer strip, value shown as a range |
-
-None of this bans the feature. It moves volume and money to where they are facts, and keeps the headline on taste and breadth.
+| Shipped today | Board says |
+|---|---|
+| "Running low · Restock" card on Home | Low fill is a Bar filter and a row fact; no Home card |
+| "Only 15 % left — a good one to finish before it fades" | Reason lines are palate/occasion only |
+| One-tap Pour with no confirm or undo | Keep one-tap re-pour with an undo toast; never a push or badge |
+| Pour-size slider above the fold, larger than the rating | Compact chip row below the wheel |
+| Four dollar figures at the top of My Bar; "est. value" as a point | Footer strip; value as a range with a source label |
 
 ---
 
 ## 5. Migration notes for the implementing agent
 
-Order of operations that keeps every step shippable and visually baselined:
+Order of operations that keeps every step shippable and visually baselined. Each step ships with regenerated baselines per DESIGN.md and is reviewed against the **Not here** lists above.
 
-1. **Global**: `AppNav` hidden on `/sign-in`, `/welcome`, `/s/[code]`; header back slot; iOS swipe-back; toast+undo region; `loading.tsx` / `error.tsx` / `not-found.tsx`. (No IA change yet.)
-2. **Pour sheet**: reorder `pour-flow.tsx` (stars first, one Save, one disclosure), remove the celebration page, return to origin. Reuse for Edit.
-3. **Bottle**: move the relationship block under the hero as a sticky bar; shelf details to a sheet; drop "I've tried it".
-4. **Bar**: list first; search + sort; flavor map to its own view; one filter vocabulary; `+ Add`.
-5. **Journal**: row overflow (Edit/Share/Visibility/Delete), one Share sheet; wire `PATCH`/`DELETE /api/pours/[id]`.
-6. **Settings**: `/settings` with sign-out, export, delete; fold `/sharing`'s privacy card in.
-7. **IA**: new nav (Home · Bar · ＋ · Explore · You), Explore page with `/passport` index and counters, You hub; Friends and Chat demote. Regenerate all baselines in one PR.
-8. **First run**: shrink `/welcome` to the first-bottle step.
-9. **Components**: extract `<BottleSearch>` and `<BottleRow>` and replace the forks.
-
-Each step ships with its visual baselines per DESIGN.md's workflow, and the boards in §3 are the review checklist: if a screen renders something its board lists under **Not here**, the PR is not done.
+1. **Global** (no IA change yet): `AppNav` hidden on `/sign-in`, `/welcome`, `/s/[code]`; header back slot on non-tab routes; iOS swipe-back; app-level toast+undo; `loading.tsx` / `error.tsx` / `not-found.tsx`; `Promise.all` the page waterfalls.
+2. **`<BottlePicker>`** (compact viewfinder + type + recents), built from the scan client's engine (`useScanEngine` extracted from `scan-client.tsx`) and the existing search API. Replace the pour flow's picker and `/welcome`'s step with it.
+3. **Pour sheet**: move `pour-flow.tsx`'s content into a full-height sheet component in the order of §2.2; bottle-optional-until-save; one sticky Save; draft persistence; visibility quick tags; delete the celebration page; return to origin. Wire Edit from the journal ⋯ menu to the same sheet.
+4. **`<BottleBreakdown>`**: extract from the bottle page hero + shelf actions; use it in the sheet after a scan/pick, at the top of the bottle page, and in Explore results. Drop the standalone "I've tried it".
+5. **Journal**: ⋯ menu wired to `PATCH`/`DELETE /api/pours/[id]`; filter line; visibility label; deep links from Bar and bottle page.
+6. **Bar**: shelf first; search + sort; one filter vocabulary; `+ Add` sheet; flavor map to its own view; money to the footer range.
+7. **Profile**: palate ring avatar component; condensed top card; passport/journal/friends summaries with greyed next crests; settings section with sign-out, export, delete (`/api/account/*`).
+8. **IA**: nav becomes Home · Bar · ＋ · Explore · Friends; header avatar → profile everywhere; Explore page with `/passport` index and counters; Home per §3.1 with the rail linking to Explore; Chat demotes to affordances. Regenerate all baselines in one PR; update SOCIAL.md §6.1/§6.3.
+9. **Batch scan** redesign (viewfinder-first) and **first run** shrink.
+10. **Components**: `<BottleRow>` replaces the six row anatomies; copy pass; type floor.
