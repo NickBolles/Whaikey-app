@@ -1,6 +1,47 @@
 import { expect, test } from "@playwright/test";
 import { SCAN_SESSION_TOKEN, signIn } from "./fixtures";
 
+/**
+ * Review SEC-H3: the app shipped with no security headers at all. These run
+ * with the CSP ENFORCED (see playwright.config.ts) — the point is not that the
+ * header string is present but that the whole functional suite still passes
+ * underneath it.
+ */
+test.describe("security headers", () => {
+  test("every response carries the policy, and the camera survives it", async ({ page }) => {
+    const response = await page.goto("/");
+    const headers = response?.headers() ?? {};
+
+    expect(headers["strict-transport-security"]).toContain("max-age=");
+    expect(headers["x-content-type-options"]).toBe("nosniff");
+    expect(headers["x-frame-options"]).toBe("DENY");
+    // /s/<code> share links are bearer credentials; they must not ride Referer.
+    expect(headers["referrer-policy"]).toBe("strict-origin-when-cross-origin");
+    // /scan is a first-party camera surface on the web, so camera must stay.
+    expect(headers["permissions-policy"]).toContain("camera=(self)");
+    expect(headers["permissions-policy"]).toContain("microphone=()");
+
+    const csp = headers["content-security-policy"] ?? "";
+    // Clickjacking /sharing ("Make everything private", link revocation) is the
+    // concrete attack this closes.
+    expect(csp).toContain("frame-ancestors 'none'");
+    expect(csp).toContain("base-uri 'none'");
+    // Bottle art is source-owned media on whatever host the catalog found it.
+    expect(csp).toContain("img-src 'self' data: https:");
+  });
+
+  test("the scan page loads and asks for the camera under the policy", async ({ page }) => {
+    const violations: string[] = [];
+    page.on("console", (msg) => {
+      if (msg.text().includes("Content Security Policy")) violations.push(msg.text());
+    });
+
+    await page.goto("/scan");
+    await expect(page.getByRole("heading", { name: /scan/i }).first()).toBeVisible();
+    expect(violations).toEqual([]);
+  });
+});
+
 test.describe("signed-out smoke", () => {
   test("home shows the hero with a sign-in CTA", async ({ page }) => {
     await page.goto("/");

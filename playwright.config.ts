@@ -56,6 +56,11 @@ export default defineConfig({
       // visual.spec.ts — the dashboard's month-in-review is computed on the
       // server, where the browser pin can't reach (src/lib/clock.ts).
       WHAIKEY_FAKE_NOW: "2026-07-19T19:30:00Z",
+      // The CSP goes to production report-only (review SEC-H3), but it is only
+      // worth shipping if it holds — so e2e runs it ENFORCED. A directive this
+      // app actually needs shows up here as a broken page, not as a report
+      // nobody read.
+      WHAIKEY_CSP_ENFORCE: "true",
     },
     timeout: 120_000,
   },
