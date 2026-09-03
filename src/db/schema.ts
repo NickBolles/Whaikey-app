@@ -306,9 +306,23 @@ export const pours = pgTable(
     amountMl: integer("amount_ml"),
     context: jsonb("context").$type<{ setting?: string; companions?: string; glassware?: string }>(),
     visibility: text("visibility").$type<PourVisibility>().notNull().default("private"),
+    /**
+     * Client-minted idempotency key (REL-4.2). A pour is written where the
+     * signal isn't, so a save whose response is lost in transit gets retried
+     * from the offline queue; the same key on the retry makes the second write
+     * a no-op that returns the first pour instead of double-logging and
+     * double-decrementing the fill level. Null for writes that don't carry one
+     * (the API, imports, seeds) — Postgres treats nulls as distinct, so the
+     * unique index below only ever constrains real keys.
+     */
+    clientId: text("client_id"),
     createdAt: createdAt(),
   },
-  (t) => [index("pours_user_idx").on(t.userId), index("pours_bottle_idx").on(t.bottleId)],
+  (t) => [
+    index("pours_user_idx").on(t.userId),
+    index("pours_bottle_idx").on(t.bottleId),
+    uniqueIndex("pours_user_client_idx").on(t.userId, t.clientId),
+  ],
 );
 
 /**

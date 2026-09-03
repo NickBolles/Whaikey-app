@@ -63,7 +63,6 @@ An AI-native whiskey tracking app, inspired by wine apps like **Vivino** (social
 - **Passport** counts 3 of 6 dimensions and is reachable only from a claimed social profile; no counters on My Bar.
 - **Learn progress** lives in localStorage.
 - **Reports** are written and never read; no moderation surface exists.
-- **Offline pours on the web** are acknowledged and never flushed (review REL-4.1); queued pours have no idempotency key.
 - **Community consensus** is live at `/bottles/[id]/compare` ahead of the jurisdiction review SOCIAL.md §14 makes its precondition.
 
 ### 2.3 Not built, and load-bearing
@@ -226,8 +225,8 @@ Principles: every third-party lookup converts into a first-party record; every f
 
 ### 4.6 Offline, sync and media
 
-- **Queue:** `src/lib/native/offline-queue.ts` persists pours in localStorage/Preferences and flushes on mount, `online` and app resume — on **both** web and native (review REL-4.1 fixes the web path). One in-flight flush at a time; the queue is re-read before every write.
-- **Idempotency:** every queued pour carries a client-generated `clientId`; `POST /api/pours` upserts on `(userId, clientId)` and returns the existing row on replay.
+- **Queue:** ✅ `src/lib/native/offline-queue.ts` persists pours in localStorage/Preferences and flushes on mount, `online`, tab foreground and app resume — on **both** web and native. One in-flight flush at a time; the queue is re-read before every write, so a pour logged mid-flush is kept.
+- **Idempotency:** ✅ every pour carries a client-generated `clientId`, minted before the first send and reused by every retry; `POST /api/pours` is unique on `(userId, clientId)` and returns the existing row and note on replay, so a lost response cannot double-log or double-decrement the fill level.
 - **Conflicts:** pours are append-only, so create-conflicts do not arise. Shelf edits (fill level, purchase info) are last-write-wins per field; a queued edit older than the server row is dropped with a toast.
 - **Media:** not yet built. When it is: object storage (Supabase Storage or S3) for user label photos and avatars, size/format limits, moderation of user images, a licence-metadata field, and deletion on account deletion. `bottles.imageUrl` remains a URL to source-owned media with attribution.
 
@@ -257,7 +256,7 @@ Tracks run in parallel and are named so that "Phase 2" is never ambiguous: **C**
 
 ### 5.2 Now — two lanes, in parallel
 
-**Lane A (C): stop the bleeding.** WP-1 offline queue + idempotency · WP-2/3 native auth binding and cookie storage · WP-4 security headers · WP-5 aggregate leak, body limits, AI timeouts.
+**Lane A (C): stop the bleeding.** ✅ WP-1 offline queue + idempotency · WP-2/3 native auth binding and cookie storage · WP-4 security headers · WP-5 aggregate leak, body limits, AI timeouts.
 
 **Lane B (C): the focus and polish pass**, in STORYBOARD.md §5 order. WP-6 back/nav/toast/loading · WP-7 pour sheet · WP-8 bottle action bar · WP-9 My Bar shelf-first · WP-10 journal edit/delete + one Share sheet · WP-11 settings, export, delete · WP-12 the new nav (Home · Bar · ＋ · Explore · You), `/passport` with six dimensions and counters on Bar, Home cut to three modules · WP-13 first run · WP-14 shared search/row components · WP-15 share-page CTA.
 

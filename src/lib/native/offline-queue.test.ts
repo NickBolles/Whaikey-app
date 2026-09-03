@@ -130,6 +130,70 @@ describe("flushPourQueue", () => {
   });
 });
 
+describe("concurrent flushes", () => {
+  /**
+   * Mount, `online` and app-resume all fire within a few ms of signal
+   * returning. Without a single-flight guard each reads the same queue and
+   * POSTs the same pours (REL-4.3) — the user's dram in the journal twice, and
+   * the bottle two pours emptier.
+   */
+  it("collapses onto one flush, so a pour is sent once", async () => {
+    await enqueuePour({ body: { bottleId: "a" }, bottleName: "A" });
+    await enqueuePour({ body: { bottleId: "b" }, bottleName: "B" });
+    const fetchMock = mockFetchSequence(ok(), ok());
+
+    const [first, second, third] = await Promise.all([
+      flushPourQueue(),
+      flushPourQueue(),
+      flushPourQueue(),
+    ]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    // Every caller gets the real result, not a "someone else is doing it" stub.
+    expect(first).toMatchObject({ synced: 2, remaining: 0 });
+    expect(second).toBe(first);
+    expect(third).toBe(first);
+    await expect(queueDepth()).resolves.toBe(0);
+  });
+
+  it("takes a fresh look at the queue once the previous flush has settled", async () => {
+    await enqueuePour({ body: { bottleId: "a" }, bottleName: "A" });
+    mockFetchSequence(ok(), ok());
+
+    await flushPourQueue();
+    await enqueuePour({ body: { bottleId: "b" }, bottleName: "B" });
+    await expect(flushPourQueue()).resolves.toMatchObject({ synced: 1, remaining: 0 });
+  });
+
+  /**
+   * The user is in the bar. Signal flickers, a flush goes out, and they log the
+   * next dram before it returns. Writing the flush's own snapshot back would
+   * erase that pour — the exact silent loss this queue exists to prevent.
+   */
+  it("keeps a pour logged while the flush was out on the network", async () => {
+    await enqueuePour({ body: { bottleId: "a" }, bottleName: "A" });
+
+    let releaseFirstSend: () => void = () => {};
+    const sent = new Promise<void>((resolve) => {
+      releaseFirstSend = resolve;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        await sent;
+        return ok();
+      }),
+    );
+
+    const flush = flushPourQueue();
+    await enqueuePour({ body: { bottleId: "b" }, bottleName: "B" });
+    releaseFirstSend();
+
+    await expect(flush).resolves.toMatchObject({ synced: 1, remaining: 1 });
+    expect((await readQueue()).map((entry) => entry.bottleName)).toEqual(["B"]);
+  });
+});
+
 describe("isOnline", () => {
   it("trusts the browser, defaulting to online when it says nothing", () => {
     expect(isOnline()).toBe(true);

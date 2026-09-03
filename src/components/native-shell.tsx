@@ -15,8 +15,9 @@ import { flushPourQueue, isOnline } from "@/lib/native/offline-queue";
 
 /**
  * Boots the native shell (docs/NATIVE_APP.md §2.1). Rendered once from the root
- * layout, renders nothing, and short-circuits entirely on the web — so the web
- * app pays a mounted-effect and nothing else.
+ * layout and renders nothing. The native plugin wiring short-circuits on the
+ * web; the offline pour flush does not, because web and PWA users queue pours
+ * too and something has to send them.
  */
 export function NativeShell() {
   const router = useRouter();
@@ -30,6 +31,30 @@ export function NativeShell() {
     const { synced } = await flushPourQueue();
     if (synced > 0) router.refresh();
   }, [router]);
+
+  /**
+   * Every platform, not just the device. A PWA on a phone hits the same dead
+   * spot as the native app and queues the same way; when the flush lived
+   * behind `isNativeApp()` those pours were written to storage, reported as
+   * "saved on your phone", and never sent (REL-4.1). The native shell adds a
+   * resume hook below — that's a lifecycle the browser doesn't have, not a
+   * different sync policy.
+   */
+  useEffect(() => {
+    const onOnline = () => void syncQueue();
+    const onVisible = () => {
+      // The web's nearest thing to app resume: a tab coming back to the
+      // foreground is the moment to catch a network that returned quietly.
+      if (document.visibilityState === "visible") void syncQueue();
+    };
+    window.addEventListener("online", onOnline);
+    document.addEventListener("visibilitychange", onVisible);
+    void syncQueue();
+    return () => {
+      window.removeEventListener("online", onOnline);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [syncQueue]);
 
   useEffect(() => {
     if (!isNativeApp()) return;
@@ -78,21 +103,16 @@ export function NativeShell() {
       // app is backgrounded; refresh re-runs them without losing client state.
       router.refresh();
       // Coming back to the app is the most reliable moment to catch a network
-      // that returned while we weren't looking.
+      // that returned while we weren't looking. A backgrounded WebView doesn't
+      // reliably fire `visibilitychange`, so this is its own hook rather than
+      // a duplicate of the web one above.
       void syncQueue();
     });
-
-    // Flush on reconnect as well, so a pour goes up the moment signal returns
-    // rather than waiting for the user to background and reopen the app.
-    const onOnline = () => void syncQueue();
-    window.addEventListener("online", onOnline);
-    void syncQueue();
 
     return () => {
       unsubscribeBack();
       unsubscribeDeepLink();
       unsubscribeResume();
-      window.removeEventListener("online", onOnline);
       document.documentElement.classList.remove("native-app");
     };
   }, [router, syncQueue]);

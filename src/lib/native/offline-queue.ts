@@ -9,6 +9,10 @@
  * Storage is Capacitor Preferences on a device (survives app kills and OS
  * eviction better than web storage) and `localStorage` on the web, which gets the
  * same behaviour for the PWA and makes the whole thing testable in jsdom.
+ *
+ * Nothing here is native-only. A web or PWA user in the same bar basement
+ * queues the same way and must be flushed the same way — see `NativeShell`,
+ * which wires the flush for every platform.
  */
 import { loadPlugin } from "./platform";
 
@@ -18,14 +22,14 @@ const STORAGE_KEY = "whaikey.pour-queue.v1";
 const MAX_ATTEMPTS = 5;
 
 export interface QueuedPour {
-  /**
-   * Local bookkeeping id. Note this is *not* an idempotency key — `/api/pours`
-   * has none, so a flush whose response is lost in transit leaves the entry
-   * queued and can double-log on the next attempt. Narrow window, but real;
-   * closing it needs a server-side key (docs/NATIVE_APP.md §4, Phase 3).
-   */
+  /** Local bookkeeping id — what identifies this entry within the queue. */
   id: string;
-  /** The exact `/api/pours` body, captured at the moment the user hit save. */
+  /**
+   * The exact `/api/pours` body, captured at the moment the user hit save. It
+   * carries the `clientId` the caller minted before its first send attempt, so
+   * replaying this entry after a lost response returns the original pour
+   * rather than logging a second one (REL-4.2).
+   */
   body: unknown;
   /** For showing "Ardbeg 10 · waiting to sync" without another lookup. */
   bottleName: string;
@@ -62,6 +66,21 @@ async function writeRaw(value: string): Promise<void> {
   }
 }
 
+/**
+ * Every read-modify-write of the queue runs through here, one at a time.
+ * Storage is async on both platforms, so without it a `enqueuePour` that reads
+ * the queue before a flush writes its result back would save a snapshot taken
+ * before the flush and resurrect pours that were already synced.
+ */
+let storageChain: Promise<unknown> = Promise.resolve();
+
+function serialize<T>(work: () => Promise<T>): Promise<T> {
+  const run = storageChain.then(work, work);
+  // Keep the chain alive after a rejection so one failure doesn't wedge it.
+  storageChain = run.catch(() => undefined);
+  return run;
+}
+
 export async function readQueue(): Promise<QueuedPour[]> {
   const raw = await readRaw();
   if (!raw) return [];
@@ -89,21 +108,32 @@ function newId(): string {
   }
 }
 
+/**
+ * Mint the idempotency key for one pour. The caller stamps it into the body
+ * *before* the first send attempt and reuses it for every retry of that same
+ * pour, which is what lets the server collapse a replay onto the original.
+ */
+export function newPourClientId(): string {
+  return newId();
+}
+
 /** Add a pour that couldn't be sent. Returns the queue's new depth. */
 export async function enqueuePour(entry: {
   body: unknown;
   bottleName: string;
 }): Promise<number> {
-  const queue = await readQueue();
-  queue.push({
-    id: newId(),
-    body: entry.body,
-    bottleName: entry.bottleName,
-    queuedAt: new Date().toISOString(),
-    attempts: 0,
+  return serialize(async () => {
+    const queue = await readQueue();
+    queue.push({
+      id: newId(),
+      body: entry.body,
+      bottleName: entry.bottleName,
+      queuedAt: new Date().toISOString(),
+      attempts: 0,
+    });
+    await writeQueue(queue);
+    return queue.length;
   });
-  await writeQueue(queue);
-  return queue.length;
 }
 
 export async function queueDepth(): Promise<number> {
@@ -111,7 +141,7 @@ export async function queueDepth(): Promise<number> {
 }
 
 export async function clearQueue(): Promise<void> {
-  await writeQueue([]);
+  await serialize(() => writeQueue([]));
 }
 
 export interface FlushResult {
@@ -122,16 +152,32 @@ export interface FlushResult {
   discarded: QueuedPour[];
 }
 
+let inFlight: Promise<FlushResult> | null = null;
+
 /**
  * Try to send everything in the queue.
  *
+ * There is exactly one flush at a time. Three things call this — mount,
+ * `online`, and returning to the app — and they routinely fire together when
+ * signal comes back; without the guard each would read the same queue and POST
+ * the same pours. Callers all get the same result, so none of them has to know
+ * it wasn't the one doing the work.
+ */
+export function flushPourQueue(): Promise<FlushResult> {
+  inFlight ??= runFlush().finally(() => {
+    inFlight = null;
+  });
+  return inFlight;
+}
+
+/**
  * Ordering matters — pours are a timeline — so this stops at the first entry that
  * fails for network reasons rather than skipping ahead. A 4xx is different: the
  * server has judged the request itself, and retrying it forever would wedge the
  * queue behind one bad row, so those count against `MAX_ATTEMPTS` and are
  * eventually dropped and reported.
  */
-export async function flushPourQueue(): Promise<FlushResult> {
+async function runFlush(): Promise<FlushResult> {
   const queue = await readQueue();
   if (queue.length === 0) return { synced: 0, remaining: 0, discarded: [] };
 
@@ -183,8 +229,22 @@ export async function flushPourQueue(): Promise<FlushResult> {
     ...queue.slice(0, index).map((entry) => entry.id),
     ...discarded.map((entry) => entry.id),
   ]);
-  const remaining = queue.filter((entry) => !handled.has(entry.id));
-  await writeQueue(remaining);
+  // Merge rather than overwrite: the user can log another pour offline while
+  // this flush is out on the network, and writing back our own snapshot would
+  // silently drop it. Only the entries this flush actually settled are
+  // removed; everything else in storage stays, in the order it is in now.
+  const attempts = new Map(queue.map((entry) => [entry.id, entry.attempts]));
+  const remaining = await serialize(async () => {
+    const current = await readQueue();
+    const kept = current
+      .filter((entry) => !handled.has(entry.id))
+      .map((entry) => {
+        const tried = attempts.get(entry.id);
+        return tried === undefined ? entry : { ...entry, attempts: tried };
+      });
+    await writeQueue(kept);
+    return kept;
+  });
 
   return { synced, remaining: remaining.length, discarded };
 }

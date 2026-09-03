@@ -117,6 +117,81 @@ describe("/api/pours", () => {
     expect(res.status).toBe(404);
   });
 
+  /**
+   * REL-4.2. The offline queue retries a pour whose response never came back,
+   * and it cannot tell "the server never saw it" from "the 201 was lost in the
+   * tunnel". The key is what makes the second case harmless.
+   */
+  it("POST replayed with the same clientId returns the first pour and logs nothing new", async () => {
+    await db.insert(schema.userBottles).values({
+      id: uid("ub"),
+      userId: user.id,
+      bottleId: bottle.id,
+      relationship: "own",
+      status: "open",
+      fillLevel: 100,
+    });
+    const body = {
+      bottleId: bottle.id,
+      rating: 4,
+      amountMl: 45,
+      clientId: "queued-pour-1",
+      note: { nose: "Orchard fruit" },
+    };
+
+    const first = await POST(jsonRequest("/api/pours", "POST", body));
+    expect(first.status).toBe(201);
+    const created = await first.json();
+
+    const replay = await POST(jsonRequest("/api/pours", "POST", body));
+    expect(replay.status).toBe(201);
+    const replayed = await replay.json();
+
+    expect(replayed.pour.id).toBe(created.pour.id);
+    expect(replayed.note.id).toBe(created.note.id);
+    const pours = await db.select().from(schema.pours).where(eq(schema.pours.userId, user.id));
+    expect(pours).toHaveLength(1);
+    // The bottle must not empty twice for one dram.
+    const ub = await db.query.userBottles.findFirst({
+      where: eq(schema.userBottles.userId, user.id),
+    });
+    expect(ub?.fillLevel).toBe(95);
+  });
+
+  it("POST treats two concurrent replays of one key as a single pour", async () => {
+    const body = { bottleId: bottle.id, rating: 4, clientId: "queued-pour-2" };
+    const [a, b] = await Promise.all([
+      POST(jsonRequest("/api/pours", "POST", body)),
+      POST(jsonRequest("/api/pours", "POST", body)),
+    ]);
+    expect([a.status, b.status]).toEqual([201, 201]);
+    const [bodyA, bodyB] = await Promise.all([a.json(), b.json()]);
+    expect(bodyA.pour.id).toBe(bodyB.pour.id);
+    const pours = await db.select().from(schema.pours).where(eq(schema.pours.userId, user.id));
+    expect(pours).toHaveLength(1);
+  });
+
+  it("POST keeps clientIds scoped per user, so two people can queue independently", async () => {
+    const other = await createTestUser(db);
+    const body = { bottleId: bottle.id, rating: 4, clientId: "same-key" };
+
+    setSessionUser(user);
+    expect((await POST(jsonRequest("/api/pours", "POST", body))).status).toBe(201);
+    setSessionUser(other);
+    expect((await POST(jsonRequest("/api/pours", "POST", body))).status).toBe(201);
+
+    const pours = await db.select().from(schema.pours);
+    expect(pours).toHaveLength(2);
+  });
+
+  it("POST without a clientId still logs every pour — two drams are two pours", async () => {
+    const body = { bottleId: bottle.id, rating: 4 };
+    expect((await POST(jsonRequest("/api/pours", "POST", body))).status).toBe(201);
+    expect((await POST(jsonRequest("/api/pours", "POST", body))).status).toBe(201);
+    const pours = await db.select().from(schema.pours).where(eq(schema.pours.userId, user.id));
+    expect(pours).toHaveLength(2);
+  });
+
   it("GET lists only own pours, newest first, with bottle name + note", async () => {
     const other = await createTestUser(db);
     await db.insert(schema.pours).values({

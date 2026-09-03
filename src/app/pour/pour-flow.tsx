@@ -10,7 +10,7 @@ import { FlavorWheelInput } from "@/components/flavor-wheel-input";
 import { PourSizePicker } from "@/components/pour-size-picker";
 import { NoteCapture, type ExtractedTastingNote } from "@/components/note-capture";
 import { VisibilityChips } from "@/components/visibility-chips";
-import { enqueuePour } from "@/lib/native/offline-queue";
+import { enqueuePour, newPourClientId } from "@/lib/native/offline-queue";
 
 export interface BottlePick {
   id: string;
@@ -244,6 +244,10 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
   const [defaultVisibility, setDefaultVisibility] = useState<PourVisibility>("private");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  // The idempotency key for the pour being written, held across retries and
+  // cleared once it lands (or is queued). "Log another" is a different pour and
+  // gets a different key.
+  const clientIdRef = useRef<string | null>(null);
   const [done, setDone] = useState<{
     bottleName: string;
     rating: number | null;
@@ -285,6 +289,7 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
     setFlavorTags({});
     visibilityDirtyRef.current = false;
     setVisibility(defaultVisibility);
+    clientIdRef.current = null;
     setSubmitting(false);
     setSubmitError(null);
     setDone(null);
@@ -321,6 +326,13 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
     setSubmitting(true);
     setSubmitError(null);
 
+    // Minted once per pour, not per attempt: a retry after a failed save — by
+    // the user tapping again or by the offline queue — carries the same key, so
+    // if the first attempt actually reached the server and only the response
+    // was lost, the second collapses onto it instead of logging the dram twice.
+    clientIdRef.current ??= newPourClientId();
+    const clientId = clientIdRef.current;
+
     const noteFields = {
       nose: nose.trim() || undefined,
       palate: palate.trim() || undefined,
@@ -338,6 +350,7 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
       context: companions.trim() ? { companions: companions.trim() } : undefined,
       note: hasNote ? noteFields : undefined,
       visibility,
+      clientId,
     };
 
     try {
@@ -350,6 +363,7 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
         const data = await res.json().catch(() => null);
         throw new Error(data?.error ?? "Something went wrong saving your pour.");
       }
+      clientIdRef.current = null;
       setDone({ bottleName: bottle.name, rating: bare ? null : rating, queued: false });
     } catch (err) {
       // A pour is logged where the whiskey is, and that is routinely somewhere
@@ -358,6 +372,7 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
       // instead of erroring. A server that answered and said no is a real error.
       if (err instanceof TypeError) {
         await enqueuePour({ body: payload, bottleName: bottle.name });
+        clientIdRef.current = null;
         setDone({ bottleName: bottle.name, rating: bare ? null : rating, queued: true });
       } else {
         setSubmitError(err instanceof Error ? err.message : "Something went wrong.");

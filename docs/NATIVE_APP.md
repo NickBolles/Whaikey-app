@@ -295,11 +295,13 @@ and MLKit components merged in — verified. Signed builds and the device smoke 
 still need real credentials and hardware.
 
 ### Phase 3 — Offline + engagement ✅ (partly implemented)
-Done: offline pour queue with durable storage, ordered flush on reconnect and resume,
-and a visible "saved on your phone" state; push registration + token storage endpoint.
+Done: offline pour queue with durable storage, ordered single-flight flush on
+reconnect, resume and foreground — on every platform, not just the device, because a
+PWA hits the same dead spot — a visible "saved on your phone" state, a `clientId`
+idempotency key on `/api/pours` so a flush whose response is lost cannot double-log,
+and push registration + token storage endpoint.
 Remaining: sending the first notification types (needs FCM/APNs credentials), a
-share-a-note-card surface, app shortcuts, and an idempotency key on `/api/pours` so a
-flush whose response is lost cannot double-log.
+share-a-note-card surface, and app shortcuts.
 **Exit:** log a pour in airplane mode, reconnect, see it sync.
 
 ### Phase 4 — Store launch (CI ready, credentials pending)
