@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   activeAiProvider,
   aiClientOptions,
@@ -119,16 +119,23 @@ describe("withinBudget", () => {
    * /api/chat's deadline on its own however tight the model timeouts are.
    */
   it("returns the work when it finishes in time", async () => {
-    await expect(withinBudget(Date.now(), 1_000, Promise.resolve("done"))).resolves.toBe("done");
+    await expect(withinBudget(Date.now(), 1_000, async () => "done")).resolves.toBe("done");
   });
 
   it("gives up on work that outlives the budget", async () => {
-    const slow = new Promise<string>((resolve) => setTimeout(() => resolve("late"), 200));
+    const slow = () => new Promise<string>((resolve) => setTimeout(() => resolve("late"), 200));
     await expect(withinBudget(Date.now(), 20, slow)).resolves.toBeNull();
   });
 
-  it("does not start waiting at all once the budget is spent", async () => {
-    const never = new Promise<string>(() => {});
-    await expect(withinBudget(Date.now() - 5_000, 1_000, never)).resolves.toBeNull();
+  /**
+   * A factory, not a promise: an argument is evaluated before the call, so
+   * taking a promise started the work before the budget was consulted. With
+   * several tool uses in one turn that let a tool mutate the user's data after
+   * the request had already given up and returned.
+   */
+  it("never starts the work once the budget is spent", async () => {
+    const start = vi.fn(async () => "should not run");
+    await expect(withinBudget(Date.now() - 5_000, 1_000, start)).resolves.toBeNull();
+    expect(start).not.toHaveBeenCalled();
   });
 });

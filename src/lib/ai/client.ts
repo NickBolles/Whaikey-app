@@ -115,23 +115,38 @@ export function remainingBudget(startedAt: number, budgetMs: number): number | n
  * budget would abort perfectly good generations; they are slow on purpose.
  */
 export const AI_BATCH_TIMEOUT_MS = 5 * 60_000;
+/**
+ * And its retries. The shared client sets `maxRetries: 0` because a retry
+ * cannot fit inside a route's deadline — a constraint a job runner does not
+ * have. Without restoring them here, one transient 429 from the provider would
+ * abort an entire multi-batch enrichment run.
+ */
+export const AI_BATCH_MAX_RETRIES = 2;
 
 /**
- * Give up on `work` once `budgetMs` from `startedAt` has passed.
+ * Give up on `start()` once `budgetMs` from `startedAt` has passed.
  *
  * The loop budget has to cover tool execution too, not only model calls: a
  * `get_pairings` miss can sit on a 60 s generation lease, which alone outlives
- * `/api/chat`'s deadline no matter how tight the model timeouts are. The work
- * is not cancelled — it may be a lease another request is legitimately holding
- * — but the loop stops waiting on it and answers with what it has.
+ * `/api/chat`'s deadline no matter how tight the model timeouts are. Work that
+ * has begun is not cancelled — it may be a lease another request is
+ * legitimately holding — but the loop stops waiting on it and answers with
+ * what it has.
+ *
+ * A **factory**, not a promise, and that is the whole point: an argument is
+ * evaluated before the function it is passed to, so taking a promise here
+ * started the work before the budget was consulted. With several tool uses in
+ * one turn that meant a tool could mutate the user's data (`add_to_wishlist`)
+ * after the request had already given up and returned.
  */
 export async function withinBudget<T>(
   startedAt: number,
   budgetMs: number,
-  work: Promise<T>,
+  start: () => Promise<T>,
 ): Promise<T | null> {
   const left = budgetMs - (Date.now() - startedAt);
   if (left <= 0) return null;
+  const work = start();
   let timer: ReturnType<typeof setTimeout> | undefined;
   const expiry = new Promise<null>((resolve) => {
     timer = setTimeout(() => resolve(null), left);

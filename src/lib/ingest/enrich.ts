@@ -5,6 +5,7 @@ import { bottleClaims, bottleResources, bottles, catalogSources, distilleries, p
 import {
   activeAiProvider,
   aiSupportsServerWebSearch,
+  AI_BATCH_MAX_RETRIES,
   AI_BATCH_TIMEOUT_MS,
   getAnthropic,
 } from "@/lib/ai/client";
@@ -372,12 +373,16 @@ async function runModelBatch(
   ];
   const texts: string[] = [];
   for (let attempt = 0; attempt < 4; attempt++) {
-    // Explicit budget, because the shared client is tuned for request handlers
-    // (25 s, to fit inside a route's maxDuration) and this is a batch job with
-    // no such deadline — 25 bottles at 8,000 tokens plus search continuations
-    // is legitimately slower than any page would tolerate.
+    // Explicit budget AND retries, because the shared client is tuned for
+    // request handlers: 25 s to fit inside a route's maxDuration, and no retry
+    // because a second attempt would be killed by the platform mid-flight.
+    // Neither constraint applies to a batch job — 25 bottles at 8,000 tokens
+    // plus search continuations is legitimately slower than any page would
+    // tolerate, and there is no deadline for a retry to overrun. Without the
+    // override a single transient 429 would abort a whole multi-batch run.
     const response = await anthropic.messages.create({ ...base, messages } as never, {
       timeout: AI_BATCH_TIMEOUT_MS,
+      maxRetries: AI_BATCH_MAX_RETRIES,
     });
     texts.push(textFromContent(response.content as never));
     if (response.stop_reason !== "pause_turn") break;

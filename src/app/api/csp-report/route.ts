@@ -19,6 +19,46 @@ export const dynamic = "force-dynamic";
 /** Reports are a few hundred bytes; anything larger is not a report. */
 const MAX_BODY_BYTES = 8_192;
 
+/**
+ * A ceiling on how much log a flood of reports can produce.
+ *
+ * The body guard bounds each request; nothing bounded how many, and this
+ * endpoint takes no credentials — anything can POST `{}` forever and turn log
+ * retention into someone else's bill. Real violations arrive in bursts of a
+ * handful per page load, so a small allowance loses nothing worth reading, and
+ * the suppressed count is reported once per window rather than dropped
+ * silently.
+ *
+ * Per instance, not global: serverless spreads this across however many are
+ * warm. That is a much weaker bound than a shared counter would be, and still
+ * the difference between bounded and unbounded — a shared one needs a store,
+ * which is the same gap as SEC-M3's unauthenticated throttling (WP-25).
+ */
+const LOG_WINDOW_MS = 60_000;
+const MAX_LOGS_PER_WINDOW = 20;
+
+let windowOpenedAt = 0;
+let loggedInWindow = 0;
+let suppressedInWindow = 0;
+
+/** False when this report should be counted but not written. */
+function admitToLog(now: number): boolean {
+  if (now - windowOpenedAt >= LOG_WINDOW_MS) {
+    if (suppressedInWindow > 0) {
+      console.warn(`[csp] ${suppressedInWindow} further violation(s) not logged (rate limit)`);
+    }
+    windowOpenedAt = now;
+    loggedInWindow = 0;
+    suppressedInWindow = 0;
+  }
+  if (loggedInWindow >= MAX_LOGS_PER_WINDOW) {
+    suppressedInWindow++;
+    return false;
+  }
+  loggedInWindow++;
+  return true;
+}
+
 interface CspReportBody {
   "csp-report"?: Record<string, unknown>;
 }
@@ -78,6 +118,8 @@ export async function POST(req: Request) {
       typeof parsed === "object" && parsed !== null
         ? ((parsed as CspReportBody)["csp-report"] ?? (parsed as Record<string, unknown>))
         : {};
+
+    if (!admitToLog(Date.now())) return new NextResponse(null, { status: 204 });
 
     console.warn("[csp] violation", {
       directive: field(report, "violated-directive") || field(report, "effective-directive"),

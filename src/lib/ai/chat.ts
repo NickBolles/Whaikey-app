@@ -198,7 +198,7 @@ export async function runChat(
         (await withinBudget(
           startedAt,
           AI_LOOP_BUDGET_MS,
-          executeTool(db, userId, toolUse.name, toolUse.input),
+          () => executeTool(db, userId, toolUse.name, toolUse.input),
         )) ?? TOOL_TIMED_OUT;
       toolCalls.push({ name: toolUse.name, input: toolUse.input, result });
       results.push({
@@ -396,7 +396,7 @@ export async function* runChatStream(
         (await withinBudget(
           startedAt,
           AI_LOOP_BUDGET_MS,
-          executeTool(db, userId, toolUse.name, input),
+          () => executeTool(db, userId, toolUse.name, input),
         )) ?? TOOL_TIMED_OUT;
       toolCalls.push({ name: toolUse.name, input, result });
       results.push({

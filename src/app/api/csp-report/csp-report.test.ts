@@ -120,6 +120,28 @@ describe("POST /api/csp-report", () => {
     expect(logged.blocked.length).toBeLessThanOrEqual(300);
   });
 
+  /**
+   * The body guard bounds each request and nothing bounded how many. An
+   * unauthenticated endpoint that logs every valid body turns log retention
+   * into somebody else's bill.
+   */
+  it("stops logging under a flood, and says how much it dropped", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const report = JSON.stringify({ "csp-report": { "violated-directive": "img-src" } });
+
+    for (let i = 0; i < 60; i++) await POST(post(report));
+    const duringFlood = warn.mock.calls.length;
+    expect(duringFlood).toBeLessThan(60);
+    // Every request still gets the same inert answer, so it reveals nothing.
+    await expect(POST(post(report))).resolves.toMatchObject({ status: 204 });
+
+    // A new window reports what the last one swallowed rather than hiding it.
+    vi.spyOn(Date, "now").mockReturnValue(Date.now() + 120_000);
+    await POST(post(report));
+    const summary = warn.mock.calls.map((c) => String(c[0])).find((m) => m.includes("rate limit"));
+    expect(summary).toMatch(/not logged/);
+  });
+
   it("shrugs off a malformed report rather than erroring", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     await expect(POST(post("{not json"))).resolves.toMatchObject({ status: 204 });
