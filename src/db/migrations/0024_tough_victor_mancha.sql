@@ -1,1 +1,0 @@
-ALTER TABLE "native_auth_codes" ADD COLUMN "code_challenge" text;

@@ -5,12 +5,13 @@ import { useRouter } from "next/navigation";
 import { applyStatusBarStyle, configureKeyboard, hideSplash } from "@/lib/native/app-chrome";
 import { exitApp, onBackButton, onDeepLink, onResume } from "@/lib/native/app-lifecycle";
 import {
+  clearPendingSignIn,
   closeNativeSignIn,
   describeNativeAuthError,
   exchangeUrl,
   parseAuthCallback,
+  readPendingSignIn,
   statesMatch,
-  takePendingSignIn,
 } from "@/lib/native/auth";
 import type { AuthCallback } from "@/lib/native/auth";
 import { isNativeApp } from "@/lib/native/platform";
@@ -22,7 +23,7 @@ import { flushPourQueue, isOnline } from "@/lib/native/offline-queue";
  * web; the offline pour flush does not, because web and PWA users queue pours
  * too and something has to send them.
  */
-export function NativeShell() {
+export function NativeShell({ userId }: { userId?: string | null }) {
   const router = useRouter();
 
   /**
@@ -31,9 +32,12 @@ export function NativeShell() {
    */
   const syncQueue = useCallback(async () => {
     if (!isOnline()) return;
-    const { synced } = await flushPourQueue();
+    // Scoped to whoever is signed in: on the web the queue is per origin, not
+    // per session, so a pour queued by one person must not be sent while
+    // someone else is signed in on the same browser.
+    const { synced } = await flushPourQueue(userId ?? undefined);
     if (synced > 0) router.refresh();
-  }, [router]);
+  }, [router, userId]);
 
   /**
    * Every platform, not just the device. A PWA on a phone hits the same dead
@@ -94,14 +98,18 @@ export function NativeShell() {
      * one would swap the WebView into whoever sent it (SEC-H1) — silently, and
      * every pour logged afterwards would land in their account.
      *
-     * So: take the sign-in this app started (once — the read clears it), and
-     * act only on a callback whose state matches it. Anything else is dropped
-     * without a word, because there is no user here to warn; nobody asked for
-     * this link.
+     * So: act only on a callback whose state matches the sign-in this app
+     * started. Anything else is dropped without a word, because there is no
+     * user here to warn; nobody asked for this link.
+     *
+     * The pending sign-in is read but not consumed until it matches. Clearing
+     * it on the way past would let anyone who can launch `whaikey://` cancel a
+     * real sign-in with one forged callback.
      */
     async function handleAuthCallback(callback: NonNullable<AuthCallback>): Promise<void> {
-      const pending = await takePendingSignIn();
+      const pending = await readPendingSignIn();
       if (!pending || !statesMatch(pending.state, callback.state)) return;
+      await clearPendingSignIn();
 
       void closeNativeSignIn();
       if ("code" in callback) {

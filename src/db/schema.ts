@@ -1085,6 +1085,16 @@ export const nativeAuthCodes = pgTable(
      */
     codeChallenge: text("code_challenge"),
     expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }).notNull(),
+    /**
+     * Vestigial. Redemption is now `DELETE … RETURNING`, so nothing ever sets
+     * this and nothing reads it. It stays because production applies migrations
+     * *before* the new build is activated (`scripts/build.mjs`), which means the
+     * previous release serves traffic against this schema for the length of a
+     * build — and that release still writes `used_at` on every redemption.
+     * Dropping it here would fail every native sign-in during the rollout.
+     * Drop it in a later deploy, once no running instance references it.
+     */
+    usedAt: timestamp("used_at", { withTimezone: true, mode: "date" }),
     createdAt: createdAt(),
   },
   (t) => [index("native_auth_codes_expires_idx").on(t.expiresAt)],

@@ -252,7 +252,12 @@ export async function getCommunityRating(db: DB, bottleId: string): Promise<Comm
   const ratingCount = Number(stats?.ratingCount ?? 0);
   const raterCount = Number(stats?.raterCount ?? 0);
   if (raterCount < MIN_COMMUNITY_RATERS) {
-    return { avgRating: null, ratingCount, raterCount };
+    // The counts go too, not just the average. This endpoint takes no session,
+    // so a count that ticks 0 → 1 tells a poller that a particular small group
+    // published a rating and roughly when — the same disclosure the floor is
+    // there to prevent, one number over. Below the floor there is no community
+    // aggregate to report, and that is the honest answer.
+    return { avgRating: null, ratingCount: 0, raterCount: 0 };
   }
   return {
     avgRating: stats?.avgRating != null ? Number(stats.avgRating) : null,

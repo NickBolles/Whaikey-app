@@ -162,8 +162,11 @@ describe("get_bottle_details", () => {
 
     const result = (await executeTool(db, user.id, "get_bottle_details", {
       bottleId: bottle.id,
-    })) as { communityAvgRating: number | null };
+    })) as { communityAvgRating: number | null; communityRatingCount: number };
     expect(result.communityAvgRating).toBeNull();
+    // The count is suppressed with the average — the concierge must not become
+    // the way to read what the bottle endpoint won't say.
+    expect(result.communityRatingCount).toBe(0);
   });
 
   it("returns {error} for an unknown bottle id", async () => {

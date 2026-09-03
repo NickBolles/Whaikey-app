@@ -60,18 +60,27 @@ export function isAiConfigured(): boolean {
 }
 
 /**
- * Budget for a single model call (REL-3.1).
+ * Budget for a model call (REL-3.1).
  *
  * The SDK defaults to a ten-minute timeout and two retries, which is a fine
  * default for a script and a wrong one here: every AI route caps out at 30-60 s
  * of `maxDuration` and *reserves the user's rate-limit slot before the call*,
  * so a slow model spent someone's hourly budget on a 504 they never saw an
- * answer for. Twenty-five seconds leaves room inside the shortest of those
- * caps to fail and say so; one retry covers a dropped connection without
- * doubling the wait.
+ * answer for.
+ *
+ * The budget is the whole call, not one attempt, because the platform's kill is
+ * on wall time. The shortest route deadline is 30 s (`scan-label`,
+ * `extract-note`, `pairings`, `import/analyze`), so 25 s buys one attempt with
+ * room to return a real error — and a retry is off, since a second 25 s attempt
+ * starting at 25 s is killed at 30 s and reproduces exactly the failure this
+ * budget exists to prevent. A retry is worth having, but only with a per-route
+ * budget to fit it in; that belongs with the per-feature reservation work in
+ * WP-25, not here.
  */
 const AI_TIMEOUT_MS = 25_000;
-const AI_MAX_RETRIES = 1;
+const AI_MAX_RETRIES = 0;
+/** Shortest `maxDuration` across the AI routes; the budget above must fit it. */
+export const SHORTEST_AI_ROUTE_DEADLINE_MS = 30_000;
 
 /**
  * Singleton client for Anthropic Messages-compatible calls. OpenRouter is

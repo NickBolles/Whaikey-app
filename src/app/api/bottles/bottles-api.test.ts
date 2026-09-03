@@ -397,7 +397,7 @@ describe("GET /api/bottles/[id] community rating privacy", () => {
       .update(schema.userProfiles)
       .set({ socialEnabled: false })
       .where(eq(schema.userProfiles.userId, leaving.id));
-    expect(await stats()).toEqual({ avgRating: null, ratingCount: 2, raterCount: 2 });
+    expect(await stats()).toEqual({ avgRating: null, ratingCount: 0, raterCount: 0 });
   });
 
   it("suppresses an average that is really one or two people's rating", async () => {
@@ -411,16 +411,26 @@ describe("GET /api/bottles/[id] community rating privacy", () => {
     expect(await stats()).toEqual({ avgRating: 4, ratingCount: 3, raterCount: 3 });
   });
 
+  /**
+   * Suppressing the average but reporting the counts moves the disclosure one
+   * number over: this endpoint takes no session, so a count ticking 0 → 1 tells
+   * a poller that a particular small group published a rating, and roughly when.
+   */
+  it("reports no counts either while it is below the floor", async () => {
+    await publicRater(db, bottle.id, 5);
+    expect(await stats()).toEqual({ avgRating: null, ratingCount: 0, raterCount: 0 });
+    await publicRater(db, bottle.id, 3);
+    expect(await stats()).toEqual({ avgRating: null, ratingCount: 0, raterCount: 0 });
+  });
+
   it("counts people, not pours, so one enthusiast cannot clear the floor alone", async () => {
     const solo = await publicRater(db, bottle.id, 5);
     await db.insert(schema.pours).values([
       { id: uid("pour"), userId: solo.id, bottleId: bottle.id, rating: 5, visibility: "public" },
       { id: uid("pour"), userId: solo.id, bottleId: bottle.id, rating: 5, visibility: "public" },
     ]);
-    const result = await stats();
-    expect(result.ratingCount).toBe(3);
-    expect(result.raterCount).toBe(1);
-    expect(result.avgRating).toBeNull();
+    // Three public rated pours, one person — below the floor, so nothing at all.
+    expect(await stats()).toEqual({ avgRating: null, ratingCount: 0, raterCount: 0 });
   });
 
   it("reports nothing at all for a bottle nobody has published a rating for", async () => {

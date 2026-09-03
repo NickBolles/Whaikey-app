@@ -7,6 +7,7 @@ import {
   fastModel,
   getAnthropic,
   setAnthropicForTests,
+  SHORTEST_AI_ROUTE_DEADLINE_MS,
 } from "./client";
 
 const originalEnv = { ...process.env };
@@ -52,18 +53,20 @@ describe("model call budget", () => {
    * reserves the user's rate-limit slot *before* the call, so a slow model
    * spent someone's hourly budget on a 504 they never saw an answer for.
    */
-  it("gives a model call a budget that fits inside the route's own", () => {
+  it("fits the whole call, retries included, inside the shortest route deadline", () => {
     setAnthropicForTests(null);
     delete process.env.OPENROUTER_API_KEY;
     process.env.ANTHROPIC_API_KEY = "test-anthropic-key";
 
     const client = getAnthropic();
-    // The shortest maxDuration on an AI route is 30s; the call has to fail and
-    // be reported inside that, not be killed by the platform mid-flight.
-    expect(client.timeout).toBeLessThan(30_000);
-    expect(client.maxRetries).toBe(1);
-    // One retry has to fit too, or the budget is a fiction.
-    expect(client.timeout * (1 + client.maxRetries)).toBeLessThanOrEqual(60_000);
+    // The platform kills on wall time, so the budget that matters is every
+    // attempt added up — a 25s timeout with one retry is 50s under a 30s
+    // maxDuration, which is the 504-on-a-spent-reservation this is meant to
+    // stop, not a fix for it.
+    const worstCase = client.timeout * (1 + client.maxRetries);
+    expect(worstCase).toBeLessThan(SHORTEST_AI_ROUTE_DEADLINE_MS);
+    // And enough of that deadline is left to return a real error, not a 504.
+    expect(SHORTEST_AI_ROUTE_DEADLINE_MS - worstCase).toBeGreaterThanOrEqual(2_000);
 
     setAnthropicForTests(null);
   });

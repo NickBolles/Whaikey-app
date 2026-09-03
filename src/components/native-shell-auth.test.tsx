@@ -135,6 +135,28 @@ describe("NativeShell auth callback", () => {
     expect(assign).not.toHaveBeenCalled();
   });
 
+  /**
+   * The mismatch has to be free for the user: if a forged callback consumed the
+   * pending sign-in, any app or website able to launch `whaikey://` could
+   * cancel a real sign-in on demand.
+   */
+  it("leaves the pending sign-in intact when a forged callback is dropped", async () => {
+    startedSignIn();
+    render(<NativeShell />);
+
+    deliverDeepLink("/auth/callback", "whaikey://auth/callback?code=attacker&state=wrong-nonce");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(assign).not.toHaveBeenCalled();
+
+    // The real callback still works.
+    deliverDeepLink("/auth/callback", `whaikey://auth/callback?code=abc123&state=${STATE}`);
+    await waitFor(() =>
+      expect(assign).toHaveBeenCalledWith(
+        `/api/auth/native/exchange?code=abc123&code_verifier=${VERIFIER}`,
+      ),
+    );
+  });
+
   it("accepts one callback per sign-in, so a replayed link is inert", async () => {
     startedSignIn();
     render(<NativeShell />);

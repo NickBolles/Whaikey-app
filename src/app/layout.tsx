@@ -76,7 +76,9 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
       className={`${geistSans.variable} ${geistMono.variable} ${fraunces.variable} antialiased`}
     >
       <body className="min-h-dvh">
-        <NativeShell />
+        {/* The queue lives in per-origin storage, so the flush has to know
+            whose pours it is allowed to send. */}
+        <NativeShell userId={user?.id ?? null} />
         <div className="mx-auto max-w-2xl min-h-dvh flex flex-col">
           <AppHeader
             user={user ? { name: user.name, image: user.image } : null}

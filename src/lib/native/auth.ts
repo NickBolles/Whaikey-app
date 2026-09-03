@@ -127,20 +127,23 @@ async function savePending(pending: PendingSignIn): Promise<void> {
 }
 
 /**
- * Read the in-flight sign-in and clear it in the same breath. One callback per
- * `/start`: a second one — the retry of a link, or an attacker's — finds
- * nothing to match against and is dropped.
+ * Read the in-flight sign-in *without* consuming it.
+ *
+ * Reading and clearing in one step looked tidier and handed anyone who can
+ * launch `whaikey://` a cancel button: a forged callback arriving mid-flow
+ * would take the verifier away, and the real callback moments later would find
+ * nothing to match and be ignored. So the state is compared first and
+ * `clearPendingSignIn` runs only on a match — a mismatched callback now costs
+ * the attacker nothing and the user nothing.
  */
-export async function takePendingSignIn(): Promise<PendingSignIn | null> {
+export async function readPendingSignIn(): Promise<PendingSignIn | null> {
   let raw: string | null = null;
   const plugin = await loadPlugin(() => import("@capacitor/preferences"));
   if (plugin) {
     raw = (await plugin.Preferences.get({ key: PENDING_KEY })).value;
-    await plugin.Preferences.remove({ key: PENDING_KEY });
   } else {
     try {
       raw = localStorage.getItem(PENDING_KEY);
-      localStorage.removeItem(PENDING_KEY);
     } catch {
       return null;
     }
@@ -160,6 +163,24 @@ export async function takePendingSignIn(): Promise<PendingSignIn | null> {
     // Corrupt storage reads as no pending sign-in.
   }
   return null;
+}
+
+/**
+ * Consume the in-flight sign-in. Called once the callback has been matched, so
+ * a replayed link finds nothing — the server's code is single-use too, but the
+ * app should not be trying to spend it twice either.
+ */
+export async function clearPendingSignIn(): Promise<void> {
+  const plugin = await loadPlugin(() => import("@capacitor/preferences"));
+  if (plugin) {
+    await plugin.Preferences.remove({ key: PENDING_KEY });
+    return;
+  }
+  try {
+    localStorage.removeItem(PENDING_KEY);
+  } catch {
+    // Nothing to clear if storage is unavailable.
+  }
 }
 
 /**

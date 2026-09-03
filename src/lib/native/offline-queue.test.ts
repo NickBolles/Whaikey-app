@@ -26,16 +26,34 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+/** An entry as an older release wrote it: no owner, no clientId. */
+async function writeLegacyEntry(entry: {
+  id: string;
+  body: unknown;
+  bottleName: string;
+}): Promise<void> {
+  localStorage.setItem(
+    "whaikey.pour-queue.v1",
+    JSON.stringify([{ ...entry, queuedAt: "2026-08-01T00:00:00.000Z", attempts: 0 }]),
+  );
+}
+
 /** Replies in the given order; anything beyond the list is a network failure. */
 function mockFetchSequence(...responses: Array<Response | "network-error">) {
   let call = 0;
-  const fn = vi.fn(async () => {
+  const fn = vi.fn(async (_url: string, init: RequestInit) => {
+    void init;
     const next = responses[call++] ?? "network-error";
     if (next === "network-error") throw new TypeError("Failed to fetch");
     return next;
   });
   vi.stubGlobal("fetch", fn);
   return fn;
+}
+
+/** The JSON body of the nth POST the mock received. */
+function sentBody(fn: ReturnType<typeof mockFetchSequence>, n = 0): Record<string, unknown> {
+  return JSON.parse(String(fn.mock.calls[n]?.[1]?.body));
 }
 
 const ok = () => new Response(null, { status: 201 });
@@ -127,6 +145,77 @@ describe("flushPourQueue", () => {
     expect(final.discarded.map((entry) => entry.bottleName)).toEqual(["Ardbeg 10"]);
     expect(final.synced).toBe(1);
     await expect(queueDepth()).resolves.toBe(0);
+  });
+});
+
+describe("whose pour it is", () => {
+  /**
+   * Web storage is per *origin*, not per session. A pour queued offline by one
+   * person and flushed after someone else signs in on the same browser would
+   * land in the wrong account — their private note, in a stranger's journal.
+   * On native this never mattered; on the web it does, and the web is exactly
+   * where the flush was just switched on.
+   */
+  it("holds a pour belonging to someone else who used this browser", async () => {
+    await enqueuePour({ body: { bottleId: "a" }, bottleName: "A", userId: "alice" });
+    const fetchMock = mockFetchSequence(ok());
+
+    await expect(flushPourQueue("bob")).resolves.toMatchObject({ synced: 0, remaining: 1 });
+    expect(fetchMock).not.toHaveBeenCalled();
+    // Held, not dropped: it is still Alice's pour and still owed to her.
+    expect((await readQueue())[0].attempts).toBe(0);
+  });
+
+  it("sends it once its owner is back", async () => {
+    await enqueuePour({ body: { bottleId: "a" }, bottleName: "A", userId: "alice" });
+    mockFetchSequence(ok());
+    await expect(flushPourQueue("alice")).resolves.toMatchObject({ synced: 1, remaining: 0 });
+  });
+
+  it("stops at the first pour that isn't ours, so the timeline holds", async () => {
+    await enqueuePour({ body: { bottleId: "a" }, bottleName: "A", userId: "bob" });
+    await enqueuePour({ body: { bottleId: "b" }, bottleName: "B", userId: "alice" });
+    await enqueuePour({ body: { bottleId: "c" }, bottleName: "C", userId: "bob" });
+    const fetchMock = mockFetchSequence(ok(), ok());
+
+    await expect(flushPourQueue("bob")).resolves.toMatchObject({ synced: 1, remaining: 2 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect((await readQueue()).map((entry) => entry.bottleName)).toEqual(["B", "C"]);
+  });
+
+  it("sends an entry from before owners were recorded, rather than stranding it", async () => {
+    // Written by a release that had no flush on the web at all, so it has been
+    // sitting unsent. On the single-account device that is nearly every device,
+    // the current user is its author; holding it forever is the data loss this
+    // queue exists to prevent.
+    await writeLegacyEntry({ id: "legacy-1", body: { bottleId: "a" }, bottleName: "A" });
+    mockFetchSequence(ok());
+    await expect(flushPourQueue("whoever")).resolves.toMatchObject({ synced: 1, remaining: 0 });
+  });
+});
+
+describe("legacy entries", () => {
+  /**
+   * Entries queued before `clientId` existed are precisely the ones that have
+   * waited longest, and the first flush of one is the first chance to
+   * double-log it. Stamp the queue id it already has (REL-4.2).
+   */
+  it("gives a pour with no idempotency key the one it already has", async () => {
+    await writeLegacyEntry({ id: "legacy-1", body: { bottleId: "a" }, bottleName: "A" });
+    const fetchMock = mockFetchSequence(ok());
+
+    await flushPourQueue();
+
+    expect(sentBody(fetchMock)).toEqual({ bottleId: "a", clientId: "legacy-1" });
+  });
+
+  it("leaves a key the caller already minted alone", async () => {
+    await enqueuePour({ body: { bottleId: "a", clientId: "minted-at-save" }, bottleName: "A" });
+    const fetchMock = mockFetchSequence(ok());
+
+    await flushPourQueue();
+
+    expect(sentBody(fetchMock).clientId).toBe("minted-at-save");
   });
 });
 

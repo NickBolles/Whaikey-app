@@ -103,27 +103,41 @@ describe("callback state", () => {
   });
 });
 
-describe("takePendingSignIn", () => {
-  it("returns the sign-in this app started, exactly once", async () => {
-    localStorage.setItem(
-      "whaikey.native-auth.pending.v1",
-      JSON.stringify({ state: "nonce-1", verifier: "v-1" }),
-    );
-    await expect(mod.takePendingSignIn()).resolves.toEqual({ state: "nonce-1", verifier: "v-1" });
-    // Cleared on read, so a replayed callback finds nothing to match.
-    await expect(mod.takePendingSignIn()).resolves.toBeNull();
+describe("readPendingSignIn", () => {
+  const KEY = "whaikey.native-auth.pending.v1";
+
+  it("returns the sign-in this app started", async () => {
+    localStorage.setItem(KEY, JSON.stringify({ state: "nonce-1", verifier: "v-1" }));
+    await expect(mod.readPendingSignIn()).resolves.toEqual({ state: "nonce-1", verifier: "v-1" });
+  });
+
+  /**
+   * Reading and clearing in one step would hand anyone who can launch
+   * `whaikey://` a cancel button: a forged callback takes the verifier away,
+   * and the real one moments later finds nothing to match.
+   */
+  it("does not consume it, so a forged callback cannot cancel a real sign-in", async () => {
+    localStorage.setItem(KEY, JSON.stringify({ state: "nonce-1", verifier: "v-1" }));
+    await mod.readPendingSignIn();
+    await expect(mod.readPendingSignIn()).resolves.toEqual({ state: "nonce-1", verifier: "v-1" });
+  });
+
+  it("is consumed explicitly, once the callback has been matched", async () => {
+    localStorage.setItem(KEY, JSON.stringify({ state: "nonce-1", verifier: "v-1" }));
+    await mod.clearPendingSignIn();
+    await expect(mod.readPendingSignIn()).resolves.toBeNull();
   });
 
   it("reads no pending sign-in when none was started", async () => {
     localStorage.clear();
-    await expect(mod.takePendingSignIn()).resolves.toBeNull();
+    await expect(mod.readPendingSignIn()).resolves.toBeNull();
   });
 
   it("treats corrupt or half-written storage as no pending sign-in", async () => {
-    localStorage.setItem("whaikey.native-auth.pending.v1", "{not json");
-    await expect(mod.takePendingSignIn()).resolves.toBeNull();
-    localStorage.setItem("whaikey.native-auth.pending.v1", JSON.stringify({ state: "only" }));
-    await expect(mod.takePendingSignIn()).resolves.toBeNull();
+    localStorage.setItem(KEY, "{not json");
+    await expect(mod.readPendingSignIn()).resolves.toBeNull();
+    localStorage.setItem(KEY, JSON.stringify({ state: "only" }));
+    await expect(mod.readPendingSignIn()).resolves.toBeNull();
   });
 });
 

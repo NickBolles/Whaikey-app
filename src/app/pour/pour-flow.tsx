@@ -220,7 +220,7 @@ function BottlePicker({ onPick }: { onPick: (bottle: BottlePick) => void }) {
 // The flow
 // ---------------------------------------------------------------------------
 
-export function PourFlow({ initialBottle = null, initialBottleMissing = false }: { initialBottle?: BottlePick | null; initialBottleMissing?: boolean }) {
+export function PourFlow({ userId, initialBottle = null, initialBottleMissing = false }: { userId?: string; initialBottle?: BottlePick | null; initialBottleMissing?: boolean }) {
   const [bottle, setBottle] = useState<BottlePick | null>(initialBottle);
   const [rating, setRating] = useState<number | null>(null);
   const [servingStyle, setServingStyle] = useState<ServingStyle | null>(null);
@@ -371,7 +371,7 @@ export function PourFlow({ initialBottle = null, initialBottleMissing = false }:
       // far worse outcome than a delayed save, so a network failure queues it
       // instead of erroring. A server that answered and said no is a real error.
       if (err instanceof TypeError) {
-        await enqueuePour({ body: payload, bottleName: bottle.name });
+        await enqueuePour({ body: payload, bottleName: bottle.name, userId });
         clientIdRef.current = null;
         setDone({ bottleName: bottle.name, rating: bare ? null : rating, queued: true });
       } else {

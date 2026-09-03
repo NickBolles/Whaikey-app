@@ -7,5 +7,5 @@ CREATE TABLE "native_auth_requests" (
 	"created_at" timestamp with time zone NOT NULL
 );
 --> statement-breakpoint
-CREATE INDEX "native_auth_requests_expires_idx" ON "native_auth_requests" USING btree ("expires_at");--> statement-breakpoint
-ALTER TABLE "native_auth_codes" DROP COLUMN "used_at";
+ALTER TABLE "native_auth_codes" ADD COLUMN "code_challenge" text;--> statement-breakpoint
+CREATE INDEX "native_auth_requests_expires_idx" ON "native_auth_requests" USING btree ("expires_at");

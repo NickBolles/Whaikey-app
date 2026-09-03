@@ -31,6 +31,14 @@ export interface QueuedPour {
    * rather than logging a second one (REL-4.2).
    */
   body: unknown;
+  /**
+   * Who wrote it. On the web this storage is per *origin*, not per session, so
+   * without an owner a pour queued by one person and flushed after someone else
+   * signs in on the same browser lands in the wrong account — their private
+   * note, in a stranger's journal. Optional only because entries written by
+   * releases before this one have none.
+   */
+  userId?: string;
   /** For showing "Ardbeg 10 · waiting to sync" without another lookup. */
   bottleName: string;
   queuedAt: string;
@@ -121,6 +129,7 @@ export function newPourClientId(): string {
 export async function enqueuePour(entry: {
   body: unknown;
   bottleName: string;
+  userId?: string;
 }): Promise<number> {
   return serialize(async () => {
     const queue = await readQueue();
@@ -128,6 +137,7 @@ export async function enqueuePour(entry: {
       id: newId(),
       body: entry.body,
       bottleName: entry.bottleName,
+      userId: entry.userId,
       queuedAt: new Date().toISOString(),
       attempts: 0,
     });
@@ -155,7 +165,7 @@ export interface FlushResult {
 let inFlight: Promise<FlushResult> | null = null;
 
 /**
- * Try to send everything in the queue.
+ * Try to send everything in the queue that belongs to `userId`.
  *
  * There is exactly one flush at a time. Three things call this — mount,
  * `online`, and returning to the app — and they routinely fire together when
@@ -163,11 +173,41 @@ let inFlight: Promise<FlushResult> | null = null;
  * the same pours. Callers all get the same result, so none of them has to know
  * it wasn't the one doing the work.
  */
-export function flushPourQueue(): Promise<FlushResult> {
-  inFlight ??= runFlush().finally(() => {
+export function flushPourQueue(userId?: string): Promise<FlushResult> {
+  inFlight ??= runFlush(userId).finally(() => {
     inFlight = null;
   });
   return inFlight;
+}
+
+/**
+ * Whether this entry is the current user's to send.
+ *
+ * An entry with no owner predates the release that started recording one, and
+ * — on the web — predates any flush at all, so it has been sitting unsent since
+ * it was written. Sending it as whoever is signed in now is a guess, and on the
+ * single-account device that is nearly every device it is the right one; the
+ * alternative is stranding the pour permanently, which is the data loss this
+ * queue exists to prevent. Entries written from here on always carry an owner,
+ * so the guess expires with them.
+ */
+function belongsTo(entry: QueuedPour, userId: string | undefined): boolean {
+  if (entry.userId === undefined) return true;
+  return entry.userId === userId;
+}
+
+/**
+ * The body to actually POST. Entries from before `clientId` existed carry none,
+ * and they are exactly the ones that have been queued longest — so give them
+ * the queue id they already have. Without it, flushing them for the first time
+ * would reintroduce the double-log this release closes (REL-4.2).
+ */
+function bodyFor(entry: QueuedPour): unknown {
+  const body = entry.body;
+  if (typeof body !== "object" || body === null || Array.isArray(body)) return body;
+  const record = body as Record<string, unknown>;
+  if (typeof record.clientId === "string" && record.clientId) return body;
+  return { ...record, clientId: entry.id };
 }
 
 /**
@@ -177,7 +217,7 @@ export function flushPourQueue(): Promise<FlushResult> {
  * queue behind one bad row, so those count against `MAX_ATTEMPTS` and are
  * eventually dropped and reported.
  */
-async function runFlush(): Promise<FlushResult> {
+async function runFlush(userId: string | undefined): Promise<FlushResult> {
   const queue = await readQueue();
   if (queue.length === 0) return { synced: 0, remaining: 0, discarded: [] };
 
@@ -187,12 +227,18 @@ async function runFlush(): Promise<FlushResult> {
 
   for (; index < queue.length; index++) {
     const entry = queue[index];
+    if (!belongsTo(entry, userId)) {
+      // Someone else's pour on a shared browser. Not ours to send and not ours
+      // to delete — it waits for them, and ordering holds because everything
+      // after it waits too.
+      break;
+    }
     let response: Response;
     try {
       response = await fetch("/api/pours", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(entry.body),
+        body: JSON.stringify(bodyFor(entry)),
       });
     } catch {
       // Still offline. Leave this entry and everything after it in place.
