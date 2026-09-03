@@ -21,17 +21,26 @@ import { ageVerifications, type AgeVerification } from "@/db/schema";
 export const DEFAULT_MINIMUM_AGE = 18;
 
 /**
- * Markets whose drinking age is above the default.
+ * Markets whose minimum is above the default.
  *
- * Deliberately short and deliberately conservative: it covers the markets the
- * app is being prepared for, and anything unlisted falls back to 18 rather
- * than to a guess. Extending it is a product-owner decision per market (§9.1),
- * taken before the app is offered there — not something to infer from here.
+ * **The rule for this table is the highest minimum anywhere in the market.**
+ * The gate asks for a country, not an address, so a market with a
+ * sub-national split has to take its strictest number or it admits people
+ * where it should not: Canada is 19 in most provinces and 18 in three, so it
+ * is 19 here. The alternative — asking for a province — is a second question
+ * to buy back one year for a minority of one country, and the review's own
+ * remedy for this shape is "conservatively apply the higher number".
+ *
+ * Deliberately short. Anything unlisted falls back to 18 rather than to a
+ * guess, and adding a market is a product-owner decision taken in PLAN.md
+ * §9.1 before the app is offered there — not something to infer from here.
+ * Every entry must also appear in `OFFERED_MARKETS`; a test enforces it.
  */
 export const MINIMUM_AGE_BY_MARKET: Readonly<Record<string, number>> = {
   US: 21,
   JP: 20,
   KR: 19,
+  CA: 19,
 };
 
 /**

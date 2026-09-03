@@ -39,6 +39,16 @@ describe("the minimum by market", () => {
     // Unlisted falls back rather than throwing or inventing a number.
     expect(minimumAgeFor("ZZ")).toBe(DEFAULT_MINIMUM_AGE);
   });
+
+  /**
+   * The gate asks for a country, not an address, so a market that is split
+   * internally has to take its strictest number — otherwise it admits people
+   * in the parts where it shouldn't. Canada is 19 in most provinces and 18 in
+   * three.
+   */
+  it("takes the highest minimum in a market that is split internally", () => {
+    expect(minimumAgeFor("CA")).toBe(19);
+  });
 });
 
 describe("ageOn", () => {
