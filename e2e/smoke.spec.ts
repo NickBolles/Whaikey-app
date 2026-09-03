@@ -218,6 +218,40 @@ test.describe("signed-in scan flow", () => {
     await expect(page.getByRole("status")).toContainText(/already scanned/i);
   });
 
+  /**
+   * Review PLAN-A1. The catalog is 269 bottles, so "we don't have it" is an
+   * ordinary answer — and it used to be the last one. This walks the whole way
+   * out: a barcode nobody knows, a catalog that has nothing like it, and a
+   * bottle on the shelf at the end of it.
+   */
+  test("a bottle the catalog lacks can be added and used straight away", async ({ page }) => {
+    await page.goto("/scan");
+    await page.getByLabel(/barcode number/i).fill("012345678912");
+    await page.getByRole("button", { name: "Scan" }).click();
+
+    await page.getByRole("button", { name: /needs you/i }).click();
+    const sheet = page.getByRole("dialog");
+    await sheet.getByRole("searchbox").fill("Faraway Farm Barrel Pick");
+    await sheet.getByRole("link", { name: /not in the catalog/i }).click();
+
+    // It arrives as a confirmation, not a blank form: the barcode and the
+    // words already typed came with it.
+    await expect(page.getByLabel(/bottle name/i)).toHaveValue("Faraway Farm Barrel Pick");
+    await expect(page.getByText("012345678912")).toBeVisible();
+    await page.getByRole("button", { name: /^Bourbon$/ }).click();
+    await page.getByRole("button", { name: /add this bottle/i }).click();
+
+    // Back where the scan left off, with the bottle now on the shelf.
+    await expect(page).toHaveURL(/\/scan$/);
+    await page.goto("/bar");
+    await expect(page.getByText("Faraway Farm Barrel Pick")).toBeVisible();
+
+    // And it is searchable for its submitter, who is the only one it exists for.
+    await page.goto("/search");
+    await page.getByRole("searchbox").fill("faraway farm");
+    await expect(page.getByText("Faraway Farm Barrel Pick")).toBeVisible();
+  });
+
   test("a bad code gets a clear inline error", async ({ page }) => {
     await page.goto("/scan");
     await page.getByLabel(/barcode number/i).fill("1234");

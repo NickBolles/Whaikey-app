@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
 import { POUR_VISIBILITIES, SERVING_STYLES, type Pour, type PourVisibility, type TastingNote } from "@/db/schema";
+import { canViewBottle } from "@/lib/catalog-visibility";
 import { isValidLeaf } from "@/lib/flavor-wheel";
 import { refreshUserPalate } from "@/lib/palate-store";
 import { getSocialPrefs } from "@/lib/social";
@@ -136,7 +137,9 @@ export async function logPour(db: DB, userId: string, input: PourInput): Promise
   const bottle = await db.query.bottles.findFirst({
     where: eq(schema.bottles.id, parsed.bottleId),
   });
-  if (!bottle) throw new BottleNotFoundError(parsed.bottleId);
+  // Unknown and "somebody else's unreviewed submission" are the same answer
+  // here (PLAN-A1): a pour can only be logged against a bottle the user can see.
+  if (!bottle || !canViewBottle(bottle, userId)) throw new BottleNotFoundError(parsed.bottleId);
 
   const amountMl = parsed.amountMl ?? DEFAULT_POUR_ML;
   let visibility: PourVisibility =

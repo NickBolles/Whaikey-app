@@ -54,6 +54,7 @@ An AI-native whiskey tracking app, inspired by wine apps like **Vivino** (social
 - **Whiskey School:** 9 lessons with quizzes and a flavor-wheel explorer.
 - **Catalog pipeline:** 9 source adapters (TTB COLA, Iowa, Oregon, Utah, BC, Systembolaget, Vinmonopolet, WHISKY:EDITION, CSV), enrichment, sold-verification queue with a subscription-CLI worker, a source-provenance graph, issue-driven feedback review, 4 scheduled workflows.
 - **Native:** Capacitor shell loading the deployed site, capability layer with web fallbacks, PKCE + state-bound device-code sign-in, offline pour queue, push-token registration, Android debug + iOS compile in CI, release workflow awaiting credentials.
+- **Adding a bottle the catalog lacks:** `POST /api/bottles` with a dedupe prompt, reached from the search empty state, the scan decision sheet and an unmatched import row (`/bottles/new`). See §2.2 for what "added" means before review.
 
 ### 2.2 Live but weaker than it reads
 
@@ -63,11 +64,11 @@ An AI-native whiskey tracking app, inspired by wine apps like **Vivino** (social
 - **Passport** counts 3 of 6 dimensions and is reachable only from a claimed social profile; no counters on My Bar.
 - **Learn progress** lives in localStorage.
 - **Reports** are written and never read; no moderation surface exists.
+- **User-submitted bottles** are added instantly and usable instantly, but stay private to their submitter: `bottle_submissions` holds the review queue and **nothing promotes a row yet** (that is the moderation surface above). A submission is excluded from passport badges and never teaches the barcode scanner until it is promoted.
 - **Community consensus** is live at `/bottles/[id]/compare` ahead of the jurisdiction review SOCIAL.md §14 makes its precondition.
 
 ### 2.3 Not built, and load-bearing
 
-- **No way to add a bottle the catalog lacks** — no `POST /api/bottles`; a scan, search or import miss is a dead end.
 - **No age gate, no data export, no account deletion, no Terms, no Privacy Policy, no billing or entitlements, no analytics, no error monitoring, no settings page, no sign-out control, no moderation queue.**
 - No clubs, blind flights, samples, distillery visits, passport diffing, palate share card, flights/blind mode, 100-point rating mode, similar-bottles rail, chat tools `log_pour_draft` / `recommend_bottles` / `get_price_info`.
 - No `minShellVersion` kill switch for the native shell; no reviewer demo account (the app is social-login-only).

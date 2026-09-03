@@ -205,6 +205,7 @@ export async function lookupExternalUpc(upc: string): Promise<ExternalUpcProduct
 export async function candidatesFromExternalName(
   db: DB,
   name: string,
+  viewerId?: string,
 ): Promise<BottleSearchResult[]> {
   const NOISE = /^(the|whiskey|whisky|bourbon|scotch|single|malt|straight|kentucky|tennessee|irish|blended|750ml|700ml|1l|liter|litre|proof|year|yr|old)$/i;
   const words = name
@@ -213,7 +214,7 @@ export async function candidatesFromExternalName(
 
   for (let take = Math.min(4, words.length); take >= 1; take--) {
     const query = words.slice(0, take).join(" ");
-    const results = await searchBottlesLike(db, query, undefined, 5);
+    const results = await searchBottlesLike(db, query, undefined, 5, viewerId);
     if (results.length > 0) return results;
   }
   return [];

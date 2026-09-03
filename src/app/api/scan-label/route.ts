@@ -122,7 +122,7 @@ export async function POST(request: Request) {
 
     for (const query of queries) {
       if (candidates.length >= 3) break;
-      for (const match of await searchBottlesLike(db, query, undefined, 5)) {
+      for (const match of await searchBottlesLike(db, query, undefined, 5, user.id)) {
         if (candidates.length >= 3) break;
         if (!seen.has(match.id)) {
           seen.add(match.id);

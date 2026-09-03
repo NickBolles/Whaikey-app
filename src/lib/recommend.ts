@@ -24,6 +24,7 @@
 import { and, desc, eq } from "drizzle-orm";
 import type { DB } from "@/db";
 import { bottles, distilleries, pours, userBottles } from "@/db/schema";
+import { catalogVisibleTo } from "@/lib/catalog-visibility";
 import { FLAVOR_WHEEL } from "@/lib/flavor-wheel";
 import {
   cosineSimilarity,
@@ -318,7 +319,10 @@ async function discoveryCandidates(
       distillery: distilleries.name,
     })
     .from(bottles)
-    .leftJoin(distilleries, eq(bottles.distilleryId, distilleries.id));
+    .leftJoin(distilleries, eq(bottles.distilleryId, distilleries.id))
+    // Discovery recommends from the shared catalog plus this user's own
+    // submissions — never somebody else's pending one (review PLAN-A1).
+    .where(catalogVisibleTo(userId));
 
   const scored: ScoredBottle[] = [];
   for (const b of rows) {

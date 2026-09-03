@@ -4,6 +4,7 @@ import { and, desc, eq, ilike, or } from "drizzle-orm";
 import type Anthropic from "@anthropic-ai/sdk";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
+import { catalogVisibleTo } from "@/lib/catalog-visibility";
 import { escapeLike, getCommunityRating } from "@/lib/search";
 import { getOrGeneratePairings } from "./pairings";
 
@@ -154,6 +155,7 @@ export async function searchBottlesLike(
   query: string,
   category?: schema.WhiskeyCategory,
   limit = 10,
+  viewerId?: string,
 ): Promise<BottleSearchResult[]> {
   // The model writes this string, and a model can be talked into writing "%".
   // Unescaped that matched the whole catalog, and "%_%_%" made Postgres
@@ -181,7 +183,15 @@ export async function searchBottlesLike(
     .from(schema.bottles)
     .leftJoin(schema.bottleAliases, eq(schema.bottleAliases.bottleId, schema.bottles.id))
     .leftJoin(schema.distilleries, eq(schema.bottles.distilleryId, schema.distilleries.id))
-    .where(category ? and(matchClause, eq(schema.bottles.category, category)) : matchClause)
+    // The concierge searches the same catalog the user does: everything
+    // shared, plus their own submissions, never anyone else's (PLAN-A1).
+    .where(
+      and(
+        matchClause,
+        catalogVisibleTo(viewerId),
+        category ? eq(schema.bottles.category, category) : undefined,
+      ),
+    )
     .limit(limit);
 }
 
@@ -209,22 +219,34 @@ export function isWriteTool(name: string): boolean {
 type ToolError = { error: string };
 const toolError = (error: string): ToolError => ({ error });
 
-async function getBottle(db: DB, bottleId: string): Promise<schema.Bottle | null> {
+async function getBottle(
+  db: DB,
+  bottleId: string,
+  viewerId: string,
+): Promise<schema.Bottle | null> {
   const [bottle] = await db
     .select()
     .from(schema.bottles)
-    .where(eq(schema.bottles.id, bottleId))
+    .where(and(eq(schema.bottles.id, bottleId), catalogVisibleTo(viewerId)))
     .limit(1);
   return bottle ?? null;
 }
 
-async function execSearchBottles(db: DB, input: z.infer<typeof searchBottlesInput>) {
-  const results = await searchBottlesLike(db, input.query, input.category, 10);
+async function execSearchBottles(
+  db: DB,
+  userId: string,
+  input: z.infer<typeof searchBottlesInput>,
+) {
+  const results = await searchBottlesLike(db, input.query, input.category, 10, userId);
   return { results };
 }
 
-async function execGetBottleDetails(db: DB, input: z.infer<typeof bottleIdInput>) {
-  const bottle = await getBottle(db, input.bottleId);
+async function execGetBottleDetails(
+  db: DB,
+  userId: string,
+  input: z.infer<typeof bottleIdInput>,
+) {
+  const bottle = await getBottle(db, input.bottleId, userId);
   if (!bottle) return toolError(`No bottle found with id "${input.bottleId}"`);
 
   let distillery: schema.Distillery | null = null;
@@ -318,7 +340,7 @@ async function execGetPourHistory(db: DB, userId: string, input: z.infer<typeof 
 }
 
 async function execGetTastingNotes(db: DB, userId: string, input: z.infer<typeof bottleIdInput>) {
-  const bottle = await getBottle(db, input.bottleId);
+  const bottle = await getBottle(db, input.bottleId, userId);
   if (!bottle) return toolError(`No bottle found with id "${input.bottleId}"`);
 
   const rows = await db
@@ -340,7 +362,7 @@ async function execGetTastingNotes(db: DB, userId: string, input: z.infer<typeof
 }
 
 async function execAddToWishlist(db: DB, userId: string, input: z.infer<typeof bottleIdInput>) {
-  const bottle = await getBottle(db, input.bottleId);
+  const bottle = await getBottle(db, input.bottleId, userId);
   if (!bottle) return toolError(`No bottle found with id "${input.bottleId}"`);
 
   const [existing] = await db
@@ -368,7 +390,12 @@ async function execAddToWishlist(db: DB, userId: string, input: z.infer<typeof b
   return { status: "added_to_wishlist" as const, bottleName: bottle.name };
 }
 
-async function execGetPairings(db: DB, input: z.infer<typeof bottleIdInput>) {
+async function execGetPairings(db: DB, userId: string, input: z.infer<typeof bottleIdInput>) {
+  // Resolve the bottle under the viewer's visibility first, so the pairing
+  // generator is never asked about somebody else's pending submission.
+  if (!(await getBottle(db, input.bottleId, userId))) {
+    return toolError(`No bottle found with id "${input.bottleId}"`);
+  }
   const pairings = await getOrGeneratePairings(db, input.bottleId);
   if (pairings === null) return toolError(`No bottle found with id "${input.bottleId}"`);
   return {
@@ -400,12 +427,12 @@ export async function executeTool(
       case "search_bottles": {
         const parsed = searchBottlesInput.safeParse(input);
         if (!parsed.success) return toolError(`Invalid input: ${parsed.error.message}`);
-        return await execSearchBottles(db, parsed.data);
+        return await execSearchBottles(db, userId, parsed.data);
       }
       case "get_bottle_details": {
         const parsed = bottleIdInput.safeParse(input);
         if (!parsed.success) return toolError(`Invalid input: ${parsed.error.message}`);
-        return await execGetBottleDetails(db, parsed.data);
+        return await execGetBottleDetails(db, userId, parsed.data);
       }
       case "get_my_bar": {
         const parsed = myBarInput.safeParse(input ?? {});
@@ -430,7 +457,7 @@ export async function executeTool(
       case "get_pairings": {
         const parsed = bottleIdInput.safeParse(input);
         if (!parsed.success) return toolError(`Invalid input: ${parsed.error.message}`);
-        return await execGetPairings(db, parsed.data);
+        return await execGetPairings(db, userId, parsed.data);
       }
       default:
         return toolError(`Unknown tool "${name}"`);

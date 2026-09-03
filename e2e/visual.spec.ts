@@ -51,6 +51,19 @@ test.describe("signed out", () => {
     await expect(page).toHaveScreenshot(shot("search-empty"), { fullPage: true });
   });
 
+  /**
+   * The end of the dead end (review PLAN-A1). A search that finds nothing is
+   * an ordinary outcome on a 269-bottle catalog, so the shot that matters is
+   * the one with somewhere to go in it.
+   */
+  test("search: nothing found, with a way out", async ({ page }) => {
+    await page.goto("/search");
+    await page.getByRole("searchbox").fill("zzzz no such bottle");
+    await expect(page.getByText("No bottles found")).toBeVisible();
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("search-no-results"), { fullPage: true });
+  });
+
   test("search results", async ({ page }) => {
     await page.goto("/search");
     await page.getByRole("searchbox").fill("eagle");
@@ -127,6 +140,13 @@ test.describe("signed in (demo collector)", () => {
     await expect(page.getByRole("heading", { name: "Tonight’s pour" })).toBeVisible();
     await settle(page);
     await expect(page).toHaveScreenshot(shot("home-dashboard"), { fullPage: true });
+  });
+
+  test("add a bottle the catalog lacks", async ({ page }) => {
+    await page.goto("/bottles/new?source=search&name=Barrell%20Dovetail");
+    await expect(page.getByRole("heading", { name: "Add a bottle" })).toBeVisible();
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("bottle-new"), { fullPage: true });
   });
 
   test("my bar", async ({ page }) => {

@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import type { PgColumn } from "drizzle-orm/pg-core";
 import type { DB } from "@/db";
 import {
@@ -63,6 +63,12 @@ interface MetBottleRow {
  * Every distinct catalog bottle the user has met: a logged pour OR an
  * own/tried relationship (FEATURES.md §11.2). Wishlist never counts —
  * wanting is not meeting.
+ *
+ * Nor does a bottle the user added themselves and nobody has reviewed
+ * (PLAN-A1/WP-16). A badge counts distinct things met in the shared catalog,
+ * and a row you wrote is not evidence that you met anything — without this,
+ * "have I been to Campbeltown?" is answered by typing, and the denominator
+ * (verified bottles only, below) would let a stamp exceed its own total.
  */
 async function listMetBottles(db: DB, userId: string): Promise<MetBottleRow[]> {
   const fields = {
@@ -76,12 +82,18 @@ async function listMetBottles(db: DB, userId: string): Promise<MetBottleRow[]> {
       .select(fields)
       .from(userBottles)
       .innerJoin(bottles, eq(userBottles.bottleId, bottles.id))
-      .where(and(eq(userBottles.userId, userId), inArray(userBottles.relationship, ["own", "tried"]))),
+      .where(
+        and(
+          eq(userBottles.userId, userId),
+          inArray(userBottles.relationship, ["own", "tried"]),
+          ne(bottles.status, "user_submitted"),
+        ),
+      ),
     db
       .select(fields)
       .from(pours)
       .innerJoin(bottles, eq(pours.bottleId, bottles.id))
-      .where(eq(pours.userId, userId)),
+      .where(and(eq(pours.userId, userId), ne(bottles.status, "user_submitted"))),
   ]);
   const byId = new Map<string, MetBottleRow>();
   for (const row of [...owned, ...poured]) byId.set(row.bottleId, row);
@@ -254,12 +266,17 @@ export async function getPassportBadgeDetail(
   const badge = list.find((b) => b.value === value);
   if (!badge) return null;
 
-  const valueMatch =
+  // Same rule as `listMetBottles`: the drill-down must list exactly the
+  // bottles the badge counted, so an unreviewed submission is excluded here
+  // too or the list and the number disagree.
+  const valueMatch = and(
     family === "country"
       ? eq(bottles.country, value)
       : family === "region"
         ? eq(bottles.region, value)
-        : eq(bottles.category, value as WhiskeyCategory);
+        : eq(bottles.category, value as WhiskeyCategory),
+    ne(bottles.status, "user_submitted"),
+  );
   const fields = { bottleId: bottles.id, name: bottles.name };
   const [owned, poured] = await Promise.all([
     db

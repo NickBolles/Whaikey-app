@@ -13,6 +13,7 @@ import {
   ImageUp,
   Keyboard,
   Loader2,
+  Plus,
   RefreshCw,
   ScanLine,
   Sparkles,
@@ -1756,6 +1757,21 @@ function DecisionSheet({
             <ImageUp size={18} strokeWidth={1.8} aria-hidden />
             Snap the label instead
           </button>
+          {/*
+            The end of the dead end (review PLAN-A1). A barcode we don't know
+            and a catalog that doesn't have it used to leave "Skip this one" as
+            the only honest option. The scanned code and whatever the user has
+            typed travel with them, so the form is a confirmation.
+          */}
+          <Link
+            href={`/bottles/new?source=scan${item.upc ? `&upc=${encodeURIComponent(item.upc)}` : ""}${
+              query.trim() ? `&name=${encodeURIComponent(query.trim())}` : ""
+            }&next=%2Fscan`}
+            className="btn-secondary px-4 py-3 text-sm font-medium flex items-center justify-center gap-2"
+          >
+            <Plus size={18} strokeWidth={1.8} aria-hidden />
+            It&apos;s not in the catalog — add it
+          </Link>
           <button
             type="button"
             onClick={onRemove}

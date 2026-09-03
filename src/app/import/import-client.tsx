@@ -3,7 +3,8 @@
 import { useRef, useState } from "react";
 import Link from "next/link";
 import { ArrowRight, Check, FileUp, Loader2, Sparkles } from "lucide-react";
-import { RELATIONSHIPS, type Relationship } from "@/db/schema";
+import { RELATIONSHIPS, WHISKEY_CATEGORIES, type Relationship } from "@/db/schema";
+import { categoryLabel } from "@/components/category-chip";
 import {
   FIELD_LABELS,
   IMPORT_FIELDS,
@@ -370,9 +371,34 @@ export function ImportClient() {
                   ))}
                 </select>
                 {r.candidates.length === 0 && (
-                  <p className="text-xs text-muted">
-                    No catalog match — this row will be skipped. Add it later via search or scan.
-                  </p>
+                  <UnmatchedRow
+                    row={r.row}
+                    onAdded={(bottle) =>
+                      setRows((prev) =>
+                        prev.map((p, pi) =>
+                          pi === i
+                            ? {
+                                ...p,
+                                candidates: [{ ...bottle, via: "name" as const }],
+                                choice: bottle.id,
+                              }
+                            : p,
+                        ),
+                      )
+                    }
+                    onDuplicates={(found) =>
+                      setRows((prev) =>
+                        prev.map((p, pi) =>
+                          pi === i
+                            ? {
+                                ...p,
+                                candidates: found.map((c) => ({ ...c, via: "name" as const })),
+                              }
+                            : p,
+                        ),
+                      )
+                    }
+                  />
                 )}
               </li>
             ))}
@@ -418,6 +444,113 @@ export function ImportClient() {
             </button>
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The unmatched-row escape hatch (review PLAN-A1).
+ *
+ * An import row with no catalog match used to say "this row will be skipped.
+ * Add it later via search or scan" — which was a dead end pointing at two
+ * other dead ends. Adding it happens here, in the flow, because leaving the
+ * page loses every row already parsed and confirmed.
+ *
+ * The category is asked for rather than guessed: the row's text is a bottle
+ * name and a price, and inventing "bourbon" for it would put a guess into the
+ * catalog under the user's name.
+ */
+function UnmatchedRow({
+  row,
+  onAdded,
+  onDuplicates,
+}: {
+  row: NormalizedImportRow;
+  onAdded: (bottle: { id: string; name: string; distillery: string | null; category: string }) => void;
+  onDuplicates: (
+    found: Array<{ id: string; name: string; distillery: string | null; category: string }>,
+  ) => void;
+}) {
+  const [category, setCategory] = useState<string>("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const name = row.name?.trim() ?? "";
+
+  if (!name) {
+    return (
+      <p className="text-xs text-muted">
+        No bottle name in this row, so there is nothing to match — it will be skipped.
+      </p>
+    );
+  }
+
+  async function add() {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/bottles", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name,
+          category,
+          upc: row.upc?.trim() || undefined,
+          source: "import",
+        }),
+      });
+      if (res.status === 409) {
+        const data = (await res.json()) as {
+          duplicates?: Array<{ id: string; name: string; distillery: string | null; category: string }>;
+        };
+        onDuplicates(data.duplicates ?? []);
+        setBusy(false);
+        return;
+      }
+      if (!res.ok) throw new Error(`add failed (${res.status})`);
+      const data = (await res.json()) as {
+        bottle: { id: string; name: string; category: string };
+      };
+      onAdded({ ...data.bottle, distillery: null });
+    } catch {
+      setError("Couldn't add that one — try again.");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="text-xs text-muted">
+        No catalog match. Add it and it&apos;s yours right away — it joins the shared catalog once
+        someone has checked it over.
+      </p>
+      <div className="flex gap-2">
+        <select
+          aria-label={`Category for ${name}`}
+          value={category}
+          onChange={(e) => setCategory(e.target.value)}
+          className="flex-1 min-w-0 rounded-xl border border-border-subtle bg-surface py-2.5 px-3 text-sm text-foreground focus-visible:ring-2 focus-visible:ring-accent/60"
+        >
+          <option value="">Pick a category…</option>
+          {WHISKEY_CATEGORIES.map((c) => (
+            <option key={c} value={c}>
+              {categoryLabel(c)}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          disabled={busy || !category}
+          onClick={() => void add()}
+          className="btn-secondary shrink-0 px-3.5 py-2.5 text-xs font-medium disabled:opacity-50"
+        >
+          {busy ? "Adding…" : "Add it"}
+        </button>
+      </div>
+      {error && (
+        <p role="alert" className="text-xs text-danger">
+          {error}
+        </p>
       )}
     </div>
   );

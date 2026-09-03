@@ -87,6 +87,32 @@ describe("getPassport", () => {
     expect(passport.regions.find((r) => r.value === "Islay")?.metCount).toBe(2);
   });
 
+  /**
+   * WP-16 gave users a way to add a bottle. The passport counts distinct
+   * things *met*, and a row you wrote yourself is not evidence you met
+   * anything — so "have I been to Campbeltown?" must not be answerable by
+   * typing. The denominator already counted verified bottles only, so a
+   * self-served numerator could also push a stamp past its own total.
+   */
+  it("does not let a bottle the user added themselves mint a stamp", async () => {
+    await seedIslay(4);
+    const own = await createTestBottle(db, {
+      name: "My Own Campbeltown Pick",
+      category: "scotch-single-malt",
+      country: "Scotland",
+      region: "Campbeltown",
+      status: "user_submitted",
+      submittedBy: userId,
+    });
+    await tryBottle(own.id);
+    await db.insert(pours).values({ id: uid("pour"), userId, bottleId: own.id });
+
+    const passport = await getPassport(db, userId);
+    expect(passport.regions.find((r) => r.value === "Campbeltown")).toBeUndefined();
+    // And the drill-down agrees with the number rather than listing it anyway.
+    expect(await getPassportBadgeDetail(db, userId, "region", "Campbeltown")).toBeNull();
+  });
+
   it("excludes unverified bottles from the denominator", async () => {
     const ids = await seedIslay(6);
     await createTestBottle(db, { name: "COLA ghost", country: "Scotland", region: "Islay", status: "imported" });

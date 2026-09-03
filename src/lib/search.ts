@@ -1,5 +1,6 @@
 import { and, asc, eq, inArray, ne, sql, type SQL } from "drizzle-orm";
 import type { DB } from "@/db";
+import { catalogVisibleTo } from "@/lib/catalog-visibility";
 import {
   bottleAliases,
   bottleClaims,
@@ -41,6 +42,12 @@ export interface BottleSearchResult {
 export interface SearchOptions {
   category?: WhiskeyCategory;
   limit?: number;
+  /**
+   * Who is searching. A user-submitted bottle is visible to its submitter and
+   * to nobody else (review PLAN-A1), so an omitted viewer searches the shared
+   * catalog only — which is the right default for a signed-out request.
+   */
+  viewerId?: string;
 }
 
 const DEFAULT_LIMIT = 20;
@@ -89,9 +96,11 @@ async function fetchCandidates(
   db: DB,
   tokens: string[],
   category?: WhiskeyCategory,
+  viewerId?: string,
 ): Promise<BottleSearchResult[]> {
   const conditions: SQL[] = tokens.map(tokenCondition);
   if (category) conditions.push(eq(bottles.category, category));
+  conditions.push(catalogVisibleTo(viewerId));
   return db
     .select(resultColumns)
     .from(bottles)
@@ -139,7 +148,7 @@ export async function searchBottles(
   query: string,
   opts: SearchOptions = {},
 ): Promise<BottleSearchResult[]> {
-  const { category, limit = DEFAULT_LIMIT } = opts;
+  const { category, limit = DEFAULT_LIMIT, viewerId } = opts;
   const q = query.trim().toLowerCase();
   const tokens = q.split(/\s+/).filter(Boolean);
 
@@ -148,17 +157,17 @@ export async function searchBottles(
       .select(resultColumns)
       .from(bottles)
       .leftJoin(distilleries, eq(bottles.distilleryId, distilleries.id))
-      .where(category ? eq(bottles.category, category) : undefined)
+      .where(and(catalogVisibleTo(viewerId), category ? eq(bottles.category, category) : undefined))
       .orderBy(asc(bottles.name))
       .limit(limit);
   }
 
-  let rows = await fetchCandidates(db, tokens, category);
+  let rows = await fetchCandidates(db, tokens, category, viewerId);
 
   if (rows.length === 0) {
     const trimmed = tokens.map((t) => t.slice(0, PREFIX_LEN));
     if (trimmed.some((t, i) => t !== tokens[i])) {
-      rows = await fetchCandidates(db, trimmed, category);
+      rows = await fetchCandidates(db, trimmed, category, viewerId);
     }
   }
 
@@ -275,8 +284,10 @@ export async function getBottleDetail(
     .select({ bottle: bottles, distillery: distilleries })
     .from(bottles)
     .leftJoin(distilleries, eq(bottles.distilleryId, distilleries.id))
-    .where(eq(bottles.id, bottleId))
+    .where(and(eq(bottles.id, bottleId), catalogVisibleTo(userId)))
     .limit(1);
+  // Someone else's pending submission is 404, not 403: an id that resolves to
+  // "not yours" still tells you the bottle exists.
   if (!row) return null;
 
   const communityStats = await getCommunityRating(db, bottleId);

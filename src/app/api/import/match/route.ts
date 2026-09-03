@@ -47,7 +47,7 @@ export interface ImportMatchCandidate {
  */
 export async function POST(request: Request) {
   return withErrorHandling(async () => {
-    await requireUser();
+    const user = await requireUser();
 
     const body = await readJsonWithinLimit(request, MAX_BODY_BYTES);
     const parsed = bodySchema.safeParse(body);
@@ -80,7 +80,7 @@ export async function POST(request: Request) {
       }
 
       if (candidates.length === 0 && row.name?.trim()) {
-        for (const m of await searchBottles(db, row.name, { limit: 3 })) {
+        for (const m of await searchBottles(db, row.name, { limit: 3, viewerId: user.id })) {
           if (seen.has(m.id)) continue;
           candidates.push({
             id: m.id,

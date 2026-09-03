@@ -433,6 +433,33 @@ describe("ScanClient (manual fallback mode)", () => {
     expect(await screen.findByText(/scanned this session \(1\)/i)).toBeTruthy();
   });
 
+  /**
+   * Review PLAN-A1. A barcode nobody knows, against a catalog that doesn't
+   * have the bottle, used to leave "Skip this one" as the only honest option.
+   * The scanned code and whatever was typed travel to the form, so it opens as
+   * a confirmation rather than a blank page.
+   */
+  it("offers the submission path on a total miss, carrying the barcode and the query", async () => {
+    mockFetch((url) => {
+      if (url.includes("/api/scan/upc")) return scanMiss();
+      if (url.includes("/api/bottles/search")) return { results: [] };
+      return confirmResponse(EAGLE, "ub-7");
+    });
+    const user = userEvent.setup();
+    render(<ScanClient />);
+
+    await user.type(screen.getByLabelText(/barcode number/i), UPC);
+    await user.click(screen.getByRole("button", { name: "Scan" }));
+    await user.click(await screen.findByRole("button", { name: /needs you/i }));
+    await user.type(screen.getByLabelText(/search the catalog/i), "barrell dovetail");
+
+    const link = await screen.findByRole("link", { name: /not in the catalog/i });
+    expect(link).toHaveAttribute(
+      "href",
+      `/bottles/new?source=scan&upc=${UPC}&name=barrell%20dovetail&next=%2Fscan`,
+    );
+  });
+
   it("skips a barcode already scanned this session", async () => {
     let scans = 0;
     mockFetch((url) => {
