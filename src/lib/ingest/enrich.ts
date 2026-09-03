@@ -2,7 +2,12 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import type { DB } from "@/db";
 import { bottleClaims, bottleResources, bottles, catalogSources, distilleries, pours, tastingNotes } from "@/db/schema";
-import { activeAiProvider, aiSupportsServerWebSearch, getAnthropic } from "@/lib/ai/client";
+import {
+  activeAiProvider,
+  aiSupportsServerWebSearch,
+  AI_BATCH_TIMEOUT_MS,
+  getAnthropic,
+} from "@/lib/ai/client";
 import { parseModelJson, textFromContent } from "@/lib/ai/json";
 import { FLAVOR_WHEEL, WEDGE_IDS, rollUpToWedges } from "@/lib/flavor-wheel";
 
@@ -367,10 +372,13 @@ async function runModelBatch(
   ];
   const texts: string[] = [];
   for (let attempt = 0; attempt < 4; attempt++) {
-    const response = await anthropic.messages.create({
-      ...base,
-      messages,
-    } as never);
+    // Explicit budget, because the shared client is tuned for request handlers
+    // (25 s, to fit inside a route's maxDuration) and this is a batch job with
+    // no such deadline — 25 bottles at 8,000 tokens plus search continuations
+    // is legitimately slower than any page would tolerate.
+    const response = await anthropic.messages.create({ ...base, messages } as never, {
+      timeout: AI_BATCH_TIMEOUT_MS,
+    });
     texts.push(textFromContent(response.content as never));
     if (response.stop_reason !== "pause_turn") break;
     messages.push({ role: "assistant", content: response.content });

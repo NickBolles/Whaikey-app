@@ -17,9 +17,13 @@ test.describe("security headers", () => {
     expect(headers["x-frame-options"]).toBe("DENY");
     // /s/<code> share links are bearer credentials; they must not ride Referer.
     expect(headers["referrer-policy"]).toBe("strict-origin-when-cross-origin");
-    // /scan is a first-party camera surface on the web, so camera must stay.
+    // /scan is a first-party camera surface and the note capture has a shipped
+    // dictation button, so both stay for THIS origin — a policy that denies
+    // them leaves visible controls that silently fail.
     expect(headers["permissions-policy"]).toContain("camera=(self)");
-    expect(headers["permissions-policy"]).toContain("microphone=()");
+    expect(headers["permissions-policy"]).toContain("microphone=(self)");
+    // But nothing is granted to anything embedded, which is the point.
+    expect(headers["permissions-policy"]).toContain("geolocation=()");
 
     const csp = headers["content-security-policy"] ?? "";
     // Clickjacking /sharing ("Make everything private", link revocation) is the

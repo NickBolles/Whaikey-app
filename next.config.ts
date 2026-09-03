@@ -71,10 +71,15 @@ const securityHeaders = [
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
   // Belt and braces with frame-ancestors, for anything that predates CSP.
   { key: "X-Frame-Options", value: "DENY" },
-  // Camera stays: /scan is a first-party camera surface on the web too.
+  // Camera and microphone both stay for this origin: /scan is a first-party
+  // camera surface on the web, and the tasting-note capture has a shipped
+  // dictation button (`note-capture.tsx`, Web Speech). Chrome gates
+  // SpeechRecognition on this policy, so `microphone=()` would leave a visible
+  // mic button that silently fails. Everything is denied to embedded frames
+  // either way, which is the part that matters.
   {
     key: "Permissions-Policy",
-    value: "camera=(self), microphone=(), geolocation=(), payment=(), usb=()",
+    value: "camera=(self), microphone=(self), geolocation=(), payment=(), usb=()",
   },
 ];
 

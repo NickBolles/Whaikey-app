@@ -3,7 +3,7 @@ import { asc, desc, eq, and } from "drizzle-orm";
 import type Anthropic from "@anthropic-ai/sdk";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
-import { chatModel, getAnthropic } from "./client";
+import { AI_LOOP_BUDGET_MS, chatModel, getAnthropic, remainingBudget } from "./client";
 import { executeTool, TOOL_DEFINITIONS } from "./tools";
 
 /** Max number of tool-executing iterations per user turn. */
@@ -143,15 +143,25 @@ export async function runChat(
 
   const toolCalls: ChatToolCall[] = [];
   let finalText = "";
+  // One budget for the whole turn, not per call: a tool round trip is up to
+  // seven model calls, and /api/chat is killed at 60s regardless of how the
+  // time was spent. Running out ends the loop with whatever has been said so
+  // far, which beats a 504 on a rate-limit slot the user has already paid for.
+  const startedAt = Date.now();
 
   for (let iteration = 0; ; iteration++) {
-    const response = await anthropic.messages.create({
-      model: chatModel(),
-      max_tokens: 8192,
-      system: SYSTEM_PROMPT,
-      tools: TOOL_DEFINITIONS,
-      messages,
-    });
+    const timeout = remainingBudget(startedAt, AI_LOOP_BUDGET_MS);
+    if (timeout === null) break;
+    const response = await anthropic.messages.create(
+      {
+        model: chatModel(),
+        max_tokens: 8192,
+        system: SYSTEM_PROMPT,
+        tools: TOOL_DEFINITIONS,
+        messages,
+      },
+      { timeout },
+    );
 
     const content = response.content as Anthropic.Messages.ContentBlock[];
     const texts = content.filter(
@@ -271,16 +281,23 @@ export async function* runChatStream(
 
   const toolCalls: ChatToolCall[] = [];
   let finalText = "";
+  // Same shared budget as runChat — see there for why it is per turn.
+  const startedAt = Date.now();
 
   for (let iteration = 0; ; iteration++) {
-    const stream = (await anthropic.messages.create({
-      model: chatModel(),
-      max_tokens: 8192,
-      system: SYSTEM_PROMPT,
-      tools: TOOL_DEFINITIONS,
-      messages,
-      stream: true,
-    })) as unknown as AsyncIterable<RawStreamEvent>;
+    const timeout = remainingBudget(startedAt, AI_LOOP_BUDGET_MS);
+    if (timeout === null) break;
+    const stream = (await anthropic.messages.create(
+      {
+        model: chatModel(),
+        max_tokens: 8192,
+        system: SYSTEM_PROMPT,
+        tools: TOOL_DEFINITIONS,
+        messages,
+        stream: true,
+      },
+      { timeout },
+    )) as unknown as AsyncIterable<RawStreamEvent>;
 
     const blocks: AssembledBlock[] = [];
     let stopReason: string | null = null;

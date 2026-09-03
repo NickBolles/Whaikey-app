@@ -83,6 +83,40 @@ const AI_MAX_RETRIES = 0;
 export const SHORTEST_AI_ROUTE_DEADLINE_MS = 30_000;
 
 /**
+ * Budget for a whole agentic turn, not one call.
+ *
+ * `runChat`/`runChatStream` make up to seven model calls per request, so the
+ * per-call timeout above bounds nothing on their own: seven of them is 175 s
+ * under `/api/chat`'s 60 s `maxDuration`. Callers that loop share this budget
+ * across every call and hand each one whatever is left (`remainingBudget`),
+ * ten seconds short of the deadline so there is room to answer with what the
+ * loop already has instead of being killed mid-call.
+ */
+export const AI_LOOP_BUDGET_MS = 50_000;
+
+/**
+ * Whatever is left of a budget, or null once it is spent.
+ *
+ * Null means stop rather than "no limit" — a caller that has run out of time
+ * should return what it has, not start another call it cannot finish.
+ */
+export function remainingBudget(startedAt: number, budgetMs: number): number | null {
+  const left = budgetMs - (Date.now() - startedAt);
+  // Under a second is not enough for a model call to do anything useful.
+  return left > 1_000 ? Math.min(left, AI_TIMEOUT_MS) : null;
+}
+
+/**
+ * Budget for work that is NOT behind a route.
+ *
+ * `pnpm ingest enrich` and the catalog-sync workflow batch 25 bottles at 8,000
+ * tokens with optional hosted-search continuation turns, and they answer to a
+ * job runner rather than a 30 s platform deadline. Capping those at the route
+ * budget would abort perfectly good generations; they are slow on purpose.
+ */
+export const AI_BATCH_TIMEOUT_MS = 5 * 60_000;
+
+/**
  * Singleton client for Anthropic Messages-compatible calls. OpenRouter is
  * selected first so one OPENROUTER_API_KEY can serve every AI feature.
  */

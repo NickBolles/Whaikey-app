@@ -172,15 +172,37 @@ describe("whose pour it is", () => {
     await expect(flushPourQueue("alice")).resolves.toMatchObject({ synced: 1, remaining: 0 });
   });
 
-  it("stops at the first pour that isn't ours, so the timeline holds", async () => {
-    await enqueuePour({ body: { bottleId: "a" }, bottleName: "A", userId: "bob" });
-    await enqueuePour({ body: { bottleId: "b" }, bottleName: "B", userId: "alice" });
-    await enqueuePour({ body: { bottleId: "c" }, bottleName: "C", userId: "bob" });
+  /**
+   * The first cut of this stopped at a foreign entry to preserve ordering,
+   * which stranded the signed-in user's own later pours behind it forever —
+   * a worse failure than the one it was guarding against. There is no timeline
+   * spanning two accounts for that ordering to protect.
+   */
+  it("keeps going past someone else's pour to reach this user's own", async () => {
+    await enqueuePour({ body: { bottleId: "a" }, bottleName: "Alice's", userId: "alice" });
+    await enqueuePour({ body: { bottleId: "b" }, bottleName: "Bob's first", userId: "bob" });
+    await enqueuePour({ body: { bottleId: "c" }, bottleName: "Bob's second", userId: "bob" });
     const fetchMock = mockFetchSequence(ok(), ok());
 
-    await expect(flushPourQueue("bob")).resolves.toMatchObject({ synced: 1, remaining: 2 });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect((await readQueue()).map((entry) => entry.bottleName)).toEqual(["B", "C"]);
+    await expect(flushPourQueue("bob")).resolves.toMatchObject({ synced: 2, remaining: 1 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    // Alice's is still there, still hers.
+    expect((await readQueue()).map((entry) => entry.bottleName)).toEqual(["Alice's"]);
+  });
+
+  it("still stops at the first failure of this user's own, so their timeline holds", async () => {
+    await enqueuePour({ body: { bottleId: "a" }, bottleName: "Alice's", userId: "alice" });
+    await enqueuePour({ body: { bottleId: "b" }, bottleName: "Bob 1", userId: "bob" });
+    await enqueuePour({ body: { bottleId: "c" }, bottleName: "Bob 2", userId: "bob" });
+    await enqueuePour({ body: { bottleId: "d" }, bottleName: "Bob 3", userId: "bob" });
+    mockFetchSequence(ok(), "network-error");
+
+    await expect(flushPourQueue("bob")).resolves.toMatchObject({ synced: 1, remaining: 3 });
+    expect((await readQueue()).map((entry) => entry.bottleName)).toEqual([
+      "Alice's",
+      "Bob 2",
+      "Bob 3",
+    ]);
   });
 
   it("sends an entry from before owners were recorded, rather than stranding it", async () => {

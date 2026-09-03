@@ -222,16 +222,16 @@ async function runFlush(userId: string | undefined): Promise<FlushResult> {
   if (queue.length === 0) return { synced: 0, remaining: 0, discarded: [] };
 
   const discarded: QueuedPour[] = [];
+  const handled = new Set<string>();
   let synced = 0;
-  let index = 0;
 
-  for (; index < queue.length; index++) {
-    const entry = queue[index];
+  for (const entry of queue) {
     if (!belongsTo(entry, userId)) {
-      // Someone else's pour on a shared browser. Not ours to send and not ours
-      // to delete — it waits for them, and ordering holds because everything
-      // after it waits too.
-      break;
+      // Someone else's pour on a shared browser: not ours to send and not ours
+      // to delete, so leave it and carry on. Stopping here would strand this
+      // user's own later pours behind it forever, and there is no timeline
+      // that spans two accounts for the ordering to protect.
+      continue;
     }
     let response: Response;
     try {
@@ -247,6 +247,7 @@ async function runFlush(userId: string | undefined): Promise<FlushResult> {
 
     if (response.ok) {
       synced++;
+      handled.add(entry.id);
       continue;
     }
 
@@ -264,6 +265,7 @@ async function runFlush(userId: string | undefined): Promise<FlushResult> {
     entry.attempts++;
     if (entry.attempts >= MAX_ATTEMPTS) {
       discarded.push(entry);
+      handled.add(entry.id);
       continue;
     }
     // A 4xx that hasn't exhausted its attempts: stop so ordering holds, and let
@@ -271,10 +273,6 @@ async function runFlush(userId: string | undefined): Promise<FlushResult> {
     break;
   }
 
-  const handled = new Set([
-    ...queue.slice(0, index).map((entry) => entry.id),
-    ...discarded.map((entry) => entry.id),
-  ]);
   // Merge rather than overwrite: the user can log another pour offline while
   // this flush is out on the network, and writing back our own snapshot would
   // silently drop it. Only the entries this flush actually settled are
