@@ -4,6 +4,7 @@ import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { RELATIONSHIPS, BOTTLE_STATUSES } from "@/db/schema";
 import { requireUser, withErrorHandling } from "@/lib/session";
+import { readJsonWithinLimit } from "@/lib/body-limit";
 import { toUserBottleValues } from "@/lib/bar";
 import { isValidUpc, normalizeUpc } from "@/lib/scan";
 
@@ -11,6 +12,13 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 
 const MAX_ITEMS = 300;
+/**
+ * 300 shelf rows with notes is well under this; a megabyte is generous and
+ * still bounded. Route handlers have no body limit of their own, so without
+ * this the item cap was only checked after the whole body had been buffered
+ * and parsed (review SEC-M1).
+ */
+const MAX_BODY_BYTES = 1024 * 1024;
 
 const isoDate = z
   .string()
@@ -47,7 +55,7 @@ export async function POST(request: Request) {
   return withErrorHandling(async () => {
     const user = await requireUser();
 
-    const body = await request.json().catch(() => null);
+    const body = await readJsonWithinLimit(request, MAX_BODY_BYTES);
     const parsed = bodySchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json(

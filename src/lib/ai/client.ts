@@ -60,6 +60,20 @@ export function isAiConfigured(): boolean {
 }
 
 /**
+ * Budget for a single model call (REL-3.1).
+ *
+ * The SDK defaults to a ten-minute timeout and two retries, which is a fine
+ * default for a script and a wrong one here: every AI route caps out at 30-60 s
+ * of `maxDuration` and *reserves the user's rate-limit slot before the call*,
+ * so a slow model spent someone's hourly budget on a 504 they never saw an
+ * answer for. Twenty-five seconds leaves room inside the shortest of those
+ * caps to fail and say so; one retry covers a dropped connection without
+ * doubling the wait.
+ */
+const AI_TIMEOUT_MS = 25_000;
+const AI_MAX_RETRIES = 1;
+
+/**
  * Singleton client for Anthropic Messages-compatible calls. OpenRouter is
  * selected first so one OPENROUTER_API_KEY can serve every AI feature.
  */
@@ -67,7 +81,13 @@ export function getAnthropic(): Anthropic {
   if (testClient) return testClient;
   const options = aiClientOptions();
   if (!options) throw new AiNotConfiguredError();
-  if (!singleton) singleton = new Anthropic(options);
+  if (!singleton) {
+    singleton = new Anthropic({
+      ...options,
+      timeout: AI_TIMEOUT_MS,
+      maxRetries: AI_MAX_RETRIES,
+    });
+  }
   return singleton;
 }
 

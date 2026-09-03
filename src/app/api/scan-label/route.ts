@@ -6,15 +6,30 @@ import { fastModel, getAnthropic, isAiConfigured } from "@/lib/ai/client";
 import { parseModelJson, textFromContent } from "@/lib/ai/json";
 import { searchBottlesLike, type BottleSearchResult } from "@/lib/ai/tools";
 import { reserveAiRequest } from "@/lib/ai/rate-limit";
+import { readJsonWithinLimit } from "@/lib/body-limit";
 
 // Node runtime (not edge): uses the DB driver and the Anthropic SDK.
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // ~5MB decoded
+/**
+ * The wire budget for the whole request: base64 costs a third on top of the
+ * decoded image, plus the JSON around it. Enforced while reading rather than
+ * after, because the old check ran on a body that had already been buffered
+ * and parsed — free to send, expensive to receive (SEC-M1 / REL-3.4).
+ */
+const MAX_BODY_BYTES = Math.ceil(MAX_IMAGE_BYTES * 1.4);
 
 const bodySchema = z.object({
-  imageBase64: z.string().min(1),
+  // Length-capped and shape-checked: `min(1)` accepted an arbitrarily long
+  // arbitrary string, and the size check downstream inferred bytes from a
+  // length that might not be base64 at all.
+  imageBase64: z
+    .string()
+    .min(1)
+    .max(MAX_BODY_BYTES)
+    .regex(/^[A-Za-z0-9+/]+={0,2}$/, "imageBase64 must be base64"),
   mediaType: z.enum(["image/jpeg", "image/png", "image/webp", "image/gif"]),
 });
 
@@ -47,7 +62,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "AI features are not configured" }, { status: 503 });
     }
 
-    const body = await request.json().catch(() => null);
+    const body = await readJsonWithinLimit(request, MAX_BODY_BYTES);
     const parsed = bodySchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json(

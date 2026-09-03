@@ -11,6 +11,7 @@ import {
   pairings,
   pours,
   userBottles,
+  userProfiles,
   type Bottle,
   type BottleClaim,
   type BottleMedia,
@@ -49,7 +50,7 @@ const CANDIDATE_LIMIT = 100;
 const PREFIX_LEN = 4;
 
 /** Escape LIKE wildcards so user input is treated literally. */
-function escapeLike(s: string): string {
+export function escapeLike(s: string): string {
   return s.replace(/[\\%_]/g, (c) => `\\${c}`);
 }
 
@@ -171,12 +172,7 @@ export async function searchBottles(
 export interface BottleDetail {
   bottle: Bottle;
   distillery: Distillery | null;
-  communityStats: {
-    /** Average pour rating across ALL users, null when nobody has rated. */
-    avgRating: number | null;
-    /** Number of rated pours across all users. */
-    ratingCount: number;
-  };
+  communityStats: CommunityRating;
   /** The signed-in user's shelf row for this bottle, null when absent/signed out. */
   userBottle: UserBottle | null;
   pairings: Pairing[];
@@ -201,6 +197,70 @@ export interface BottleDetail {
  * current user's shelf relationship (when a userId is given), and pairing
  * suggestions. Returns null for an unknown bottle id.
  */
+export interface CommunityRating {
+  /**
+   * Mean of the ratings people chose to make public, null when there are too
+   * few of them to be an average rather than a disclosure.
+   */
+  avgRating: number | null;
+  /** Public rated pours behind that average. */
+  ratingCount: number;
+  /** Distinct people behind it — what the floor is actually applied to. */
+  raterCount: number;
+}
+
+/**
+ * Below this many distinct raters, an "average" is one or two people's private
+ * business wearing a plural. `/api/bottles/[id]` needs no session, so on a
+ * rarely-rated bottle the number moving told an unauthenticated poller the
+ * rating and the timing of a single pour.
+ */
+export const MIN_COMMUNITY_RATERS = 3;
+
+/**
+ * The community rating for a bottle, over pours whose owners chose to publish
+ * them (review SEC-M2).
+ *
+ * Two filters and a floor, and all three matter. `visibility = 'public'` is the
+ * user's own choice — a pour marked "Only me" never moves a public number, which
+ * is the private-by-default promise in docs/SOCIAL.md. `socialEnabled` is the
+ * step-back switch: someone who has turned social off has withdrawn their public
+ * pours with it. And the floor keeps a two-person "average" from being a way to
+ * read one person's rating off a public endpoint.
+ *
+ * The count is of distinct *people*, not rated pours: three pours from one
+ * enthusiast are one opinion, and a per-pour floor would let them clear it alone.
+ */
+export async function getCommunityRating(db: DB, bottleId: string): Promise<CommunityRating> {
+  const [stats] = await db
+    .select({
+      avgRating: sql<number | null>`avg(${pours.rating})`,
+      ratingCount: sql<number>`count(${pours.rating})`,
+      raterCount: sql<number>`count(distinct ${pours.userId})`,
+    })
+    .from(pours)
+    .innerJoin(userProfiles, eq(userProfiles.userId, pours.userId))
+    .where(
+      and(
+        eq(pours.bottleId, bottleId),
+        eq(pours.visibility, "public"),
+        eq(userProfiles.socialEnabled, true),
+        sql`${pours.rating} is not null`,
+      ),
+    );
+
+  const ratingCount = Number(stats?.ratingCount ?? 0);
+  const raterCount = Number(stats?.raterCount ?? 0);
+  if (raterCount < MIN_COMMUNITY_RATERS) {
+    return { avgRating: null, ratingCount, raterCount };
+  }
+  return {
+    avgRating: stats?.avgRating != null ? Number(stats.avgRating) : null,
+    ratingCount,
+    raterCount,
+  };
+}
+
 export async function getBottleDetail(
   db: DB,
   bottleId: string,
@@ -214,13 +274,7 @@ export async function getBottleDetail(
     .limit(1);
   if (!row) return null;
 
-  const [stats] = await db
-    .select({
-      avgRating: sql<number | null>`avg(${pours.rating})`,
-      ratingCount: sql<number>`count(${pours.rating})`,
-    })
-    .from(pours)
-    .where(eq(pours.bottleId, bottleId));
+  const communityStats = await getCommunityRating(db, bottleId);
 
   const pairingRows = await db
     .select()
@@ -292,10 +346,7 @@ export async function getBottleDetail(
   return {
     bottle: row.bottle,
     distillery: row.distillery,
-    communityStats: {
-      avgRating: stats?.avgRating ?? null,
-      ratingCount: stats?.ratingCount ?? 0,
-    },
+    communityStats,
     userBottle,
     pairings: pairingRows,
     resources: resourceRows.map((row) => ({

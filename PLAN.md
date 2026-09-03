@@ -255,7 +255,7 @@ Tracks run in parallel and are named so that "Phase 2" is never ambiguous: **C**
 
 ### 5.2 Now — two lanes, in parallel
 
-**Lane A (C): stop the bleeding.** ✅ WP-1 offline queue + idempotency · ✅ WP-2/3 native auth binding and cookie storage (bar the Universal Link callback, blocked on the bundle id) · ✅ WP-4 security headers (CSP report-only pending its first production reports) · WP-5 aggregate leak, body limits, AI timeouts.
+**Lane A (C): stop the bleeding.** ✅ WP-1 offline queue + idempotency · ✅ WP-2/3 native auth binding and cookie storage (bar the Universal Link callback, blocked on the bundle id) · ✅ WP-4 security headers (CSP report-only pending its first production reports) · ✅ WP-5 aggregate leak, body limits, AI timeouts.
 
 **Lane B (C): the focus and polish pass**, in STORYBOARD.md §5 order. WP-6 back/nav/toast/loading · WP-7 pour sheet · WP-8 bottle action bar · WP-9 My Bar shelf-first · WP-10 journal edit/delete + one Share sheet · WP-11 settings, export, delete · WP-12 the new nav (Home · Bar · ＋ · Explore · You), `/passport` with six dimensions and counters on Bar, Home cut to three modules · WP-13 first run · WP-14 shared search/row components · WP-15 share-page CTA.
 
