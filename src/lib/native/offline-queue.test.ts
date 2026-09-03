@@ -6,6 +6,7 @@ import {
   flushPourQueue,
   isOnline,
   queueDepth,
+  readQuarantine,
   readQueue,
 } from "./offline-queue";
 
@@ -134,6 +135,27 @@ describe("flushPourQueue", () => {
 
     await expect(flushPourQueue(ME)).resolves.toMatchObject({ synced: 0, remaining: 1 });
     expect((await readQueue())[0].attempts).toBe(0);
+  });
+
+  /**
+   * The queue giving up is not the same as the note being gone. An automatic
+   * background retry — which now runs on every platform without anyone asking
+   * — must never be the thing that destroys writing the user was told was
+   * saved, so a pour the server keeps rejecting goes to quarantine.
+   */
+  it("quarantines a pour it gives up on rather than destroying it", async () => {
+    await enqueuePour({ body: POUR, bottleName: "Ardbeg 10", userId: ME });
+
+    for (let attempt = 0; attempt < 5; attempt++) {
+      mockFetchSequence(status(400));
+      await flushPourQueue(ME);
+    }
+
+    await expect(queueDepth()).resolves.toBe(0);
+    const quarantined = await readQuarantine();
+    expect(quarantined.map((entry) => entry.bottleName)).toEqual(["Ardbeg 10"]);
+    // The note itself is intact, which is the part that cannot be recreated.
+    expect(quarantined[0].body).toEqual(POUR);
   });
 
   it("eventually drops a pour the server keeps rejecting, and reports it", async () => {

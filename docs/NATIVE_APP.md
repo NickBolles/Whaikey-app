@@ -214,14 +214,24 @@ originating request by PKCE, stored only as a hash, destroyed on redemption (`DE
 marked "spent"), and the code never logged. `whaikey://` is registered on both
 platforms.
 
-**Still open:** moving the auth callback to the already-declared App Link /
-Universal Link (`https://app.whaikey.com/auth/callback`) and keeping `whaikey://`
-only as a state-gated fallback. Android declares an `autoVerify` intent filter
-already; iOS needs an Associated Domains entitlement, and both hosts need
-`/.well-known/` association files naming a real team id and bundle id — none of
-which can be written until the app name, bundle id and production domain are
-decided (PLAN.md §12). Defence in depth rather than the fix: PKCE and state
-already make an intercepted or forged callback useless.
+**Still open, and it is a launch gate:** moving the auth callback to a verified
+App Link / Universal Link (`https://app.whaikey.com/auth/callback`), keeping
+`whaikey://` only as a state-gated fallback.
+
+PKCE and state close interception and forged callbacks. They do **not** close
+the case where the malicious app *starts* the flow: it can register the same
+scheme, open `/start` with a challenge and state of its own, let the user sign
+in for real in the system browser, take the callback and redeem the code with
+its own verifier. The pending row proves `/start` was called, not that Whaikey
+called it. Only a redirect target the OS verifies against our domain
+distinguishes us from an impersonator — which is why RFC 8252 requires claimed
+`https` redirects for native apps.
+
+Android declares an `autoVerify` intent filter already; iOS needs an Associated
+Domains entitlement, and both hosts need `/.well-known/` association files
+naming a real team id and bundle id — none of which can be written until the app
+name, bundle id and production domain are decided (PLAN.md §12). **Do not submit
+native sign-in to either store before this is in place.**
 
 ### 2.4 Repo layout
 

@@ -120,12 +120,9 @@ async function savePending(pending: PendingSignIn): Promise<void> {
     await plugin.Preferences.set({ key: PENDING_KEY, value });
     return;
   }
-  try {
-    localStorage.setItem(PENDING_KEY, value);
-  } catch {
-    // Storage disabled: takePending will find nothing and the callback is
-    // dropped, which is the safe direction.
-  }
+  // Throwing rather than swallowing: the caller has to know, because a sign-in
+  // whose verifier was never stored can only end in a dropped callback.
+  localStorage.setItem(PENDING_KEY, value);
 }
 
 /**
@@ -221,7 +218,17 @@ export async function startNativeSignIn(
     console.warn("[native] cannot derive a PKCE challenge", err);
     return { status: "failed", reason: "Couldn't start a secure sign-in on this device." };
   }
-  await savePending(pending);
+  try {
+    await savePending(pending);
+  } catch (err) {
+    // Failing closed is the only safe direction: without the stored verifier
+    // the callback has nothing to match and would be dropped as forged, so the
+    // browser would open onto a sign-in that could never complete. Returning a
+    // result (rather than rejecting) is what keeps the buttons out of a
+    // permanent "Connecting…".
+    console.warn("[native] could not persist the pending sign-in", err);
+    return { status: "failed", reason: "Couldn't start sign-in on this device." };
+  }
 
   const params = new URLSearchParams({
     provider,

@@ -3,11 +3,24 @@ import { asc, desc, eq, and } from "drizzle-orm";
 import type Anthropic from "@anthropic-ai/sdk";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
-import { AI_LOOP_BUDGET_MS, chatModel, getAnthropic, remainingBudget } from "./client";
+import {
+  AI_LOOP_BUDGET_MS,
+  chatModel,
+  getAnthropic,
+  remainingBudget,
+  withinBudget,
+} from "./client";
 import { executeTool, TOOL_DEFINITIONS } from "./tools";
 
 /** Max number of tool-executing iterations per user turn. */
 const MAX_TOOL_ITERATIONS = 6;
+
+/**
+ * What a tool returns when the turn's budget ran out waiting for it. The model
+ * sees it as an ordinary tool result and can answer around it, which is a far
+ * better outcome than the platform killing the request with nothing to show.
+ */
+const TOOL_TIMED_OUT = { error: "That lookup took too long — answer without it." };
 export const MAX_CHAT_HISTORY_TURNS = 12;
 export const MAX_CHAT_CONTEXT_CHARS = 12_000;
 
@@ -179,7 +192,14 @@ export async function runChat(
     messages.push({ role: "assistant", content });
     const results: Anthropic.Messages.ToolResultBlockParam[] = [];
     for (const toolUse of toolUses) {
-      const result = await executeTool(db, userId, toolUse.name, toolUse.input);
+      // The budget covers tools too: a `get_pairings` miss can wait on a 60s
+      // generation lease, which outlives the route's deadline on its own.
+      const result =
+        (await withinBudget(
+          startedAt,
+          AI_LOOP_BUDGET_MS,
+          executeTool(db, userId, toolUse.name, toolUse.input),
+        )) ?? TOOL_TIMED_OUT;
       toolCalls.push({ name: toolUse.name, input: toolUse.input, result });
       results.push({
         type: "tool_result",
@@ -372,7 +392,12 @@ export async function* runChatStream(
         input = {};
       }
       yield { type: "tool", name: toolUse.name };
-      const result = await executeTool(db, userId, toolUse.name, input);
+      const result =
+        (await withinBudget(
+          startedAt,
+          AI_LOOP_BUDGET_MS,
+          executeTool(db, userId, toolUse.name, input),
+        )) ?? TOOL_TIMED_OUT;
       toolCalls.push({ name: toolUse.name, input, result });
       results.push({
         type: "tool_result",

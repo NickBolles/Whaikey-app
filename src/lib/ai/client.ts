@@ -117,6 +117,33 @@ export function remainingBudget(startedAt: number, budgetMs: number): number | n
 export const AI_BATCH_TIMEOUT_MS = 5 * 60_000;
 
 /**
+ * Give up on `work` once `budgetMs` from `startedAt` has passed.
+ *
+ * The loop budget has to cover tool execution too, not only model calls: a
+ * `get_pairings` miss can sit on a 60 s generation lease, which alone outlives
+ * `/api/chat`'s deadline no matter how tight the model timeouts are. The work
+ * is not cancelled — it may be a lease another request is legitimately holding
+ * — but the loop stops waiting on it and answers with what it has.
+ */
+export async function withinBudget<T>(
+  startedAt: number,
+  budgetMs: number,
+  work: Promise<T>,
+): Promise<T | null> {
+  const left = budgetMs - (Date.now() - startedAt);
+  if (left <= 0) return null;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expiry = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), left);
+  });
+  try {
+    return await Promise.race([work, expiry]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * Singleton client for Anthropic Messages-compatible calls. OpenRouter is
  * selected first so one OPENROUTER_API_KEY can serve every AI feature.
  */

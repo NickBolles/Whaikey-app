@@ -9,6 +9,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  */
 const APP_URL = "https://app.whaikey.com";
 
+const prefsSet = vi.fn<(opts: { key: string; value: string }) => Promise<void>>(async () => {});
+vi.mock("@capacitor/preferences", () => ({
+  Preferences: {
+    get: async ({ key }: { key: string }) => ({ value: localStorage.getItem(key) }),
+    set: prefsSet,
+    remove: async ({ key }: { key: string }) => localStorage.removeItem(key),
+  },
+}));
+const browserOpen = vi.fn<(opts: { url: string; presentationStyle?: string }) => Promise<void>>(
+  async () => {},
+);
+vi.mock("@capacitor/browser", () => ({
+  Browser: { open: browserOpen, close: vi.fn(async () => {}) },
+}));
+
 let mod: typeof import("./auth");
 
 beforeEach(async () => {
@@ -160,6 +175,52 @@ describe("startNativeSignIn", () => {
   it("reports unavailable on the web so the caller uses the normal flow", async () => {
     // A browser has no embedded-WebView problem to work around.
     await expect(mod.startNativeSignIn("google")).resolves.toEqual({ status: "unavailable" });
+  });
+
+  describe("on a device", () => {
+    beforeEach(() => {
+      Object.defineProperty(window, "Capacitor", {
+        value: { getPlatform: () => "ios", isNativePlatform: () => true },
+        configurable: true,
+        writable: true,
+      });
+      prefsSet.mockClear();
+      browserOpen.mockClear();
+      prefsSet.mockImplementation(async () => {});
+    });
+
+    afterEach(() => {
+      Reflect.deleteProperty(window, "Capacitor");
+    });
+
+    it("stores the verifier and sends only its challenge", async () => {
+      await expect(mod.startNativeSignIn("google")).resolves.toEqual({ status: "started" });
+
+      const stored = JSON.parse(String(prefsSet.mock.calls[0]?.[0].value));
+      const opened = new URL(String(browserOpen.mock.calls[0]?.[0].url));
+      expect(opened.searchParams.get("state")).toBe(stored.state);
+      // The verifier never leaves the device — only its hash does.
+      expect(opened.search).not.toContain(stored.verifier);
+      expect(opened.searchParams.get("code_challenge")).toBeTruthy();
+    });
+
+    /**
+     * Without a stored verifier the callback has nothing to match and is
+     * dropped as forged, so opening the browser would start a sign-in that
+     * could never finish — and an escaping rejection left both provider
+     * buttons stuck on "Connecting…".
+     */
+    it("fails closed, with a result, when the verifier cannot be persisted", async () => {
+      prefsSet.mockImplementation(async () => {
+        throw new Error("native storage unavailable");
+      });
+
+      await expect(mod.startNativeSignIn("google")).resolves.toEqual({
+        status: "failed",
+        reason: expect.stringContaining("Couldn't start sign-in"),
+      });
+      expect(browserOpen).not.toHaveBeenCalled();
+    });
   });
 });
 

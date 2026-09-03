@@ -17,6 +17,16 @@
 import { loadPlugin } from "./platform";
 
 const STORAGE_KEY = "whaikey.pour-queue.v1";
+/**
+ * Where a pour goes when the queue gives up on it, instead of nowhere.
+ *
+ * A note the user wrote and was told was saved must not be destroyed by an
+ * automatic background retry — and the flush now runs on its own on every
+ * platform, so "the caller will surface it" was never going to happen by
+ * itself. Quarantined entries are out of the send path but still on the
+ * device, waiting for a surface that can show them (see `readQuarantine`).
+ */
+const QUARANTINE_KEY = "whaikey.pour-queue.failed.v1";
 
 /** Give up on a pour that has failed this many times with a real server error. */
 const MAX_ATTEMPTS = 5;
@@ -47,28 +57,28 @@ export interface QueuedPour {
 
 // --- storage ----------------------------------------------------------------
 
-async function readRaw(): Promise<string | null> {
+async function readRaw(key: string): Promise<string | null> {
   const plugin = await loadPlugin(() => import("@capacitor/preferences"));
   if (plugin) {
-    const { value } = await plugin.Preferences.get({ key: STORAGE_KEY });
+    const { value } = await plugin.Preferences.get({ key });
     return value;
   }
   try {
-    return localStorage.getItem(STORAGE_KEY);
+    return localStorage.getItem(key);
   } catch {
     // Private browsing or storage disabled — the queue degrades to in-flight only.
     return null;
   }
 }
 
-async function writeRaw(value: string): Promise<void> {
+async function writeRaw(key: string, value: string): Promise<void> {
   const plugin = await loadPlugin(() => import("@capacitor/preferences"));
   if (plugin) {
-    await plugin.Preferences.set({ key: STORAGE_KEY, value });
+    await plugin.Preferences.set({ key, value });
     return;
   }
   try {
-    localStorage.setItem(STORAGE_KEY, value);
+    localStorage.setItem(key, value);
   } catch {
     // Quota or disabled storage; nothing useful to do but keep the app working.
   }
@@ -90,7 +100,18 @@ function serialize<T>(work: () => Promise<T>): Promise<T> {
 }
 
 export async function readQueue(): Promise<QueuedPour[]> {
-  const raw = await readRaw();
+  return parseEntries(await readRaw(STORAGE_KEY));
+}
+
+/**
+ * Pours the queue gave up on, and pours whose author it cannot establish, are
+ * both still the user's writing. This is what a recovery surface reads.
+ */
+export async function readQuarantine(): Promise<QueuedPour[]> {
+  return parseEntries(await readRaw(QUARANTINE_KEY));
+}
+
+function parseEntries(raw: string | null): QueuedPour[] {
   if (!raw) return [];
   try {
     const parsed = JSON.parse(raw);
@@ -102,7 +123,14 @@ export async function readQueue(): Promise<QueuedPour[]> {
 }
 
 async function writeQueue(queue: QueuedPour[]): Promise<void> {
-  await writeRaw(JSON.stringify(queue));
+  await writeRaw(STORAGE_KEY, JSON.stringify(queue));
+}
+
+/** Move entries out of the send path without destroying them. */
+async function quarantine(entries: QueuedPour[]): Promise<void> {
+  if (entries.length === 0) return;
+  const existing = await readQuarantine();
+  await writeRaw(QUARANTINE_KEY, JSON.stringify([...existing, ...entries]));
 }
 
 // --- queue operations -------------------------------------------------------
@@ -151,14 +179,22 @@ export async function queueDepth(): Promise<number> {
 }
 
 export async function clearQueue(): Promise<void> {
-  await serialize(() => writeQueue([]));
+  await serialize(async () => {
+    await writeQueue([]);
+    await writeRaw(QUARANTINE_KEY, JSON.stringify([]));
+  });
 }
 
 export interface FlushResult {
   synced: number;
   /** Still queued: either the network is still down, or they're mid-retry. */
   remaining: number;
-  /** Dropped after MAX_ATTEMPTS of server rejection — surfaced, never silent. */
+  /**
+   * Given up on after MAX_ATTEMPTS of server rejection. Moved to quarantine,
+   * not deleted: an automatic retry must never be the thing that destroys a
+   * note the user wrote and was told was saved. `readQuarantine()` still has
+   * them.
+   */
   discarded: QueuedPour[];
   /**
    * Queued by a release that recorded no author, so there is nobody to safely
@@ -300,6 +336,8 @@ async function runFlush(userId: string | undefined): Promise<FlushResult> {
     await writeQueue(kept);
     return kept;
   });
+
+  await serialize(() => quarantine(discarded));
 
   return { synced, remaining: remaining.length, discarded, unclaimed };
 }

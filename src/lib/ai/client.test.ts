@@ -8,6 +8,7 @@ import {
   getAnthropic,
   setAnthropicForTests,
   remainingBudget,
+  withinBudget,
   AI_LOOP_BUDGET_MS,
   AI_BATCH_TIMEOUT_MS,
   SHORTEST_AI_ROUTE_DEADLINE_MS,
@@ -108,5 +109,26 @@ describe("agentic turn budget", () => {
     // continuations and answers to a job runner, not a platform deadline —
     // the route budget would abort perfectly good generations.
     expect(AI_BATCH_TIMEOUT_MS).toBeGreaterThan(SHORTEST_AI_ROUTE_DEADLINE_MS);
+  });
+});
+
+describe("withinBudget", () => {
+  /**
+   * The budget has to cover tool execution, not only model calls: a
+   * `get_pairings` miss waits on a 60s generation lease, which outlives
+   * /api/chat's deadline on its own however tight the model timeouts are.
+   */
+  it("returns the work when it finishes in time", async () => {
+    await expect(withinBudget(Date.now(), 1_000, Promise.resolve("done"))).resolves.toBe("done");
+  });
+
+  it("gives up on work that outlives the budget", async () => {
+    const slow = new Promise<string>((resolve) => setTimeout(() => resolve("late"), 200));
+    await expect(withinBudget(Date.now(), 20, slow)).resolves.toBeNull();
+  });
+
+  it("does not start waiting at all once the budget is spent", async () => {
+    const never = new Promise<string>(() => {});
+    await expect(withinBudget(Date.now() - 5_000, 1_000, never)).resolves.toBeNull();
   });
 });

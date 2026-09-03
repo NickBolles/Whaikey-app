@@ -35,8 +35,22 @@ export function NativeShell({ userId }: { userId?: string | null }) {
     // Scoped to whoever is signed in: on the web the queue is per origin, not
     // per session, so a pour queued by one person must not be sent while
     // someone else is signed in on the same browser.
-    const { synced } = await flushPourQueue(userId ?? undefined);
+    const { synced, discarded, unclaimed } = await flushPourQueue(userId ?? undefined);
     if (synced > 0) router.refresh();
+    // Neither of these can be shown yet — there is no app-level toast until
+    // WP-6 — but neither is lost either: a rejected pour is quarantined rather
+    // than deleted, and an unclaimed one stays queued. Logged so the gap is
+    // visible in a session replay rather than only in this comment.
+    if (discarded.length > 0) {
+      console.warn(
+        `[pours] ${discarded.length} queued pour(s) the server kept rejecting are in quarantine, awaiting a recovery surface`,
+      );
+    }
+    if (unclaimed > 0) {
+      console.warn(
+        `[pours] ${unclaimed} queued pour(s) predate author tracking and cannot be attributed; held for their author`,
+      );
+    }
   }, [router, userId]);
 
   /**
