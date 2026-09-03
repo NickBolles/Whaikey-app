@@ -531,9 +531,17 @@ export async function seedDemoUser(db: DB): Promise<void> {
     },
   ]);
 
-  // A third drinker whose public pour feeds the comparison screen's Community
-  // aggregate (opt-in via visibility, per docs/SOCIAL.md D6). Not followed by
-  // Jordan, so the Friends and Community reference sets stay distinct.
+  // Drinkers whose PUBLIC pours feed the community aggregates: the comparison
+  // screen's Community column and the bottle page's community rating (opt-in
+  // via visibility, per docs/SOCIAL.md D6). None of them is followed by Jordan,
+  // so the Friends and Community reference sets stay distinct.
+  //
+  // There are three of them because the community rating is suppressed below
+  // three distinct raters (review SEC-M2, `MIN_COMMUNITY_RATERS`) — a two-person
+  // "average" on a rarely-rated bottle is one person's rating in a plural.
+  // Jordan's own pours are private and no longer feed this number at all, which
+  // is the point; without these three the card would simply vanish from the
+  // baselines and stop being covered.
   await db.insert(schema.user).values({
     id: "demo-community",
     name: "Riley Cask",
@@ -552,16 +560,112 @@ export async function seedDemoUser(db: DB): Promise<void> {
     createdAt: D("2026-03-01T12:00:00Z"),
     updatedAt: D("2026-03-01T12:00:00Z"),
   });
-  await db.insert(schema.pours).values({
-    id: "demo-community-pour-1",
-    userId: "demo-community",
-    bottleId: "lagavulin-16",
-    rating: 4,
-    servingStyle: "rocks",
-    amountMl: 45,
-    visibility: "public",
-    createdAt: D("2026-07-10T21:00:00Z"),
-  });
+  await db.insert(schema.user).values([
+    {
+      id: "demo-community-2",
+      name: "Nia Torrance",
+      email: "community2@whaikey.app",
+      emailVerified: true,
+      createdAt: D("2026-03-02T12:00:00Z"),
+      updatedAt: D("2026-03-02T12:00:00Z"),
+    },
+    {
+      id: "demo-community-3",
+      name: "Marcus Dee",
+      email: "community3@whaikey.app",
+      emailVerified: true,
+      createdAt: D("2026-03-03T12:00:00Z"),
+      updatedAt: D("2026-03-03T12:00:00Z"),
+    },
+  ]);
+  await db.insert(schema.userProfiles).values([
+    {
+      userId: "demo-community-2",
+      handle: "niatorrance",
+      displayName: "Nia Torrance",
+      isPublic: true,
+      discoverable: true,
+      socialEnabled: true,
+      createdAt: D("2026-03-02T12:00:00Z"),
+      updatedAt: D("2026-03-02T12:00:00Z"),
+    },
+    {
+      userId: "demo-community-3",
+      handle: "marcusdee",
+      displayName: "Marcus Dee",
+      isPublic: true,
+      discoverable: true,
+      socialEnabled: true,
+      createdAt: D("2026-03-03T12:00:00Z"),
+      updatedAt: D("2026-03-03T12:00:00Z"),
+    },
+  ]);
+  // Only Riley's Lagavulin pour carries a note: the comparison screen's
+  // Community column is built from flavour tags, and these two exist to be
+  // *raters*, not tasters. It also keeps them under the taste-twin sample
+  // floor, so they stay out of Jordan's profile.
+  await db.insert(schema.pours).values([
+    {
+      id: "demo-community-pour-1",
+      userId: "demo-community",
+      bottleId: "lagavulin-16",
+      rating: 4,
+      servingStyle: "rocks",
+      amountMl: 45,
+      visibility: "public",
+      createdAt: D("2026-07-10T21:00:00Z"),
+    },
+    {
+      id: "demo-community-pour-2",
+      userId: "demo-community",
+      bottleId: "eagle-rare-10",
+      rating: 4,
+      servingStyle: "neat",
+      amountMl: 45,
+      visibility: "public",
+      createdAt: D("2026-07-11T19:00:00Z"),
+    },
+    {
+      id: "demo-community-pour-3",
+      userId: "demo-community-2",
+      bottleId: "lagavulin-16",
+      rating: 4.5,
+      servingStyle: "neat",
+      amountMl: 45,
+      visibility: "public",
+      createdAt: D("2026-07-08T20:00:00Z"),
+    },
+    {
+      id: "demo-community-pour-4",
+      userId: "demo-community-2",
+      bottleId: "eagle-rare-10",
+      rating: 4,
+      servingStyle: "neat",
+      amountMl: 45,
+      visibility: "public",
+      createdAt: D("2026-07-09T20:00:00Z"),
+    },
+    {
+      id: "demo-community-pour-5",
+      userId: "demo-community-3",
+      bottleId: "lagavulin-16",
+      rating: 4.5,
+      servingStyle: "neat",
+      amountMl: 45,
+      visibility: "public",
+      createdAt: D("2026-07-06T20:00:00Z"),
+    },
+    {
+      id: "demo-community-pour-6",
+      userId: "demo-community-3",
+      bottleId: "eagle-rare-10",
+      rating: 4.5,
+      servingStyle: "neat",
+      amountMl: 45,
+      visibility: "public",
+      createdAt: D("2026-07-07T20:00:00Z"),
+    },
+  ]);
   await db.insert(schema.tastingNotes).values({
     id: "demo-community-note-1",
     pourId: "demo-community-pour-1",
