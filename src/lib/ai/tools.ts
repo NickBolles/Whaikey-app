@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { and, avg, count, desc, eq, ilike, or } from "drizzle-orm";
+import { and, desc, eq, ilike, or } from "drizzle-orm";
 import type Anthropic from "@anthropic-ai/sdk";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
+import { escapeLike, getCommunityRating } from "@/lib/search";
 import { getOrGeneratePairings } from "./pairings";
 
 /**
@@ -141,13 +142,25 @@ export interface BottleSearchResult {
   distillery: string | null;
 }
 
+/**
+ * A search term short enough to match most of the catalog isn't a search
+ * (SEC-L4). One character of a leading-wildcard ILIKE scans everything; a
+ * model that asks for "a" should get nothing rather than the table.
+ */
+const MIN_SEARCH_CHARS = 2;
+
 export async function searchBottlesLike(
   db: DB,
   query: string,
   category?: schema.WhiskeyCategory,
   limit = 10,
 ): Promise<BottleSearchResult[]> {
-  const term = `%${query.trim()}%`;
+  // The model writes this string, and a model can be talked into writing "%".
+  // Unescaped that matched the whole catalog, and "%_%_%" made Postgres
+  // backtrack for it (SEC-L4).
+  const trimmed = query.trim();
+  if (trimmed.length < MIN_SEARCH_CHARS) return [];
+  const term = `%${escapeLike(trimmed)}%`;
   const matchClause = or(
     ilike(schema.bottles.name, term),
     ilike(schema.bottleAliases.alias, term),
@@ -175,6 +188,23 @@ export async function searchBottlesLike(
 // ---------------------------------------------------------------------------
 // Executors
 // ---------------------------------------------------------------------------
+
+/**
+ * Tools that change the user's data.
+ *
+ * The chat turn's budget races a slow tool and answers without it, which is
+ * right for a read — `get_pairings` can wait on a generation lease and the
+ * model can answer around a missing suggestion. It is wrong for a write: the
+ * work keeps running after the race is lost, so the bottle lands on the shelf
+ * while the answer says the request could not finish. Writes are awaited
+ * instead; they are ordinary database calls, not the slow ones the budget
+ * exists for.
+ */
+const WRITE_TOOLS = new Set<string>(["add_to_wishlist"]);
+
+export function isWriteTool(name: string): boolean {
+  return WRITE_TOOLS.has(name);
+}
 
 type ToolError = { error: string };
 const toolError = (error: string): ToolError => ({ error });
@@ -207,13 +237,18 @@ async function execGetBottleDetails(db: DB, input: z.infer<typeof bottleIdInput>
     distillery = row ?? null;
   }
 
-  const [community] = await db
-    .select({ avgRating: avg(schema.pours.rating), ratingCount: count(schema.pours.rating) })
-    .from(schema.pours)
-    .where(eq(schema.pours.bottleId, bottle.id));
-
-  const avgRating = community?.avgRating != null ? Math.round(Number(community.avgRating) * 100) / 100 : null;
-  return { bottle, distillery, communityAvgRating: avgRating, communityRatingCount: community?.ratingCount ?? 0 };
+  // Same query as the bottle page, deliberately: the concierge reads the user's
+  // own data, but this number is the public one, and a second implementation is
+  // how the private-pour leak got into one of them and not the other (SEC-M2).
+  const community = await getCommunityRating(db, bottle.id);
+  const avgRating =
+    community.avgRating != null ? Math.round(community.avgRating * 100) / 100 : null;
+  return {
+    bottle,
+    distillery,
+    communityAvgRating: avgRating,
+    communityRatingCount: community.ratingCount,
+  };
 }
 
 async function execGetMyBar(db: DB, userId: string, input: z.infer<typeof myBarInput>) {

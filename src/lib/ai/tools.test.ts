@@ -3,7 +3,7 @@ import { and, eq } from "drizzle-orm";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
 import { createTestBottle, createTestUser, setupTestDb, uid } from "@/test/helpers";
-import { executeTool, searchBottlesLike } from "./tools";
+import { executeTool, isWriteTool, searchBottlesLike } from "./tools";
 
 let db: DB;
 let user: schema.User;
@@ -56,7 +56,51 @@ describe("search_bottles", () => {
     const result = (await executeTool(db, user.id, "search_bottles", {})) as { error?: string };
     expect(result.error).toBeTruthy();
   });
+
+  /**
+   * The model writes this query string, and a model can be talked into writing
+   * "%". Unescaped, that matched the entire catalog through a leading-wildcard
+   * ILIKE; "%_%_%" made Postgres backtrack for it (review SEC-L4).
+   */
+  it("treats LIKE wildcards as literal characters, not as a way to select everything", async () => {
+    await createTestBottle(db, { name: "Eagle Rare 10 Year" });
+    await createTestBottle(db, { name: "Lagavulin 16" });
+
+    await expect(searchBottlesLike(db, "%")).resolves.toEqual([]);
+    await expect(searchBottlesLike(db, "%_%_%")).resolves.toEqual([]);
+    await expect(searchBottlesLike(db, "%%%%%%")).resolves.toEqual([]);
+    // And a literal wildcard only matches a bottle whose name contains one.
+    await expect(searchBottlesLike(db, "100%")).resolves.toEqual([]);
+    const literal = await createTestBottle(db, { name: "Barrel Proof 100% Rye" });
+    const found = await searchBottlesLike(db, "100%");
+    expect(found.map((r) => r.id)).toEqual([literal.id]);
+  });
+
+  it("refuses a query too short to be a search", async () => {
+    await createTestBottle(db, { name: "Ardbeg 10" });
+    // One character of a leading-wildcard scan is the whole table.
+    await expect(searchBottlesLike(db, "a")).resolves.toEqual([]);
+    await expect(searchBottlesLike(db, "  ")).resolves.toEqual([]);
+    await expect(searchBottlesLike(db, "")).resolves.toEqual([]);
+    await expect(searchBottlesLike(db, "ar")).resolves.not.toEqual([]);
+  });
 });
+
+/** A user who has published a rated pour: social on, pour public. */
+async function publicRater(bottleId: string, rating: number) {
+  const rater = await createTestUser(db);
+  await db.insert(schema.userProfiles).values({
+    userId: rater.id,
+    handle: `h${rater.id.slice(-8)}`,
+    displayName: "Taster",
+    isPublic: true,
+    socialEnabled: true,
+  });
+  await db
+    .insert(schema.pours)
+    .values({ id: uid("pour"), userId: rater.id, bottleId, rating, visibility: "public" });
+  return rater;
+}
 
 describe("get_bottle_details", () => {
   it("returns bottle, distillery, and community average rating", async () => {
@@ -65,11 +109,9 @@ describe("get_bottle_details", () => {
       .values({ id: uid("dist"), name: "Buffalo Trace Distillery", country: "USA" })
       .returning();
     const bottle = await createTestBottle(db, { distilleryId: distillery.id });
-    const otherUser = await createTestUser(db);
-    await db.insert(schema.pours).values([
-      { id: uid("pour"), userId: user.id, bottleId: bottle.id, rating: 4 },
-      { id: uid("pour"), userId: otherUser.id, bottleId: bottle.id, rating: 5 },
-    ]);
+    await publicRater(bottle.id, 4);
+    await publicRater(bottle.id, 5);
+    await publicRater(bottle.id, 4.5);
 
     const result = (await executeTool(db, user.id, "get_bottle_details", {
       bottleId: bottle.id,
@@ -82,7 +124,49 @@ describe("get_bottle_details", () => {
     expect(result.bottle.id).toBe(bottle.id);
     expect(result.distillery.name).toBe("Buffalo Trace Distillery");
     expect(result.communityAvgRating).toBe(4.5);
-    expect(result.communityRatingCount).toBe(2);
+    expect(result.communityRatingCount).toBe(3);
+  });
+
+  /**
+   * The concierge answers over the signed-in user's own data, but this number
+   * is the public one, and it had its own copy of the aggregate with the same
+   * missing visibility filter as the bottle page (SEC-M2). Both now run the
+   * same query, and this is the test that says so.
+   */
+  it("leaves private pours out of the community rating it reports", async () => {
+    const bottle = await createTestBottle(db, { name: "Quiet Cask" });
+    await publicRater(bottle.id, 4);
+    await publicRater(bottle.id, 4);
+    await publicRater(bottle.id, 4);
+    // The signed-in user's own private pour, which the model must not surface
+    // as a community number even though it can read the user's own journal.
+    await db.insert(schema.pours).values({
+      id: uid("pour"),
+      userId: user.id,
+      bottleId: bottle.id,
+      rating: 1,
+      visibility: "private",
+    });
+
+    const result = (await executeTool(db, user.id, "get_bottle_details", {
+      bottleId: bottle.id,
+    })) as { communityAvgRating: number | null; communityRatingCount: number };
+    expect(result.communityAvgRating).toBe(4);
+    expect(result.communityRatingCount).toBe(3);
+  });
+
+  it("reports no average until enough distinct people have published one", async () => {
+    const bottle = await createTestBottle(db, { name: "Barely Rated" });
+    await publicRater(bottle.id, 5);
+    await publicRater(bottle.id, 5);
+
+    const result = (await executeTool(db, user.id, "get_bottle_details", {
+      bottleId: bottle.id,
+    })) as { communityAvgRating: number | null; communityRatingCount: number };
+    expect(result.communityAvgRating).toBeNull();
+    // The count is suppressed with the average — the concierge must not become
+    // the way to read what the bottle endpoint won't say.
+    expect(result.communityRatingCount).toBe(0);
   });
 
   it("returns {error} for an unknown bottle id", async () => {
@@ -235,5 +319,24 @@ describe("dispatcher", () => {
   it("returns {error} for an unknown tool name", async () => {
     const result = (await executeTool(db, user.id, "launch_rockets", {})) as { error?: string };
     expect(result.error).toMatch(/unknown tool/i);
+  });
+});
+
+describe("write tools", () => {
+  /**
+   * The chat turn races a slow tool against its budget and answers without it.
+   * That is right for a read — the model can answer around a missing pairing —
+   * and wrong for a write, whose work keeps running after the race is lost, so
+   * the bottle lands on the shelf while the answer says it didn't.
+   */
+  it("names the tools that change the user's data", () => {
+    expect(isWriteTool("add_to_wishlist")).toBe(true);
+    // Reads, including the slow one the budget exists for.
+    expect(isWriteTool("get_pairings")).toBe(false);
+    expect(isWriteTool("search_bottles")).toBe(false);
+    expect(isWriteTool("get_my_bar")).toBe(false);
+    expect(isWriteTool("get_bottle_details")).toBe(false);
+    expect(isWriteTool("get_pour_history")).toBe(false);
+    expect(isWriteTool("get_tasting_notes")).toBe(false);
   });
 });

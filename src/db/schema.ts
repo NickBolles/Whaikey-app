@@ -306,9 +306,23 @@ export const pours = pgTable(
     amountMl: integer("amount_ml"),
     context: jsonb("context").$type<{ setting?: string; companions?: string; glassware?: string }>(),
     visibility: text("visibility").$type<PourVisibility>().notNull().default("private"),
+    /**
+     * Client-minted idempotency key (REL-4.2). A pour is written where the
+     * signal isn't, so a save whose response is lost in transit gets retried
+     * from the offline queue; the same key on the retry makes the second write
+     * a no-op that returns the first pour instead of double-logging and
+     * double-decrementing the fill level. Null for writes that don't carry one
+     * (the API, imports, seeds) — Postgres treats nulls as distinct, so the
+     * unique index below only ever constrains real keys.
+     */
+    clientId: text("client_id"),
     createdAt: createdAt(),
   },
-  (t) => [index("pours_user_idx").on(t.userId), index("pours_bottle_idx").on(t.bottleId)],
+  (t) => [
+    index("pours_user_idx").on(t.userId),
+    index("pours_bottle_idx").on(t.bottleId),
+    uniqueIndex("pours_user_client_idx").on(t.userId, t.clientId),
+  ],
 );
 
 /**
@@ -1021,6 +1035,33 @@ export const catalogVerificationAttempts = pgTable(
  * ones. `sessionCookie` holds the raw signed cookie value so the exchange can
  * reproduce it verbatim rather than minting a second session.
  */
+/**
+ * A native sign-in that has been started but not yet completed: the app's PKCE
+ * challenge and state nonce, parked for the length of the OAuth round trip
+ * (docs/NATIVE_APP.md §2.3).
+ *
+ * The row's id is what `/api/auth/native/complete` requires before it will mint
+ * anything, so an OAuth callback that no `/start` ever asked for produces no
+ * code. It is consumed on first use, and the state is echoed from here rather
+ * than carried through the provider, so nothing the app has to compare against
+ * ever depends on a query parameter surviving Better Auth's redirect chain.
+ */
+export const nativeAuthRequests = pgTable(
+  "native_auth_requests",
+  {
+    id: id(),
+    /** base64url(SHA-256(code_verifier)) — PKCE S256, the app keeps the verifier. */
+    codeChallenge: text("code_challenge").notNull(),
+    /** Nonce the app echoes back to itself to recognise its own callback. */
+    state: text("state").notNull(),
+    /** Validated same-origin return path, held here rather than in the URL. */
+    next: text("next"),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }).notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index("native_auth_requests_expires_idx").on(t.expiresAt)],
+);
+
 export const nativeAuthCodes = pgTable(
   "native_auth_codes",
   {
@@ -1030,9 +1071,29 @@ export const nativeAuthCodes = pgTable(
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
     sessionCookieName: text("session_cookie_name").notNull(),
+    /**
+     * AES-256-GCM ciphertext of the session cookie, not the cookie (SEC-H2).
+     * The plaintext is a weeks-long credential and this column is the kind of
+     * thing that ends up in a backup or a replica; the key never does.
+     */
     sessionCookie: text("session_cookie").notNull(),
+    /**
+     * The PKCE challenge from the `native_auth_requests` row this code was
+     * minted for. Redemption requires a verifier that hashes to it, so a code
+     * intercepted off the custom scheme by another app is inert. Nullable only
+     * so the column could be added to a live table; a null is never redeemable.
+     */
+    codeChallenge: text("code_challenge"),
     expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }).notNull(),
-    /** Set the moment a code is redeemed; a second attempt must find it non-null. */
+    /**
+     * Vestigial. Redemption is now `DELETE … RETURNING`, so nothing ever sets
+     * this and nothing reads it. It stays because production applies migrations
+     * *before* the new build is activated (`scripts/build.mjs`), which means the
+     * previous release serves traffic against this schema for the length of a
+     * build — and that release still writes `used_at` on every redemption.
+     * Dropping it here would fail every native sign-in during the rollout.
+     * Drop it in a later deploy, once no running instance references it.
+     */
     usedAt: timestamp("used_at", { withTimezone: true, mode: "date" }),
     createdAt: createdAt(),
   },
@@ -1060,6 +1121,7 @@ export const pushDevices = pgTable(
 );
 
 export type NativeAuthCode = typeof nativeAuthCodes.$inferSelect;
+export type NativeAuthRequest = typeof nativeAuthRequests.$inferSelect;
 export type PushDevice = typeof pushDevices.$inferSelect;
 
 export type VerificationRun = typeof catalogVerificationRuns.$inferSelect;

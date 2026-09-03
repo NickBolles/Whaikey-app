@@ -1,16 +1,29 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isNativeProvider, safeReturnPath } from "@/lib/native-auth";
+import { isNativeProvider, safeReturnPath, startNativeAuthRequest } from "@/lib/native-auth";
 
 /**
  * Step 1 of native sign-in (docs/NATIVE_APP.md §2.3).
  *
  * The app opens this URL in the **system browser**, not its own WebView, because
- * Google refuses OAuth from embedded WebViews (`disallowed_useragent`). All this
- * handler does is kick off the normal Better Auth social flow with a callback
- * that returns to `/api/auth/native/complete`, which is where the session gets
- * packaged up for the app.
+ * Google refuses OAuth from embedded WebViews (`disallowed_useragent`). This
+ * handler records what the app is asking for — its PKCE challenge and its state
+ * nonce — and kicks off the normal Better Auth social flow with a callback to
+ * `/api/auth/native/complete`, carrying the id of that record.
+ *
+ * The record is the thing that makes the callback legitimate. Without it,
+ * `/complete` is a URL that hands a session-equivalent code to whoever holds a
+ * browser session, which is half of SEC-H1.
  */
 export const dynamic = "force-dynamic";
+
+/**
+ * Both values are opaque to us — we only ever compare them to themselves — so
+ * this is a sanity floor, not a format: enough entropy to be worth binding to,
+ * and short enough not to be a way to write arbitrary data into the table.
+ */
+function isChallenge(value: string | null): value is string {
+  return value !== null && /^[A-Za-z0-9._~-]{32,128}$/.test(value);
+}
 
 export async function GET(request: NextRequest) {
   const provider = request.nextUrl.searchParams.get("provider");
@@ -21,18 +34,36 @@ export async function GET(request: NextRequest) {
     );
   }
 
+  // PKCE (S256) and the state nonce, both minted by the app. The verifier stays
+  // on the device; only its hash comes through here, so nothing observable on
+  // this request is enough to redeem the code the flow ends in.
+  const codeChallenge = request.nextUrl.searchParams.get("code_challenge");
+  const state = request.nextUrl.searchParams.get("state");
+  if (!isChallenge(codeChallenge) || !isChallenge(state)) {
+    return NextResponse.json(
+      {
+        error: "Invalid sign-in request",
+        details: "code_challenge and state are required (PKCE S256).",
+      },
+      { status: 400 },
+    );
+  }
+
   const { auth } = await import("@/lib/auth");
   // Optional validated return path (e.g. a scanned /add/<handle> code) that
-  // rides the whole flow so the app can land back where the user started.
+  // rides the whole flow so the app can land back where the user started. It is
+  // parked on the pending row rather than the URL, so the round trip can't
+  // rewrite where sign-in lands.
   const next = safeReturnPath(request.nextUrl.searchParams.get("next"));
 
   try {
+    const pending = await startNativeAuthRequest({ codeChallenge, state, next });
     const { url } = await auth.api.signInSocial({
       body: {
         provider,
         // Relative to the auth baseURL. After OAuth resolves, the browser lands
         // here already carrying the session cookie.
-        callbackURL: `/api/auth/native/complete${next ? `?next=${encodeURIComponent(next)}` : ""}`,
+        callbackURL: `/api/auth/native/complete?request=${encodeURIComponent(pending)}`,
         // Sign-in must not silently become sign-up-less: a first-time native
         // user should get an account exactly as they would on the web.
         disableRedirect: true,

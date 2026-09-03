@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { requireUser, withErrorHandling } from "@/lib/session";
+import { readJsonWithinLimit } from "@/lib/body-limit";
 import { searchBottles } from "@/lib/search";
 import { isValidUpc, normalizeUpc, resolveUpc } from "@/lib/scan";
 
@@ -9,6 +10,13 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 
 const MAX_ROWS = 300;
+/**
+ * 300 rows of name + UPC is a few tens of kilobytes; a megabyte is generous
+ * and still bounded. Route handlers have no body limit of their own, so
+ * without this the row cap was only checked after the whole body had been
+ * buffered and parsed (review SEC-M1).
+ */
+const MAX_BODY_BYTES = 1024 * 1024;
 
 const bodySchema = z.object({
   rows: z
@@ -41,7 +49,7 @@ export async function POST(request: Request) {
   return withErrorHandling(async () => {
     await requireUser();
 
-    const body = await request.json().catch(() => null);
+    const body = await readJsonWithinLimit(request, MAX_BODY_BYTES);
     const parsed = bodySchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json(

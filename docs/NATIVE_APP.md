@@ -160,22 +160,43 @@ And the system browser (`ASWebAuthenticationSession` / Chrome Custom Tabs) does 
 share its cookie jar with WKWebView, so completing OAuth in the browser doesn't sign
 you in inside the app.
 
-The working pattern, to be built in Phase 2:
+The working pattern, as built:
 
 ```
 1. Tap "Continue with Google"
-   → native detects it's in-app → opens @capacitor/browser to
-     https://app.whaikey.com/api/auth/native/start?provider=google
-2. Full OAuth runs in the system browser (Google is happy: real browser).
-3. Better Auth callback lands on the server, which mints a single-use,
-   short-TTL (≤60s) exchange code bound to that session.
-4. Server redirects to whaikey://auth/callback?code=…
+   → the app mints a PKCE verifier and a state nonce, keeps both in
+     Preferences, and opens @capacitor/browser to
+     https://app.whaikey.com/api/auth/native/start
+       ?provider=google&code_challenge=<S256>&state=<nonce>
+2. /start parks the challenge, the state and any return path on a
+   native_auth_requests row and hands its id to Better Auth as the
+   callbackURL. Full OAuth runs in the system browser (Google is happy:
+   real browser).
+3. The callback lands on /complete?request=<id>, which consumes that row —
+   no row, no code — and mints a single-use, ≤60s exchange code bound to
+   the row's challenge. The session cookie behind it is encrypted at rest.
+4. Server redirects to whaikey://auth/callback?code=…&state=…
    → the custom scheme wakes the app; @capacitor/app's appUrlOpen fires.
-5. The app navigates the *WebView* to
-   https://app.whaikey.com/api/auth/native/exchange?code=…
+5. The app takes its stored sign-in (once — the read clears it) and acts
+   only if the state matches. Then it navigates the *WebView* to
+   https://app.whaikey.com/api/auth/native/exchange?code=…&code_verifier=…
    That navigation happens inside the WebView, so the Set-Cookie response
    lands in the WebView's cookie store. Session established. Redirect home.
 ```
+
+Steps 1, 3 and 5 are what make the custom-scheme leg survivable, and they are
+not optional dressing (review SEC-H1). `whaikey://` is a scheme **any app on
+the device can register** — on Android anyone may claim it, on iOS the last
+installer wins. So:
+
+- the **verifier** never leaves the app that started the flow, which makes a
+  code read off the callback by another app redeem to nothing;
+- the **state** makes an unsolicited callback inert, which is what stops an
+  attacker pushing their own code at the app and silently moving the user's
+  WebView into the attacker's account — every pour logged afterwards would
+  land there;
+- the **pending row** stops `/complete` being a URL that mints a
+  session-equivalent code for whoever happens to hold a browser session.
 
 Why this and not the alternatives:
 
@@ -187,10 +208,30 @@ Why this and not the alternatives:
   natively even though the exchange endpoint would also work. Note Apple requires
   Sign in with Apple to be offered wherever a third-party social login is offered.
 
-Security requirements on the exchange endpoint (write these into the implementation):
-single-use, ≤60s TTL, bound to the originating session and provider, rate-limited, and
-the code never logged. Register `whaikey://` on both platforms plus Universal
-Links / App Links for `https://app.whaikey.com/*` so shared bottle URLs open the app.
+Security requirements on the exchange endpoint: single-use, ≤60s TTL, bound to the
+originating request by PKCE, stored only as a hash, destroyed on redemption (`DELETE
+… RETURNING`, so exactly one of two concurrent attempts wins and nothing is left
+marked "spent"), and the code never logged. `whaikey://` is registered on both
+platforms.
+
+**Still open, and it is a launch gate:** moving the auth callback to a verified
+App Link / Universal Link (`https://app.whaikey.com/auth/callback`), keeping
+`whaikey://` only as a state-gated fallback.
+
+PKCE and state close interception and forged callbacks. They do **not** close
+the case where the malicious app *starts* the flow: it can register the same
+scheme, open `/start` with a challenge and state of its own, let the user sign
+in for real in the system browser, take the callback and redeem the code with
+its own verifier. The pending row proves `/start` was called, not that Whaikey
+called it. Only a redirect target the OS verifies against our domain
+distinguishes us from an impersonator — which is why RFC 8252 requires claimed
+`https` redirects for native apps.
+
+Android declares an `autoVerify` intent filter already; iOS needs an Associated
+Domains entitlement, and both hosts need `/.well-known/` association files
+naming a real team id and bundle id — none of which can be written until the app
+name, bundle id and production domain are decided (PLAN.md §12). **Do not submit
+native sign-in to either store before this is in place.**
 
 ### 2.4 Repo layout
 
@@ -295,11 +336,13 @@ and MLKit components merged in — verified. Signed builds and the device smoke 
 still need real credentials and hardware.
 
 ### Phase 3 — Offline + engagement ✅ (partly implemented)
-Done: offline pour queue with durable storage, ordered flush on reconnect and resume,
-and a visible "saved on your phone" state; push registration + token storage endpoint.
+Done: offline pour queue with durable storage, ordered single-flight flush on
+reconnect, resume and foreground — on every platform, not just the device, because a
+PWA hits the same dead spot — a visible "saved on your phone" state, a `clientId`
+idempotency key on `/api/pours` so a flush whose response is lost cannot double-log,
+and push registration + token storage endpoint.
 Remaining: sending the first notification types (needs FCM/APNs credentials), a
-share-a-note-card surface, app shortcuts, and an idempotency key on `/api/pours` so a
-flush whose response is lost cannot double-log.
+share-a-note-card surface, and app shortcuts.
 **Exit:** log a pour in airplane mode, reconnect, see it sync.
 
 ### Phase 4 — Store launch (CI ready, credentials pending)

@@ -9,10 +9,26 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  */
 const APP_URL = "https://app.whaikey.com";
 
+const prefsSet = vi.fn<(opts: { key: string; value: string }) => Promise<void>>(async () => {});
+vi.mock("@capacitor/preferences", () => ({
+  Preferences: {
+    get: async ({ key }: { key: string }) => ({ value: localStorage.getItem(key) }),
+    set: prefsSet,
+    remove: async ({ key }: { key: string }) => localStorage.removeItem(key),
+  },
+}));
+const browserOpen = vi.fn<(opts: { url: string; presentationStyle?: string }) => Promise<void>>(
+  async () => {},
+);
+vi.mock("@capacitor/browser", () => ({
+  Browser: { open: browserOpen, close: vi.fn(async () => {}) },
+}));
+
 let mod: typeof import("./auth");
 
 beforeEach(async () => {
   vi.resetModules();
+  localStorage.clear();
   vi.stubEnv("NEXT_PUBLIC_APP_URL", APP_URL);
   mod = await import("./auth");
 });
@@ -58,14 +74,85 @@ describe("parseAuthCallback", () => {
 });
 
 describe("exchangeUrl", () => {
-  it("encodes the code into the in-WebView exchange path", () => {
-    expect(mod.exchangeUrl("abc123")).toBe("/api/auth/native/exchange?code=abc123");
+  it("carries the code and the verifier into the in-WebView exchange path", () => {
+    expect(mod.exchangeUrl("abc123", "v-123")).toBe(
+      "/api/auth/native/exchange?code=abc123&code_verifier=v-123",
+    );
   });
 
-  it("escapes codes containing URL-significant characters", () => {
+  it("escapes values containing URL-significant characters", () => {
     // base64url shouldn't produce these, but a malformed callback must not be
     // able to inject extra query parameters into the exchange request.
-    expect(mod.exchangeUrl("a&b=c")).toBe("/api/auth/native/exchange?code=a%26b%3Dc");
+    expect(mod.exchangeUrl("a&b=c", "d&e=f")).toBe(
+      "/api/auth/native/exchange?code=a%26b%3Dc&code_verifier=d%26e%3Df",
+    );
+  });
+});
+
+describe("callback state", () => {
+  /**
+   * The state nonce is the whole reason an inbound `whaikey://` link can be
+   * trusted: without it, any app on the device can push a code at Whaikey and
+   * silently swap the user into the sender's account (SEC-H1).
+   */
+  it("extracts the state alongside the code", () => {
+    expect(mod.parseAuthCallback("whaikey://auth/callback?code=abc&state=nonce-1")).toEqual({
+      code: "abc",
+      state: "nonce-1",
+    });
+  });
+
+  it("extracts the state on an error callback too", () => {
+    expect(
+      mod.parseAuthCallback("whaikey://auth/callback?error=not_signed_in&state=nonce-1"),
+    ).toEqual({ error: "not_signed_in", state: "nonce-1" });
+  });
+
+  it("accepts only the exact state this app is waiting for", () => {
+    expect(mod.statesMatch("nonce-1", "nonce-1")).toBe(true);
+    expect(mod.statesMatch("nonce-1", "nonce-2")).toBe(false);
+    // A callback with no state at all is the interesting case: that is what an
+    // attacker who has not seen our nonce can produce.
+    expect(mod.statesMatch("nonce-1", undefined)).toBe(false);
+    expect(mod.statesMatch("nonce-1", "")).toBe(false);
+  });
+});
+
+describe("readPendingSignIn", () => {
+  const KEY = "whaikey.native-auth.pending.v1";
+
+  it("returns the sign-in this app started", async () => {
+    localStorage.setItem(KEY, JSON.stringify({ state: "nonce-1", verifier: "v-1" }));
+    await expect(mod.readPendingSignIn()).resolves.toEqual({ state: "nonce-1", verifier: "v-1" });
+  });
+
+  /**
+   * Reading and clearing in one step would hand anyone who can launch
+   * `whaikey://` a cancel button: a forged callback takes the verifier away,
+   * and the real one moments later finds nothing to match.
+   */
+  it("does not consume it, so a forged callback cannot cancel a real sign-in", async () => {
+    localStorage.setItem(KEY, JSON.stringify({ state: "nonce-1", verifier: "v-1" }));
+    await mod.readPendingSignIn();
+    await expect(mod.readPendingSignIn()).resolves.toEqual({ state: "nonce-1", verifier: "v-1" });
+  });
+
+  it("is consumed explicitly, once the callback has been matched", async () => {
+    localStorage.setItem(KEY, JSON.stringify({ state: "nonce-1", verifier: "v-1" }));
+    await mod.clearPendingSignIn();
+    await expect(mod.readPendingSignIn()).resolves.toBeNull();
+  });
+
+  it("reads no pending sign-in when none was started", async () => {
+    localStorage.clear();
+    await expect(mod.readPendingSignIn()).resolves.toBeNull();
+  });
+
+  it("treats corrupt or half-written storage as no pending sign-in", async () => {
+    localStorage.setItem(KEY, "{not json");
+    await expect(mod.readPendingSignIn()).resolves.toBeNull();
+    localStorage.setItem(KEY, JSON.stringify({ state: "only" }));
+    await expect(mod.readPendingSignIn()).resolves.toBeNull();
   });
 });
 
@@ -89,6 +176,52 @@ describe("startNativeSignIn", () => {
     // A browser has no embedded-WebView problem to work around.
     await expect(mod.startNativeSignIn("google")).resolves.toEqual({ status: "unavailable" });
   });
+
+  describe("on a device", () => {
+    beforeEach(() => {
+      Object.defineProperty(window, "Capacitor", {
+        value: { getPlatform: () => "ios", isNativePlatform: () => true },
+        configurable: true,
+        writable: true,
+      });
+      prefsSet.mockClear();
+      browserOpen.mockClear();
+      prefsSet.mockImplementation(async () => {});
+    });
+
+    afterEach(() => {
+      Reflect.deleteProperty(window, "Capacitor");
+    });
+
+    it("stores the verifier and sends only its challenge", async () => {
+      await expect(mod.startNativeSignIn("google")).resolves.toEqual({ status: "started" });
+
+      const stored = JSON.parse(String(prefsSet.mock.calls[0]?.[0].value));
+      const opened = new URL(String(browserOpen.mock.calls[0]?.[0].url));
+      expect(opened.searchParams.get("state")).toBe(stored.state);
+      // The verifier never leaves the device — only its hash does.
+      expect(opened.search).not.toContain(stored.verifier);
+      expect(opened.searchParams.get("code_challenge")).toBeTruthy();
+    });
+
+    /**
+     * Without a stored verifier the callback has nothing to match and is
+     * dropped as forged, so opening the browser would start a sign-in that
+     * could never finish — and an escaping rejection left both provider
+     * buttons stuck on "Connecting…".
+     */
+    it("fails closed, with a result, when the verifier cannot be persisted", async () => {
+      prefsSet.mockImplementation(async () => {
+        throw new Error("native storage unavailable");
+      });
+
+      await expect(mod.startNativeSignIn("google")).resolves.toEqual({
+        status: "failed",
+        reason: expect.stringContaining("Couldn't start sign-in"),
+      });
+      expect(browserOpen).not.toHaveBeenCalled();
+    });
+  });
 });
 
 describe("return path threading", () => {
@@ -100,9 +233,11 @@ describe("return path threading", () => {
   });
 
   it("exchangeUrl carries next, encoded", () => {
-    expect(mod.exchangeUrl("abc", "/add/sasha")).toBe(
-      "/api/auth/native/exchange?code=abc&next=%2Fadd%2Fsasha",
+    expect(mod.exchangeUrl("abc", "v-1", "/add/sasha")).toBe(
+      "/api/auth/native/exchange?code=abc&code_verifier=v-1&next=%2Fadd%2Fsasha",
     );
-    expect(mod.exchangeUrl("abc")).toBe("/api/auth/native/exchange?code=abc");
+    expect(mod.exchangeUrl("abc", "v-1")).toBe(
+      "/api/auth/native/exchange?code=abc&code_verifier=v-1",
+    );
   });
 });

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { eq } from "drizzle-orm";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
 import {
@@ -93,6 +94,26 @@ describe("GET /api/bottles/search", () => {
   });
 });
 
+/**
+ * A rater who has published this pour: a social-enabled profile plus a pour
+ * marked public. Both are required — `visibility` is the choice made when
+ * logging, `socialEnabled` is the step-back switch that withdraws it.
+ */
+async function publicRater(db: DB, bottleId: string, rating: number): Promise<schema.User> {
+  const user = await createTestUser(db);
+  await db.insert(schema.userProfiles).values({
+    userId: user.id,
+    handle: `h${user.id.slice(-8)}`,
+    displayName: "Taster",
+    isPublic: true,
+    socialEnabled: true,
+  });
+  await db
+    .insert(schema.pours)
+    .values({ id: uid("pour"), userId: user.id, bottleId, rating, visibility: "public" });
+  return user;
+}
+
 describe("GET /api/bottles/[id]", () => {
   beforeEach(async () => {
     db = await setupTestDb();
@@ -113,15 +134,21 @@ describe("GET /api/bottles/[id]", () => {
       name: "Elijah Craig Barrel Proof",
       distilleryId: dist.id,
     });
-    // Ratings come from OTHER users' pours — community stats span all users.
-    const alice = await createTestUser(db);
-    const bob = await createTestUser(db);
-    await db.insert(schema.pours).values([
-      { id: uid("pour"), userId: alice.id, bottleId: bottle.id, rating: 4 },
-      { id: uid("pour"), userId: bob.id, bottleId: bottle.id, rating: 5 },
-      // Unrated pour must not drag the average or the rated count.
-      { id: uid("pour"), userId: bob.id, bottleId: bottle.id, rating: null },
-    ]);
+    // Ratings come from OTHER users' pours — community stats span all users —
+    // but only the pours those users chose to publish, and only once enough
+    // distinct people have published one (SEC-M2).
+    const alice = await publicRater(db, bottle.id, 4);
+    const bob = await publicRater(db, bottle.id, 5);
+    await publicRater(db, bottle.id, 4.5);
+    // Unrated pour must not drag the average or the rated count.
+    await db.insert(schema.pours).values({
+      id: uid("pour"),
+      userId: bob.id,
+      bottleId: bottle.id,
+      rating: null,
+      visibility: "public",
+    });
+    void alice;
     await db.insert(schema.pairings).values({
       id: uid("pairing"),
       bottleId: bottle.id,
@@ -171,7 +198,7 @@ describe("GET /api/bottles/[id]", () => {
     const body = await res.json();
     expect(body.bottle).toMatchObject({ id: bottle.id, name: "Elijah Craig Barrel Proof" });
     expect(body.distillery).toMatchObject({ name: "Heaven Hill" });
-    expect(body.communityStats).toEqual({ avgRating: 4.5, ratingCount: 2 });
+    expect(body.communityStats).toEqual({ avgRating: 4.5, ratingCount: 3, raterCount: 3 });
     expect(body.userBottle).toBeNull();
     expect(body.pairings).toHaveLength(1);
     expect(body.pairings[0]).toMatchObject({ pairingType: "food", suggestion: "Dark chocolate" });
@@ -317,5 +344,96 @@ describe("GET /api/bottles/[id]", () => {
     const res = await detailGET(searchRequest(""), detailCtx(bottle.id));
     const body = await res.json();
     expect(body.userBottle).toBeNull();
+  });
+});
+
+/**
+ * SEC-M2. `/api/bottles/[id]` needs no session, so its community average is
+ * readable by anyone with the id — and it was computed over every pour,
+ * including ones the owner marked "Only me". On a rarely-rated bottle, watching
+ * that number move told an unauthenticated poller the rating and the timing of
+ * a single private pour, which is the opposite of what docs/SOCIAL.md promises.
+ */
+describe("GET /api/bottles/[id] community rating privacy", () => {
+  let bottle: schema.Bottle;
+
+  beforeEach(async () => {
+    db = await setupTestDb();
+    setSessionUser(null);
+    bottle = await createTestBottle(db, { name: "Elijah Craig Barrel Proof" });
+  });
+
+  async function stats() {
+    const res = await detailGET(searchRequest(""), detailCtx(bottle.id));
+    return (await res.json()).communityStats;
+  }
+
+  it("never lets a private pour move the public average", async () => {
+    await publicRater(db, bottle.id, 4);
+    await publicRater(db, bottle.id, 4);
+    await publicRater(db, bottle.id, 4);
+    expect(await stats()).toEqual({ avgRating: 4, ratingCount: 3, raterCount: 3 });
+
+    // A 1-star pour kept to oneself. The number must not budge.
+    const quiet = await publicRater(db, bottle.id, 4);
+    await db.insert(schema.pours).values({
+      id: uid("pour"),
+      userId: quiet.id,
+      bottleId: bottle.id,
+      rating: 1,
+      visibility: "private",
+    });
+    expect(await stats()).toEqual({ avgRating: 4, ratingCount: 4, raterCount: 4 });
+  });
+
+  it("drops the pours of someone who has stepped back from social", async () => {
+    await publicRater(db, bottle.id, 4);
+    await publicRater(db, bottle.id, 4);
+    const leaving = await publicRater(db, bottle.id, 1);
+    expect((await stats()).raterCount).toBe(3);
+
+    // "Make everything private" withdraws their published pours with them.
+    await db
+      .update(schema.userProfiles)
+      .set({ socialEnabled: false })
+      .where(eq(schema.userProfiles.userId, leaving.id));
+    expect(await stats()).toEqual({ avgRating: null, ratingCount: 0, raterCount: 0 });
+  });
+
+  it("suppresses an average that is really one or two people's rating", async () => {
+    await publicRater(db, bottle.id, 5);
+    expect((await stats()).avgRating).toBeNull();
+    await publicRater(db, bottle.id, 3);
+    expect((await stats()).avgRating).toBeNull();
+
+    // Three distinct raters is where it becomes a community number.
+    await publicRater(db, bottle.id, 4);
+    expect(await stats()).toEqual({ avgRating: 4, ratingCount: 3, raterCount: 3 });
+  });
+
+  /**
+   * Suppressing the average but reporting the counts moves the disclosure one
+   * number over: this endpoint takes no session, so a count ticking 0 → 1 tells
+   * a poller that a particular small group published a rating, and roughly when.
+   */
+  it("reports no counts either while it is below the floor", async () => {
+    await publicRater(db, bottle.id, 5);
+    expect(await stats()).toEqual({ avgRating: null, ratingCount: 0, raterCount: 0 });
+    await publicRater(db, bottle.id, 3);
+    expect(await stats()).toEqual({ avgRating: null, ratingCount: 0, raterCount: 0 });
+  });
+
+  it("counts people, not pours, so one enthusiast cannot clear the floor alone", async () => {
+    const solo = await publicRater(db, bottle.id, 5);
+    await db.insert(schema.pours).values([
+      { id: uid("pour"), userId: solo.id, bottleId: bottle.id, rating: 5, visibility: "public" },
+      { id: uid("pour"), userId: solo.id, bottleId: bottle.id, rating: 5, visibility: "public" },
+    ]);
+    // Three public rated pours, one person — below the floor, so nothing at all.
+    expect(await stats()).toEqual({ avgRating: null, ratingCount: 0, raterCount: 0 });
+  });
+
+  it("reports nothing at all for a bottle nobody has published a rating for", async () => {
+    expect(await stats()).toEqual({ avgRating: null, ratingCount: 0, raterCount: 0 });
   });
 });

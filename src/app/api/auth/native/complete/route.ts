@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { issueNativeAuthCode, NATIVE_CALLBACK_SCHEME, safeReturnPath } from "@/lib/native-auth";
+import {
+  consumeNativeAuthRequest,
+  issueNativeAuthCode,
+  NATIVE_CALLBACK_SCHEME,
+} from "@/lib/native-auth";
 import { getSessionUser } from "@/lib/session";
 
 /**
@@ -11,8 +15,13 @@ import { getSessionUser } from "@/lib/session";
  *
  * The code — not the cookie — travels through the URL: a custom-scheme redirect
  * is visible to anything that can observe the browser's navigation, and a code
- * that dies in 60 seconds and works once is a far smaller thing to leak than a
- * session cookie with weeks of life in it.
+ * that dies in 60 seconds, works once, and needs a verifier the app kept to
+ * itself is a far smaller thing to leak than a session cookie with weeks of
+ * life in it.
+ *
+ * Nothing is minted without a live `request` id from `/start` (SEC-H1). A GET
+ * that arrives with a browser session and no pending sign-in is not a sign-in
+ * this app asked for, and it leaves here with no code.
  */
 export const dynamic = "force-dynamic";
 
@@ -24,16 +33,38 @@ function appRedirect(params: Record<string, string>): NextResponse {
 }
 
 export async function GET(request: NextRequest) {
-  // Validated once and carried on every outcome, error included — a cancelled
-  // or failed sign-in should retry toward the scanned target, not lose it.
-  const next = safeReturnPath(request.nextUrl.searchParams.get("next"));
-  const withNext = (params: Record<string, string>) => appRedirect(next ? { ...params, next } : params);
+  // Single-use: consumed here whatever the outcome, so a callback URL that
+  // leaks (browser history, a shared screen) can't be walked back through.
+  const pending = await consumeNativeAuthRequest(
+    request.nextUrl.searchParams.get("request") ?? "",
+  );
+
+  if (!pending) {
+    // An id nobody issued, or one already answered. There is nothing to echo a
+    // state back to, so the app has nothing to accept — which is the point:
+    // this response is inert.
+    return appRedirect({ error: "no_request" });
+  }
+
+  // The state the app is waiting to see, and the return path it asked for, both
+  // read from the row rather than the URL — neither can be rewritten in flight.
+  const { state, next } = pending;
+  const withState = (params: Record<string, string>) =>
+    appRedirect(next ? { ...params, state, next } : { ...params, state });
+
+  if (pending.expired) {
+    // A real sign-in that took longer than the TTL. It gets its state back so
+    // the app recognises the callback as its own and can close the browser,
+    // clear the pending sign-in and say so — a stateless answer would be
+    // dropped as forged and leave sign-in hanging on "Connecting…".
+    return withState({ error: "expired" });
+  }
 
   const user = await getSessionUser();
   if (!user) {
     // OAuth was cancelled or the callback failed — tell the app so it can show a
     // real message rather than hanging on a browser that silently closed.
-    return withNext({ error: "not_signed_in" });
+    return withState({ error: "not_signed_in" });
   }
 
   const { auth } = await import("@/lib/auth");
@@ -45,7 +76,7 @@ export async function GET(request: NextRequest) {
 
   if (!sessionCookie) {
     console.error("[native-auth] signed in but no session cookie named", cookieName);
-    return withNext({ error: "no_session_cookie" });
+    return withState({ error: "no_session_cookie" });
   }
 
   try {
@@ -53,10 +84,11 @@ export async function GET(request: NextRequest) {
       userId: user.id,
       sessionCookieName: cookieName,
       sessionCookie,
+      codeChallenge: pending.codeChallenge,
     });
-    return withNext({ code });
+    return withState({ code });
   } catch (err) {
     console.error("[native-auth] failed to issue exchange code", err);
-    return withNext({ error: "exchange_failed" });
+    return withState({ error: "exchange_failed" });
   }
 }

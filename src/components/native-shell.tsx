@@ -5,20 +5,25 @@ import { useRouter } from "next/navigation";
 import { applyStatusBarStyle, configureKeyboard, hideSplash } from "@/lib/native/app-chrome";
 import { exitApp, onBackButton, onDeepLink, onResume } from "@/lib/native/app-lifecycle";
 import {
+  clearPendingSignIn,
   closeNativeSignIn,
   describeNativeAuthError,
   exchangeUrl,
   parseAuthCallback,
+  readPendingSignIn,
+  statesMatch,
 } from "@/lib/native/auth";
+import type { AuthCallback } from "@/lib/native/auth";
 import { isNativeApp } from "@/lib/native/platform";
 import { flushPourQueue, isOnline } from "@/lib/native/offline-queue";
 
 /**
  * Boots the native shell (docs/NATIVE_APP.md §2.1). Rendered once from the root
- * layout, renders nothing, and short-circuits entirely on the web — so the web
- * app pays a mounted-effect and nothing else.
+ * layout and renders nothing. The native plugin wiring short-circuits on the
+ * web; the offline pour flush does not, because web and PWA users queue pours
+ * too and something has to send them.
  */
-export function NativeShell() {
+export function NativeShell({ userId }: { userId?: string | null }) {
   const router = useRouter();
 
   /**
@@ -27,9 +32,50 @@ export function NativeShell() {
    */
   const syncQueue = useCallback(async () => {
     if (!isOnline()) return;
-    const { synced } = await flushPourQueue();
+    // Scoped to whoever is signed in: on the web the queue is per origin, not
+    // per session, so a pour queued by one person must not be sent while
+    // someone else is signed in on the same browser.
+    const { synced, discarded, unclaimed } = await flushPourQueue(userId ?? undefined);
     if (synced > 0) router.refresh();
-  }, [router]);
+    // Neither of these can be shown yet — there is no app-level toast until
+    // WP-6 — but neither is lost either: a rejected pour is quarantined rather
+    // than deleted, and an unclaimed one stays queued. Logged so the gap is
+    // visible in a session replay rather than only in this comment.
+    if (discarded.length > 0) {
+      console.warn(
+        `[pours] ${discarded.length} queued pour(s) the server kept rejecting are in quarantine, awaiting a recovery surface`,
+      );
+    }
+    if (unclaimed > 0) {
+      console.warn(
+        `[pours] ${unclaimed} queued pour(s) predate author tracking and cannot be attributed; held for their author`,
+      );
+    }
+  }, [router, userId]);
+
+  /**
+   * Every platform, not just the device. A PWA on a phone hits the same dead
+   * spot as the native app and queues the same way; when the flush lived
+   * behind `isNativeApp()` those pours were written to storage, reported as
+   * "saved on your phone", and never sent (REL-4.1). The native shell adds a
+   * resume hook below — that's a lifecycle the browser doesn't have, not a
+   * different sync policy.
+   */
+  useEffect(() => {
+    const onOnline = () => void syncQueue();
+    const onVisible = () => {
+      // The web's nearest thing to app resume: a tab coming back to the
+      // foreground is the moment to catch a network that returned quietly.
+      if (document.visibilityState === "visible") void syncQueue();
+    };
+    window.addEventListener("online", onOnline);
+    document.addEventListener("visibilitychange", onVisible);
+    void syncQueue();
+    return () => {
+      window.removeEventListener("online", onOnline);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [syncQueue]);
 
   useEffect(() => {
     if (!isNativeApp()) return;
@@ -54,45 +100,75 @@ export function NativeShell() {
     const unsubscribeDeepLink = onDeepLink((path, rawUrl) => {
       const callback = parseAuthCallback(rawUrl);
       if (callback) {
-        void closeNativeSignIn();
-        if ("code" in callback) {
-          // A full navigation, not router.push: the point of this request is the
-          // Set-Cookie it comes back with, and that only lands in the WebView's
-          // cookie store if the WebView itself made the request.
-          window.location.assign(exchangeUrl(callback.code, callback.next));
-        } else {
-          const message = describeNativeAuthError(callback.error);
-          const retry = new URLSearchParams({ error: message ?? "Sign-in failed." });
-          // Keep the return target on the retry, so trying again still lands
-          // on the scanned page (the sign-in page re-validates it).
-          if (callback.next) retry.set("next", callback.next);
-          router.push(`/sign-in?${retry.toString()}`);
-        }
+        // Nothing in here may reject unhandled: the callback arrives once, so a
+        // storage read that fails would leave sign-in on "Connecting…" until
+        // the code expired, with no error anyone could act on.
+        void handleAuthCallback(callback).catch((err: unknown) => {
+          console.warn("[native] could not handle the sign-in callback", err);
+          void closeNativeSignIn();
+          router.push(`/sign-in?error=${encodeURIComponent("Sign-in didn't complete. Please try again.")}`);
+        });
         return;
       }
       router.push(path);
     });
+
+    /**
+     * `whaikey://` is a scheme any app on the device can register, so an
+     * inbound auth callback is a claim, not a fact. Acting on an unsolicited
+     * one would swap the WebView into whoever sent it (SEC-H1) — silently, and
+     * every pour logged afterwards would land in their account.
+     *
+     * So: act only on a callback whose state matches the sign-in this app
+     * started. Anything else is dropped without a word, because there is no
+     * user here to warn; nobody asked for this link.
+     *
+     * The pending sign-in is read but not consumed until it matches. Clearing
+     * it on the way past would let anyone who can launch `whaikey://` cancel a
+     * real sign-in with one forged callback.
+     */
+    async function handleAuthCallback(callback: NonNullable<AuthCallback>): Promise<void> {
+      const pending = await readPendingSignIn();
+      if (!pending || !statesMatch(pending.state, callback.state)) return;
+      // Cleanup must not be able to cost the user their sign-in: the callback
+      // arrives once, so a rejected `remove()` here would strand them on
+      // "Connecting…" while the code quietly expired. Single use is enforced by
+      // the server anyway — this is tidying, not a guard.
+      await clearPendingSignIn().catch((err: unknown) => {
+        console.warn("[native] could not clear the pending sign-in", err);
+      });
+
+      void closeNativeSignIn();
+      if ("code" in callback) {
+        // A full navigation, not router.push: the point of this request is the
+        // Set-Cookie it comes back with, and that only lands in the WebView's
+        // cookie store if the WebView itself made the request.
+        window.location.assign(exchangeUrl(callback.code, pending.verifier, callback.next));
+      } else {
+        const message = describeNativeAuthError(callback.error);
+        const retry = new URLSearchParams({ error: message ?? "Sign-in failed." });
+        // Keep the return target on the retry, so trying again still lands
+        // on the scanned page (the sign-in page re-validates it).
+        if (callback.next) retry.set("next", callback.next);
+        router.push(`/sign-in?${retry.toString()}`);
+      }
+    }
 
     const unsubscribeResume = onResume(() => {
       // Server-rendered pages (My Bar totals, pour history) go stale while the
       // app is backgrounded; refresh re-runs them without losing client state.
       router.refresh();
       // Coming back to the app is the most reliable moment to catch a network
-      // that returned while we weren't looking.
+      // that returned while we weren't looking. A backgrounded WebView doesn't
+      // reliably fire `visibilitychange`, so this is its own hook rather than
+      // a duplicate of the web one above.
       void syncQueue();
     });
-
-    // Flush on reconnect as well, so a pour goes up the moment signal returns
-    // rather than waiting for the user to background and reopen the app.
-    const onOnline = () => void syncQueue();
-    window.addEventListener("online", onOnline);
-    void syncQueue();
 
     return () => {
       unsubscribeBack();
       unsubscribeDeepLink();
       unsubscribeResume();
-      window.removeEventListener("online", onOnline);
       document.documentElement.classList.remove("native-app");
     };
   }, [router, syncQueue]);

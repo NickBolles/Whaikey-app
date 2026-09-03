@@ -17,6 +17,7 @@ import { schema } from "@/db";
 import { hasPublishedProducerFlavorNotes } from "@/lib/bar";
 import { contributorVisibleSql, getFriendNotesForBottle } from "@/lib/social";
 import { meanTags, validTags, type BottleComparison } from "@/lib/compare-math";
+import { MIN_COMMUNITY_RATERS } from "@/lib/search";
 
 export * from "@/lib/compare-math";
 
@@ -90,7 +91,7 @@ export async function getBottleComparison(
   // admitting the newly blocked user's tags. Same predicate every other
   // social read path uses, so blocking stays immediate.
   const communityRows = await db
-    .select({ flavorTags: schema.tastingNotes.flavorTags })
+    .select({ flavorTags: schema.tastingNotes.flavorTags, userId: schema.pours.userId })
     .from(schema.pours)
     .innerJoin(
       schema.tastingNotes,
@@ -110,10 +111,16 @@ export async function getBottleComparison(
       ),
     );
 
-  const community = {
-    count: communityRows.length,
-    tags: meanTags(communityRows.map((r) => r.flavorTags)),
-  };
+  // The same anonymity floor as the bottle page's community rating, and for
+  // the same reason (review SEC-M2, docs/SOCIAL.md §8): with one contributor,
+  // an "aggregate" is one stranger's exact tag profile, and the count says so.
+  // Counted per person, not per pour — three notes from one enthusiast are one
+  // palate, and a per-row floor would let them clear it alone.
+  const communityContributors = new Set(communityRows.map((r) => r.userId)).size;
+  const community =
+    communityContributors >= MIN_COMMUNITY_RATERS
+      ? { count: communityRows.length, tags: meanTags(communityRows.map((r) => r.flavorTags)) }
+      : { count: 0, tags: {} };
 
   // --- Professional: the producer's attributed note plus critics on file. ---
   //

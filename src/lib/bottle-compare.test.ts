@@ -103,6 +103,51 @@ describe("getBottleComparison", () => {
     return pour;
   }
 
+  /**
+   * docs/SOCIAL.md §8: every community number waits for three distinct people.
+   * With one contributor this "aggregate" was their exact tag profile plus a
+   * count of one, readable by any signed-in viewer who opened the bottle.
+   */
+  it("suppresses the community consensus until three distinct people have published", async () => {
+    const viewer = await createTestUser(db);
+    const bottle = await createTestBottle(db, { name: "Barely Tasted" });
+    await profile(viewer.id, "viewer");
+
+    const contribute = async (handle: string) => {
+      const user = await createTestUser(db);
+      await profile(user.id, handle);
+      await pourWithNote(user.id, bottle.id, { medicinal: 3 }, { visibility: "public" });
+    };
+
+    await contribute("one");
+    let cmp = await getBottleComparison(db, viewer.id, bottle.id);
+    expect(cmp!.community).toEqual({ count: 0, tags: {} });
+
+    await contribute("two");
+    cmp = await getBottleComparison(db, viewer.id, bottle.id);
+    expect(cmp!.community).toEqual({ count: 0, tags: {} });
+
+    await contribute("three");
+    cmp = await getBottleComparison(db, viewer.id, bottle.id);
+    expect(cmp!.community.count).toBe(3);
+    expect(cmp!.community.tags).toEqual({ medicinal: 3 });
+  });
+
+  it("counts contributors, not notes, so one enthusiast cannot clear the floor", async () => {
+    const viewer = await createTestUser(db);
+    const solo = await createTestUser(db);
+    const bottle = await createTestBottle(db, { name: "One Palate" });
+    await profile(viewer.id, "viewer");
+    await profile(solo.id, "solo");
+
+    for (let i = 0; i < 3; i++) {
+      await pourWithNote(solo.id, bottle.id, { medicinal: 3 }, { visibility: "public" });
+    }
+
+    const cmp = await getBottleComparison(db, viewer.id, bottle.id);
+    expect(cmp!.community).toEqual({ count: 0, tags: {} });
+  });
+
   it("keeps the three reference sets distinct", async () => {
     const viewer = await createTestUser(db);
     const friend = await createTestUser(db);
@@ -122,6 +167,14 @@ describe("getBottleComparison", () => {
     await pourWithNote(viewer.id, bottle.id, { campfire: 3, brine: 1 });
     await pourWithNote(friend.id, bottle.id, { campfire: 2, peat: 2 }, { visibility: "friends", rating: 4.5, palate: "Smoke first." });
     await pourWithNote(stranger.id, bottle.id, { medicinal: 3 }, { visibility: "public", rating: 4 });
+    // Two more public contributors, because a "community" of one is that one
+    // person's tag profile and the aggregate is suppressed below three.
+    const stranger2 = await createTestUser(db);
+    const stranger3 = await createTestUser(db);
+    await profile(stranger2.id, "stranger2");
+    await profile(stranger3.id, "stranger3");
+    await pourWithNote(stranger2.id, bottle.id, { medicinal: 3 }, { visibility: "public", rating: 4 });
+    await pourWithNote(stranger3.id, bottle.id, { medicinal: 3 }, { visibility: "public", rating: 4 });
     await db.insert(schema.criticNotes).values({
       id: uid("critic"),
       bottleId: bottle.id,
@@ -145,7 +198,7 @@ describe("getBottleComparison", () => {
     // Community: only the public pour, not the friend's friends-only one —
     // and as an ANONYMOUS aggregate: no author, no prose, nothing that could
     // surface a stranger's note before S4 public discovery.
-    expect(cmp!.community.count).toBe(1);
+    expect(cmp!.community.count).toBe(3);
     expect(cmp!.community.tags).toEqual({ medicinal: 3 });
     expect(cmp!.community).not.toHaveProperty("notes");
     expect(JSON.stringify(cmp!.community)).not.toContain("stranger");

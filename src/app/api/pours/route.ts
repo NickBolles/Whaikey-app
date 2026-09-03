@@ -27,6 +27,19 @@ export async function POST(req: Request) {
       );
     }
 
+    if (parsed.data.expectedUserId && parsed.data.expectedUserId !== user.id) {
+      // The session changed between the client deciding whose pour this is and
+      // the request arriving — most plausibly an account switch during an
+      // offline-queue flush. Refusing is the only way to be sure a private note
+      // never lands in the wrong journal; 409 rather than 401 so the client can
+      // tell "not you" from "nobody" and hold the entry instead of retrying it
+      // to death.
+      return NextResponse.json(
+        { error: "This pour belongs to a different account" },
+        { status: 409 },
+      );
+    }
+
     try {
       const { pour, note } = await logPour(getDb(), user.id, parsed.data);
       return NextResponse.json({ pour, note }, { status: 201 });

@@ -18,5 +18,7 @@ export default async function PourPage({ searchParams }: { searchParams: Promise
     if (detail) initialBottle = { id: detail.bottle.id, name: detail.bottle.name, distillery: detail.distillery?.name, category: detail.bottle.category };
   }
 
-  return <PourFlow initialBottle={initialBottle} initialBottleMissing={Boolean(bottleId && !initialBottle)} />;
+  // A queued pour is stamped with its author so a flush after someone else
+  // signs in on the same browser can't hand them this note.
+  return <PourFlow userId={user.id} initialBottle={initialBottle} initialBottleMissing={Boolean(bottleId && !initialBottle)} />;
 }

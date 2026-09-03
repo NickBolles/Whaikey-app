@@ -1,6 +1,80 @@
 import { expect, test } from "@playwright/test";
 import { SCAN_SESSION_TOKEN, signIn } from "./fixtures";
 
+/**
+ * Review SEC-H3: the app shipped with no security headers at all. These run
+ * with the CSP ENFORCED (see playwright.config.ts) — the point is not that the
+ * header string is present but that the whole functional suite still passes
+ * underneath it.
+ */
+test.describe("security headers", () => {
+  test("every response carries the policy, and the camera survives it", async ({ page }) => {
+    const response = await page.goto("/");
+    const headers = response?.headers() ?? {};
+
+    expect(headers["strict-transport-security"]).toContain("max-age=");
+    expect(headers["x-content-type-options"]).toBe("nosniff");
+    expect(headers["x-frame-options"]).toBe("DENY");
+    // /s/<code> share links are bearer credentials; they must not ride Referer.
+    expect(headers["referrer-policy"]).toBe("strict-origin-when-cross-origin");
+    // /scan is a first-party camera surface and the note capture has a shipped
+    // dictation button, so both stay for THIS origin — a policy that denies
+    // them leaves visible controls that silently fail.
+    expect(headers["permissions-policy"]).toContain("camera=(self)");
+    expect(headers["permissions-policy"]).toContain("microphone=(self)");
+    // But nothing is granted to anything embedded, which is the point.
+    expect(headers["permissions-policy"]).toContain("geolocation=()");
+
+    const csp = headers["content-security-policy"] ?? "";
+    // Clickjacking /sharing ("Make everything private", link revocation) is the
+    // concrete attack this closes.
+    expect(csp).toContain("frame-ancestors 'none'");
+    expect(csp).toContain("base-uri 'none'");
+    // Bottle art is source-owned media on whatever host the catalog found it.
+    expect(csp).toContain("img-src 'self' data: https:");
+  });
+
+  /**
+   * The visual baselines cannot police this: the community average is two
+   * characters on a 390x844 page, far under the suite's 2% maxDiffPixelRatio,
+   * so a screenshot of a bottle whose average had silently absorbed private
+   * pours would still pass. Assert the number (review SEC-M2).
+   */
+  test("the bottle page's community rating counts only published pours", async ({ page }) => {
+    await page.goto("/bottles/eagle-rare-10");
+    const community = page.getByLabel("Community rating");
+
+    // e2e/demo-seed.ts: three public raters at 4, 4 and 4.5. Jordan's own three
+    // pours on this bottle are private and must not appear here at all — with
+    // them the average was 4.0 over 3 "rated pours", which is what shipped.
+    await expect(community).toContainText("4.2");
+    await expect(community).toContainText("3 rated pours");
+  });
+
+  test("a bottle below the floor reports nothing, and does not claim nobody has poured", async ({
+    page,
+  }) => {
+    // The count is suppressed with the average, so this state covers both
+    // "nobody" and "one or two people" — the copy must not assert either, and
+    // must not invite a pour on the false premise of being first.
+    await page.goto("/bottles/blantons-original");
+    const community = page.getByLabel("Community rating");
+    await expect(community).toContainText("Not enough ratings yet");
+    await expect(community).not.toContainText("be first");
+  });
+
+  test("the scan page loads and asks for the camera under the policy", async ({ page }) => {
+    const violations: string[] = [];
+    page.on("console", (msg) => {
+      if (msg.text().includes("Content Security Policy")) violations.push(msg.text());
+    });
+
+    await page.goto("/scan");
+    await expect(page.getByRole("heading", { name: /scan/i }).first()).toBeVisible();
+    expect(violations).toEqual([]);
+  });
+});
+
 test.describe("signed-out smoke", () => {
   test("home shows the hero with a sign-in CTA", async ({ page }) => {
     await page.goto("/");

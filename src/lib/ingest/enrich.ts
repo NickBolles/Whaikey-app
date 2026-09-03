@@ -2,7 +2,13 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import type { DB } from "@/db";
 import { bottleClaims, bottleResources, bottles, catalogSources, distilleries, pours, tastingNotes } from "@/db/schema";
-import { activeAiProvider, aiSupportsServerWebSearch, getAnthropic } from "@/lib/ai/client";
+import {
+  activeAiProvider,
+  aiSupportsServerWebSearch,
+  AI_BATCH_MAX_RETRIES,
+  AI_BATCH_TIMEOUT_MS,
+  getAnthropic,
+} from "@/lib/ai/client";
 import { parseModelJson, textFromContent } from "@/lib/ai/json";
 import { FLAVOR_WHEEL, WEDGE_IDS, rollUpToWedges } from "@/lib/flavor-wheel";
 
@@ -367,10 +373,17 @@ async function runModelBatch(
   ];
   const texts: string[] = [];
   for (let attempt = 0; attempt < 4; attempt++) {
-    const response = await anthropic.messages.create({
-      ...base,
-      messages,
-    } as never);
+    // Explicit budget AND retries, because the shared client is tuned for
+    // request handlers: 25 s to fit inside a route's maxDuration, and no retry
+    // because a second attempt would be killed by the platform mid-flight.
+    // Neither constraint applies to a batch job — 25 bottles at 8,000 tokens
+    // plus search continuations is legitimately slower than any page would
+    // tolerate, and there is no deadline for a retry to overrun. Without the
+    // override a single transient 429 would abort a whole multi-batch run.
+    const response = await anthropic.messages.create({ ...base, messages } as never, {
+      timeout: AI_BATCH_TIMEOUT_MS,
+      maxRetries: AI_BATCH_MAX_RETRIES,
+    });
     texts.push(textFromContent(response.content as never));
     if (response.stop_reason !== "pause_turn") break;
     messages.push({ role: "assistant", content: response.content });

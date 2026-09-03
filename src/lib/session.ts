@@ -1,5 +1,6 @@
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
+import { BodyTooLargeError } from "@/lib/body-limit";
 
 export interface SessionUser {
   id: string;
@@ -35,8 +36,9 @@ export async function requireUser(): Promise<SessionUser> {
 }
 
 /**
- * Wrap an API handler body: converts UnauthorizedError into a 401 response
- * and unexpected errors into a 500 (with logging).
+ * Wrap an API handler body: converts UnauthorizedError into a 401 response,
+ * an over-limit body into a 413, and unexpected errors into a 500 (with
+ * logging).
  */
 export async function withErrorHandling<T>(fn: () => Promise<T>): Promise<T | NextResponse> {
   try {
@@ -44,6 +46,11 @@ export async function withErrorHandling<T>(fn: () => Promise<T>): Promise<T | Ne
   } catch (err) {
     if (err instanceof UnauthorizedError) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    if (err instanceof BodyTooLargeError) {
+      // Handled here rather than at each call site so a route cannot read a
+      // body under a limit and then forget to answer for going over it.
+      return NextResponse.json({ error: "Request body too large" }, { status: 413 });
     }
     console.error(err);
     return NextResponse.json({ error: "Internal error" }, { status: 500 });

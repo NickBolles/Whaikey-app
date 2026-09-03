@@ -60,6 +60,105 @@ export function isAiConfigured(): boolean {
 }
 
 /**
+ * Budget for a model call (REL-3.1).
+ *
+ * The SDK defaults to a ten-minute timeout and two retries, which is a fine
+ * default for a script and a wrong one here: every AI route caps out at 30-60 s
+ * of `maxDuration` and *reserves the user's rate-limit slot before the call*,
+ * so a slow model spent someone's hourly budget on a 504 they never saw an
+ * answer for.
+ *
+ * The budget is the whole call, not one attempt, because the platform's kill is
+ * on wall time. The shortest route deadline is 30 s (`scan-label`,
+ * `extract-note`, `pairings`, `import/analyze`), so 25 s buys one attempt with
+ * room to return a real error — and a retry is off, since a second 25 s attempt
+ * starting at 25 s is killed at 30 s and reproduces exactly the failure this
+ * budget exists to prevent. A retry is worth having, but only with a per-route
+ * budget to fit it in; that belongs with the per-feature reservation work in
+ * WP-25, not here.
+ */
+const AI_TIMEOUT_MS = 25_000;
+const AI_MAX_RETRIES = 0;
+/** Shortest `maxDuration` across the AI routes; the budget above must fit it. */
+export const SHORTEST_AI_ROUTE_DEADLINE_MS = 30_000;
+
+/**
+ * Budget for a whole agentic turn, not one call.
+ *
+ * `runChat`/`runChatStream` make up to seven model calls per request, so the
+ * per-call timeout above bounds nothing on their own: seven of them is 175 s
+ * under `/api/chat`'s 60 s `maxDuration`. Callers that loop share this budget
+ * across every call and hand each one whatever is left (`remainingBudget`),
+ * ten seconds short of the deadline so there is room to answer with what the
+ * loop already has instead of being killed mid-call.
+ */
+export const AI_LOOP_BUDGET_MS = 50_000;
+
+/**
+ * Whatever is left of a budget, or null once it is spent.
+ *
+ * Null means stop rather than "no limit" — a caller that has run out of time
+ * should return what it has, not start another call it cannot finish.
+ */
+export function remainingBudget(startedAt: number, budgetMs: number): number | null {
+  const left = budgetMs - (Date.now() - startedAt);
+  // Under a second is not enough for a model call to do anything useful.
+  return left > 1_000 ? Math.min(left, AI_TIMEOUT_MS) : null;
+}
+
+/**
+ * Budget for work that is NOT behind a route.
+ *
+ * `pnpm ingest enrich` and the catalog-sync workflow batch 25 bottles at 8,000
+ * tokens with optional hosted-search continuation turns, and they answer to a
+ * job runner rather than a 30 s platform deadline. Capping those at the route
+ * budget would abort perfectly good generations; they are slow on purpose.
+ */
+export const AI_BATCH_TIMEOUT_MS = 5 * 60_000;
+/**
+ * And its retries. The shared client sets `maxRetries: 0` because a retry
+ * cannot fit inside a route's deadline — a constraint a job runner does not
+ * have. Without restoring them here, one transient 429 from the provider would
+ * abort an entire multi-batch enrichment run.
+ */
+export const AI_BATCH_MAX_RETRIES = 2;
+
+/**
+ * Give up on `start()` once `budgetMs` from `startedAt` has passed.
+ *
+ * The loop budget has to cover tool execution too, not only model calls: a
+ * `get_pairings` miss can sit on a 60 s generation lease, which alone outlives
+ * `/api/chat`'s deadline no matter how tight the model timeouts are. Work that
+ * has begun is not cancelled — it may be a lease another request is
+ * legitimately holding — but the loop stops waiting on it and answers with
+ * what it has.
+ *
+ * A **factory**, not a promise, and that is the whole point: an argument is
+ * evaluated before the function it is passed to, so taking a promise here
+ * started the work before the budget was consulted. With several tool uses in
+ * one turn that meant a tool could mutate the user's data (`add_to_wishlist`)
+ * after the request had already given up and returned.
+ */
+export async function withinBudget<T>(
+  startedAt: number,
+  budgetMs: number,
+  start: () => Promise<T>,
+): Promise<T | null> {
+  const left = budgetMs - (Date.now() - startedAt);
+  if (left <= 0) return null;
+  const work = start();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expiry = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), left);
+  });
+  try {
+    return await Promise.race([work, expiry]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * Singleton client for Anthropic Messages-compatible calls. OpenRouter is
  * selected first so one OPENROUTER_API_KEY can serve every AI feature.
  */
@@ -67,7 +166,13 @@ export function getAnthropic(): Anthropic {
   if (testClient) return testClient;
   const options = aiClientOptions();
   if (!options) throw new AiNotConfiguredError();
-  if (!singleton) singleton = new Anthropic(options);
+  if (!singleton) {
+    singleton = new Anthropic({
+      ...options,
+      timeout: AI_TIMEOUT_MS,
+      maxRetries: AI_MAX_RETRIES,
+    });
+  }
   return singleton;
 }
 

@@ -47,6 +47,46 @@ describe("POST /api/scan-label", () => {
     expect(body.error).toBe("AI features are not configured");
   });
 
+  /**
+   * Review SEC-M1: this route used to `await request.json()` first and check the
+   * size after, so the expensive part happened before the refusal. Vercel's
+   * ~4.5 MB platform cap hid it; self-hosted, one authenticated 500 MB POST
+   * takes the process down.
+   */
+  it("returns 413 on the declared size alone, before parsing anything", async () => {
+    setSessionUser(user);
+    const fake = makeFakeAnthropic([]);
+    setAnthropicForTests(fake.client);
+
+    // A body that would never survive the parser, behind a header that says it
+    // is enormous. A 413 here can only have come from the header.
+    const res = await POST(
+      new Request("http://localhost:3000/api/scan-label", {
+        method: "POST",
+        headers: { "content-type": "application/json", "content-length": "500000000" },
+        body: "{not json at all",
+      }),
+    );
+    expect(res.status).toBe(413);
+    expect(fake.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects an imageBase64 that is not base64", async () => {
+    setSessionUser(user);
+    const fake = makeFakeAnthropic([]);
+    setAnthropicForTests(fake.client);
+    // The old schema was `z.string().min(1)`, so this reached the size check —
+    // which inferred bytes from the length of something that was never base64.
+    const res = await POST(
+      jsonRequest("/api/scan-label", "POST", {
+        imageBase64: "<svg onload=alert(1)>",
+        mediaType: "image/png",
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(fake.create).not.toHaveBeenCalled();
+  });
+
   it("returns 413 for an oversize payload without calling the model", async () => {
     setSessionUser(user);
     const fake = makeFakeAnthropic([]);
