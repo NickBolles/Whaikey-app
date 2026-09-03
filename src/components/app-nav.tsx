@@ -21,12 +21,25 @@ const QUICK_ACTIONS = [
   { href: "/search", label: "Find a bottle", description: "Browse the whiskey library.", icon: Search },
 ] as const;
 
+/**
+ * The age gate is a blocking screen (PLAN.md §9.1): every tab behind it
+ * redirects straight back to it, so a nav here is five ways to end up in the
+ * same place. Only `/age` — the nav also renders on `/welcome` and `/sign-in`,
+ * which the review lists as its own bug and Lane B's to fix, and fixing it
+ * here would quietly reflow both of those baselines.
+ */
+const HIDDEN_ROUTES = ["/age"];
+
 export function AppNav() {
   const pathname = usePathname();
   const [actionsOpen, setActionsOpen] = useState(false);
   const actionsPanelRef = useRef<HTMLDivElement>(null);
   const actionsTriggerRef = useRef<HTMLButtonElement>(null);
   useScrollLock(actionsOpen);
+
+  const hidden = HIDDEN_ROUTES.some(
+    (route) => pathname === route || pathname.startsWith(`${route}/`),
+  );
 
   const closeActions = () => {
     actionsTriggerRef.current?.focus();
@@ -62,6 +75,10 @@ export function AppNav() {
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [actionsOpen]);
+
+  // Hooks first: an early return above them would change the hook order
+  // between routes, which React forbids.
+  if (hidden) return null;
 
   return (
     <>

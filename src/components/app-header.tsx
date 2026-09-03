@@ -14,7 +14,7 @@ import { UserAvatar } from "@/components/user-avatar";
  * Deliberately NOT sticky: DESIGN.md rule 10 reserves stickiness for the
  * bottom nav so full-page screenshots stay honest.
  */
-const HIDDEN_ROUTES = ["/welcome", "/sign-in"];
+const HIDDEN_ROUTES = ["/welcome", "/sign-in", "/age"];
 
 export interface AppHeaderUser {
   name: string;

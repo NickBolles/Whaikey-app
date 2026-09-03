@@ -424,6 +424,11 @@ test.describe("age gate", () => {
     // The resources page is reachable from inside the gate — the moment it is
     // most worth reading is the moment somebody has just been turned away.
     await expect(page.getByRole("link", { name: /drinking responsibly/i })).toBeVisible();
+
+    // And nothing else is: every tab behind the gate redirects back to it, so
+    // a nav here would be five ways to end up in the same place.
+    await expect(page.getByRole("navigation", { name: "Primary" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "My Bar" })).toHaveCount(0);
   });
 
   test("lets an adult through, back to where they were going", async ({ page }) => {
