@@ -1827,8 +1827,10 @@ function AddUnknownBottle({
   const [category, setCategory] = useState<string>("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** True once the server has refused this exact name as a duplicate. */
+  const [refused, setRefused] = useState(false);
 
-  async function add() {
+  async function add(confirmNew = false) {
     if (name.trim().length < 2) {
       setError("Give it a name — a couple of characters is enough.");
       return;
@@ -1844,11 +1846,16 @@ function AddUnknownBottle({
           category,
           upc: upc ?? undefined,
           source: "scan",
+          confirmNew,
         }),
       });
       if (res.status === 409) {
         const data = (await res.json()) as { duplicates?: BottleSearchResult[] };
         onDuplicates(data.duplicates ?? []);
+        // Kept on screen with a way through it: a genuinely different bottle
+        // can share a normalized name, and without this the same payload gets
+        // the same 409 forever.
+        setRefused(true);
         setBusy(false);
         return;
       }
@@ -1872,7 +1879,10 @@ function AddUnknownBottle({
       <input
         id="scan-add-name"
         value={name}
-        onChange={(e) => setName(e.target.value)}
+        onChange={(e) => {
+          setName(e.target.value);
+          setRefused(false);
+        }}
         placeholder="Elijah Craig Barrel Proof B524"
         className="w-full rounded-xl border border-border-subtle bg-surface py-2.5 px-3 text-sm text-foreground placeholder:text-muted focus:outline-none focus:border-accent/70"
       />
@@ -1897,14 +1907,20 @@ function AddUnknownBottle({
           {error}
         </p>
       )}
+      {refused && (
+        <p className="text-xs text-muted leading-relaxed">
+          We may already have this one — it&apos;s in the list above. If yours is a different
+          bottle with the same name, add it anyway.
+        </p>
+      )}
       <div className="flex gap-2">
         <button
           type="button"
           disabled={busy || !category}
-          onClick={() => void add()}
+          onClick={() => void add(refused)}
           className="btn-primary flex-1 px-4 py-2.5 text-sm font-medium disabled:opacity-50"
         >
-          {busy ? "Adding…" : "Add and use it"}
+          {busy ? "Adding…" : refused ? "None of these — add mine" : "Add and use it"}
         </button>
         <button
           type="button"

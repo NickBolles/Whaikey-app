@@ -5,6 +5,8 @@ import { createTestUser, setupTestDb } from "@/test/helpers";
 import {
   AgeAnswerAlreadyRecordedError,
   DEFAULT_MINIMUM_AGE,
+  MINIMUM_AGE_BY_MARKET,
+  OFFERED_MARKETS,
   ageOn,
   eligibleOn,
   getAgeGateState,
@@ -41,14 +43,31 @@ describe("the minimum by market", () => {
 
 describe("ageOn", () => {
   it("counts whole years by the calendar, including the birthday itself", () => {
-    expect(ageOn("2000-06-15", new Date("2026-06-14T23:59:59Z"))).toBe(25);
-    expect(ageOn("2000-06-15", new Date("2026-06-15T00:00:00Z"))).toBe(26);
+    // The comparison runs in the last timezone to reach a date (UTC-12), so
+    // "their birthday everywhere" is UTC noon on the day after.
+    expect(ageOn("2000-06-15", new Date("2026-06-15T11:59:00Z"))).toBe(25);
+    expect(ageOn("2000-06-15", new Date("2026-06-15T12:00:00Z"))).toBe(26);
   });
 
   it("does not drift on leap days, which dividing milliseconds does", () => {
     // 2004-02-29 → the day before the 21st birthday and the day of it.
-    expect(ageOn("2004-02-29", new Date("2025-02-28T12:00:00Z"))).toBe(20);
-    expect(ageOn("2004-02-29", new Date("2025-03-01T12:00:00Z"))).toBe(21);
+    expect(ageOn("2004-02-29", new Date("2025-02-28T23:00:00Z"))).toBe(20);
+    expect(ageOn("2004-02-29", new Date("2025-03-01T13:00:00Z"))).toBe(21);
+  });
+
+  /**
+   * A birthday is a local calendar date and the gate does not know the user's
+   * clock. Comparing against UTC would let somebody in California in before
+   * their birthday had started there; the gate is late everywhere instead of
+   * early anywhere.
+   */
+  it("never admits anyone before the day has started in the last timezone", () => {
+    // 21 in the US, checked at 9pm California time on the eve of the birthday
+    // — which is already the birthday in UTC.
+    const eveningBefore = new Date("2026-06-15T04:00:00Z"); // 2026-06-14 21:00 PDT
+    expect(ageOn("2005-06-15", eveningBefore)).toBe(20);
+    // And by mid-morning UTC the next day, the date has turned everywhere.
+    expect(ageOn("2005-06-15", new Date("2026-06-15T23:00:00Z"))).toBe(21);
   });
 });
 
@@ -146,6 +165,21 @@ describe("getAgeGateState", () => {
   });
 });
 
+describe("the offered markets", () => {
+  /**
+   * Leaving a raised-minimum market off the list does not apply its rule — it
+   * hides it, and hands that person the default 18 they would not have got if
+   * we had asked properly. This is the invariant that stops the two lists
+   * drifting apart.
+   */
+  it("names every market whose minimum is above the default", () => {
+    const offered = new Set(OFFERED_MARKETS.map((m) => m.code));
+    for (const code of Object.keys(MINIMUM_AGE_BY_MARKET)) {
+      expect(offered.has(code)).toBe(true);
+    }
+  });
+});
+
 describe("eligibleOn", () => {
   it("is the birthday the minimum lands on", () => {
     expect(eligibleOn("2008-01-20", 21)).toBe("2029-01-20");
@@ -160,6 +194,13 @@ describe("isUngatedPath", () => {
     expect(isUngatedPath("/responsible")).toBe(true);
     expect(isUngatedPath("/s/abc123")).toBe(true);
     expect(isUngatedPath("/api/age")).toBe(true);
+  });
+
+  it("still recognises the gate when the path arrives with its query string", () => {
+    // The proxy sends path + search, so the header is "/age?next=%2Fbar".
+    expect(isUngatedPath("/age?next=%2Fbar")).toBe(true);
+    expect(isUngatedPath("/sign-in?next=%2F")).toBe(true);
+    expect(isUngatedPath("/pour?bottleId=x")).toBe(false);
   });
 
   it("gates everything the app actually is", () => {

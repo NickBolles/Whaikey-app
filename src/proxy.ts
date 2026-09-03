@@ -18,7 +18,11 @@ export const PATH_HEADER = "x-whaikey-path";
 
 export function proxy(request: NextRequest): NextResponse {
   const headers = new Headers(request.headers);
-  headers.set(PATH_HEADER, request.nextUrl.pathname);
+  // Path *and* query: the gate sends people back where they were going, and
+  // several of those places are only meaningful with their parameters —
+  // `/pour?bottleId=…`, `/bottles/new?name=…&upc=…`. Dropping the search
+  // string turns "carry on" into "start again".
+  headers.set(PATH_HEADER, `${request.nextUrl.pathname}${request.nextUrl.search}`);
   return NextResponse.next({ request: { headers } });
 }
 

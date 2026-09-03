@@ -34,7 +34,15 @@ export const MINIMUM_AGE_BY_MARKET: Readonly<Record<string, number>> = {
   KR: 19,
 };
 
-/** The markets the gate offers by name; anything else is "Somewhere else". */
+/**
+ * The markets the gate offers by name; anything else is "Somewhere else",
+ * which takes the default.
+ *
+ * **Every market with a raised minimum has to be on this list.** Leaving one
+ * off does not apply its rule — it hides it, and hands the person the 18 they
+ * would not have got if we had asked properly. `age-gate.test.ts` asserts the
+ * two lists agree, so adding a market above without adding it here fails.
+ */
 export const OFFERED_MARKETS: ReadonlyArray<{ code: string; label: string }> = [
   { code: "US", label: "United States" },
   { code: "CA", label: "Canada" },
@@ -45,6 +53,7 @@ export const OFFERED_MARKETS: ReadonlyArray<{ code: string; label: string }> = [
   { code: "DE", label: "Germany" },
   { code: "FR", label: "France" },
   { code: "JP", label: "Japan" },
+  { code: "KR", label: "South Korea" },
   { code: "OTHER", label: "Somewhere else" },
 ];
 
@@ -65,15 +74,37 @@ export function isValidBirthDate(value: string): boolean {
 }
 
 /**
+ * The latest timezone offset in use, in hours behind UTC.
+ *
+ * A birthday is a local calendar date, and the gate does not know the user's
+ * clock — only the market they picked, which is not the same thing (a Korean
+ * account opened from a US airport is still Korean). Comparing against UTC
+ * would admit somebody in California during the evening before their
+ * twenty-first birthday, because UTC has already turned over.
+ *
+ * So the comparison runs in the *last* place on Earth to reach a date: nobody
+ * is ever admitted before the day is theirs, anywhere. The cost is that
+ * somebody east of UTC waits a few hours into their birthday, which is the
+ * right side of this to be wrong on.
+ */
+const LATEST_OFFSET_HOURS = 12;
+
+/** The calendar date in the last timezone to reach it. */
+function conservativeToday(on: Date): Date {
+  return new Date(on.getTime() - LATEST_OFFSET_HOURS * 60 * 60 * 1000);
+}
+
+/**
  * Whole years between a birth date and a day, by calendar — never by dividing
  * milliseconds, which is wrong across leap years and wrong by a day for
  * anyone born on 29 February.
  */
 export function ageOn(birthDate: string, on: Date): number {
+  const today = conservativeToday(on);
   const [year, month, day] = birthDate.split("-").map(Number);
-  let age = on.getUTCFullYear() - year;
-  const monthNow = on.getUTCMonth() + 1;
-  const dayNow = on.getUTCDate();
+  let age = today.getUTCFullYear() - year;
+  const monthNow = today.getUTCMonth() + 1;
+  const dayNow = today.getUTCDate();
   if (monthNow < month || (monthNow === month && dayNow < day)) age--;
   return age;
 }
@@ -190,5 +221,8 @@ const UNGATED_ROOTS = ["/age", "/sign-in", "/responsible", "/s", "/api"];
  * is a gate anyone can walk around by naming a route carefully.
  */
 export function isUngatedPath(pathname: string): boolean {
-  return UNGATED_ROOTS.some((root) => pathname === root || pathname.startsWith(`${root}/`));
+  // The header carries the query string too, and `/age?next=…` must still be
+  // recognised as the gate.
+  const path = pathname.split("?", 1)[0];
+  return UNGATED_ROOTS.some((root) => path === root || path.startsWith(`${root}/`));
 }

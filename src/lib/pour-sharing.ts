@@ -1,7 +1,7 @@
 import { and, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
-import { SocialDisabledError } from "@/lib/pours";
+import { PendingBottleError, SocialDisabledError } from "@/lib/pours";
 
 const SHARE_CODE_LENGTH = 12;
 
@@ -78,6 +78,20 @@ export async function createPourShare(
           where: eq(schema.userProfiles.userId, userId),
         });
         if (profile && !profile.socialEnabled) throw new SocialDisabledError();
+
+        /**
+         * And no bearer link to a pour of an unreviewed submission
+         * (PLAN-A1/WP-16). The share page renders the bottle's name to anyone
+         * holding the code, which is the same publication the submission rule
+         * exists to prevent — just through a link instead of a feed.
+         */
+        const [bottle] = await tx
+          .select({ status: schema.bottles.status })
+          .from(schema.pours)
+          .innerJoin(schema.bottles, eq(schema.bottles.id, schema.pours.bottleId))
+          .where(and(eq(schema.pours.id, pourId), eq(schema.pours.userId, userId)))
+          .limit(1);
+        if (bottle?.status === "user_submitted") throw new PendingBottleError();
 
         const existing = await tx.query.pourShares.findFirst({
           where: and(eq(schema.pourShares.pourId, pourId), eq(schema.pourShares.userId, userId)),

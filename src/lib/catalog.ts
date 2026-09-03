@@ -6,8 +6,11 @@ import {
   bottles,
   distilleries,
   type Bottle,
+  type Relationship,
+  type UserBottle,
   type WhiskeyCategory,
 } from "@/db/schema";
+import { upsertUserBottle } from "@/lib/bar";
 import { searchBottles, type BottleSearchResult } from "@/lib/search";
 
 /**
@@ -99,6 +102,8 @@ function normalizeName(value: string): string {
 export interface SubmittedBottle {
   bottle: Bottle;
   submissionId: string;
+  /** The shelf row, when the caller asked for one in the same breath. */
+  userBottle: UserBottle | null;
 }
 
 /**
@@ -131,6 +136,8 @@ export async function submitBottle(
   input: BottleSubmissionInput & {
     /** Set once the user has seen the near-matches and said none of them is it. */
     confirmNew?: boolean;
+    /** Put it on the shelf in the same transaction (see below). */
+    relationship?: Relationship;
   },
   now = new Date(),
 ): Promise<SubmittedBottle> {
@@ -141,6 +148,15 @@ export async function submitBottle(
   const bottleId = crypto.randomUUID();
   const submissionId = crypto.randomUUID();
 
+  let userBottle: UserBottle | null = null;
+  /**
+   * The shelf row is written in the same transaction as the bottle.
+   *
+   * Split across two, a failure in between left the bottle and its review row
+   * committed with no shelf row — and the retry then hit the duplicate-name
+   * 409, so the relationship the user asked for could never be applied while
+   * the client reported that adding had failed.
+   */
   const bottle = await db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`bottle-submit:${userId}`}))`);
     if (!input.confirmNew) {
@@ -179,10 +195,18 @@ export async function submitBottle(
       distilleryText: distilleryId ? null : distilleryText,
     });
 
+    if (input.relationship) {
+      const shelf = await upsertUserBottle(tx, userId, {
+        bottleId,
+        relationship: input.relationship,
+      });
+      userBottle = shelf.row;
+    }
+
     return row;
   });
 
-  return { bottle, submissionId };
+  return { bottle, submissionId, userBottle };
 }
 
 /**

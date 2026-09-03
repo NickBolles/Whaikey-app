@@ -386,13 +386,14 @@ export function ImportClient() {
                         ),
                       )
                     }
-                    onDuplicates={(found) =>
+                    onChoose={(bottle) =>
                       setRows((prev) =>
                         prev.map((p, pi) =>
                           pi === i
                             ? {
                                 ...p,
-                                candidates: found.map((c) => ({ ...c, via: "name" as const })),
+                                candidates: [{ ...bottle, via: "name" as const }],
+                                choice: bottle.id,
                               }
                             : p,
                         ),
@@ -464,17 +465,23 @@ export function ImportClient() {
 function UnmatchedRow({
   row,
   onAdded,
-  onDuplicates,
+  onChoose,
 }: {
   row: NormalizedImportRow;
   onAdded: (bottle: { id: string; name: string; distillery: string | null; category: string }) => void;
-  onDuplicates: (
-    found: Array<{ id: string; name: string; distillery: string | null; category: string }>,
-  ) => void;
+  onChoose: (bottle: { id: string; name: string; distillery: string | null; category: string }) => void;
 }) {
   const [category, setCategory] = useState<string>("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * Near-matches the server refused over, held here rather than pushed up to
+   * the row: replacing the row's candidates would unmount this component, and
+   * with it the only way to say "mine is a different bottle with that name".
+   */
+  const [duplicates, setDuplicates] = useState<
+    Array<{ id: string; name: string; distillery: string | null; category: string }> | null
+  >(null);
   const name = row.name?.trim() ?? "";
 
   if (!name) {
@@ -485,7 +492,7 @@ function UnmatchedRow({
     );
   }
 
-  async function add() {
+  async function add(confirmNew: boolean) {
     setBusy(true);
     setError(null);
     try {
@@ -497,13 +504,14 @@ function UnmatchedRow({
           category,
           upc: row.upc?.trim() || undefined,
           source: "import",
+          confirmNew,
         }),
       });
       if (res.status === 409) {
         const data = (await res.json()) as {
           duplicates?: Array<{ id: string; name: string; distillery: string | null; category: string }>;
         };
-        onDuplicates(data.duplicates ?? []);
+        setDuplicates(data.duplicates ?? []);
         setBusy(false);
         return;
       }
@@ -520,10 +528,31 @@ function UnmatchedRow({
 
   return (
     <div className="flex flex-col gap-2">
-      <p className="text-xs text-muted">
-        No catalog match. Add it and it&apos;s yours right away — it joins the shared catalog once
-        someone has checked it over.
-      </p>
+      {duplicates === null ? (
+        <p className="text-xs text-muted">
+          No catalog match. Add it and it&apos;s yours right away — it joins the shared catalog
+          once someone has checked it over.
+        </p>
+      ) : (
+        <>
+          <p className="text-xs text-muted">
+            {duplicates.length > 0
+              ? "We may already have this one. Is it any of these?"
+              : "Nothing matched — go ahead."}
+          </p>
+          {duplicates.map((b) => (
+            <button
+              key={b.id}
+              type="button"
+              onClick={() => onChoose(b)}
+              className="btn-secondary px-3 py-2 text-xs font-medium text-left"
+            >
+              {b.name}
+              {b.distillery ? ` — ${b.distillery}` : ""}
+            </button>
+          ))}
+        </>
+      )}
       <div className="flex gap-2">
         <select
           aria-label={`Category for ${name}`}
@@ -541,10 +570,10 @@ function UnmatchedRow({
         <button
           type="button"
           disabled={busy || !category}
-          onClick={() => void add()}
+          onClick={() => void add(duplicates !== null)}
           className="btn-secondary shrink-0 px-3.5 py-2.5 text-xs font-medium disabled:opacity-50"
         >
-          {busy ? "Adding…" : "Add it"}
+          {busy ? "Adding…" : duplicates !== null ? "None of these" : "Add it"}
         </button>
       </div>
       {error && (

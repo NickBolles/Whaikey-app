@@ -164,10 +164,53 @@ describe("ImportClient", () => {
     await user.selectOptions(screen.getByLabelText(/category for stagg/i), "bourbon");
     await user.click(screen.getByRole("button", { name: /^add it$/i }));
 
-    // The duplicate comes back as a candidate on the row rather than a second
-    // catalog entry, so the import continues against the bottle we have.
+    // The near-match is offered as something to pick, and picking it points
+    // the row at the bottle we already have rather than a second entry.
+    await user.click(await screen.findByRole("button", { name: /Stagg — Buffalo Trace/ }));
     const select = (await screen.findByLabelText(/match for stagg/i)) as HTMLSelectElement;
-    await waitFor(() => expect(within(select).getByRole("option", { name: /^Stagg/ })).toBeTruthy());
+    await waitFor(() => expect(select.value).toBe(STAGG.id));
+  });
+
+  /**
+   * A genuinely different bottle can share a normalized name. Without a way
+   * through the prompt the same payload gets the same 409 forever.
+   */
+  it("lets an unmatched row insist its bottle is a different one", async () => {
+    let confirmed = false;
+    const calls = mockApi({
+      match: [{ candidates: [EAGLE] }, { candidates: [] }],
+      addBottle: () => {
+        if (confirmed) {
+          return Response.json(
+            { bottle: { id: "new-bottle", name: "Stagg", category: "bourbon" } },
+            { status: 201 },
+          );
+        }
+        return Response.json(
+          { error: "That bottle may already be in the catalog", duplicates: [STAGG] },
+          { status: 409 },
+        );
+      },
+    });
+    const user = userEvent.setup();
+    render(<ImportClient />);
+
+    await user.click(screen.getByLabelText(/paste csv/i));
+    await user.paste(CSV);
+    await user.click(screen.getByRole("button", { name: /continue/i }));
+    await user.click(await screen.findByRole("button", { name: /match 2 rows/i }));
+    await screen.findByText(/confirm matches \(1\/2\)/i);
+
+    await user.selectOptions(screen.getByLabelText(/category for stagg/i), "bourbon");
+    await user.click(screen.getByRole("button", { name: /^add it$/i }));
+
+    confirmed = true;
+    await user.click(await screen.findByRole("button", { name: /^none of these$/i }));
+
+    await screen.findByText(/confirm matches \(2\/2\)/i);
+    const add = calls.filter((c) => c.url.includes("/api/bottles"));
+    expect((add[0].body as Record<string, unknown>).confirmNew).toBe(false);
+    expect((add[1].body as Record<string, unknown>).confirmNew).toBe(true);
   });
 
   it("surfaces a parse error for junk input", async () => {

@@ -5,6 +5,7 @@ import { getAgeGateState, minimumAgeFor, OFFERED_MARKETS } from "@/lib/age-gate"
 import { getSessionUser } from "@/lib/session";
 import { safeReturnPath } from "@/lib/return-path";
 import { AgeGateForm } from "./age-gate-form";
+import { SignOutButton } from "./sign-out-button";
 
 export const dynamic = "force-dynamic";
 
@@ -65,9 +66,7 @@ export default async function AgePage({
           </Link>{" "}
           has the ways to reach us.
         </p>
-        <Link href="/sign-in" className="btn-secondary px-6 py-3 self-center">
-          Sign out
-        </Link>
+        <SignOutButton className="btn-secondary px-6 py-3 self-center" />
       </div>
     );
   }

@@ -28,6 +28,16 @@ export default async function NewBottlePage({ searchParams }: { searchParams: Pa
   const params = await searchParams;
 
   if (!user) {
+    // The signed-out path here is a real one: the search miss is public, so a
+    // visitor can arrive with a name and a barcode already filled in. Sending
+    // them to sign-in without a return path throws all of that away.
+    const back = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      const first = Array.isArray(value) ? value[0] : value;
+      if (first) back.set(key, first);
+    }
+    const query = back.toString();
+    const next = `/bottles/new${query ? `?${query}` : ""}`;
     return (
       <div className="flex flex-col items-center justify-center min-h-[60dvh] px-6 text-center gap-5">
         <div aria-hidden className="text-5xl drop-shadow-[0_0_24px_rgba(232,161,60,0.25)]">
@@ -39,7 +49,10 @@ export default async function NewBottlePage({ searchParams }: { searchParams: Pa
             Sign in to add a bottle the catalog is missing.
           </p>
         </div>
-        <Link href="/sign-in" className="btn-primary px-8 py-3">
+        <Link
+          href={`/sign-in?next=${encodeURIComponent(next)}`}
+          className="btn-primary px-8 py-3"
+        >
           Sign in
         </Link>
       </div>

@@ -295,6 +295,39 @@ describe("a pour of an unreviewed bottle", () => {
     const other = await logPour(db, alice.id, { bottleId: shared.id, visibility: "public" });
     expect(other.pour.visibility).toBe("public");
   });
+
+  /**
+   * Holding it private at write time is only half the door. The owner can
+   * come back later and publish the note, or mint a bearer link to it — both
+   * of which render the bottle's name to someone else.
+   */
+  it("cannot be published or shared after the fact either", async () => {
+    const { logPour, updatePourVisibility, PendingBottleError } = await import("@/lib/pours");
+    const { createPourShare } = await import("@/lib/pour-sharing");
+    const { bottle } = await submitBottle(db, alice.id, {
+      name: "Alice's Barrel Pick",
+      category: "bourbon",
+    });
+    const { pour } = await logPour(db, alice.id, { bottleId: bottle.id });
+
+    await expect(
+      updatePourVisibility(db, alice.id, pour.id, "public"),
+    ).rejects.toBeInstanceOf(PendingBottleError);
+    await expect(createPourShare(db, alice.id, pour.id)).rejects.toBeInstanceOf(
+      PendingBottleError,
+    );
+    // Setting it private is always allowed — nothing here traps a note.
+    await expect(updatePourVisibility(db, alice.id, pour.id, "private")).resolves.toBeTruthy();
+
+    // Once the bottle is shared, its owner can publish the note themselves.
+    await db
+      .update(schema.bottles)
+      .set({ status: "verified" })
+      .where(eq(schema.bottles.id, bottle.id));
+    await expect(updatePourVisibility(db, alice.id, pour.id, "public")).resolves.toMatchObject({
+      visibility: "public",
+    });
+  });
 });
 
 describe("duplicate detection", () => {

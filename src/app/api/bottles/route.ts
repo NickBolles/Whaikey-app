@@ -4,7 +4,6 @@ import { getDb } from "@/db";
 import { RELATIONSHIPS, WHISKEY_CATEGORIES } from "@/db/schema";
 import { requireUser, withErrorHandling } from "@/lib/session";
 import { readJsonWithinLimit } from "@/lib/body-limit";
-import { upsertUserBottle } from "@/lib/bar";
 import { isValidUpc, normalizeUpc } from "@/lib/scan";
 import {
   DuplicateBottleError,
@@ -105,20 +104,11 @@ export async function POST(request: Request): Promise<NextResponse> {
       throw err;
     }
 
-    let userBottle = null;
-    if (input.relationship) {
-      const result = await upsertUserBottle(db, user.id, {
-        bottleId: created.bottle.id,
-        relationship: input.relationship,
-      });
-      userBottle = result.row;
-    }
-
     return NextResponse.json(
       {
         bottle: created.bottle,
         submissionId: created.submissionId,
-        userBottle,
+        userBottle: created.userBottle,
         /** Near-matches we found anyway, so the client can offer a merge later. */
         similar: nearby.filter((b) => b.id !== created.bottle.id),
       },

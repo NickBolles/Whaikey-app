@@ -331,6 +331,18 @@ export class SocialDisabledError extends Error {
 }
 
 /**
+ * Raised when a pour of an unreviewed submission is asked to become visible.
+ * The bottle is its submitter's alone until somebody reviews it, and a public
+ * pour would publish it through the side door.
+ */
+export class PendingBottleError extends Error {
+  constructor() {
+    super("That bottle is still waiting to be reviewed");
+    this.name = "PendingBottleError";
+  }
+}
+
+/**
  * Update a pour's social visibility. Owner-scoped; returns null for
  * missing/others'. While the owner is stepped back (socialEnabled=false),
  * non-private updates are rejected — otherwise a stale History tab could
@@ -344,6 +356,21 @@ export async function updatePourVisibility(
   visibility: PourVisibility,
 ): Promise<Pour | null> {
   return db.transaction(async (tx) => {
+    if (visibility !== "private") {
+      /**
+       * A pour of a bottle nobody has reviewed cannot be published later
+       * either (PLAN-A1/WP-16). `logPour` holds it private at write time; this
+       * is the other door into the same room, and a public projection here
+       * would carry the pending bottle's name into the feed just the same.
+       */
+      const [row] = await tx
+        .select({ status: schema.bottles.status })
+        .from(schema.pours)
+        .innerJoin(schema.bottles, eq(schema.bottles.id, schema.pours.bottleId))
+        .where(and(eq(schema.pours.id, pourId), eq(schema.pours.userId, userId)))
+        .limit(1);
+      if (row?.status === "user_submitted") throw new PendingBottleError();
+    }
     if (visibility !== "private") {
       // Same lock as makeEverythingPrivate: the check and the write are
       // atomic w.r.t. a concurrent US-11 reset.

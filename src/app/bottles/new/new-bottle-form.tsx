@@ -163,7 +163,14 @@ export function NewBottleForm({
           <input
             id="new-bottle-name"
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onChange={(e) => {
+              setName(e.target.value);
+              // The confirmation is about the name that was refused. Editing
+              // the name and then pressing "add mine" would carry
+              // `confirmNew` onto a different name, skipping the check for a
+              // bottle we may well have.
+              setDuplicates(null);
+            }}
             autoFocus
             placeholder="Elijah Craig Barrel Proof B524"
             className={INPUT}

@@ -101,9 +101,10 @@ export default function ResponsiblePage() {
       <section className="flex flex-col gap-3">
         <h2 className="font-display text-xl font-semibold">Your data</h2>
         <p className="text-sm text-muted leading-relaxed">
-          Your notes and your shelf are private by default and always exportable. Nothing you
-          log is shared until you choose to share it, and what you paid never appears anywhere
-          another person can see.{" "}
+          Your notes and your shelf are private by default. Nothing you log is shared until you
+          choose to share it, and what you paid never appears anywhere another person can see.
+          A one-tap export of everything you have written is on the way and is not built yet —
+          this page will say so until it is.{" "}
           <Link href="/sharing" className="text-accent font-medium">
             Sharing and privacy
           </Link>{" "}
