@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { signOut } from "@/lib/auth-client";
+import { signOutCompletely } from "@/lib/sign-out";
 
 /**
  * The one account action reachable from the blocked gate, and it has to
@@ -24,7 +24,7 @@ export function SignOutButton({ className }: { className?: string }) {
         onClick={() => {
           setBusy(true);
           setFailed(false);
-          void signOut()
+          void signOutCompletely()
             .then(() => {
               // A hard navigation rather than a router push: the session
               // cookie is gone, and every cached server render above this one

@@ -16,6 +16,7 @@ import {
 import type { AuthCallback } from "@/lib/native/auth";
 import { checkShellVersion, type ShellVersionCheck } from "@/lib/native/manifest";
 import { isNativeApp } from "@/lib/native/platform";
+import { refreshPushRegistration } from "@/lib/native/push";
 import { flushPourQueue, isOnline } from "@/lib/native/offline-queue";
 
 /**
@@ -168,6 +169,16 @@ export function NativeShell({ userId }: { userId?: string | null }) {
       if (check.status === "update_required") setOutdated(check);
     });
 
+    /**
+     * Tell the server this device is still here (review SEC-M6). A push token
+     * stays with its account until that account releases it or stops
+     * refreshing it, and nothing was refreshing it — every registration aged
+     * into "abandoned" after a week and became claimable by anyone holding the
+     * leaked token. Never prompts: a device that has not opted in is left
+     * alone.
+     */
+    void refreshPushRegistration();
+
     const unsubscribeResume = onResume(() => {
       // Server-rendered pages (My Bar totals, pour history) go stale while the
       // app is backgrounded; refresh re-runs them without losing client state.
@@ -177,6 +188,7 @@ export function NativeShell({ userId }: { userId?: string | null }) {
       // reliably fire `visibilitychange`, so this is its own hook rather than
       // a duplicate of the web one above.
       void syncQueue();
+      void refreshPushRegistration();
     });
 
     return () => {

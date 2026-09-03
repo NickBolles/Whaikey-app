@@ -72,6 +72,46 @@ export async function enablePush(): Promise<PushPermission> {
 }
 
 /**
+ * Re-register a device that has already granted permission (review SEC-M6).
+ *
+ * The server keeps a push token with the account that registered it until that
+ * account releases it or **stops refreshing it**. Nothing was refreshing it:
+ * `enablePush` runs once, at the moment somebody opts in, so every row aged
+ * past the staleness window and became claimable by anyone holding the leaked
+ * token — the original attack, delayed by a week rather than closed.
+ *
+ * So the shell says "still here" on every launch and resume. Never prompts:
+ * an already-granted permission is re-registered, and everything else returns
+ * without touching the OS, because iOS gives you exactly one chance to ask and
+ * this is not the moment to spend it.
+ */
+export async function refreshPushRegistration(): Promise<void> {
+  if ((await pushPermissionState()) !== "granted") return;
+  const plugin = await loadPlugin(() => import("@capacitor/push-notifications"));
+  if (!plugin) return;
+
+  const { PushNotifications } = plugin;
+  try {
+    const token = await new Promise<string | null>((resolve) => {
+      const timer = setTimeout(() => resolve(null), 10_000);
+      void PushNotifications.addListener("registration", ({ value }) => {
+        clearTimeout(timer);
+        resolve(value);
+      });
+      void PushNotifications.addListener("registrationError", () => {
+        clearTimeout(timer);
+        resolve(null);
+      });
+      void PushNotifications.register();
+    });
+    if (token) await storeToken(token);
+  } catch {
+    // A refresh that fails changes nothing: the row keeps its previous
+    // timestamp and the next launch tries again.
+  }
+}
+
+/**
  * Hand the token to the server. Failures are swallowed: a device that couldn't
  * register this time will try again on the next launch, and a broken push
  * registration must never break the surrounding screen.
