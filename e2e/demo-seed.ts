@@ -600,10 +600,11 @@ export async function seedDemoUser(db: DB): Promise<void> {
       updatedAt: D("2026-03-03T12:00:00Z"),
     },
   ]);
-  // Only Riley's Lagavulin pour carries a note: the comparison screen's
-  // Community column is built from flavour tags, and these two exist to be
-  // *raters*, not tasters. It also keeps them under the taste-twin sample
-  // floor, so they stay out of Jordan's profile.
+  // All three carry a tagged note on the Lagavulin, because the comparison
+  // screen's Community column is built from flavour tags and is suppressed
+  // below three distinct contributors for the same reason the rating is. Two
+  // tagged pours each keeps them under MIN_TWIN_SAMPLE, so they stay out of
+  // Jordan's taste-twin surfaces.
   await db.insert(schema.pours).values([
     {
       id: "demo-community-pour-1",
@@ -674,6 +675,25 @@ export async function seedDemoUser(db: DB): Promise<void> {
     extractedBy: "user",
     createdAt: D("2026-07-10T21:05:00Z"),
   });
+
+  await db.insert(schema.tastingNotes).values([
+    {
+      id: "demo-community-note-2",
+      pourId: "demo-community-pour-3",
+      palate: "Iodine and wet rope, softening to sweet smoke.",
+      flavorTags: { medicinal: 3, brine: 2, campfire: 1 },
+      extractedBy: "user",
+      createdAt: D("2026-07-08T20:05:00Z"),
+    },
+    {
+      id: "demo-community-note-3",
+      pourId: "demo-community-pour-5",
+      palate: "All bonfire and tar, not subtle, not trying to be.",
+      flavorTags: { peat: 3, ash: 2, tar: 1 },
+      extractedBy: "user",
+      createdAt: D("2026-07-06T20:05:00Z"),
+    },
+  ]);
 
   await db.insert(schema.pairings).values([
     {

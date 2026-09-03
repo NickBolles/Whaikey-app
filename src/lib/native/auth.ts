@@ -40,8 +40,10 @@ const ERROR_MESSAGES: Record<string, string> = {
   not_signed_in: "Sign-in was cancelled.",
   no_session_cookie: "Sign-in didn't complete. Please try again.",
   exchange_failed: "Sign-in didn't complete. Please try again.",
-  // The sign-in took too long, or the callback arrived a second time.
+  // The callback arrived a second time, or for a sign-in this server never saw.
   no_request: "Sign-in expired. Please try again.",
+  // The OAuth round trip outlived the request's TTL.
+  expired: "Sign-in took too long. Please try again.",
 };
 
 export function describeNativeAuthError(code: string | null): string | null {

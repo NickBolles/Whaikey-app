@@ -156,13 +156,23 @@ export interface ConsumedAuthRequest {
   codeChallenge: string;
   state: string;
   next: string | null;
+  /**
+   * The request was real but took too long. The app still needs its state back
+   * to recognise the callback as its own — without it the callback is dropped
+   * as forged and sign-in hangs on "Connecting…" until the user restarts, so
+   * an expired request is reported, not silently discarded.
+   */
+  expired: boolean;
 }
 
 /**
- * Take a pending sign-in, or null if it is unknown, expired or already used.
+ * Take a pending sign-in, or null if it is unknown or already used.
  *
  * `DELETE … RETURNING` so two callbacks for one request race in the database
- * and exactly one wins, and so nothing is left behind to replay.
+ * and exactly one wins, and so nothing is left behind to replay. Expiry is
+ * judged after the delete rather than in its predicate: an expired row is
+ * still this app's row, and telling it so is what lets it fail cleanly. Null
+ * is reserved for an id nobody issued — the forged case, which gets nothing.
  */
 export async function consumeNativeAuthRequest(
   id: string,
@@ -171,14 +181,15 @@ export async function consumeNativeAuthRequest(
   if (!id) return null;
   const [row] = await getDb()
     .delete(schema.nativeAuthRequests)
-    .where(
-      and(
-        eq(schema.nativeAuthRequests.id, id),
-        sql`${schema.nativeAuthRequests.expiresAt} > ${now}`,
-      ),
-    )
+    .where(eq(schema.nativeAuthRequests.id, id))
     .returning();
-  return row ? { codeChallenge: row.codeChallenge, state: row.state, next: row.next } : null;
+  if (!row) return null;
+  return {
+    codeChallenge: row.codeChallenge,
+    state: row.state,
+    next: row.next,
+    expired: row.expiresAt.getTime() <= now.getTime(),
+  };
 }
 
 /**

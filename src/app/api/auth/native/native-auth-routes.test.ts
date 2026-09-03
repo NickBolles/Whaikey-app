@@ -178,6 +178,26 @@ describe("GET /api/auth/native/complete", () => {
     await expect(db.select().from(schema.nativeAuthCodes)).resolves.toHaveLength(1);
   });
 
+  it("reports an expired sign-in with the state, rather than leaving the app hanging", async () => {
+    // A slow OAuth round trip is still this app's sign-in. Without its state
+    // back, the app drops the callback as forged and sits on "Connecting…".
+    const id = await startNativeAuthRequest({
+      codeChallenge: CHALLENGE,
+      state: STATE,
+      now: new Date(Date.now() - 20 * 60_000),
+    });
+    const res = await COMPLETE(
+      get(`/api/auth/native/complete?request=${id}`, { [SESSION_COOKIE]: COOKIE_VALUE }),
+    );
+
+    const params = callbackParams(res);
+    expect(params.get("error")).toBe("expired");
+    expect(params.get("state")).toBe(STATE);
+    expect(params.get("code")).toBeNull();
+    // And nothing was minted for it.
+    await expect(db.select().from(schema.nativeAuthCodes)).resolves.toHaveLength(0);
+  });
+
   it("reports a cancelled sign-in with the state, so the app can show it", async () => {
     setSessionUser(null);
     const id = await pending();

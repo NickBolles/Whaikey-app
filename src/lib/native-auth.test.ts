@@ -226,18 +226,39 @@ describe("pending sign-in requests", () => {
       codeChallenge: CHALLENGE,
       state: "state-nonce",
       next: "/add/sasha",
+      expired: false,
     });
     // Single use: a replayed callback URL has nothing to complete.
     await expect(consumeNativeAuthRequest(id)).resolves.toBeNull();
   });
 
-  it("refuses unknown, empty and expired ids", async () => {
+  it("gives nothing back for an id nobody issued", async () => {
+    // The forged case: no state to echo, so the app has nothing to accept.
     await expect(consumeNativeAuthRequest("never-issued")).resolves.toBeNull();
     await expect(consumeNativeAuthRequest("")).resolves.toBeNull();
+  });
 
-    const id = await startNativeAuthRequest({ codeChallenge: CHALLENGE, state: "s" });
+  /**
+   * An OAuth round trip that outlives the TTL is a real sign-in, and the app
+   * drops any callback whose state it can't match — so a stateless answer left
+   * it hanging on "Connecting…" until the user restarted. Expiry is reported
+   * with its state, not silently discarded.
+   */
+  it("reports an expired request with its state, so the app can fail cleanly", async () => {
+    const id = await startNativeAuthRequest({ codeChallenge: CHALLENGE, state: "state-nonce" });
     const tooLate = new Date(Date.now() + REQUEST_TTL_MS + 1_000);
+
+    await expect(consumeNativeAuthRequest(id, tooLate)).resolves.toMatchObject({
+      state: "state-nonce",
+      expired: true,
+    });
+    // Still single-use: the row is gone either way.
     await expect(consumeNativeAuthRequest(id, tooLate)).resolves.toBeNull();
+  });
+
+  it("marks a live request as not expired", async () => {
+    const id = await startNativeAuthRequest({ codeChallenge: CHALLENGE, state: "s" });
+    await expect(consumeNativeAuthRequest(id)).resolves.toMatchObject({ expired: false });
   });
 
   it("lets only one of two concurrent completions win", async () => {

@@ -160,6 +160,12 @@ export interface FlushResult {
   remaining: number;
   /** Dropped after MAX_ATTEMPTS of server rejection — surfaced, never silent. */
   discarded: QueuedPour[];
+  /**
+   * Queued by a release that recorded no author, so there is nobody to safely
+   * send them as. Counted rather than sent, and counted rather than dropped:
+   * the note is still on the device and still owed to whoever wrote it.
+   */
+  unclaimed: number;
 }
 
 let inFlight: Promise<FlushResult> | null = null;
@@ -183,24 +189,26 @@ export function flushPourQueue(userId?: string): Promise<FlushResult> {
 /**
  * Whether this entry is the current user's to send.
  *
- * An entry with no owner predates the release that started recording one, and
- * — on the web — predates any flush at all, so it has been sitting unsent since
- * it was written. Sending it as whoever is signed in now is a guess, and on the
- * single-account device that is nearly every device it is the right one; the
- * alternative is stranding the pour permanently, which is the data loss this
- * queue exists to prevent. Entries written from here on always carry an owner,
- * so the guess expires with them.
+ * An entry with no owner predates the release that started recording one. It is
+ * tempting to send those as whoever is signed in now — on a single-account
+ * device that is who wrote them, and the alternative leaves a pour unsent.
+ * But "usually right" is not a basis for writing someone's private tasting note
+ * into another person's journal, which is what the guess costs when it is
+ * wrong, and it is wrong exactly where two people share a browser. Private by
+ * default is not a probability.
+ *
+ * So they are held, and `FlushResult.unclaimed` says how many, so the app can
+ * offer them to their author instead of quietly deciding on their behalf.
  */
 function belongsTo(entry: QueuedPour, userId: string | undefined): boolean {
-  if (entry.userId === undefined) return true;
-  return entry.userId === userId;
+  return entry.userId !== undefined && entry.userId === userId;
 }
 
 /**
  * The body to actually POST. Entries from before `clientId` existed carry none,
- * and they are exactly the ones that have been queued longest — so give them
- * the queue id they already have. Without it, flushing them for the first time
- * would reintroduce the double-log this release closes (REL-4.2).
+ * so give them the queue id they already have — that key has to be stable from
+ * the first attempt, whenever the entry is finally claimed and sent, or the
+ * double-log this release closes comes back with it (REL-4.2).
  */
 function bodyFor(entry: QueuedPour): unknown {
   const body = entry.body;
@@ -219,18 +227,21 @@ function bodyFor(entry: QueuedPour): unknown {
  */
 async function runFlush(userId: string | undefined): Promise<FlushResult> {
   const queue = await readQueue();
-  if (queue.length === 0) return { synced: 0, remaining: 0, discarded: [] };
+  if (queue.length === 0) return { synced: 0, remaining: 0, discarded: [], unclaimed: 0 };
 
   const discarded: QueuedPour[] = [];
   const handled = new Set<string>();
   let synced = 0;
+  let unclaimed = 0;
 
   for (const entry of queue) {
     if (!belongsTo(entry, userId)) {
-      // Someone else's pour on a shared browser: not ours to send and not ours
-      // to delete, so leave it and carry on. Stopping here would strand this
-      // user's own later pours behind it forever, and there is no timeline
-      // that spans two accounts for the ordering to protect.
+      // Someone else's pour on a shared browser, or one with no author on
+      // record: not ours to send and not ours to delete, so leave it and carry
+      // on. Stopping here would strand this user's own later pours behind it
+      // forever, and there is no timeline spanning two accounts for the
+      // ordering to protect.
+      if (entry.userId === undefined) unclaimed++;
       continue;
     }
     let response: Response;
@@ -290,7 +301,7 @@ async function runFlush(userId: string | undefined): Promise<FlushResult> {
     return kept;
   });
 
-  return { synced, remaining: remaining.length, discarded };
+  return { synced, remaining: remaining.length, discarded, unclaimed };
 }
 
 /** Whether the device currently believes it has a connection. */

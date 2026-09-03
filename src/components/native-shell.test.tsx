@@ -8,6 +8,9 @@ vi.mock("next/navigation", () => ({ useRouter: () => router }));
 import { NativeShell } from "@/components/native-shell";
 import { clearQueue, enqueuePour, flushPourQueue, queueDepth } from "@/lib/native/offline-queue";
 
+/** The signed-in user; the flush only ever sends pours it can attribute. */
+const ME = "user-me";
+
 beforeEach(async () => {
   // Every mount above starts a flush, and the single-flight guard would hand a
   // still-pending one to the next test instead of looking at its queue. Let it
@@ -28,7 +31,7 @@ afterEach(() => {
 
 describe("NativeShell", () => {
   it("renders nothing", () => {
-    const { container } = render(<NativeShell />);
+    const { container } = render(<NativeShell userId={ME} />);
     expect(container).toBeEmptyDOMElement();
   });
 
@@ -36,7 +39,7 @@ describe("NativeShell", () => {
     // The web app must not pay for the *native* parts of the shell — no marker
     // class, no plugin work, no navigation. The offline pour flush is the one
     // deliberate exception (below): web and PWA users queue pours too.
-    render(<NativeShell />);
+    render(<NativeShell userId={ME} />);
     expect(document.documentElement).not.toHaveClass("native-app");
     expect(router.back).not.toHaveBeenCalled();
     expect(router.push).not.toHaveBeenCalled();
@@ -50,7 +53,7 @@ describe("NativeShell", () => {
       writable: true,
     });
 
-    const { unmount } = render(<NativeShell />);
+    const { unmount } = render(<NativeShell userId={ME} />);
     expect(document.documentElement).toHaveClass("native-app");
 
     unmount();
@@ -72,10 +75,10 @@ describe("NativeShell offline pour sync on the web", () => {
   }
 
   it("flushes queued pours on mount even though this is not the native app", async () => {
-    await enqueuePour({ body: { bottleId: "ardbeg-10" }, bottleName: "Ardbeg 10" });
+    await enqueuePour({ body: { bottleId: "ardbeg-10" }, bottleName: "Ardbeg 10", userId: ME });
     const fetchMock = mockFetch();
 
-    render(<NativeShell />);
+    render(<NativeShell userId={ME} />);
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/pours", expect.anything()));
     await waitFor(async () => expect(await queueDepth()).toBe(0));
@@ -86,9 +89,9 @@ describe("NativeShell offline pour sync on the web", () => {
 
   it("flushes again when the connection comes back", async () => {
     const fetchMock = mockFetch();
-    render(<NativeShell />);
+    render(<NativeShell userId={ME} />);
 
-    await enqueuePour({ body: { bottleId: "springbank-15" }, bottleName: "Springbank 15" });
+    await enqueuePour({ body: { bottleId: "springbank-15" }, bottleName: "Springbank 15", userId: ME });
     window.dispatchEvent(new Event("online"));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
@@ -97,9 +100,9 @@ describe("NativeShell offline pour sync on the web", () => {
 
   it("flushes when the tab comes back to the foreground", async () => {
     const fetchMock = mockFetch();
-    render(<NativeShell />);
+    render(<NativeShell userId={ME} />);
 
-    await enqueuePour({ body: { bottleId: "lagavulin-16" }, bottleName: "Lagavulin 16" });
+    await enqueuePour({ body: { bottleId: "lagavulin-16" }, bottleName: "Lagavulin 16", userId: ME });
     document.dispatchEvent(new Event("visibilitychange"));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
@@ -108,10 +111,10 @@ describe("NativeShell offline pour sync on the web", () => {
 
   it("does not send while the browser reports no connection", async () => {
     vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
-    await enqueuePour({ body: { bottleId: "ardbeg-10" }, bottleName: "Ardbeg 10" });
+    await enqueuePour({ body: { bottleId: "ardbeg-10" }, bottleName: "Ardbeg 10", userId: ME });
     const fetchMock = mockFetch();
 
-    render(<NativeShell />);
+    render(<NativeShell userId={ME} />);
 
     // Give the mount effect a turn to do the wrong thing.
     await new Promise((resolve) => setTimeout(resolve, 0));

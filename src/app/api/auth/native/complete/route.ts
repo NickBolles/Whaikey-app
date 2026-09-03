@@ -40,9 +40,9 @@ export async function GET(request: NextRequest) {
   );
 
   if (!pending) {
-    // No pending sign-in, or one that has already been answered. There is
-    // nothing to echo a state back to, so the app has nothing to accept — which
-    // is the point: this response is inert.
+    // An id nobody issued, or one already answered. There is nothing to echo a
+    // state back to, so the app has nothing to accept — which is the point:
+    // this response is inert.
     return appRedirect({ error: "no_request" });
   }
 
@@ -51,6 +51,14 @@ export async function GET(request: NextRequest) {
   const { state, next } = pending;
   const withState = (params: Record<string, string>) =>
     appRedirect(next ? { ...params, state, next } : { ...params, state });
+
+  if (pending.expired) {
+    // A real sign-in that took longer than the TTL. It gets its state back so
+    // the app recognises the callback as its own and can close the browser,
+    // clear the pending sign-in and say so — a stateless answer would be
+    // dropped as forged and leave sign-in hanging on "Connecting…".
+    return withState({ error: "expired" });
+  }
 
   const user = await getSessionUser();
   if (!user) {

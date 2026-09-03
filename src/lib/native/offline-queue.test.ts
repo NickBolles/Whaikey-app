@@ -15,6 +15,8 @@ import {
  * ordering guarantees matter — pours are a timeline.
  */
 const POUR = { bottleId: "ardbeg-10", rating: 4.5 };
+/** The signed-in user for tests that aren't about who owns what. */
+const ME = "user-me";
 
 beforeEach(async () => {
   localStorage.clear();
@@ -31,6 +33,7 @@ async function writeLegacyEntry(entry: {
   id: string;
   body: unknown;
   bottleName: string;
+  userId?: string;
 }): Promise<void> {
   localStorage.setItem(
     "whaikey.pour-queue.v1",
@@ -61,7 +64,7 @@ const status = (code: number) => new Response(null, { status: code });
 
 describe("enqueue and persistence", () => {
   it("survives a reload by living in storage, not memory", async () => {
-    await enqueuePour({ body: POUR, bottleName: "Ardbeg 10" });
+    await enqueuePour({ body: POUR, bottleName: "Ardbeg 10", userId: ME });
 
     // Nothing in-process is consulted: the next read goes back to storage, the
     // same way it would after the OS kills a backgrounded app.
@@ -72,76 +75,81 @@ describe("enqueue and persistence", () => {
   });
 
   it("keeps pours in the order they were logged", async () => {
-    await enqueuePour({ body: { bottleId: "first" }, bottleName: "First" });
-    await enqueuePour({ body: { bottleId: "second" }, bottleName: "Second" });
+    await enqueuePour({ body: { bottleId: "first" }, bottleName: "First", userId: ME });
+    await enqueuePour({ body: { bottleId: "second" }, bottleName: "Second", userId: ME });
     expect((await readQueue()).map((entry) => entry.bottleName)).toEqual(["First", "Second"]);
   });
 
   it("recovers from corrupt storage instead of wedging pour logging", async () => {
     localStorage.setItem("whaikey.pour-queue.v1", "{not json");
     await expect(readQueue()).resolves.toEqual([]);
-    await expect(enqueuePour({ body: POUR, bottleName: "Ardbeg 10" })).resolves.toBe(1);
+    await expect(enqueuePour({ body: POUR, bottleName: "Ardbeg 10", userId: ME })).resolves.toBe(1);
   });
 });
 
 describe("flushPourQueue", () => {
   it("does nothing and touches no network when the queue is empty", async () => {
     const fetchMock = mockFetchSequence();
-    await expect(flushPourQueue()).resolves.toEqual({ synced: 0, remaining: 0, discarded: [] });
+    await expect(flushPourQueue(ME)).resolves.toEqual({
+      synced: 0,
+      remaining: 0,
+      discarded: [],
+      unclaimed: 0,
+    });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("sends everything and empties the queue when online", async () => {
-    await enqueuePour({ body: { bottleId: "a" }, bottleName: "A" });
-    await enqueuePour({ body: { bottleId: "b" }, bottleName: "B" });
+    await enqueuePour({ body: { bottleId: "a" }, bottleName: "A", userId: ME });
+    await enqueuePour({ body: { bottleId: "b" }, bottleName: "B", userId: ME });
     mockFetchSequence(ok(), ok());
 
-    await expect(flushPourQueue()).resolves.toMatchObject({ synced: 2, remaining: 0 });
+    await expect(flushPourQueue(ME)).resolves.toMatchObject({ synced: 2, remaining: 0 });
     await expect(queueDepth()).resolves.toBe(0);
   });
 
   it("stops at the first network failure and keeps the rest in order", async () => {
-    await enqueuePour({ body: { bottleId: "a" }, bottleName: "A" });
-    await enqueuePour({ body: { bottleId: "b" }, bottleName: "B" });
-    await enqueuePour({ body: { bottleId: "c" }, bottleName: "C" });
+    await enqueuePour({ body: { bottleId: "a" }, bottleName: "A", userId: ME });
+    await enqueuePour({ body: { bottleId: "b" }, bottleName: "B", userId: ME });
+    await enqueuePour({ body: { bottleId: "c" }, bottleName: "C", userId: ME });
     mockFetchSequence(ok(), "network-error");
 
-    await expect(flushPourQueue()).resolves.toMatchObject({ synced: 1, remaining: 2 });
+    await expect(flushPourQueue(ME)).resolves.toMatchObject({ synced: 1, remaining: 2 });
     // B must not be skipped over in favour of C — the timeline would reorder.
     expect((await readQueue()).map((entry) => entry.bottleName)).toEqual(["B", "C"]);
   });
 
   it("holds everything when the session has expired", async () => {
-    await enqueuePour({ body: POUR, bottleName: "Ardbeg 10" });
+    await enqueuePour({ body: POUR, bottleName: "Ardbeg 10", userId: ME });
     mockFetchSequence(status(401));
 
-    await expect(flushPourQueue()).resolves.toMatchObject({ synced: 0, remaining: 1 });
+    await expect(flushPourQueue(ME)).resolves.toMatchObject({ synced: 0, remaining: 1 });
     // Not the pour's fault, so it must not burn a retry attempt either.
     expect((await readQueue())[0].attempts).toBe(0);
   });
 
   it("does not spend an attempt on a server error", async () => {
-    await enqueuePour({ body: POUR, bottleName: "Ardbeg 10" });
+    await enqueuePour({ body: POUR, bottleName: "Ardbeg 10", userId: ME });
     mockFetchSequence(status(500));
 
-    await expect(flushPourQueue()).resolves.toMatchObject({ synced: 0, remaining: 1 });
+    await expect(flushPourQueue(ME)).resolves.toMatchObject({ synced: 0, remaining: 1 });
     expect((await readQueue())[0].attempts).toBe(0);
   });
 
   it("eventually drops a pour the server keeps rejecting, and reports it", async () => {
-    await enqueuePour({ body: POUR, bottleName: "Ardbeg 10" });
-    await enqueuePour({ body: { bottleId: "good" }, bottleName: "Good" });
+    await enqueuePour({ body: POUR, bottleName: "Ardbeg 10", userId: ME });
+    await enqueuePour({ body: { bottleId: "good" }, bottleName: "Good", userId: ME });
 
     // A permanently-invalid row must not wedge the queue behind it forever...
     for (let attempt = 0; attempt < 4; attempt++) {
       mockFetchSequence(status(400));
-      const result = await flushPourQueue();
+      const result = await flushPourQueue(ME);
       expect(result).toMatchObject({ synced: 0, remaining: 2, discarded: [] });
     }
 
     // ...but it is dropped loudly, not silently, and only after real persistence.
     mockFetchSequence(status(400), ok());
-    const final = await flushPourQueue();
+    const final = await flushPourQueue(ME);
     expect(final.discarded.map((entry) => entry.bottleName)).toEqual(["Ardbeg 10"]);
     expect(final.synced).toBe(1);
     await expect(queueDepth()).resolves.toBe(0);
@@ -205,14 +213,35 @@ describe("whose pour it is", () => {
     ]);
   });
 
-  it("sends an entry from before owners were recorded, rather than stranding it", async () => {
-    // Written by a release that had no flush on the web at all, so it has been
-    // sitting unsent. On the single-account device that is nearly every device,
-    // the current user is its author; holding it forever is the data loss this
-    // queue exists to prevent.
+  /**
+   * Written by a release that recorded no author. Sending it as whoever happens
+   * to be signed in is right on a single-account device and writes a private
+   * tasting note into a stranger's journal on a shared one. "Usually right" is
+   * not a basis for that, so it is held and counted rather than guessed at.
+   */
+  it("holds a pour from before owners were recorded instead of guessing", async () => {
     await writeLegacyEntry({ id: "legacy-1", body: { bottleId: "a" }, bottleName: "A" });
+    const fetchMock = mockFetchSequence(ok());
+
+    await expect(flushPourQueue("whoever")).resolves.toMatchObject({
+      synced: 0,
+      remaining: 1,
+      unclaimed: 1,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("does not let an unclaimed pour block the signed-in user's own", async () => {
+    await writeLegacyEntry({ id: "legacy-1", body: { bottleId: "a" }, bottleName: "Legacy" });
+    await enqueuePour({ body: { bottleId: "b" }, bottleName: "Mine", userId: "bob" });
     mockFetchSequence(ok());
-    await expect(flushPourQueue("whoever")).resolves.toMatchObject({ synced: 1, remaining: 0 });
+
+    await expect(flushPourQueue("bob")).resolves.toMatchObject({
+      synced: 1,
+      remaining: 1,
+      unclaimed: 1,
+    });
+    expect((await readQueue()).map((entry) => entry.bottleName)).toEqual(["Legacy"]);
   });
 });
 
@@ -223,19 +252,22 @@ describe("legacy entries", () => {
    * double-log it. Stamp the queue id it already has (REL-4.2).
    */
   it("gives a pour with no idempotency key the one it already has", async () => {
-    await writeLegacyEntry({ id: "legacy-1", body: { bottleId: "a" }, bottleName: "A" });
+    // Held entries still need a stable key for whenever they are claimed: the
+    // key has to be the same on the first attempt and the last, or the
+    // double-log comes back with them.
+    await writeLegacyEntry({ id: "legacy-1", body: { bottleId: "a" }, bottleName: "A", userId: "bob" });
     const fetchMock = mockFetchSequence(ok());
 
-    await flushPourQueue();
+    await flushPourQueue("bob");
 
     expect(sentBody(fetchMock)).toEqual({ bottleId: "a", clientId: "legacy-1" });
   });
 
   it("leaves a key the caller already minted alone", async () => {
-    await enqueuePour({ body: { bottleId: "a", clientId: "minted-at-save" }, bottleName: "A" });
+    await enqueuePour({ body: { bottleId: "a", clientId: "minted-at-save" }, bottleName: "A", userId: ME });
     const fetchMock = mockFetchSequence(ok());
 
-    await flushPourQueue();
+    await flushPourQueue(ME);
 
     expect(sentBody(fetchMock).clientId).toBe("minted-at-save");
   });
@@ -249,14 +281,14 @@ describe("concurrent flushes", () => {
    * the bottle two pours emptier.
    */
   it("collapses onto one flush, so a pour is sent once", async () => {
-    await enqueuePour({ body: { bottleId: "a" }, bottleName: "A" });
-    await enqueuePour({ body: { bottleId: "b" }, bottleName: "B" });
+    await enqueuePour({ body: { bottleId: "a" }, bottleName: "A", userId: ME });
+    await enqueuePour({ body: { bottleId: "b" }, bottleName: "B", userId: ME });
     const fetchMock = mockFetchSequence(ok(), ok());
 
     const [first, second, third] = await Promise.all([
-      flushPourQueue(),
-      flushPourQueue(),
-      flushPourQueue(),
+      flushPourQueue(ME),
+      flushPourQueue(ME),
+      flushPourQueue(ME),
     ]);
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -268,12 +300,12 @@ describe("concurrent flushes", () => {
   });
 
   it("takes a fresh look at the queue once the previous flush has settled", async () => {
-    await enqueuePour({ body: { bottleId: "a" }, bottleName: "A" });
+    await enqueuePour({ body: { bottleId: "a" }, bottleName: "A", userId: ME });
     mockFetchSequence(ok(), ok());
 
-    await flushPourQueue();
-    await enqueuePour({ body: { bottleId: "b" }, bottleName: "B" });
-    await expect(flushPourQueue()).resolves.toMatchObject({ synced: 1, remaining: 0 });
+    await flushPourQueue(ME);
+    await enqueuePour({ body: { bottleId: "b" }, bottleName: "B", userId: ME });
+    await expect(flushPourQueue(ME)).resolves.toMatchObject({ synced: 1, remaining: 0 });
   });
 
   /**
@@ -282,7 +314,7 @@ describe("concurrent flushes", () => {
    * erase that pour — the exact silent loss this queue exists to prevent.
    */
   it("keeps a pour logged while the flush was out on the network", async () => {
-    await enqueuePour({ body: { bottleId: "a" }, bottleName: "A" });
+    await enqueuePour({ body: { bottleId: "a" }, bottleName: "A", userId: ME });
 
     let releaseFirstSend: () => void = () => {};
     const sent = new Promise<void>((resolve) => {
@@ -296,8 +328,8 @@ describe("concurrent flushes", () => {
       }),
     );
 
-    const flush = flushPourQueue();
-    await enqueuePour({ body: { bottleId: "b" }, bottleName: "B" });
+    const flush = flushPourQueue(ME);
+    await enqueuePour({ body: { bottleId: "b" }, bottleName: "B", userId: ME });
     releaseFirstSend();
 
     await expect(flush).resolves.toMatchObject({ synced: 1, remaining: 1 });
