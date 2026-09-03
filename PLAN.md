@@ -2,7 +2,9 @@
 
 An AI-native whiskey tracking app, inspired by wine apps like **Vivino** (social scanning + ratings) and **InVintory** (beautiful personal cellar management), but built for whiskey from day one with AI at the core — not bolted on.
 
-> Deep dives: [docs/FEATURES.md](./docs/FEATURES.md) (detailed feature map) · [docs/SOCIAL.md](./docs/SOCIAL.md) (social layer: friends, comparison, clubs, privacy) · [docs/COMPETITORS.md](./docs/COMPETITORS.md) (competitor & market analysis) · [docs/DATA_SOURCES.md](./docs/DATA_SOURCES.md) (data sourcing strategy)
+> **Last refreshed 2026-09-03** against HEAD `6dfb4ff` by the [September 2026 review](./docs/REVIEW_2026-09.md). §2 (current state), §3 (the v1 line), §5 (roadmap) and §12 (decisions) are the sections that go stale; update them on every PR that changes surface area.
+
+> Deep dives: [docs/FEATURES.md](./docs/FEATURES.md) (feature map, REFERENCE) · [docs/STORYBOARD.md](./docs/STORYBOARD.md) (target IA and screen boards, **BINDING** for UI) · [docs/DESIGN.md](./docs/DESIGN.md) (design system, **BINDING**) · [docs/SOCIAL.md](./docs/SOCIAL.md) (social layer, **BINDING** for anything user-to-user) · [docs/COMPETITORS.md](./docs/COMPETITORS.md) · [docs/DATA_SOURCES.md](./docs/DATA_SOURCES.md) · [docs/SOURCING_AT_SCALE.md](./docs/SOURCING_AT_SCALE.md) · [docs/SUBSCRIPTION_CATALOG_AUTOMATION.md](./docs/SUBSCRIPTION_CATALOG_AUTOMATION.md) · [docs/NATIVE_APP.md](./docs/NATIVE_APP.md) · [docs/APP_STORE_SETUP.md](./docs/APP_STORE_SETUP.md) · [docs/REVIEW_2026-09.md](./docs/REVIEW_2026-09.md) (findings and work packages)
 
 ---
 
@@ -22,242 +24,192 @@ An AI-native whiskey tracking app, inspired by wine apps like **Vivino** (social
 
 **Explore and Share are the two we have historically under-built**, and both are the point of the thing: whiskey is a hobby people fall into because someone poured them something, and it stays a hobby because there's always a region, a distillery or a cask finish you haven't met. The app should feel like a passport and a table of friends, not a ledger.
 
+**The v1 promise, in one sentence:** *A whiskey drinker can find any bottle they're holding in under 10 seconds, record what they thought of it in two taps, see what they've tasted and where they haven't been — and get their data out.* Track and Explore are the v1 spine; Refine rides on the wheel that exists; Learn and Share are shipped enough to keep and are frozen until the spine is closed (§5.4).
+
 **Guiding principles:**
 
-1. **AI-native** — AI isn't a feature tab; it powers search, tasting-note capture, recommendations, and a conversational assistant throughout the app.
-2. **Fast above all** — Logging a pour or scanning a bottle must take under 10 seconds. Optimistic UI, offline-capable, instant search.
+1. **AI-native** — AI isn't a feature tab; it powers search, tasting-note capture, recommendations, and a conversational assistant throughout the app. It is also optional: every AI feature degrades to a working manual path.
+2. **Fast above all** — Logging a pour or scanning a bottle must take under 10 seconds. Optimistic UI, offline-capable, instant search. The primary action of every screen is above the fold (STORYBOARD.md).
 3. **User-friendly** — A collector's app that a beginner can use. Progressive disclosure: simple by default, deep when you want it.
 4. **Your palate, not the crowd's** — Community ratings are context; personal taste modeling is the product. Friends' palates are the *most useful* context, which is why the social layer compares palates rather than aggregating them into an average.
 5. **Social by comparison, never by consumption** — Whiskey is drunk with people, so the app is better with people in it. But the shared thing is *the bottle* and the compared thing is *your palate* — never how much or how often you drink. Every social mechanic must be winnable by a moderate drinker, or it doesn't ship ([docs/SOCIAL.md](./docs/SOCIAL.md) §3).
 6. **Curiosity is what we celebrate** — The scoreboard, where there is one, counts *distinct things met*: regions, countries, distilleries, cask types, styles, descriptors. Breadth saturates — the fiftieth pour of the same bourbon moves nothing — which is exactly why it is safe to make it fun, competitive and shareable. A 15 ml sample at a bar earns the same as a bottle, so the cheapest way to fill a passport is to drink *less of more*, with friends. This is not a loophole in the responsible-drinking stance; it is the substitute the stance was designed to make room for ([docs/SOCIAL.md](./docs/SOCIAL.md) §3.2).
 
----
-
-## 2. Feature Brainstorm
-
-### 2.1 Bottle Identification & Library
-
-- **Label scan (camera)** — Vivino-style: photograph a label, vision model identifies distillery, expression, age statement, proof. Confirm-or-correct flow.
-- **Barcode/UPC scan** — rapid batch mode: scan bottle after bottle and shelve a whole collection in minutes; own-DB-first resolution with crowdsourced UPC→bottle confirmations (FEATURES.md §2.3, DATA_SOURCES.md §3).
-- **Text/voice search** with fuzzy matching ("that 12yr Redbreast", "lagavulin 16").
-- **"Add to library or not" decision point** — after identifying a bottle, choose:
-  - **Own it** → goes into *My Bar* (with purchase price, date, store, open/sealed status, fill level).
-  - **Tried it** → log a tasting without owning (bar pour, friend's bottle, sample).
-  - **Wishlist** → want to buy later (with target price alerting as a future feature).
-  - **Just looking** → view info, save nothing.
-- **Bottle detail page** — distillery, region, mash bill, cask type, ABV, age, MSRP vs. street price, community rating, your rating, flavor profile, similar bottles.
-
-### 2.2 My Bar (Inventory)
-
-- Track **owned bottles**: sealed vs. open, fill level (visual bottle gauge), location (shelf/cabinet/office), number of backups.
-- **$ tracking**:
-  - Purchase price per bottle, tax/fees, store.
-  - **Collection value**: total spent, estimated current market value, value change over time.
-  - **Cost per pour** — auto-computed from price ÷ pours logged.
-  - Spending dashboard: monthly spend, average bottle price, most expensive open bottle.
-- **Low-fill context** — can inform a personal recommendation without a standalone finish-first nudge.
-- Sort/filter by region, style, price, rating, open status, "haven't touched in 6 months."
-
-### 2.3 Tasting Notes & Ratings
-
-- **Quick pour log** (the core loop): pick bottle → rate → optional note. Three levels of depth:
-  1. **One-tap rating** (1–5 stars or 100-pt scale, user preference).
-  2. **Guided structured note** — nose / palate / finish, with tappable flavor chips.
-  3. **Freeform + voice note** — talk about the dram; AI transcribes and *auto-extracts structured flavors, rating sentiment, and context* into the structured format.
-- **Tasting context**: neat / rocks / water / cocktail, glassware, setting, who with.
-- **Side-by-side comparison mode** for flights (2–4 bottles, split-screen notes).
-- **Blind tasting mode** — hide the label, reveal after rating (great for calibrating your palate).
-- Ratings history per bottle — see how your score evolves across pours.
-
-### 2.4 Flavor Wheel
-
-- **Interactive whiskey flavor wheel** (2-tier: 8 core categories → ~60 specific descriptors):
-  - Core: Fruity, Floral, Grain/Cereal, Sweet, Woody, Spicy, Peaty/Smoky, Sulfury/Feinty.
-  - Tap a wedge to drill into specifics (Fruity → orchard fruit → green apple).
-- **Per-bottle wheel**: radar/wheel visualization of a bottle's profile from your notes + community aggregate.
-- **Your palate wheel**: aggregated across everything you've rated highly — a visual fingerprint of your taste. This is the input to the recommendation engine and a shareable graphic.
-- Wheel doubles as an **input device** during guided tasting (tap wedges instead of typing).
-
-### 2.5 Food & Drink Pairing
-
-- **Pairing suggestions per bottle** — AI-generated, grounded in the bottle's flavor profile (e.g., sherried Speyside → dark chocolate, blue cheese, dried fruit; Islay peat → oysters, smoked brisket).
-- **Reverse pairing** — "I'm having steak tonight, what should I pour from my bar?" (searches *your* inventory first).
-- **Cigar pairing** (popular with whiskey audience) and **cocktail suggestions** for bottles that suit mixing.
-- Log pairings you tried with a worked/didn't-work rating — feeds back into personalization.
-
-### 2.6 Recommendations
-
-- **New bottle recommendations** — "you'll probably love X" based on:
-  - Your palate wheel + rating history (collaborative + content-based hybrid).
-  - Price band awareness ("similar profile to Blanton's at half the price").
-  - Availability/realism (don't recommend unicorns by default; "grail mode" toggle).
-- **Explainable**: every recommendation says *why* ("You rated 4 sherry-cask Speysides ≥4.5 stars; this is a sherried Highland at your usual $60–80 range").
-- **"What to pour tonight"** — from your own bar, based on mood/occasion/weather/what you've been drinking lately.
-- **Gift mode** — recommend for a friend given a few of their favorites.
-
-### 2.7 AI Chat Assistant ("the Whiskey Concierge")
-
-A persistent chat box (floating button + dedicated tab) with full context of your library, notes, and palate. Example queries:
-
-- "What's the difference between bourbon and rye?"
-- "Which of my open bottles is closest to being empty?"
-- "What should I bring to a dinner party for someone who likes Macallan 12?"
-- "Summarize my tasting notes on Ardbeg 10 over the last year."
-- "Is $95 a good price for Eagle Rare 10 right now?"
-- "Build me a 5-bottle starter flight to learn Scotch regions."
-
-Implementation: LLM with **tool calling** into the app's own APIs (query inventory, query notes, search bottle DB, get market prices, add to wishlist) — so the assistant can *act*, not just answer ("add it to my wishlist" actually does it, with confirmation).
-
-### 2.8 Social & Community — "Strava for whiskey" (full design: [docs/SOCIAL.md](./docs/SOCIAL.md))
-
-**The organizing idea:** Strava works because everyone runs the same *segment*, which makes comparison meaningful. In whiskey, **the bottle is the segment** — and what varies is the palate, not the performance. So the question our social layer asks is never "who drank the most?" but **"what did you taste that I didn't?"** That substitution is what lets us be socially competitive without becoming a consumption leaderboard.
-
-- **Share what you tried, what you tasted, and how it compared** — a pour you already logged becomes shareable with one visibility flag (no separate composer). Shipped today as bearer-token public links (`/s/[code]`); the social layer adds revocation first (S1), then identity and friend-scoped visibility (S2).
-- **Same Dram** *(signature)* — the bottle page shows **you vs. the producer vs. your friends** in the same flavor coordinate space. It reuses the shipped `getFlavorCalibration()` buckets (shared / blind / signature) and adds a social one (**contested**). The payoff line — *"where Sarah writes clove, you write cinnamon"* — is the reason to open the app. The two-person version ships first on the existing share page (S1), with no graph — which is also how we test the sparse-overlap risk for the cost of one page section.
-- **Comparison stream** — a "From your friends" module on Home (not a tab; a sparse early graph would make a dedicated feed tab feel dead — SOCIAL.md §6.3). Chronological, friends-only, and every card carries a "you tasted this too / 3 friends tasted this" comparison hook. Explicitly *not* a generic activity stream; competitors already have those.
-- **Follow graph + profiles** — the profile *is* your palate card (palate wheel, signature descriptors, regions covered), not a wall of pours. Asymmetric follow; mutual follows derive "friends" for the more intimate surfaces.
-- **Taste twins** — palate-vector similarity gives us the collaborative-filtering signal a content-based recommender can't generate alone, and makes recommendations explainable ("your two closest palate matches both rated it 4.5+").
-- **Clubs** — small groups (societies, bottle-share crews, four friends) with a shared shelf, club feed, and club palate wheel. Small-group belonging is the strongest retention mechanic Strava has.
-- **Blind taste test / flight setup** — host picks bottles from their bar (or a shared pool) and creates a "flight" for an in-person tasting; app assigns each bottle a blind letter/number so labels are hidden from participants. Each guest logs ratings + flavor-wheel notes per blind slot from their own phone; host (or a scheduled reveal trigger) unmasks the bottle identities at the end so the group can compare notes, see who guessed closest, and see aggregate scores per bottle. Now also produces a group-level Same Dram view (the whole table vs. the producer's notes) and a shareable results card. Ratings only, no $ estimates, so it stays inside the responsible-drinking and no-false-precision guardrails — and it pushes engagement toward shared, occasion-based drinking rather than solo daily logging.
-- **Bottle shares & samples** — track the 2 oz you sent a friend, and see the note they wrote from it. Rewards generosity, not consumption.
-- Community ratings & note aggregation per bottle (the Vivino moat), including **community flavor consensus vs. the producer's claim** — *"the label says honey; 71% of drinkers say caramel"* — which nobody else can compute without our shared taxonomy plus attributed producer notes.
-- Local availability & price reports crowdsourced from users.
-
-**Non-negotiable constraints** (detail in SOCIAL.md §3 and §8, grounded in the published critique of Untappd's gamification): no streaks, no volume/frequency/ABV badges, no consumption leaderboards, no "your friends are drinking now" presence, no pour-nudging notifications. Everything is **private by default**; money data (purchase price, collection value, spend) never crosses a social boundary at all.
-
-### 2.9 Exploration — the Passport (full spec: [docs/FEATURES.md](./docs/FEATURES.md) §11)
-
-**The organizing idea:** whiskey is enormous and a drinker's actual experience of it is small and lopsided — four bourbons and a Speyside, then a plateau. The Passport turns that gap into the product's most legible progress surface, by counting **distinct things you've met**: regions, countries, distilleries, cask types, categories, and flavor descriptors you've named yourself.
-
-- **The map, not the meter.** Each dimension renders as territory: five countries met, the Scotch regions with two of them filled, 41 distilleries, sherry/bourbon/port/virgin-oak casks tried. Country is the dimension that always works — every bottle has one, so a first pour already puts something on the map — and region is the finer grain beneath it, wherever the catalog knows one. The empty cells are the feature — they're the recommendation surface with a reason already attached (*"you've never had a Campbeltown"*).
-- **Badges** for meaningful thresholds and completions — one per country and per region met; ten distilleries in one country; four cask finishes of the same distillate; a full flavor wedge named across your notes. Tiered, so there's always a next one, and every tier is reachable by tasting more *kinds*, never more *volume*.
-- **Tasted and visited are separate dimensions.** A *tasted* distillery badge means you drank something they made, from anywhere — a bar pour, a friend's sample, a 15 ml miniature. A *visited* badge means you went there, and it earns its own page and map (FEATURES.md §11.8): whiskey is one of the few hobbies with destinations, and an Islay trip should be worth something in the app. Neither is a drinking-venue badge — bars and restaurants are never counted, visits count distinct destinations rather than frequency, and nothing anywhere reacts to proximity.
-- **Shareable and comparable** — a passport card for friends and clubs, and passport diffing with a friend (*"you've both done Islay; neither of you has touched Japan"*), which turns into a shared plan: what to open next time you're in the same room. Clubs get an aggregate passport, so a group can go after a region together.
-- **Suggests the next step, never the next pour.** Exploration surfaces recommend *what* to try when you next try something — matched to your palate and your price band — and never prompt you to drink now. No notification says "one region to go."
-
-### 2.10 Extras / Delighters (backlog)
-
-- **Stats & Wrapped** — yearly "Whiskey Wrapped" recap (top bottle, flavor journey, spend… optionally hidden 😅).
-- (Distillery visits and their map moved into §2.9 — they're a passport dimension, not a delighter.)
-- Sample/bottle-share management (track 2oz samples, who you owe).
-- Insurance export (CSV/PDF of collection with values).
-- Home-screen widgets: "tonight's pour," collection value.
+**What we will never build** (one list, cross-linked from AGENTS.md): consumption mechanics of any kind — streaks, volume/ABV/time-of-day badges, leaderboards sorted by a consumption quantity, pour-nudging or finish-this-bottle notifications, "friends drinking now" presence; money data in any social projection; dark patterns; password auth; paywalling data users entered themselves.
 
 ---
 
-## 3. Prioritization (MoSCoW for v1)
+## 2. Current state — read this before writing code
 
-| Must have | Should have | Could have | Won't have (v1) |
-|---|---|---|---|
-| Bottle search + detail pages | Label photo scan | Blind tasting mode | Social graph & feed |
-| Barcode/UPC scan (rapid collection import) | Voice note → structured note | Cigar pairing | Clubs / group tastings |
-| My Bar with $ tracking | Palate wheel visualization | Gift mode | Marketplace/price alerts |
-| Quick pour log + ratings | Reverse pairing from my bar | Widgets | Club/aggregate passports |
-| Structured notes + flavor chips | Shareable pour/palate cards (link-based) | Wrapped recap | Community price reports |
-| Interactive flavor wheel | Collection value estimates | Passport badges & tiers | |
-| AI chat with tool calling | Explainable recommendations | | |
-| Wishlist / tried / own flows | Breadth counters (regions/distilleries/casks tried) | | |
-| | Your notes vs. producer notes (calibration) | | |
+**As of 2026-09-03, HEAD `6dfb4ff`.** Whaikey is a Next.js 16 App Router web app on Vercel, wrapped by Capacitor for iOS/Android, with Drizzle over Postgres (Supabase in production; PGlite locally and in tests), Better Auth (Google/Apple only), and an Anthropic-Messages-compatible AI client that prefers OpenRouter when configured. 24 page routes, 34 API route files, 55 tables, 22 migrations, 134 unit-test files (1,288 tests), 41 mobile visual baselines, 7 GitHub workflows. `pnpm typecheck && pnpm lint && pnpm test && pnpm build` is green.
 
-**On exploration specifically:** the *counters* are v1 — "3 of 6 Scotch regions, 11 distilleries" is a `select count(distinct …)` over data we already store, and it's the cheapest thing in the app that makes a solo user feel like they're getting somewhere. Badges, tiers and the full passport surface follow once there's enough logged history for a threshold to mean anything; sharing and club passports come with the graph.
+### 2.1 Live and solid
 
-**On social specifically:** the *graph* is deliberately post-v1 (Phase S2+, [docs/SOCIAL.md](./docs/SOCIAL.md) §13), but **link-based sharing ships early** — it's the growth loop, it needs no graph, and it's already live for pours. The private journal has to be worth using alone before a network can carry it.
+- **Core loop:** search → bottle detail → own/tried/wishlist → pour log with half-star ratings, nose/palate/finish, flavor-wheel tags with intensity → journal. My Bar carries fill level, spend, cost-per-pour, lifecycle statuses and a library flavor heat map with three lenses (mine / label / compare).
+- **Identification:** dual-mode camera (barcode loop + label shutter), on-device framing guidance, live label ID, async capture queue with undo, crowdsourced UPC → bottle map, CSV/competitor import with AI column mapping.
+- **Flavor contract:** `src/lib/flavor-wheel.ts` — 8 wedges, 55 leaves — shared by bottle profiles, notes, the wheel UI, calibration and AI extraction.
+- **AI (optional everywhere):** chat with streaming and 7 tools, note extraction from dictated/typed text, label scan, pairings (food/cigar/cocktail, cached), explained recommendations (discovery + tonight) that degrade to deterministic reasons with no key.
+- **Social S1–S2 and most of S3:** share links with revocation, comparison on the link, profiles as palate cards, follow/approve/block, per-pour visibility (default Only me), "From your friends" Home module, Same Dram, cheers, comments + reports, taste twins, phone (HMAC) and QR discovery, one-tap "make everything private".
+- **Passport:** countries / regions / styles met, catalog-share tier badges (Oak → Amber) that never downgrade, crests on profile and bottle, passport hooks on the discovery rail.
+- **Whiskey School:** 9 lessons with quizzes and a flavor-wheel explorer.
+- **Catalog pipeline:** 9 source adapters (TTB COLA, Iowa, Oregon, Utah, BC, Systembolaget, Vinmonopolet, WHISKY:EDITION, CSV), enrichment, sold-verification queue with a subscription-CLI worker, a source-provenance graph, issue-driven feedback review, 4 scheduled workflows.
+- **Native:** Capacitor shell loading the deployed site, capability layer with web fallbacks, device-code sign-in, offline pour queue, push-token registration, Android debug + iOS compile in CI, release workflow awaiting credentials.
+
+### 2.2 Live but weaker than it reads
+
+- **Search** is `ILIKE` substring over name/distillery/alias with query + category filters. It does not tolerate misspellings and has no supporting trigram index.
+- **"Est. value"** is a user-typed field falling back to catalog average price, shown as a point number.
+- **Voice notes** are browser dictation (Web Speech), unreliable in an iOS WebView; there is no audio upload.
+- **Passport** counts 3 of 6 dimensions and is reachable only from a claimed social profile; no counters on My Bar.
+- **Learn progress** lives in localStorage.
+- **Reports** are written and never read; no moderation surface exists.
+- **Offline pours on the web** are acknowledged and never flushed (review REL-4.1); queued pours have no idempotency key.
+- **Community consensus** is live at `/bottles/[id]/compare` ahead of the jurisdiction review SOCIAL.md §14 makes its precondition.
+
+### 2.3 Not built, and load-bearing
+
+- **No way to add a bottle the catalog lacks** — no `POST /api/bottles`; a scan, search or import miss is a dead end.
+- **No age gate, no data export, no account deletion, no Terms, no Privacy Policy, no billing or entitlements, no analytics, no error monitoring, no settings page, no sign-out control, no moderation queue.**
+- No clubs, blind flights, samples, distillery visits, passport diffing, palate share card, flights/blind mode, 100-point rating mode, similar-bottles rail, chat tools `log_pour_draft` / `recommend_bottles` / `get_price_info`.
+- No `minShellVersion` kill switch for the native shell; no reviewer demo account (the app is social-login-only).
+- No HTTP security headers; native sign-in lacks state/PKCE binding (review SEC-H1–H3).
+
+### 2.4 The UX diagnosis
+
+Screens are individually well crafted but the four highest-traffic ones (Home, My Bar, Log a pour, Bottle) are 2–3.5 viewports long with the primary action at the bottom; the nav spends two slots on the thinnest surfaces; there is no back, edit, delete, settings or sign-out; and the same job is drawn several ways. [docs/STORYBOARD.md](./docs/STORYBOARD.md) is the target and [docs/REVIEW_2026-09.md](./docs/REVIEW_2026-09.md) §1 and §7 (Lane B) the order of work.
+
+### 2.5 Do not trust until rewritten
+
+- `docs/SOCIAL.md` §8 principle 7, `docs/FEATURES.md` §8.3 and §12: all assert an age gate that does not exist.
+- `docs/APP_STORE_SETUP.md` §6.2 says to answer "no UGC"; the app ships profiles, feeds and comments today. §1/§6.4 demand a password demo account the app forbids.
+- `docs/SOCIAL.md` §6.1's nav list contradicts its own §6.3 amendment, and both predate STORYBOARD.md §1.1.
+- `docs/FEATURES.md` §2.1 (fuzzy search), §4.2 (100-point storage), §11.3 (counters on My Bar): promised, not shipped.
+- `docs/SOURCING_AT_SCALE.md`'s "~25,000 bottles" describes a production database no repo artifact can confirm (the committed seed is 269 bottles).
+
+---
+
+## 3. The v1 done line
+
+v1 ships to a store when every box is ticked. Nothing on this list is optional and nothing not on it blocks.
+
+**Core loop**
+- [ ] Any bottle a user can hold resolves: scan or search hits the catalog, **or "add this bottle" creates a private bottle usable immediately** (review queue for global visibility). Catalog-miss dead-end rate = 0.
+- [ ] Search tolerates a misspelling (`pg_trgm`), with a 50-query evaluation set committed.
+- [ ] Pour logging: two taps, works offline on web and native, idempotent on flush.
+- [ ] Bottle page: relationship and log action above the fold; your history; flavor profile; honest price framing (ranges); pairings.
+- [ ] Every non-tab route has back; every mutation has undo or confirm; loading/error/not-found states exist.
+
+**Explore**
+- [ ] Passport counters render on My Bar and Explore for a user with no social profile.
+- [ ] All six dimensions counted (distilleries, casks, descriptors are `count(distinct)` over existing columns).
+
+**Own your data**
+- [ ] Export (JSON + CSV) of notes, inventory, pours and graph — one tap, no tier.
+- [ ] Hard account deletion with a stated policy for shared and aggregate contributions.
+- [ ] Settings page: account, sign-out, rating scale, units, privacy defaults, notifications.
+
+**Legal to operate**
+- [ ] Age gate at signup; store availability aligned to markets.
+- [ ] Privacy Policy and Terms live, covering AI processing (and the provider), photos, the user-photo licence grant, community opt-in.
+- [ ] Moderation queue an operator can work; report and block flows (shipped) documented for store review.
+- [ ] Support URL and an in-app feedback path.
+
+**Observable**
+- [ ] Error monitoring in production.
+- [ ] Analytics sufficient to compute SOCIAL.md §12's cohort-adjusted pours-per-active-user metric and per-user AI cost.
+- [ ] Search p95 and scan-to-shelved p95 measured (CI or RUM), with NATIVE_APP.md §1.4's tripwires wired to real numbers.
+
+**Shippable**
+- [ ] Reviewer access solved; App Store UGC answers corrected; `minShellVersion` kill switch live.
+- [ ] The three High security findings and the P0 closed (review §2, §3).
+
+**Explicitly not in v1:** billing. Ship free, instrument willingness-to-pay (§6.5), then price.
 
 ---
 
 ## 4. Architecture & Tech Stack
 
-### 4.1 Recommended stack
+### 4.1 The stack (as built)
 
-- **App:** ~~React Native + Expo~~ → **Next.js App Router on the web, wrapped by Capacitor for iOS/Android.** This section predates any code; once the web app existed, React Native meant rewriting ~7k lines of UI plus the whole test and visual-regression harness while buying nothing on the server. The full comparison, tripwires for revisiting the decision, and the native architecture are in [docs/NATIVE_APP.md](./docs/NATIVE_APP.md).
-- **Backend:** Postgres (Supabase is the intended hosted option; PGlite provides local/test parity) + Better Auth + storage/realtime integrations as needed. Postgres gives us `pgvector` for embeddings and full-text search for instant bottle lookup.
-- **AI layer:** Anthropic Claude via a thin server-side gateway (Edge Function):
-  - `claude-sonnet-5` for chat, note extraction, pairing/rec explanations.
-  - `claude-haiku-4-5` for cheap/fast tasks (autocomplete, flavor-chip extraction).
-  - Vision (image input) for label scanning.
-- **Search:** Postgres FTS + trigram for instant-as-you-type; `pgvector` embeddings for "bottles like this" similarity.
-- **Analytics/monitoring:** Sentry + PostHog.
+- **App:** Next.js 16 App Router (TypeScript, Tailwind v4) on Vercel, wrapped by **Capacitor** for iOS/Android. The native shell loads the deployed site over HTTPS rather than a static export, so server components and cookie auth are unchanged. The React Native decision, tripwires and native architecture are in [docs/NATIVE_APP.md](./docs/NATIVE_APP.md).
+- **Backend:** route handlers under `src/app/api` (`runtime = "nodejs"`, never edge). Drizzle over Postgres — Supabase (pooler URL) in production, PGlite in-process locally and in tests; the driver is chosen from the connection string in `src/db/index.ts`. **Better Auth**, social login only (Google, optional Apple).
+- **AI layer:** `src/lib/ai/client.ts` selects the provider at runtime — **OpenRouter** when `OPENROUTER_API_KEY` is set, Anthropic direct otherwise; both speak the Messages API. Two model roles, `chatModel()` (chat, pairings, rec explanations) and `fastModel()` (extraction, label scan), each overridable by `WHAIKEY_CHAT_MODEL` / `WHAIKEY_FAST_MODEL`. **Model ids live in code, not here.** On the OpenRouter path prompt caching and hosted web search are unavailable. Missing keys ⇒ routes return 503 and the UI hides AI affordances; the manual loop never blocks. The catalog verification lane runs separately on an authenticated Claude Code subscription (`src/lib/ingest/verification-queue.ts`).
+- **Search:** today, Postgres `ILIKE` substring over name/distillery/aliases (`src/lib/search.ts`). Planned: `pg_trgm` GIN indexes and `similarity()` for misspellings (§3). Embeddings/pgvector are **not** planned until a committed search evaluation shows substring + trigram is the bottleneck.
+- **Analytics / monitoring:** not adopted yet (§10). Sentry and a minimal event set are on the v1 line.
 
 ### 4.2 High-level architecture
 
 ```
-┌────────────────┐     ┌──────────────────────────────┐
-│  Expo App      │────▶│  Supabase                    │
-│  (iOS/Android/ │     │  • Postgres (+pgvector, FTS) │
-│   Web)         │     │  • Auth / RLS                │
-│                │     │  • Storage (label photos)    │
-│  Local cache   │     │  • Edge Functions ──────────┐│
-│  (offline log) │     └──────────────────────────────┘│
-└────────────────┘                    │                │
-                                      ▼                ▼
-                        ┌──────────────────┐  ┌──────────────┐
-                        │ AI Gateway (EF)  │  │ Bottle DB     │
-                        │ • Chat + tools   │  │ seed/import   │
-                        │ • Label vision   │  │ pipeline      │
-                        │ • Note extraction│  └──────────────┘
-                        │ • Recs/pairings  │
-                        └──────────────────┘
-                                 │
-                                 ▼
-                          Claude API
+┌──────────────────────┐   ┌──────────────┐
+│ Capacitor shell      │   │ Browser /    │
+│ (iOS / Android)      │   │ PWA          │
+│ • capability layer   │   │              │
+│   src/lib/native/*   │   │              │
+│ • device-code auth   │   │              │
+│ • offline pour queue │   │              │
+└──────────┬───────────┘   └──────┬───────┘
+           │        HTTPS         │
+           ▼                      ▼
+┌────────────────────────────────────────────────────────┐
+│ Next.js App Router on Vercel                           │
+│ • server components + route handlers (runtime=nodejs) │
+│ • Better Auth (cookie sessions; Google / Apple)        │
+│ • src/lib/session.ts — the only auth seam              │
+│ • Drizzle ──▶ Postgres (Supabase prod · PGlite local)  │
+│ • src/lib/ai/client.ts ──▶ OpenRouter | Anthropic      │
+│ • per-user AI rate limits (DB-backed, atomic)          │
+└──────────────────────────┬─────────────────────────────┘
+                           │
+┌──────────────────────────┴─────────────────────────────┐
+│ GitHub Actions (incl. a self-hosted runner)            │
+│ • catalog-sync · source-backed scan · verification     │
+│ • whiskey-feedback review · native release             │
+│ ──▶ same Postgres (catalog-production environment)     │
+└────────────────────────────────────────────────────────┘
 ```
 
 Key decisions:
-- **All AI calls server-side** (Edge Functions) — no API keys in the client, per-user rate limiting, response caching (pairings/recs for a bottle are cacheable).
-- **AI chat uses tool calling** against internal APIs: `search_bottles`, `get_my_bar`, `get_tasting_notes`, `add_to_wishlist`, `get_pairings`, `recommend_bottles`. Destructive/creative actions require in-chat confirmation.
-- **Offline-first pour logging**: queue writes locally, sync on reconnect (a bar basement has no signal).
-- **Bottle database**: seed from open datasets + AI-assisted enrichment (flavor profiles, descriptions), dedupe pipeline, user-submitted bottles go through a review queue. Sourcing detailed in §4.5.
+- **All AI calls server-side** through one client; no keys in the client; per-user rate limiting; per-bottle caching of pairings and recommendation explanations.
+- **AI chat uses tool calling** against internal functions: `search_bottles`, `get_bottle_details`, `get_my_bar`, `get_pour_history`, `get_tasting_notes`, `get_pairings`, `add_to_wishlist` (the only write tool; idempotent, user-scoped). Planned: `log_pour_draft` (with inline confirmation), `recommend_bottles`, `get_price_info`.
+- **Offline-first pour logging**: queue writes locally, sync on reconnect — on web and native — with a client-generated idempotency key (§4.6).
+- **Bottle database**: seeded + ingested from open datasets with AI-assisted enrichment and provenance; user-submitted bottles go into a review queue (§3). Sourcing in §4.5.
 
-### 4.3 Core data model (simplified)
+### 4.3 Core data model
+
+**`src/db/schema.ts` is the source of truth** (55 tables, documented inline). The conceptual sketch:
 
 ```
-users(id, handle, palate_profile jsonb, prefs jsonb)
-
-bottles(id, distillery_id, name, category,      -- bourbon/scotch/rye/irish/japanese/...
-        region, age_years, abv, cask_types[],
-        msrp, avg_street_price, flavor_profile jsonb,   -- wheel scores 0-10 per category
-        embedding vector, image_url, status)            -- status: verified/user_submitted
-
-distilleries(id, name, country, region, founded, lat, lng)
-
-user_bottles(id, user_id, bottle_id,
-             relationship,                 -- own / tried / wishlist
-             status,                       -- sealed / open / finished
-             fill_level, purchase_price, purchase_date, store,
-             est_market_value, location_label, notes)
-
-pours(id, user_id, bottle_id, user_bottle_id?,
-      rating, serving_style,               -- neat/rocks/water/cocktail
-      context jsonb,                       -- setting, companions, glassware
-      created_at)
-
-tasting_notes(id, pour_id, nose text, palate text, finish text,
-              freeform text, voice_transcript text,
-              flavor_tags jsonb,           -- {wedge: intensity} from wheel/AI extraction
-              extracted_by)                -- user / ai
-
-pairings(id, bottle_id, pairing_type,      -- food/cigar/cocktail
-         suggestion, rationale, source,    -- ai/community
-         user_feedback_score)
-
-chat_sessions(id, user_id) / chat_messages(id, session_id, role, content, tool_calls jsonb)
-
-price_history(bottle_id, date, price, source)   -- powers $ trends & "good price?" answers
-
--- Social layer (Phase S1+; full sketch in docs/SOCIAL.md §9)
-user_profiles(user_id, handle, display_name, avatar_url, bio, is_public)
-follows(follower_id, followee_id, state)        -- asymmetric; mutual = "friends"
-blocks(blocker_id, blocked_id)
-pours.visibility                                -- private (default) / friends / followers / public
-reactions(subject_type, subject_id, user_id, kind) / comments(...)
-clubs(...) / club_members(...) / club_shelf(...)
-blind_flights(...) / blind_flight_slots(...) / blind_flight_entries(...)
-user_palate_similarity(user_a, user_b, score)   -- cached "taste twin" matching
+user(id, palate_profile jsonb)            user_profiles(user_id, handle, display_name, avatar_url, bio, is_public, social_enabled, phone_hash)
+bottles(id, distillery_id, name, category, country, region, age_years, abv, cask_types[],
+        msrp, avg_price, flavor_profile jsonb, producer_flavor_tags, image_url, status)   -- verified / imported / user_submitted
+distilleries(id, name, country, region)
+bottle_aliases · bottle_upcs(confirmed_count) · bottle_verifications · bottle_resources · bottle_claims · bottle_media · catalog_sources
+user_bottles(user_id, bottle_id, relationship own/tried/wishlist, status, fill_level, purchase_price, purchase_date, store, est_value, location, notes)
+pours(user_id, bottle_id, user_bottle_id?, rating 0.5–5.0, serving_style, amount_ml, context jsonb, visibility, created_at)
+tasting_notes(pour_id, nose, palate, finish, freeform, flavor_tags jsonb {leafId: intensity}, extracted_by)
+pairings(bottle_id, type food/cigar/cocktail, suggestion, rationale, user_feedback_score) · rec_explanations · ai_rate_limits
+chat_sessions / chat_messages
+price_history(bottle_id, date, price, source)      -- written by verify-sold; not yet read by any surface
+follows(follower, followee, state) · blocks · reactions(cheers) · comments · reports · phone_lookups · pour_shares(code, revoked_at)
+passport_tiers(user_id, family, value, tier, achieved_at)   -- never downgrades
+native_auth_codes · push_devices
 ```
 
-Row-level security throughout: users only see their own bars/notes; bottles/distilleries are public-read.
+Rules that hold across the model:
+- **Ratings** are half-stars 0.5–5.0 stored as a double (decided, §12). A 100-point display mode, if ever built, is a transform, not a storage change.
+- **Social read-path rule:** every social surface reads through an explicit projection that selects columns individually (`getPublicPourShare()` pattern), never a whole `pours` or `user_bottles` row. Purchase price, collection value and spend are structurally absent from those projections.
+- **Origin:** `bottles.country` always set; `bottles.region` sub-national or null (`bottleOrigin()` enforces at seed time).
+- **Money** is currently `double precision` in USD with no currency column; moving to integer minor units with a currency is on the roadmap (§5, track C).
 
-**Social read-path rule:** every social surface reads through an explicit projection function that selects columns individually (the shipped `getPublicPourShare()` pattern), never a whole `pours` or `user_bottles` row. Purchase price, collection value and spend are structurally absent from those projections — that's how money data is kept from ever crossing a social boundary.
+### 4.4 Environments, deployment & operations
+
+- **Environments:** local (PGlite, `file:./data/whaikey`), Vercel preview (signed-out only; Google redirect URI is fixed to production), production (Supabase pooler). **Missing:** a staging environment with real Postgres where social features can be exercised — on the roadmap (track L).
+- **Deploy:** Vercel builds on every push; `scripts/build.mjs` runs `pnpm db:push` then `next build`. Migrations therefore land **before** the build succeeds; schema changes must be backward compatible with the previous release (expand/contract) until the migration step moves post-build.
+- **Migrations:** generated only via `pnpm db:generate` (custom backfills via `--custom`); never hand-edited. Nothing yet verifies that production's migration state matches `main` while scheduled catalog workflows write to production — a drift check is on the v1 line (§3, Observable).
+- **Backups & restore:** rely on Supabase point-in-time recovery; a documented restore drill is required before launch.
+- **Secrets:** `BETTER_AUTH_SECRET` (fails closed in production), `WHAIKEY_PHONE_KEY` (**never rotate** — stored phone hashes only match under the same key; key versioning is the eventual fix), OAuth client secrets, `OPENROUTER_API_KEY` / `ANTHROPIC_API_KEY`, the `catalog-production` environment's `DATABASE_URL` on the self-hosted runner, and a persisted Claude Code subscription login on that runner. One inventory with rotation notes lives in README §Deployment; keep it there.
+- **Self-hosted runner:** patching, monitoring, subscription-login expiry and lease reclamation on runner death are undocumented — track K.
+- **Domain:** `app.whaikey.com` is assumed by the release workflow and store runbook but not yet committed (§12). Deep links, OAuth redirect URIs, `.well-known` files and the Capacitor `server.url` all depend on it.
 
 ### 4.5 Data sourcing (summary — full strategy in [docs/DATA_SOURCES.md](./docs/DATA_SOURCES.md))
 
@@ -265,65 +217,74 @@ There is no single whiskey API; the catalog is assembled in layers, mostly free 
 
 | Layer | Launch sources (free) | Paid upgrades (when funded) |
 |---|---|---|
-| **Bottle catalog** | TTB COLA registry (US label approvals + images; public record), Iowa Liquor Products dataset (clean SKU catalog), Wikidata distilleries (CC0), 86-distillery Scotch flavor dataset | COLA Cloud API (repackaged COLA + 575k extracted barcodes), Whiskybase *licensing conversation* (never scraping) |
-| **Barcodes** | Own DB first; UPCitemdb free tier; Open Food Facts fallback (ODbL — never merged into our DB) | UPCitemdb Dev $99/mo |
-| **Prices/valuation** | Iowa monthly price data, control-state price books (VA/NC/OH/PA), Whisky Hunter free auction-trend API, affiliate feeds (Whisky Exchange, Master of Malt, Total Wine — live prices + revenue) | Wine-Searcher API (covers spirits), Whiskystats auction data |
-| **Label scanning** | Barcode-first → OCR text match (labels are text-heavy) | TinEye WineEngine or Vuforia visual matching, seeded with COLA label images (Vivino's stack) |
+| **Bottle catalog** | TTB COLA registry, Iowa Liquor Products, Oregon/Utah/BC/Systembolaget/Vinmonopolet catalogs, WHISKY:EDITION (CC BY 4.0 — attribution surface required), Wikidata distilleries | COLA Cloud API, Whiskybase *licensing conversation* (never scraping) |
+| **Barcodes** | Own DB first (crowdsourced confirmations); UPCitemdb trial; Open Food Facts fallback (ODbL — never merged) | UPCitemdb Dev |
+| **Prices/valuation** | Iowa monthly price data, control-state price books, auction-trend APIs, affiliate feeds | Wine-Searcher, Whiskystats |
+| **Label scanning** | Barcode-first → OCR text match → vision model | Visual matching seeded with COLA label images |
 
-Principles: every third-party lookup converts into a first-party record (user confirmations, corrections, prices paid — the moat we control); every external feed has a degraded-but-working fallback (Systembolaget/LCBO both revoked open APIs); legal checklist (COLA image posture, ODbL isolation, feed ToS) clears before launch.
+Principles: every third-party lookup converts into a first-party record; every feed has a fallback; the legal checklist (COLA image posture, ODbL isolation, CC BY attribution, feed ToS) is **one checklist with owners and dates** in §9.5 and clears before launch. The pipeline's steady-state cost (scheduled syncs + enrichment of new rows) needs a budget and an alarm (track K).
 
-### 4.6 The palate model (what makes it AI-native)
+### 4.6 Offline, sync and media
 
-1. Every tasting note (typed, tapped, or spoken) → Haiku extracts normalized flavor tags mapped to the wheel taxonomy.
-2. Ratings × flavor tags accumulate into `users.palate_profile` (weighted flavor-preference vector, updated incrementally).
-3. Recommendations = vector similarity (bottle embeddings vs. palate vector) → filtered by price band/availability → **re-ranked and explained by Claude** with the user's actual history in context.
-4. The same profile grounds chat answers, pairing suggestions, and "what to pour tonight."
+- **Queue:** `src/lib/native/offline-queue.ts` persists pours in localStorage/Preferences and flushes on mount, `online` and app resume — on **both** web and native (review REL-4.1 fixes the web path). One in-flight flush at a time; the queue is re-read before every write.
+- **Idempotency:** every queued pour carries a client-generated `clientId`; `POST /api/pours` upserts on `(userId, clientId)` and returns the existing row on replay.
+- **Conflicts:** pours are append-only, so create-conflicts do not arise. Shelf edits (fill level, purchase info) are last-write-wins per field; a queued edit older than the server row is dropped with a toast.
+- **Media:** not yet built. When it is: object storage (Supabase Storage or S3) for user label photos and avatars, size/format limits, moderation of user images, a licence-metadata field, and deletion on account deletion. `bottles.imageUrl` remains a URL to source-owned media with attribution.
+
+### 4.7 The palate model (what makes it AI-native)
+
+1. Every tasting note (typed, tapped, or spoken) → the fast model extracts normalized flavor tags mapped to the wheel taxonomy; the user confirms.
+2. Ratings × flavor tags × recency decay accumulate into `user.palate_profile` (`src/lib/palate.ts`, persisted by `palate-store.ts`).
+3. Recommendations = palate similarity against bottle profiles → filtered by price band and shelf → nudged by passport gaps and taste twins → **explained** (by the chat model when configured, deterministically otherwise).
+4. The same profile grounds chat answers, pairings, "what to pour tonight", Same Dram and taste twins.
+
+Performance rule: palate reads are bounded (recent history, capped rows) and the persisted profile is authoritative for social and recommendation reads; recomputation happens on write, after commit.
 
 ---
 
-## 5. Roadmap
+## 5. Roadmap — one timeline, five tracks
 
-### Phase 0 — Foundation (week 1–2)
-- Expo app scaffold, Supabase project, auth (Apple/Google/email), CI.
-- Schema + RLS, bottle DB seeded with ~2–5k popular bottles (Iowa Products + TTB COLA + Wikidata pipeline, §4.5).
-- Design system: dark, warm, whiskey-toned; bottle card + detail components.
+Tracks run in parallel and are named so that "Phase 2" is never ambiguous: **C** core/product, **L** legal & operations, **N** native, **S** social, **K** catalog. Work packages (WP-n) are specified in [docs/REVIEW_2026-09.md](./docs/REVIEW_2026-09.md) §7.
 
-### Phase 1 — Core loop MVP (week 3–6)
-- Bottle search (instant FTS) + detail page.
-- Barcode/UPC scan with rapid batch mode (collection import in minutes).
-- Own / tried / wishlist flows; My Bar with purchase price + totals.
-- Quick pour log with 3-depth notes; flavor-chip input; ratings.
-- Interactive flavor wheel (input + per-bottle visualization).
-- **Milestone: you can replace your spreadsheet/notes app.**
+### 5.1 History (what actually shipped, in order)
 
-### Phase 2 — AI-native layer (week 7–10)
-- AI gateway Edge Function; chat assistant with tool calling.
-- Voice/freeform note → structured extraction.
-- Label photo scan → identify flow.
-- Pairing suggestions (cached per bottle) + reverse pairing from My Bar.
-- **Milestone: the concierge works and feels magical.**
+| When | Delivered |
+|---|---|
+| 2026-Q2 | Next.js scaffold, PGlite/Postgres parity, Better Auth social login, seed catalog, search, bottle detail, My Bar with spend, pour log with wheel and half-stars, journal, flavor wheel input/viz/heat map, AI chat + extraction + pairings + recommendations, label and UPC scan, CSV import |
+| 2026-07 | Native shell (N0–N2): capability layer, device-code auth, offline queue, push-token registration, CI compiles; fonts pinned after a CI outage; Whiskey School |
+| 2026-08 | Social S1 (share revocation, comparison on the link), S2 (profiles, follows, visibility, friends module, Same Dram, cheers, blocks, privacy reset), most of S3 (comments, reports, taste twins, phone/QR discovery); onboarding wizard and Home/My Bar/Friends redesign; source-backed catalog pipeline, verification queue, origin model; passport tiers and crests; scan sharpening |
+| 2026-09 | This review: STORYBOARD.md, refreshed plan |
 
-### Phase 3 — Personalization & polish (week 11–14)
-- Palate profile + palate wheel; explainable new-bottle recommendations; "what to pour tonight."
-- **Passport v1** — breadth counters (regions, countries, distilleries, cask types, categories) on My Bar and the profile, with the unmet cells linked to search so a gap becomes a next bottle (§2.9).
-- Cost-per-pour, collection value dashboard, price history basics.
-- Offline pour logging, performance pass (cold start < 2s, search < 100ms).
-- **Milestone: App Store / Play Store beta (TestFlight first).**
+### 5.2 Now — two lanes, in parallel
 
-### Phase 4 — Growth & the social layer (post-launch)
+**Lane A (C): stop the bleeding.** WP-1 offline queue + idempotency · WP-2/3 native auth binding and cookie storage · WP-4 security headers · WP-5 aggregate leak, body limits, AI timeouts.
 
-Each phase ships a loop a user can feel, and the riskiest assumption (sparse note overlap) is tested by the cheapest phase. User stories, page map and milestones in [docs/SOCIAL.md](./docs/SOCIAL.md) §5–§6 and §13; S1 has an agent-ready build spec (§16) and zero open decisions.
+**Lane B (C): the focus and polish pass**, in STORYBOARD.md §5 order. WP-6 back/nav/toast/loading · WP-7 pour sheet · WP-8 bottle action bar · WP-9 My Bar shelf-first · WP-10 journal edit/delete + one Share sheet · WP-11 settings, export, delete · WP-12 the new nav (Home · Bar · ＋ · Explore · You), `/passport` with six dimensions and counters on Bar, Home cut to three modules · WP-13 first run · WP-14 shared search/row components · WP-15 share-page CTA.
 
-- **S1 — Share control & the first comparison:** share-link revocation + a "shared links" page; the share page shows a signed-in viewer how their notes on the same bottle compare, plus a wishlist hook. No graph, no profiles.
-- **S2 — Friends & Same Dram:** profiles + handles, palate card, follow graph, per-pour visibility (default *only me*), blocks, the "From your friends" Home module, **Same Dram** (you vs. producer vs. friends), cheers, notification policy, one-tap "make everything private."
-- **S3 — Conversation & groups:** comments + reports, clubs, blind flights end-to-end (no club dependency — flights can lead), taste twins feeding recommendations, bottle shares/samples, **passport badges + friend passport diffing** ("neither of you has touched Japan" → a plan for next time).
-- **S3.5 — Club passports:** an aggregate passport per club, so a group can take on a region together. Depends on clubs; deliberately after the solo passport has proven it motivates anything.
-- **Later — Distillery visits:** the pilgrimage page and map, manual entry first, with an optional foreground-only, coarse, permission-gated location check-in that stores nothing but `(distillery, date)` (US-20; rules in SOCIAL.md §8.3). Needs the native shell's geolocation capability, which is why it sits behind the passport rather than inside it.
-- **S4 — Community scale:** community flavor consensus, crowdsourced availability, moderation tooling, public discovery.
-- In parallel: Wrapped recap, price alerts on wishlist, widgets.
-- Launch premium tier (see §6 Monetization).
+**Lane C (L): launch blockers.** WP-16 user-submitted bottles · WP-17 age gate · WP-18 moderation queue, store answers, reviewer access, ToS/Privacy, support · WP-19 monitoring + the guardrail metric + publish S1/S2 overlap numbers · WP-20 kill switch, push-token rule, Android backup flag.
 
-**Structural invariant on every social release:** nothing becomes visible to a second user until the visibility model and block checks are enforced on the read path that serves it (SOCIAL.md §13). Consumption guardrails are enforced as mechanic bans in review (SOCIAL.md §3.1) and verified by cohort-adjusted metrics (SOCIAL.md §12).
+**Lane D (C/K): scale before the catalog grows.** WP-21 bounded discovery + indexes + cached totals · WP-22 trigram search + evaluation set · WP-23 bounded palate reads · WP-24 batched ingest and atomic finalize · WP-25 money/timezones/dates/budgets/TTLs · WP-26 Postgres CI lane and route tests.
+
+### 5.3 Then
+
+- **C:** collection value done honestly (range + trend + source label), price-history surfacing, `/stats` (private pours-over-time stays private), palate share card, similar-bottles rail, the three missing chat tools, native voice recording (the signature feature on the platform that matters).
+- **N:** store launch — closed test, screenshots, store records, credentials (NATIVE_APP.md N4).
+- **S:** re-open S3's remainder (clubs, blind flights, samples, passport diffing) **only after** the S1/S2 overlap numbers SOCIAL.md §15 promised are published and clear §12's targets. Flights are the strongest acquisition argument in the doc set and are judged on that evidence.
+- **Monetization:** entitlements + billing (§6.6) after beta usage data.
+- **Later:** distillery visits (needs geolocation in the shell), club passports, S4 community scale (after the jurisdiction review), Wrapped, widgets, price alerts, gift mode.
+
+### 5.4 Frozen scope (and what unfreezes it)
+
+| Frozen | Unfreezes when |
+|---|---|
+| Clubs, blind flights, samples, passport diffing, club passports, distillery visits | S1/S2 overlap and SOCIAL §12 metrics published and healthy; Lane C complete |
+| S4 community consensus and public discovery (and the community segment already live on `/bottles/[id]/compare` is a §12 decision) | Jurisdiction review done |
+| New Whiskey School content, AI personalisation, Pro gating of lessons | Progress persisted server-side; v1 line closed |
+| Catalog pipeline feature work (batch API migration, new sources) | Steady-state cost model and budget alarm exist; maintenance and cost control only until then |
+| pgvector / embeddings / semantic search | Committed search evaluation shows substring + trigram is the bottleneck |
+| Wrapped, widgets, price alerts, gift mode, infinity bottles, store picks, 100-point mode | v1 line closed |
+
+**Structural invariant on every social release:** nothing becomes visible to a second user until the visibility model and block checks are enforced on the read path that serves it (SOCIAL.md §13). Consumption guardrails are enforced as mechanic bans in review and verified by the cohort-adjusted metric (SOCIAL.md §12), which must exist before the next social release.
 
 ---
 
@@ -340,6 +301,7 @@ Everything needed to replace notes apps and win the habit:
 - Bottle search + detail pages, label scanning (fair-use cap, e.g. 20 scans/mo).
 - **Limited AI chat** — e.g. 10 messages/month, enough to feel the magic and hit the wall.
 - Basic spend total (sum of purchase prices).
+- Export, always.
 
 ### 6.2 Premium — "Whaikey Pro" (~$5.99/mo or $49/yr; ~30% annual discount)
 
@@ -348,9 +310,9 @@ Sell the *palate + portfolio* story — "know your taste, know your bar's worth"
 - **Unlimited AI concierge** chat + voice-note extraction.
 - **Deeper social analysis** (not social *access* — see 6.2.1): full palate-match breakdowns across your graph, club analytics ("what is this club missing?").
 - **Palate wheel + explainable recommendations** ("because you loved X…").
-- **Collection value tracking** — market value estimates, value-over-time chart, cost-per-pour, spending analytics.
+- **Collection value tracking** — market value estimates as ranges, value-over-time chart, cost-per-pour, spending analytics.
 - Unlimited label scans, price history on bottles, wishlist price alerts (when built).
-- Blind tasting mode, flight comparison, CSV/PDF export (insurance reports).
+- Blind tasting mode, flight comparison, CSV/PDF insurance reports.
 - Yearly "Whiskey Wrapped" in full (free users get a teaser).
 
 Pricing logic: whiskey collectors routinely spend $50–100+ per bottle; $6/mo is < 2% of a single mid-shelf purchase. Anchor the annual plan as "less than one pour of Blanton's per month."
@@ -363,8 +325,8 @@ Same logic that keeps scanning free: the graph **is** the growth engine, and a p
 
 ### 6.3 Later revenue streams (post-traction, in order of attractiveness)
 
-1. **Affiliate/referral on recommendations** — "buy near you / online" links from bottle pages and rec cards (Vivino's core model). Strict rule: recommendations are *never* pay-to-rank; affiliate revenue is disclosed and downstream of an honest rec, or trust dies.
-2. **Retailer/brand analytics (B2B)** — aggregated, anonymized demand and flavor-trend data ("sherry-cask demand up 40% in Texas"). Privacy-first: opt-out, aggregate-only, no individual data sales.
+1. **Affiliate/referral on recommendations** — "buy near you / online" links from bottle pages and rec cards. Strict rule: recommendations are *never* pay-to-rank; affiliate revenue is disclosed and downstream of an honest rec, or trust dies.
+2. **Retailer/brand analytics (B2B)** — aggregated, anonymized demand and flavor-trend data. Privacy-first: opt-out, aggregate-only, no individual data sales.
 3. **Distillery partnerships** — sponsored (clearly labeled) tasting flights, early releases, virtual tastings inside clubs.
 4. **One-time IAPs** — lifetime unlock option (~$149) for subscription-averse collectors; gift subscriptions.
 
@@ -372,45 +334,132 @@ Same logic that keeps scanning free: the graph **is** the growth engine, and a p
 
 ### 6.4 Unit economics sanity check
 
-- Main variable cost is AI inference. Mitigations already in §7 risks: Haiku for high-volume extraction, per-bottle caching of pairings/recs, rate limits on free tier.
-- Rough target: keep AI cost per premium user < $1/mo (achievable with caching + Haiku routing) → healthy margin at $5.99.
-- Conversion assumption to validate in beta: 3–5% free→paid (typical for prosumer hobby apps; collectors likely convert higher).
+- Main variable cost is AI inference. Mitigations: the fast model for high-volume extraction, per-bottle caching of pairings/recs, per-feature rate limits, premium tier absorbs heavy chat users.
+- Rough target: keep AI cost per premium user < $1/mo → healthy margin at $5.99 **net of the 15–30 % store cut on IAP** (web checkout at the same price avoids it; parity rules apply).
+- Conversion assumption to validate in beta: 3–5% free→paid. **Neither number is measurable today** — per-user cost attribution is on the v1 line (§3).
 
 ### 6.5 Rollout
 
 - **Beta:** everything free, instrument usage to find the real willingness-to-pay lines.
-- **Launch:** grandfather beta users with 3 months of Pro; introduce paywall with the limits above.
-- Revisit free-tier AI message cap based on actual cost data — generosity is a growth lever, not a loss center, if caching works.
+- **Launch:** grandfather beta users with 3 months of Pro; introduce the paywall with the limits above.
+- Revisit the free-tier AI message cap based on actual cost data — generosity is a growth lever, not a loss center, if caching works.
+
+### 6.6 Implementation (not yet built)
+
+There is no entitlement concept in the schema or code. When billing lands: an `entitlements` row per user (tier, source web/ios/android, renews_at), one `hasEntitlement(user, feature)` helper used by every gated surface, RevenueCat (or StoreKit 2 + Play Billing direct) for stores and Stripe for web, receipt validation server-side, grandfathering by account creation date, and export/deletion unaffected by tier.
 
 ---
 
-## 7. Risks & open questions
+## 7. Risks
 
-| Risk | Mitigation |
-|---|---|
-| Bottle database quality/coverage | Layered sourcing per §4.5 (TTB COLA + Iowa + Wikidata seed); AI-assisted enrichment; user submissions with review queue; fuzzy matching so near-misses still resolve |
-| Data source revocation (Systembolaget/LCBO precedent) | Single-source risk rule: every feed has a fallback; convert lookups into first-party records (DATA_SOURCES.md §6) |
-| AI cost per user | Haiku for high-volume tasks, cache pairings/recs per bottle, rate-limit free tier, premium tier absorbs heavy chat users |
-| Label scan accuracy (bottle variants, private barrels) | Always confirm-or-correct UX; log corrections as training/eval data |
-| Market price data (no clean whiskey API) | Start with MSRP + user-entered prices; crowdsource street prices; treat "value" as estimate with ranges |
-| Scope creep (this doc proves it) | Ship the Phase 1 core loop before touching Phase 2 |
-| **Social drifts into rewarding consumption** (the Untappd failure mode — published research finds its streak/volume/ABV badges unchanged after 5 years of criticism) | Hard mechanic bans enforced in review, not disclaimers (SOCIAL.md §3.1); cohort-adjusted weekly-pour-rate metric as the smoke alarm (SOCIAL.md §12) |
-| **Privacy leak through a social surface** — prices, location, or a pour someone thought was private | Private by default, money data structurally absent from social projections, no system-raised visibility changes, revocable links, visibility + block checks land before any read path serves another user (SOCIAL.md §8, §13) |
-| **Sparse overlap** — friends haven't tasted the same bottles, so "compare notes" has nothing to compare | Tested in S1 for the cost of one page section (comparison on existing share links, no graph needed); compare at the descriptor level too (palate match needs zero shared bottles); use "3 friends tasted this" as the discovery framing when overlap is absent |
-| **Social is table stakes, not a wedge** — Distiller, Whiskybase, DramIt and Whiskey Social all have feeds | Only ship social that is downstream of our moat (taxonomy + calibration + palate model): the comparison card, not the activity stream |
-
-**Open questions to resolve before Phase 1:**
-1. Rating scale default — 5 stars (casual, Vivino-like) vs. 100-pt (enthusiast)? *Proposal: 5 stars with 0.5 steps, optional 100-pt mode in settings.*
-2. iOS-first or simultaneous Android? *Proposal: build cross-platform, but polish/beta iOS first.* (The Capacitor shell makes both one build — see [docs/NATIVE_APP.md](./docs/NATIVE_APP.md) §4.)
-3. Name: "Whaikey" — placeholder or keeper?
-
-**On the social layer:** the open-question list is now a *decision* table — [docs/SOCIAL.md](./docs/SOCIAL.md) §14 records 14 decided calls (asymmetric follow with derived friends; default visibility **Only me** with no system-raised retroactivity; reaction named **"Cheers"**; chronological stream as a Home module; bar/venue tagging not built, while distillery *visits* are a future passport dimension with permission-gated location; and more). Agents build to that table; overturn by editing it. Only two questions remain genuinely open: whole-shelf sharing timing (S3 lean, wants S2 privacy telemetry first) and the jurisdiction checklist before S4 public discovery. S1 needs no decisions at all — its build spec is in SOCIAL.md §16.
+| Risk | Tripwire | Mitigation |
+|---|---|---|
+| **Catalog dead-end** — a user's bottle isn't in the catalog and cannot be added | Scan/search miss rate; any miss with no follow-up action | User-submitted bottles (WP-16) before any further ingest investment; fuzzy search so near-misses resolve |
+| Bottle database quality/coverage | % of shelved bottles with verified status, flavor profile, image | Layered sourcing (§4.5); enrichment; feedback review; catalog-quality metrics (§10) |
+| Data source revocation (Systembolaget/LCBO precedent) | A scheduled sync failing twice | Every feed has a fallback; convert lookups into first-party records |
+| **Unticked data licensing** (CC BY attribution, ODbL isolation, COLA image posture) | Any source surfaced without attribution | One checklist with owners and dates (§9.5) cleared before launch |
+| AI cost per user | Cost/user/month > $1 on Pro or > $0.20 on free | Fast model for volume, caching, per-feature budgets, tier caps; cost telemetry first |
+| **Unbounded pipeline cost** | Monthly workflow spend without a budget line | Cost model + alarm before new sources (track K) |
+| Label scan accuracy | Correction rate on confirm-or-correct | Corrections stored as eval data; confirm-or-correct always |
+| Market price data | Any point estimate shown without a range | Ranges/trends only; user-entered comps |
+| **No acquisition plan** | Sign-ups/week flat after launch | Share-page CTA, flight nights when unfrozen, first-week retention instrumented |
+| **Store rejection compounding** — UGC answer, age gate, moderation, demo account | Any submission without all four resolved | Lane C before the first store record |
+| **Prod migration drift** — scheduled workflows write to a DB whose schema may lag `main` | Migration state ≠ journal head at deploy | Drift check in CI/deploy; expand/contract until migrations move post-build |
+| **Single-operator load** — moderation and verification are ongoing duties | Report age > 72 h; verification queue growth | Size the load; queue SLAs; automation only where evidence is provenance-backed |
+| Scope creep (this doc proves it) | Any work outside §5.2 lanes before the v1 line | Frozen list (§5.4) with named tripwires |
+| **Social drifts into rewarding consumption** | The cohort-adjusted weekly pour rate rises after a social release | Mechanic bans enforced in review (SOCIAL §3.1); the metric must exist before the next social release |
+| **Privacy leak through a social surface** | Any social projection touching price/spend; any aggregate including private pours | Projection rule (§4.3); fix review SEC-M2; decide SEC-M7 (§12) |
+| **Sparse overlap** — friends haven't tasted the same bottles | S1/S2 overlap numbers below SOCIAL §12 targets | Publish the numbers; descriptor-level comparison; discovery framing |
+| Social is table stakes, not a wedge | — | Only ship social downstream of the taxonomy + calibration moat |
 
 ---
 
-## 8. Immediate next steps
+## 8. Notifications
 
-1. Approve/adjust this plan (especially §3 priorities, §6 pricing, and §7 open questions).
-2. Scaffold Expo app + Supabase project (Phase 0).
-3. Design the 4 core screens: Search, Bottle Detail, My Bar, Pour Log.
-4. Build the bottle-DB seed pipeline.
+Nothing sends today (`push_devices` stores tokens; no sender exists). When one does, this section is binding.
+
+- **Allow-list** (SOCIAL.md §7.5): new follower · cheer or comment on your note · a friend tasted a bottle you've also tasted (batched, ≤ 1/day) · club and flight events you opted into · someone logged a note from a sample you sent.
+- **Banned:** anything mentioning pouring or drinking now; "you haven't logged since…"; progress-toward-reward or "one region to go"; "friends drinking now"; fill-level or finish-this-bottle prompts; price alerts framed as urgency.
+- **Delivery:** APNs/FCM via one server-side sender behind a queue; per-user preferences stored on `user_social_prefs.notify_prefs` with every category off-able; quiet hours; batching per category; unsubscribe link in any email.
+- **Ownership of a token:** a token belongs to the account that registered it most recently **and** whose registration is fresh; stale reassignment rules per review SEC-M6.
+
+---
+
+## 9. Compliance, trust & operations
+
+### 9.1 Age gate & jurisdiction
+Date-of-birth or attestation at signup with a per-market minimum (21 US, 18 most others; align store availability to markets we can serve). One gate covers social; no re-check at first social action. Under-age existing accounts: social off, export offered, deletion after notice. **Not built** — WP-17.
+
+### 9.2 Privacy: export, deletion, retention
+- Export: JSON + CSV of bottles, pours, notes, chat, profile (minus phone hash), shares, passport; one tap, free forever.
+- Deletion: hard delete of the user row (every user-owned table cascades), revocation of shares and push devices, session clear; comments on others' pours are soft-deleted to "[deleted]"; contributions to community aggregates are recomputed on next refresh. Policy stated in the Privacy Policy.
+- Retention: native auth codes deleted on redemption and swept; rate-limit rows swept after 48 h; phone probes swept per `social.ts`; chat history kept until the user deletes it.
+- Private by default everywhere; visibility never raised by the system; money never crosses a social boundary; palate provenance decided in §12.
+
+### 9.3 Terms & Privacy Policy
+Required before any store submission. Must cover: AI processing and the provider (OpenRouter or Anthropic) that sees notes and shelf data; the user-photo licence grant (DATA_SOURCES §6); community-contribution opt-in; age requirement; responsible-drinking stance; data retention and deletion; contact.
+
+### 9.4 Moderation
+Reports exist (`/api/social/reports`); nothing reads them. Required: an operator role (env-allowlisted user ids at first), a `/admin/reports` queue with hide/warn/ban actions, a 72-hour SLA, an appeals note in the ToS, and audit logging. Store review will ask.
+
+### 9.5 Data licensing checklist (single list; owners and dates to be filled)
+- [ ] TTB COLA image posture documented
+- [ ] Open Food Facts (ODbL) never merged into our tables — verified by code review
+- [ ] WHISKY:EDITION (CC BY 4.0) attribution surface live wherever its data appears
+- [ ] Systembolaget mirror, BC OGL, Vinmonopolet terms reviewed
+- [ ] Affiliate feed ToS reviewed before any link ships
+- [ ] Whiskybase: licensing conversation only; no scraping
+- [ ] User-photo licence in the ToS before any upload path ships
+
+### 9.6 Store submission facts
+UGC: **yes** (profiles, feeds, comments) — moderation, report and block flows documented. Age rating per alcohol content. Reviewer access: decision in §12. Support URL and privacy URL live. Native kill switch (`minShellVersion`) live.
+
+### 9.7 Support & feedback
+An in-app feedback sheet (mails a support address; attaches app version and platform) and a public support URL. The GitHub issue form remains for catalog corrections only.
+
+### 9.8 Responsible-drinking stance
+Enforced as mechanic bans in review (SOCIAL §3.1; §1's never-build list), verified by the cohort-adjusted pours-per-active-user metric (§10), and visible in copy: no volume headlines, no finish-this prompts, resources page linked from Settings.
+
+---
+
+## 10. Non-functional requirements & measurement
+
+| Area | Requirement | How it is measured |
+|---|---|---|
+| Performance | Tab tap paints < 100 ms (skeleton); search results < 100 ms p95; scan-to-shelved < 3 s p95; cold start < 2 s | RUM on the three flows; a Lighthouse budget in CI; NATIVE_APP §1.4 tripwires wired to these numbers |
+| Offline | Pour logging works offline on web and native; idempotent flush; shelf edits last-write-wins per field | Tests in `offline-queue.test.ts`; a Playwright offline scenario |
+| Accessibility | VoiceOver/TalkBack on core flows; the wheel has a list-mode equivalent; dynamic type; 12 px floor; 4.5:1 contrast; 44 px targets | axe in the visual suite; a manual VoiceOver pass per release |
+| Analytics | Event set: session, search, scan (hit/miss/submit), pour (source, taps), bottle add, share create/open, follow, export; **cohort-adjusted pours per active user per week** | PostHog or equivalent, server-side where possible; the guardrail metric on a dashboard the owner looks at |
+| Error monitoring | Sentry on server and client, release-tagged; native crash reporting | Alert on error-rate spike per deploy |
+| AI evaluation | Extraction accuracy against the 55 leaves; scan match rate; pairing sanity; enrichment correctness; every user correction stored as eval data | A committed eval set run on model or prompt change |
+| Search quality | Recall@5 on a 50-query set incl. misspellings and slang | `src/lib/search.eval.ts` in CI |
+| Catalog quality | Coverage by category/country; % with flavor profile, image, verified status; duplicate rate; scan resolution rate | Printed by `pnpm ingest --stats`; tracked per sync run |
+| Testing | Unit on PGlite + a Postgres service-container lane; route tests for every handler; visual baselines CI-canonical | CI |
+| Localization | v1 English; units (ml/oz) and currency per user; strings separable | Settings; schema `currency` column with money |
+
+---
+
+## 11. Surfaces
+
+Target IA and per-screen boards: [docs/STORYBOARD.md](./docs/STORYBOARD.md). Nav: **Home · Bar · ＋ (pour sheet) · Explore · You**. Routes that must exist and do not yet: `/settings`, `/passport` (index), `/admin/reports`, `loading.tsx` / `error.tsx` / `not-found.tsx`. Routes that demote: `/friends` and `/chat` become sections and affordances rather than tabs.
+
+---
+
+## 12. Decisions
+
+Supersedes the old open-questions list; SOCIAL.md §14's decision table is incorporated by reference.
+
+| Decision | Status | Rationale / how to overturn |
+|---|---|---|
+| Rating scale | **Decided:** half-stars 0.5–5.0 stored as a double; no 100-point mode planned | A 100-point display transform is possible later without a storage change |
+| Platform | **Decided:** Next.js + Capacitor; iPhone polished first, both built in CI | NATIVE_APP.md §1.4 tripwires |
+| AI provider | **Decided:** runtime selection, OpenRouter preferred when configured; ids in code | Revisit if caching/web-search loss on OpenRouter costs more than its convenience |
+| Embeddings / semantic search | **Deferred** behind a search evaluation | Unfreezes per §5.4 |
+| App name and bundle id (`com.whaikey.app`) | **Open — decide before any store record exists** (irreversible on both stores) | Owner |
+| Production domain (`app.whaikey.com` assumed) | **Open** | Owner; blocks deep links, OAuth redirect, `.well-known`, shell URL |
+| Reviewer/demo access under social-login-only | **Open** | Options: env-flagged review-only credential provider bound to one fixed account; a signed long-lived reviewer link; a guest mode. Conflicts with AGENTS.md's password rule, so it needs an explicit owner call |
+| Palate card provenance (review SEC-M7) | **Open** | Preferred: social projections exclude "Only me" pours; else state the aggregation in SOCIAL §7.1 and the UI |
+| Community segment on `/bottles/[id]/compare` before the jurisdiction review | **Open** | Keep behind a flag, or roll back until reviewed |
+| Whiskey School progress server-side | **Recommended: yes** | One day of work; needed for any gating or passport tie-in |
+| Social phase gating | **Decided:** no S3 remainder or S4 until S1/S2 overlap numbers are published and §12 metrics exist | SOCIAL.md §15 |
+| Whole-shelf sharing timing; jurisdiction checklist before S4 | **Open** (SOCIAL §14) | As before |

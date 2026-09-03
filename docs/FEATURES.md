@@ -23,7 +23,7 @@ Companion to [PLAN.md](../PLAN.md). This document specifies every feature area i
 ## 2. Bottle Identification & Database
 
 ### 2.1 Search (🟢 Phase 1)
-- Instant-as-you-type, < 100 ms, tolerant of misspellings ("lafroig" → Laphroaig) via Postgres trigram + FTS.
+- Instant-as-you-type, < 100 ms, tolerant of misspellings ("lafroig" → Laphroaig) via Postgres trigram + FTS. **Status (2026-09): not there yet** — `src/lib/search.ts` is an `ILIKE` substring match over name/distillery/alias with no trigram index; typo tolerance is planned via `pg_trgm` (PLAN.md §3, review WP-22).
 - Understands abbreviations and enthusiast slang: "weller sr" → W.L. Weller Special Reserve; "ECBP" → Elijah Craig Barrel Proof (alias table on bottles).
 - Filters: category (bourbon/scotch/rye/irish/japanese/world), region, age, ABV, price band, cask type.
 - **Semantic search (🟡):** "smoky but sweet under $70" → embedding search over flavor profiles.
@@ -115,7 +115,7 @@ My Bar is a **top-2 surface** (with scan/search-to-add) — not a list of rows w
 
 ### 4.2 Rating system (🟢)
 - Default: 5 stars with half-steps (casual-friendly, Vivino-compatible mental model).
-- Settings toggle: 100-point enthusiast scale (stored internally as 0–100 either way).
+- ~~Settings toggle: 100-point enthusiast scale (stored internally as 0–100 either way).~~ **Decided (PLAN.md §12):** ratings are half-stars 0.5–5.0 stored as a double (`pours.rating`); a 100-point mode is not planned and would be a display transform if it ever ships.
 - Per-pour ratings roll up to a personal per-bottle average; history sparkline shows drift over time.
 - Rating calibration (🔵): occasional "which did you like more, A or B?" prompts to de-noise the scale.
 
@@ -142,7 +142,7 @@ My Bar is a **top-2 surface** (with scan/search-to-add) — not a list of rows w
 ## 5. Flavor Wheel & Palate Model
 
 ### 5.1 The wheel (🟢 Phase 1)
-- Two-tier whiskey taxonomy: 8 cores (Fruity, Floral, Grain, Sweet, Woody, Spicy, Peaty/Smoky, Feinty/Sulfury) → ~60 leaf descriptors.
+- Two-tier whiskey taxonomy: 8 cores (Fruity, Floral, Grain, Sweet, Woody, Spicy, Peaty/Smoky, Feinty) → 55 leaf descriptors (`src/lib/flavor-wheel.ts` is the contract).
 - **Subsections are always color-coded by family** (classic printed-wheel look): each core wedge owns a hue, and its leaves render as graded shades of that hue — a flavor's color is the same everywhere it appears (wheel rings, note chips, legends).
 - Roles: **input device** (tap wedges during note-taking), **bottle visualization** (aggregate profile), **library heat map** (My Bar's aggregate palate, §3.5), **comparison overlay** (bottle vs. bottle, you vs. community).
 - Custom SVG/Skia component; must feel tactile (haptics on wedge selection).
@@ -201,7 +201,7 @@ My Bar is a **top-2 surface** (with scan/search-to-add) — not a list of rows w
 - 🔵 Phase 4: proactive cards (not push-spam): "You finished your only rye — want replacements under $50?"
 
 ### 8.3 Guardrails
-- Responsible-drinking stance baked into the system prompt; no consumption encouragement patterns; regional legal-age gate at signup.
+- Responsible-drinking stance baked into the system prompt; no consumption encouragement patterns; regional legal-age gate at signup (**⚠️ not built as of 2026-09** — no age/DOB logic exists anywhere in `src/`; it is a launch blocker owned by PLAN.md §9.1).
 - AI never invents prices or availability — tools or "I don't know."
 - Per-user rate limits + free-tier caps (see PLAN.md §6 Monetization).
 
@@ -449,7 +449,7 @@ Whiskey is one of the few hobbies with *destinations*. People plan Islay trips, 
 | Offline | Pour logging, note-taking, and My Bar browsing work offline; queued sync with conflict resolution (last-write-wins per field) |
 | Privacy | Notes/inventory private by default; community contribution is opt-in and anonymized; full export (CSV/JSON, including social data) free forever; account deletion = hard delete with social rows cascading. Visibility is never raised by the system (the owner may raise it explicitly), share links are enumerable and revocable, and money data never enters a social projection (§9.11, SOCIAL.md §8) |
 | Accessibility | VoiceOver/TalkBack on all core flows; wheel has a list-mode equivalent; dynamic type |
-| Trust & safety | Age gate; responsible-drinking resources; no engagement mechanics that reward consumption frequency |
+| Trust & safety | Age gate (**not built yet** — PLAN.md §9.1); responsible-drinking resources; no engagement mechanics that reward consumption frequency |
 | Localization | v1 English; schema keeps display strings separable; metric/imperial pour sizes |
 
 ---

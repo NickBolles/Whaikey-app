@@ -6,7 +6,9 @@ An AI-native whiskey tracking app — think Vivino/InVintory, but for whiskey, w
 
 ## Docs
 
-- 📋 **[PLAN.md](./PLAN.md)** — vision, feature brainstorm, architecture, data model, monetization, phased roadmap.
+- 📋 **[PLAN.md](./PLAN.md)** — vision, current state, the v1 done line, architecture, roadmap tracks, monetization, compliance & ops, decisions.
+- 🎬 **[docs/STORYBOARD.md](./docs/STORYBOARD.md)** — target IA and screen-by-screen boards for the UX focus pass (binding for UI work).
+- 🔍 **[docs/REVIEW_2026-09.md](./docs/REVIEW_2026-09.md)** — September 2026 review: security, correctness and UX findings with prioritized work packages.
 - 🗺️ **[docs/FEATURES.md](./docs/FEATURES.md)** — detailed feature map: ~60 features with priorities, UX flows, and the build-order dependency graph.
 - ⚔️ **[docs/COMPETITORS.md](./docs/COMPETITORS.md)** — competitor & market analysis (whiskey + wine apps), comparison matrix, gaps, and the decisions it feeds back into the plan.
 - 🗄️ **[docs/DATA_SOURCES.md](./docs/DATA_SOURCES.md)** — data sourcing strategy: bottle catalog, barcodes, prices/valuation, label scanning, costs, and legal checklist.
@@ -123,4 +125,4 @@ Font rasterization differs across environments, so a baseline rendered on your l
 
 ## Status
 
-MVP in progress — Phases 0–2 of [PLAN.md](./PLAN.md) (core loop + AI layer).
+Core loop, AI layer, native shell, social S1–S3 (most), passport, Whiskey School and the catalog pipeline are live; see [PLAN.md](./PLAN.md) §2 for the honest current state, §3 for the v1 done line, and [docs/REVIEW_2026-09.md](./docs/REVIEW_2026-09.md) for open findings and work packages.

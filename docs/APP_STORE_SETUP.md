@@ -163,9 +163,12 @@ Also relevant on the current questionnaire:
 - References to alcohol: **yes, frequent/intense** (it is the subject of the app).
 - Does the app encourage consumption? **No** — and PLAN.md §7's responsible-drinking
   stance is worth stating in the review notes.
-- User-generated content / social feed: **no** for v1 (that's PLAN.md Phase 4). Revisit
-  when social ships — Apple's UGC questions become mandatory in Sept 2026 and force 13+
-  minimum with moderation and blocking requirements.
+- User-generated content / social feed: **yes.** The app ships public profiles, notes
+  shared to followers/public, cheers and threaded comments today (SOCIAL.md S1–S3).
+  Apple's UGC path forces a 13+ minimum and requires a published moderation policy, a
+  report flow (shipped: `/api/social/reports`), a block flow (shipped), **and a way for
+  the operator to act on reports — not shipped; no moderation queue exists (PLAN.md §9.4).**
+  Do not submit until the queue exists. Answering "no" here is a false declaration.
 
 Set the **App Store availability age gate** consistently, and check whether any target
 country restricts alcohol-related apps outright.

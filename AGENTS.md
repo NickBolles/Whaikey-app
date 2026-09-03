@@ -10,7 +10,9 @@ AI-native whiskey tracking app: search/scan bottles → own/tried/wishlist → l
 
 ## Docs index (read what the task touches)
 
-- `PLAN.md` — product plan, architecture, data model, monetization, roadmap phases.
+- `PLAN.md` — product plan: vision, **current state (§2 — read before writing code)**, the v1 done line, architecture, roadmap tracks, monetization, compliance/ops, decisions.
+- `docs/STORYBOARD.md` — **binding** target information architecture and screen boards (nav, per-screen "not here" lists, tap-count targets, global patterns). Any screen or nav change must match it or change it first.
+- `docs/REVIEW_2026-09.md` — the September 2026 review: security, correctness, UX findings with file:line refs and the prioritized work packages (WP-1…26) to pick up.
 - `docs/FEATURES.md` — feature specs with priorities; `docs/COMPETITORS.md` — market analysis; `docs/DATA_SOURCES.md` — catalog/price/scan data strategy.
 - `docs/SOCIAL.md` — **binding** for anything social: friends/feed/clubs, the visibility model (private by default, money data never crosses a social boundary), the banned-mechanics list (no streaks, volume/ABV badges, or consumption leaderboards) **and §3.2's encouraged substitutes, which are just as binding**. Read it before adding any user-to-user surface.
 - `docs/DESIGN.md` — **binding** design system (recipes + rules + screenshot workflow). Any UI change must follow it.
@@ -18,7 +20,7 @@ AI-native whiskey tracking app: search/scan bottles → own/tried/wishlist → l
 
 ## Stack & commands
 
-Next.js App Router (TS, Tailwind v4) · Drizzle + PGlite locally/tests and Postgres in production · Better Auth (**social login only — never add password auth**) · Anthropic SDK (server-side only) · Vitest · Playwright.
+Next.js App Router (TS, Tailwind v4) · Drizzle + PGlite locally/tests and Postgres in production · Better Auth (**social login only — never add password auth**) · Anthropic Messages API via `src/lib/ai/client.ts` (OpenRouter preferred when `OPENROUTER_API_KEY` is set, Anthropic direct otherwise; server-side only) · Vitest · Playwright.
 
 ```bash
 pnpm dev                 # http://localhost:3000 (needs pnpm db:push && pnpm db:seed once)
