@@ -172,8 +172,9 @@ The feature set has to land somewhere. Today's surface map, then what social cha
 
 ### 6.1 The app today
 
-- **Tab bar (5 slots):** Home `/` · My Bar `/bar` · **＋ New** (quick actions: log a pour `/pour`, scan `/scan`, find a bottle `/search`) · Search `/search` · Chat `/chat`.
-- **Secondary surfaces:** bottle detail `/bottles/[id]`, pour history `/history`, learn `/learn`, import `/import`, share page `/s/[code]`, sign-in `/sign-in`.
+- **Tab bar as shipped (2026-08, `src/components/app-nav.tsx`):** Home `/` · My Bar `/bar` · **＋ New** (quick actions: log a pour `/pour`, scan `/scan`, find a bottle `/search`) · Friends `/friends` · Chat `/chat`; search and the journal live in the header.
+- **Target (docs/STORYBOARD.md §1.1, binding for the next IA change):** Home · Bar · ＋ (pour sheet) · Explore · You — Friends becomes a section of You, Chat becomes an affordance rather than a tab.
+- **Secondary surfaces:** bottle detail `/bottles/[id]` and `/bottles/[id]/compare`, journal `/history`, note `/notes/[pourId]`, profile `/u/[handle]`, add-by-link `/add/[handle]`, passport `/passport/[family]/[value]`, sharing `/sharing`, learn `/learn`, import `/import`, welcome `/welcome`, share page `/s/[code]`, sign-in `/sign-in`.
 - Home is already a dashboard (greeting, start-with-your-shelf, Whiskey School, recent pours) — it has room for one more module and a natural slot for it.
 
 ### 6.2 Where social attaches
@@ -330,7 +331,7 @@ Alcohol consumption is sensitive personal data — in some jobs, families, juris
 4. **Revocable and enumerable.** Every share link, every follower, every public object is listed in one place and revocable in one tap. Revocation is immediate and hard (row delete/tombstone), and OG images are regenerated/404'd.
 5. **Deletion is real.** Deleting a pour removes it from feeds, links, and comparison aggregates. Account deletion is a hard delete (FEATURES.md §12) — social rows cascade, and content contributed to *aggregates* is either removed or was anonymised at write time.
 6. **Export includes your social data** — your notes, your comments, your graph. Same free-forever rule.
-7. **Age gate at signup covers social.** The existing gate is the gate; no separate re-check ceremony at first social action — social surfaces expose nothing age-worse than the journal itself.
+7. **Age gate at signup covers social.** **⚠️ Not built (verified 2026-09): no age gate exists in the codebase.** Building one is a launch blocker owned by PLAN.md §9.1. When it ships, one gate at signup is the gate; no separate re-check ceremony at first social action — social surfaces expose nothing age-worse than the journal itself.
 
 **Anti-goals:** no public-by-default anything; no follower counts as status; no "who viewed your profile"; no shadow profiles for non-users; no selling or brand-sharing of individual-level social data (PLAN.md §6.3 aggregate-only rule extends here unchanged).
 
