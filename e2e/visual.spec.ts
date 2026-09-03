@@ -64,6 +64,18 @@ test.describe("signed out", () => {
     await expect(page).toHaveScreenshot(shot("search-no-results"), { fullPage: true });
   });
 
+  /**
+   * The screen an outage renders. It is the last thing a bad deploy still
+   * shows and the only lever a remote-URL app has, so it gets a baseline like
+   * any other screen — see docs/STORYBOARD.md §3.15.
+   */
+  test("update required", async ({ page }) => {
+    await page.goto("/app-update");
+    await expect(page.getByRole("heading", { name: "Update Whaikey" })).toBeVisible();
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("app-update"), { fullPage: true });
+  });
+
   test("responsible drinking", async ({ page }) => {
     await page.goto("/responsible");
     await settle(page);

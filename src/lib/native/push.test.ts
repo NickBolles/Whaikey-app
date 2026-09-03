@@ -87,8 +87,45 @@ describe("refreshPushRegistration", () => {
   });
 });
 
+describe("disablePush", () => {
+  /**
+   * The tokenless DELETE means "every device on this account". Signing out on
+   * one phone must not kill notifications on the owner's others — or free
+   * those tokens for somebody else to claim.
+   */
+  it("releases this device only", async () => {
+    const { refreshPushRegistration, disablePush } = await import("./push");
+    await refreshPushRegistration();
+    calls.length = 0;
+
+    await expect(disablePush()).resolves.toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].method).toBe("DELETE");
+    expect(calls[0].url).toContain("token=tok-refreshed");
+  });
+
+  it("does nothing when this device never registered one", async () => {
+    window.localStorage.clear();
+    const { disablePush } = await import("./push");
+    await expect(disablePush()).resolves.toBe(true);
+    // Not a tokenless DELETE: there is nothing of ours to release, and asking
+    // for one would take the account's other devices with it.
+    expect(calls.filter((c) => c.method === "DELETE")).toHaveLength(0);
+  });
+
+  it("reports a release the server did not confirm", async () => {
+    const { refreshPushRegistration, disablePush } = await import("./push");
+    await refreshPushRegistration();
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 500 })));
+    await expect(disablePush()).resolves.toBe(false);
+  });
+});
+
 describe("signOutCompletely", () => {
   it("releases the token before ending the session", async () => {
+    const { refreshPushRegistration } = await import("./push");
+    await refreshPushRegistration();
+
     const order: string[] = [];
     vi.doMock("@/lib/auth-client", () => ({
       signOut: vi.fn(async () => {
@@ -107,13 +144,20 @@ describe("signOutCompletely", () => {
     await signOutCompletely();
 
     // Order matters: the DELETE needs the session it is about to end.
-    expect(order).toEqual(["DELETE /api/native/push-token", "signOut"]);
+    expect(order).toEqual([
+      "DELETE /api/native/push-token?token=tok-refreshed",
+      "signOut",
+    ]);
     vi.doUnmock("@/lib/auth-client");
   });
 
   it("still signs out when the token cannot be released", async () => {
     const signOut = vi.fn(async () => {});
     vi.doMock("@/lib/auth-client", () => ({ signOut }));
+    vi.resetModules();
+
+    const { refreshPushRegistration } = await import("./push");
+    await refreshPushRegistration();
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => {
@@ -121,9 +165,9 @@ describe("signOutCompletely", () => {
       }),
     );
 
-    vi.resetModules();
     const { signOutCompletely } = await import("@/lib/sign-out");
-    await expect(signOutCompletely()).resolves.toBeUndefined();
+    // Reported rather than swallowed — and it still signs out.
+    await expect(signOutCompletely()).resolves.toEqual({ pushReleased: false });
     // Nobody is trapped in an account because push cleanup failed — and a
     // device that can't reach the server can't be notified by it either.
     expect(signOut).toHaveBeenCalled();

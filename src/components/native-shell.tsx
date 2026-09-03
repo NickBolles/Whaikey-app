@@ -15,6 +15,7 @@ import {
 } from "@/lib/native/auth";
 import type { AuthCallback } from "@/lib/native/auth";
 import { checkShellVersion, type ShellVersionCheck } from "@/lib/native/manifest";
+import { ShellUpdateRequired } from "@/components/shell-update-required";
 import { isNativeApp } from "@/lib/native/platform";
 import { refreshPushRegistration } from "@/lib/native/push";
 import { flushPourQueue, isOnline } from "@/lib/native/offline-queue";
@@ -189,6 +190,14 @@ export function NativeShell({ userId }: { userId?: string | null }) {
       // a duplicate of the web one above.
       void syncQueue();
       void refreshPushRegistration();
+      // And re-ask whether this binary is still allowed to render what it is
+      // about to refresh. The shell can outlive a deploy — the WebView stays
+      // alive across backgrounding — so a floor raised while the app was away
+      // would otherwise not be seen until it was killed and relaunched, which
+      // is exactly the case a kill switch exists for.
+      void checkShellVersion().then((check) => {
+        if (check.status === "update_required") setOutdated(check);
+      });
     });
 
     return () => {
@@ -202,28 +211,11 @@ export function NativeShell({ userId }: { userId?: string | null }) {
   if (!outdated) return null;
 
   return (
-    <div
-      role="alertdialog"
-      aria-modal="true"
-      aria-label="Update Whaikey"
-      className="fixed inset-0 z-[60] flex flex-col items-center justify-center gap-5 bg-background px-8 text-center"
-    >
-      <div aria-hidden className="text-5xl drop-shadow-[0_0_24px_rgba(232,161,60,0.25)]">
-        🥃
-      </div>
-      <h1 className="font-display text-2xl font-semibold">Update Whaikey</h1>
-      <p className="text-muted max-w-sm leading-relaxed">
-        {outdated.notice ??
-          "This version of the app is too old for what's on the shelf. Updating takes a moment and nothing you've logged is lost."}
-      </p>
-      {outdated.storeUrl && (
-        <a href={outdated.storeUrl} className="btn-primary px-8 py-3">
-          Get the update
-        </a>
-      )}
-      <p className="text-xs text-muted/70">
-        Installed {outdated.installed} · needs {outdated.required}
-      </p>
-    </div>
+    <ShellUpdateRequired
+      notice={outdated.notice}
+      storeUrl={outdated.storeUrl}
+      installed={outdated.installed}
+      required={outdated.required}
+    />
   );
 }

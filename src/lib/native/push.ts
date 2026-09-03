@@ -118,24 +118,86 @@ export async function refreshPushRegistration(): Promise<void> {
  */
 async function storeToken(token: string): Promise<void> {
   try {
-    await fetch("/api/native/push-token", {
+    const res = await fetch("/api/native/push-token", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ token, platform: platform() }),
     });
+    // Only remember a token the server accepted: a 409 means it belongs to
+    // somebody else, and releasing it on our way out is not ours to do.
+    if (res.ok) rememberToken(token);
   } catch {
     // Offline — retried on the next enablePush() call.
   }
 }
 
-/** Stop delivery to this device, e.g. on sign-out. */
-export async function disablePush(): Promise<void> {
+/**
+ * The last token this device registered.
+ *
+ * Kept so sign-out can release **this** device rather than every device on the
+ * account. The tokenless DELETE means "all of mine", which on a phone signing
+ * out would silently kill notifications on the owner's other phones — and free
+ * those tokens for somebody else to claim.
+ */
+const LAST_TOKEN_KEY = "whaikey.push-token";
+
+function rememberToken(token: string): void {
+  try {
+    window.localStorage.setItem(LAST_TOKEN_KEY, token);
+  } catch {
+    // Private mode or a full quota. The release below then falls back to
+    // asking the OS, which is where the token came from anyway.
+  }
+}
+
+function rememberedToken(): string | null {
+  try {
+    return window.localStorage.getItem(LAST_TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function forgetToken(): void {
+  try {
+    window.localStorage.removeItem(LAST_TOKEN_KEY);
+  } catch {
+    // Nothing to do; the value is a cache, not a record.
+  }
+}
+
+/**
+ * Stop delivery to **this** device, e.g. on sign-out.
+ *
+ * Returns whether the server confirmed it. The caller needs to know: a
+ * swallowed failure leaves the row live, so the account that just signed out
+ * keeps receiving notifications on a device it no longer holds until the
+ * staleness window closes.
+ */
+export async function disablePush(): Promise<boolean> {
   const plugin = await loadPlugin(() => import("@capacitor/push-notifications"));
-  if (!plugin) return;
+  if (!plugin) return true;
+
+  const token = rememberedToken();
   try {
     await plugin.PushNotifications.removeAllListeners();
-    await fetch("/api/native/push-token", { method: "DELETE" }).catch(() => {});
   } catch {
-    // Nothing actionable.
+    // Listener teardown is local tidying; the row is what matters.
+  }
+
+  // No token means this device never registered one, so there is nothing of
+  // ours to release — and the tokenless DELETE would take somebody's other
+  // phones with it.
+  if (!token) return true;
+
+  try {
+    const res = await fetch(`/api/native/push-token?token=${encodeURIComponent(token)}`, {
+      method: "DELETE",
+    });
+    if (!res.ok) return false;
+    forgetToken();
+    return true;
+  } catch {
+    return false;
   }
 }

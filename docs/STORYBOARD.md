@@ -272,6 +272,15 @@ A miss is an ordinary answer on a catalog this size, so it has somewhere to go. 
 - **`/responsible`** is an ordinary content page reachable signed-out: what the app will not do, what a pour contains, and named organisations. Linked from the gate, the blocked state, sign-in and `/sharing`. It moves to **Settings → About** when Settings exists.
 - **Not here**: identity verification, a re-check at first social action, any claim the app cannot honour today (the export line says it is not built yet, because it is not).
 
+
+### 3.15 Update required (`/app-update` and the native shell; WP-20)
+
+The screen a bad deploy still renders, and the one an operator sees after raising `WHAIKEY_MIN_SHELL_VERSION` to stop one (docs/NATIVE_APP.md §2.2). Full screen, over everything, **no header and no nav** — every tab behind it leads to a UI this binary cannot run.
+
+- One line saying what happened (overridable per outage by `WHAIKEY_SHELL_NOTICE`), one button to the store when a store URL is configured, and the two version numbers in small text so a support reply has something to go on.
+- It must promise nothing about data: "nothing you've logged is lost" is the only reassurance offered, and it is true — the queue is local and survives an update.
+- The native shell renders the component inline; `/app-update` renders the same one, which is what gives an outage-critical screen a visual baseline and a link a store listing can use.
+- **Not here**: a retry button (there is nothing to retry — the binary is the problem), a way past it, or anything about the deploy that caused it.
 ---
 
 ## 4. Guardrail-sensitive UI

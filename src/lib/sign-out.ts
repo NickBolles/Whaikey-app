@@ -11,11 +11,35 @@ import { disablePush } from "@/lib/native/push";
  * register the same token for a week.
  *
  * Push first, deliberately: the DELETE needs the session it is about to end.
- * Its failure is not allowed to trap anybody in the account — a device that
- * cannot reach the server also cannot receive a notification from it, and the
- * next registration on that token will find a row nobody has refreshed.
+ * It releases **this** device only — the tokenless DELETE means "all of mine",
+ * which on one phone signing out would kill notifications on the owner's
+ * others and free those tokens for anybody to claim.
+ *
+ * A failure is retried once and then reported rather than swallowed, but it is
+ * never allowed to trap anybody in the account: on the blocked age gate this is
+ * the only way out. The residual exposure is bounded by the staleness window,
+ * and the caller is told so it can say so.
  */
-export async function signOutCompletely(): Promise<void> {
-  await disablePush().catch(() => {});
+export interface SignOutResult {
+  /** False when this device's push registration outlived the session. */
+  pushReleased: boolean;
+}
+
+export async function signOutCompletely(): Promise<SignOutResult> {
+  // Twice, because the common failure is a single dropped request and the
+  // second attempt still has the session it needs. Beyond that, ending the
+  // session matters more than tidying: refusing to sign somebody out because
+  // a notification token would not delete is the worse outcome of the two,
+  // especially on the blocked age gate where this is the only way out.
+  let pushReleased = await disablePush().catch(() => false);
+  if (!pushReleased) pushReleased = await disablePush().catch(() => false);
+
+  if (!pushReleased) {
+    console.warn(
+      "[push] this device's registration could not be released; it stays with this account until the staleness window closes",
+    );
+  }
+
   await signOut();
+  return { pushReleased };
 }
