@@ -201,7 +201,7 @@ My Bar is a **top-2 surface** (with scan/search-to-add) — not a list of rows w
 - 🔵 Phase 4: proactive cards (not push-spam): "You finished your only rye — want replacements under $50?"
 
 ### 8.3 Guardrails
-- Responsible-drinking stance baked into the system prompt; no consumption encouragement patterns; regional legal-age gate at signup (**⚠️ not built as of 2026-09** — no age/DOB logic exists anywhere in `src/`; it is a launch blocker owned by PLAN.md §9.1).
+- Responsible-drinking stance baked into the system prompt; no consumption encouragement patterns; regional legal-age gate at signup (built in WP-17 — `src/lib/age-gate.ts`, enforced in the root layout and in `requireUser`).
 - AI never invents prices or availability — tools or "I don't know."
 - Per-user rate limits + free-tier caps (see PLAN.md §6 Monetization).
 
@@ -449,7 +449,7 @@ Whiskey is one of the few hobbies with *destinations*. People plan Islay trips, 
 | Offline | Pour logging, note-taking, and My Bar browsing work offline; queued sync with conflict resolution (last-write-wins per field) |
 | Privacy | Notes/inventory private by default; community contribution is opt-in and anonymized; full export (CSV/JSON, including social data) free forever; account deletion = hard delete with social rows cascading. Visibility is never raised by the system (the owner may raise it explicitly), share links are enumerable and revocable, and money data never enters a social projection (§9.11, SOCIAL.md §8) |
 | Accessibility | VoiceOver/TalkBack on all core flows; wheel has a list-mode equivalent; dynamic type |
-| Trust & safety | Age gate (**not built yet** — PLAN.md §9.1); responsible-drinking resources; no engagement mechanics that reward consumption frequency |
+| Trust & safety | Age gate at signup, per-market minimum (WP-17); responsible-drinking resources at `/responsible`; no engagement mechanics that reward consumption frequency |
 | Localization | v1 English; schema keeps display strings separable; metric/imperial pour sizes |
 
 ---

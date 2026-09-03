@@ -1,9 +1,13 @@
 import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
+import { headers } from "next/headers";
+import { redirect } from "next/navigation";
 import { getDb } from "@/db";
+import { getAgeGateState, isUngatedPath } from "@/lib/age-gate";
 import { getOwnProfile } from "@/lib/social";
 import { getSessionUser } from "@/lib/session";
+import { PATH_HEADER } from "@/proxy";
 import { AppHeader } from "@/components/app-header";
 import { AppNav } from "@/components/app-nav";
 import { NativeShell } from "@/components/native-shell";
@@ -69,6 +73,26 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   // layout is force-dynamic already, so reading request headers here (inside
   // getSessionUser) changes nothing about rendering mode.
   const user = await getSessionUser();
+
+  /**
+   * The age gate for everything the app renders (PLAN.md §9.1).
+   *
+   * Here rather than on each page for the same reason `requireUser` carries it
+   * for the API: a gate you have to remember to apply is one you will forget
+   * to apply, and the first page anyone forgets is the one that mattered. The
+   * pathname arrives as a header from `src/proxy.ts`; without it (a context
+   * that skipped the proxy) the gate still runs, which fails closed.
+   */
+  if (user) {
+    const pathname = (await headers()).get(PATH_HEADER) ?? "";
+    if (!isUngatedPath(pathname)) {
+      const state = await getAgeGateState(getDb(), user.id);
+      if (state.status !== "verified") {
+        redirect(`/age?next=${encodeURIComponent(pathname || "/")}`);
+      }
+    }
+  }
+
   const profile = user ? await getOwnProfile(getDb(), user.id) : null;
   return (
     <html

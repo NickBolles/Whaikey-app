@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useState } from "react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { signIn } from "@/lib/auth-client";
 import { startNativeSignIn } from "@/lib/native/auth";
@@ -124,7 +125,11 @@ function SignInForm() {
         )}
       </div>
       <p className="text-xs text-muted/70 text-center max-w-xs">
-        Sip responsibly. Whaikey never rewards drinking frequency — only curiosity.
+        Sip responsibly. Whaikey never rewards drinking frequency — only curiosity.{" "}
+        <Link href="/responsible" className="underline underline-offset-2">
+          What that means
+        </Link>
+        .
       </p>
     </div>
   );

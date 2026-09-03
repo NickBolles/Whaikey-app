@@ -57,7 +57,18 @@ export async function setupTestDb(): Promise<DB> {
   return sharedDb;
 }
 
-export async function createTestUser(db: DB, overrides: Partial<schema.User> = {}): Promise<schema.User> {
+/**
+ * A test user is an adult unless a test says otherwise.
+ *
+ * The age gate (PLAN.md §9.1) is enforced inside `requireUser`, and the
+ * session mock below enforces it too — so without this every route test would
+ * be asserting against a 403. Pass `ageVerified: false` to test the gate.
+ */
+export async function createTestUser(
+  db: DB,
+  overrides: Partial<schema.User> & { ageVerified?: boolean } = {},
+): Promise<schema.User> {
+  const { ageVerified = true } = overrides;
   const id = overrides.id ?? uid("user");
   const [row] = await db
     .insert(schema.user)
@@ -68,7 +79,23 @@ export async function createTestUser(db: DB, overrides: Partial<schema.User> = {
       emailVerified: true,
     })
     .returning();
+  if (ageVerified) await verifyTestUserAge(db, row.id);
   return row;
+}
+
+/** Put an existing test user through the age gate. */
+export async function verifyTestUserAge(db: DB, userId: string): Promise<void> {
+  await db
+    .insert(schema.ageVerifications)
+    .values({
+      userId,
+      birthDate: "1988-04-12",
+      market: "US",
+      minimumAge: 21,
+      passed: true,
+      eligibleOn: null,
+    })
+    .onConflictDoNothing();
 }
 
 export async function createTestBottle(
@@ -108,8 +135,17 @@ export async function mockSessionModule() {
   return {
     ...actual,
     getSessionUser: async () => currentUser,
+    /**
+     * The same two checks the real one makes. The age gate is read from the
+     * test database rather than assumed, so a route test cannot pass against
+     * a gate the app would have closed (`createTestUser` opens it by default).
+     */
     requireUser: async () => {
       if (!currentUser) throw new actual.UnauthorizedError();
+      const { getDb } = await import("@/db");
+      const { getAgeGateState } = await import("@/lib/age-gate");
+      const state = await getAgeGateState(getDb(), currentUser.id);
+      if (state.status !== "verified") throw new actual.AgeGateRequiredError(state.status);
       return currentUser;
     },
   };

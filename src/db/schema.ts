@@ -435,6 +435,36 @@ export const pourShares = pgTable(
  * signup. The profile IS the palate card (docs/SOCIAL.md §7.1): social
  * surfaces render palate data, never spend, value, or pour counts.
  */
+/**
+ * The legal-age gate (PLAN.md §9.1, review PLAN-C8/PLAN-A7).
+ *
+ * Three documents asserted an age gate that did not exist; this is it. One
+ * row per account, written once and never rewritten: an answer that fails the
+ * minimum is *kept*, so "I'm 19" cannot be walked back into "I'm 22" on the
+ * next screen. `eligibleOn` is the date that answer stops failing, which is
+ * what lets an account come back on its birthday rather than being dead.
+ *
+ * The birth date is stored as a plain `YYYY-MM-DD` string, not a timestamp:
+ * a birthday is a calendar fact with no time and no zone, and storing it as
+ * an instant makes it shift by a day depending on where it is read.
+ */
+export const ageVerifications = pgTable("age_verifications", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => user.id, { onDelete: "cascade" }),
+  /** ISO `YYYY-MM-DD`, as entered. */
+  birthDate: text("birth_date").notNull(),
+  /** ISO 3166-1 alpha-2, whichever market the user said they are in. */
+  market: text("market").notNull(),
+  /** The minimum that applied when the answer was given, kept for the record. */
+  minimumAge: integer("minimum_age").notNull(),
+  /** True when the answer met the minimum. False rows are blocks, not retries. */
+  passed: boolean("passed").notNull(),
+  /** `YYYY-MM-DD` this account becomes eligible; null once it already is. */
+  eligibleOn: text("eligible_on"),
+  createdAt: createdAt(),
+});
+
 export const userProfiles = pgTable("user_profiles", {
   userId: text("user_id")
     .primaryKey()
@@ -1190,6 +1220,7 @@ export type BottleMedia = typeof bottleMedia.$inferSelect;
 export type Distillery = typeof distilleries.$inferSelect;
 export type Bottle = typeof bottles.$inferSelect;
 export type BottleSubmission = typeof bottleSubmissions.$inferSelect;
+export type AgeVerification = typeof ageVerifications.$inferSelect;
 export type NewBottle = typeof bottles.$inferInsert;
 export type UserBottle = typeof userBottles.$inferSelect;
 export type PassportTierRow = typeof passportTiers.$inferSelect;

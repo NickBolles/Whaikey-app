@@ -10,6 +10,19 @@ export const DEMO_SESSION_TOKEN = "e2e-demo-session-token";
  */
 export const SCAN_USER_ID = "scan-user";
 export const SCAN_SESSION_TOKEN = "e2e-scan-session-token";
+/**
+ * Signed-in accounts that have never answered the age gate (PLAN.md §9.1) —
+ * the only way to exercise the gate end to end, since every other fixture user
+ * is seeded through it.
+ *
+ * There are two because the answer is deliberately once-per-account: a test
+ * that answers has used its account up, so the pass path and the block path
+ * cannot share one.
+ */
+export const GATE_USER_ID = "gate-user";
+export const GATE_SESSION_TOKEN = "e2e-gate-session-token";
+export const GATE_MINOR_USER_ID = "gate-minor-user";
+export const GATE_MINOR_SESSION_TOKEN = "e2e-gate-minor-session-token";
 const SESSION_COOKIE = "better-auth.session_token";
 
 /**

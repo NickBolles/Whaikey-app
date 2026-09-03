@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { signIn } from "./fixtures";
+import { GATE_SESSION_TOKEN, signIn } from "./fixtures";
 
 /**
  * Visual regression suite. Screenshots are committed baselines under
@@ -62,6 +62,12 @@ test.describe("signed out", () => {
     await expect(page.getByText("No bottles found")).toBeVisible();
     await settle(page);
     await expect(page).toHaveScreenshot(shot("search-no-results"), { fullPage: true });
+  });
+
+  test("responsible drinking", async ({ page }) => {
+    await page.goto("/responsible");
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("responsible"), { fullPage: true });
   });
 
   test("search results", async ({ page }) => {
@@ -496,5 +502,19 @@ test.describe("signed in (demo collector)", () => {
     await expect(page.getByRole("heading", { name: "Your first bottle" })).toBeVisible();
     await settle(page);
     await expect(page).toHaveScreenshot(shot("welcome-bottle"), { fullPage: true });
+  });
+});
+
+/** Signed in and not yet through the age gate (PLAN.md §9.1). */
+test.describe("age gate", () => {
+  test.beforeEach(async ({ context, baseURL }) => {
+    await signIn(context, baseURL!, GATE_SESSION_TOKEN);
+  });
+
+  test("the gate", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.getByRole("heading", { name: /one thing before we start/i })).toBeVisible();
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("age-gate"), { fullPage: true });
   });
 });
