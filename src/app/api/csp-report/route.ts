@@ -30,6 +30,36 @@ function field(report: Record<string, unknown>, key: string): string {
   return typeof value === "string" ? value.slice(0, 300) : "";
 }
 
+/**
+ * Path prefixes whose next segment is a bearer credential.
+ *
+ * `/s/<code>` is a share link: anyone holding it can read the note until it is
+ * revoked. Logging a violation's `document-uri` verbatim would put those codes
+ * in retained deployment logs — which is the same leak the `Referrer-Policy`
+ * added alongside this endpoint exists to prevent, arriving by another door.
+ */
+const CREDENTIAL_PATH_PREFIXES = new Set(["s", "add"]);
+
+/**
+ * Keep enough of a URL to tell which page fired, and none of the secret.
+ *
+ * Query and fragment go unconditionally: nothing in them is needed to identify
+ * a violated directive, and they are a standing invitation for a token.
+ * Anything that isn't a URL (`eval`, `inline`) passes through untouched.
+ */
+function redactUri(raw: string): string {
+  if (!raw) return "";
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return raw;
+  }
+  const [first] = url.pathname.split("/").filter(Boolean);
+  const path = first && CREDENTIAL_PATH_PREFIXES.has(first) ? `/${first}/[redacted]` : url.pathname;
+  return `${url.origin}${path}`;
+}
+
 export async function POST(req: Request) {
   let raw: string;
   try {
@@ -51,8 +81,8 @@ export async function POST(req: Request) {
 
     console.warn("[csp] violation", {
       directive: field(report, "violated-directive") || field(report, "effective-directive"),
-      blocked: field(report, "blocked-uri"),
-      document: field(report, "document-uri"),
+      blocked: redactUri(field(report, "blocked-uri")),
+      document: redactUri(field(report, "document-uri")),
     });
   } catch {
     // A malformed report is not worth an error path; the browser sent it and

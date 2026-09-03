@@ -123,7 +123,13 @@ export function NativeShell({ userId }: { userId?: string | null }) {
     async function handleAuthCallback(callback: NonNullable<AuthCallback>): Promise<void> {
       const pending = await readPendingSignIn();
       if (!pending || !statesMatch(pending.state, callback.state)) return;
-      await clearPendingSignIn();
+      // Cleanup must not be able to cost the user their sign-in: the callback
+      // arrives once, so a rejected `remove()` here would strand them on
+      // "Connecting…" while the code quietly expired. Single use is enforced by
+      // the server anyway — this is tidying, not a guard.
+      await clearPendingSignIn().catch((err: unknown) => {
+        console.warn("[native] could not clear the pending sign-in", err);
+      });
 
       void closeNativeSignIn();
       if ("code" in callback) {

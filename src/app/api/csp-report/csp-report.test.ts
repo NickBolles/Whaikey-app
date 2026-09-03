@@ -67,6 +67,51 @@ describe("POST /api/csp-report", () => {
     expect(res.status).toBe(413);
   });
 
+  /**
+   * `/s/<code>` is a bearer share link. Logging `document-uri` verbatim would
+   * put those codes in retained deployment logs — the same leak the
+   * Referrer-Policy shipped alongside this endpoint exists to prevent, coming
+   * in through the back.
+   */
+  it("keeps share codes out of the log", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await POST(
+      post(
+        JSON.stringify({
+          "csp-report": {
+            "violated-directive": "img-src",
+            "document-uri": "https://app.whaikey.com/s/9f3a1c7b2d?utm=x",
+          },
+        }),
+      ),
+    );
+
+    const logged = warn.mock.calls[0][1] as { document: string };
+    expect(logged.document).not.toContain("9f3a1c7b2d");
+    expect(logged.document).toBe("https://app.whaikey.com/s/[redacted]");
+  });
+
+  it("keeps the ordinary page path, which is what makes a report useful", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await POST(
+      post(
+        JSON.stringify({
+          "csp-report": {
+            "document-uri": "https://app.whaikey.com/bottles/lagavulin-16?q=1#x",
+            "blocked-uri": "eval",
+          },
+        }),
+      ),
+    );
+
+    const logged = warn.mock.calls[0][1] as { document: string; blocked: string };
+    expect(logged.document).toBe("https://app.whaikey.com/bottles/lagavulin-16");
+    // Query and fragment always go — they are a standing invitation for a token.
+    expect(logged.document).not.toContain("q=1");
+    // And a non-URL blocked value survives intact, since that is the useful bit.
+    expect(logged.blocked).toBe("eval");
+  });
+
   it("truncates the attacker-controlled text it logs", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     await POST(post(JSON.stringify({ "csp-report": { "blocked-uri": "a".repeat(2_000) } })));

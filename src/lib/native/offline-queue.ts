@@ -86,17 +86,43 @@ async function writeRaw(key: string, value: string): Promise<void> {
 
 /**
  * Every read-modify-write of the queue runs through here, one at a time.
- * Storage is async on both platforms, so without it a `enqueuePour` that reads
+ * Storage is async on both platforms, so without it an `enqueuePour` that reads
  * the queue before a flush writes its result back would save a snapshot taken
  * before the flush and resurrect pours that were already synced.
+ *
+ * One at a time *across documents*, not just within one. A promise chain is
+ * per-module, so two tabs of the PWA each get their own and neither waits for
+ * the other — and two tabs is the ordinary case on the web, which is exactly
+ * where this flush was just switched on. Web Locks is the browser's answer to
+ * that; the chain stays as the fallback for anything without it (a WebView on
+ * an older OS, and jsdom).
  */
 let storageChain: Promise<unknown> = Promise.resolve();
+const LOCK_NAME = "whaikey.pour-queue";
+
+interface LockManagerLike {
+  request<T>(name: string, fn: () => Promise<T>): Promise<T>;
+}
+
+function lockManager(): LockManagerLike | null {
+  if (typeof navigator === "undefined") return null;
+  const locks = (navigator as Navigator & { locks?: LockManagerLike }).locks;
+  return typeof locks?.request === "function" ? locks : null;
+}
 
 function serialize<T>(work: () => Promise<T>): Promise<T> {
-  const run = storageChain.then(work, work);
-  // Keep the chain alive after a rejection so one failure doesn't wedge it.
-  storageChain = run.catch(() => undefined);
-  return run;
+  const inProcess = () => {
+    const run = storageChain.then(work, work);
+    // Keep the chain alive after a rejection so one failure doesn't wedge it.
+    storageChain = run.catch(() => undefined);
+    return run;
+  };
+
+  const locks = lockManager();
+  if (!locks) return inProcess();
+  // Still chained inside the lock: the lock orders the tabs, the chain orders
+  // the callers within one.
+  return locks.request(LOCK_NAME, inProcess);
 }
 
 export async function readQueue(): Promise<QueuedPour[]> {

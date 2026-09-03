@@ -382,6 +382,43 @@ describe("concurrent flushes", () => {
   });
 });
 
+describe("cross-tab safety", () => {
+  /**
+   * A promise chain is per-module, so two tabs of the PWA each get their own
+   * and neither waits for the other — and two tabs is the ordinary case on the
+   * web, which is exactly where this flush was just switched on. Without a
+   * cross-document lock, one tab's write-back can overwrite another's enqueue
+   * and silently delete a note.
+   */
+  it("takes a browser-wide lock around every read-modify-write", async () => {
+    const held: string[] = [];
+    const request = vi.fn(async (name: string, fn: () => Promise<unknown>) => {
+      held.push(name);
+      return fn();
+    });
+    Object.defineProperty(navigator, "locks", { value: { request }, configurable: true });
+
+    try {
+      await enqueuePour({ body: POUR, bottleName: "Ardbeg 10", userId: ME });
+      mockFetchSequence(ok());
+      await flushPourQueue(ME);
+
+      expect(held.length).toBeGreaterThan(0);
+      expect(new Set(held)).toEqual(new Set(["whaikey.pour-queue"]));
+    } finally {
+      Reflect.deleteProperty(navigator, "locks");
+    }
+  });
+
+  it("still serializes in-process when the browser has no Web Locks", async () => {
+    // Older WebViews, and jsdom. The queue must not depend on the lock existing.
+    expect((navigator as Navigator & { locks?: unknown }).locks).toBeUndefined();
+    await enqueuePour({ body: { bottleId: "a" }, bottleName: "A", userId: ME });
+    await enqueuePour({ body: { bottleId: "b" }, bottleName: "B", userId: ME });
+    expect((await readQueue()).map((entry) => entry.bottleName)).toEqual(["A", "B"]);
+  });
+});
+
 describe("isOnline", () => {
   it("trusts the browser, defaulting to online when it says nothing", () => {
     expect(isOnline()).toBe(true);
