@@ -144,10 +144,14 @@ Two consequences to be deliberate about:
   it is a large velocity win over both RN (store review, or EAS Update's own
   constraints) and option B.
 - **Downside: a bad production deploy bricks the installed app**, and there is no
-  version pinning. Mitigation in Phase 2: the shell checks a `/api/native/manifest`
-  endpoint for a `minShellVersion`; if the deployed web app requires a newer native
-  shell than the installed one, the app shows an "Update Whaikey" screen instead of a
-  broken UI. This also gives us a kill switch for a bad deploy.
+  version pinning. **Built (WP-20):** the shell checks `/api/native/manifest` for a
+  `minShellVersion` at boot; below it, the app shows an "Update Whaikey" screen
+  instead of a UI it cannot run. Raising `WHAIKEY_MIN_SHELL_VERSION` above every
+  released build is therefore the kill switch — the only one an app that is not a
+  store binary can have. It fails **open**: an unreachable or unparseable manifest
+  leaves the app running, because a check that locks people out on a network hiccup
+  is a worse outage than the one it prevents. Set the variable before the first
+  store build; unset, there is no floor and nobody is locked out.
 
 Option B stays documented as the Phase 5 escape hatch if offline-first becomes the
 product priority — see §4, Phase 5.

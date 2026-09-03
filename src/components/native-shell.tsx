@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { applyStatusBarStyle, configureKeyboard, hideSplash } from "@/lib/native/app-chrome";
 import { exitApp, onBackButton, onDeepLink, onResume } from "@/lib/native/app-lifecycle";
@@ -14,6 +14,7 @@ import {
   statesMatch,
 } from "@/lib/native/auth";
 import type { AuthCallback } from "@/lib/native/auth";
+import { checkShellVersion, type ShellVersionCheck } from "@/lib/native/manifest";
 import { isNativeApp } from "@/lib/native/platform";
 import { flushPourQueue, isOnline } from "@/lib/native/offline-queue";
 
@@ -25,6 +26,7 @@ import { flushPourQueue, isOnline } from "@/lib/native/offline-queue";
  */
 export function NativeShell({ userId }: { userId?: string | null }) {
   const router = useRouter();
+  const [outdated, setOutdated] = useState<ShellVersionCheck | null>(null);
 
   /**
    * Drain any pours logged while offline. Refreshing afterwards is what makes
@@ -154,6 +156,18 @@ export function NativeShell({ userId }: { userId?: string | null }) {
       }
     }
 
+    /**
+     * Is this binary new enough for the site it just loaded
+     * (docs/NATIVE_APP.md §2.2)? The shell renders whatever the deploy sends,
+     * so the web half can move ahead of the app in someone's pocket with
+     * nothing to stop it — and a raised floor is the only kill switch there is
+     * for a deploy gone wrong, since this is not a store binary you can roll
+     * back. Fails open: an unreachable manifest leaves the app running.
+     */
+    void checkShellVersion().then((check) => {
+      if (check.status === "update_required") setOutdated(check);
+    });
+
     const unsubscribeResume = onResume(() => {
       // Server-rendered pages (My Bar totals, pour history) go stale while the
       // app is backgrounded; refresh re-runs them without losing client state.
@@ -173,5 +187,31 @@ export function NativeShell({ userId }: { userId?: string | null }) {
     };
   }, [router, syncQueue]);
 
-  return null;
+  if (!outdated) return null;
+
+  return (
+    <div
+      role="alertdialog"
+      aria-modal="true"
+      aria-label="Update Whaikey"
+      className="fixed inset-0 z-[60] flex flex-col items-center justify-center gap-5 bg-background px-8 text-center"
+    >
+      <div aria-hidden className="text-5xl drop-shadow-[0_0_24px_rgba(232,161,60,0.25)]">
+        🥃
+      </div>
+      <h1 className="font-display text-2xl font-semibold">Update Whaikey</h1>
+      <p className="text-muted max-w-sm leading-relaxed">
+        {outdated.notice ??
+          "This version of the app is too old for what's on the shelf. Updating takes a moment and nothing you've logged is lost."}
+      </p>
+      {outdated.storeUrl && (
+        <a href={outdated.storeUrl} className="btn-primary px-8 py-3">
+          Get the update
+        </a>
+      )}
+      <p className="text-xs text-muted/70">
+        Installed {outdated.installed} · needs {outdated.required}
+      </p>
+    </div>
+  );
 }
