@@ -162,6 +162,20 @@
       "when": 1788450143325,
       "tag": "0022_graceful_omega_red",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1788451747935,
+      "tag": "0023_nifty_beyonder",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1788451757719,
+      "tag": "0024_tough_victor_mancha",
+      "breakpoints": true
     }
   ]
 }

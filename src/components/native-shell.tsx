@@ -9,7 +9,10 @@ import {
   describeNativeAuthError,
   exchangeUrl,
   parseAuthCallback,
+  statesMatch,
+  takePendingSignIn,
 } from "@/lib/native/auth";
+import type { AuthCallback } from "@/lib/native/auth";
 import { isNativeApp } from "@/lib/native/platform";
 import { flushPourQueue, isOnline } from "@/lib/native/offline-queue";
 
@@ -79,24 +82,42 @@ export function NativeShell() {
     const unsubscribeDeepLink = onDeepLink((path, rawUrl) => {
       const callback = parseAuthCallback(rawUrl);
       if (callback) {
-        void closeNativeSignIn();
-        if ("code" in callback) {
-          // A full navigation, not router.push: the point of this request is the
-          // Set-Cookie it comes back with, and that only lands in the WebView's
-          // cookie store if the WebView itself made the request.
-          window.location.assign(exchangeUrl(callback.code, callback.next));
-        } else {
-          const message = describeNativeAuthError(callback.error);
-          const retry = new URLSearchParams({ error: message ?? "Sign-in failed." });
-          // Keep the return target on the retry, so trying again still lands
-          // on the scanned page (the sign-in page re-validates it).
-          if (callback.next) retry.set("next", callback.next);
-          router.push(`/sign-in?${retry.toString()}`);
-        }
+        void handleAuthCallback(callback);
         return;
       }
       router.push(path);
     });
+
+    /**
+     * `whaikey://` is a scheme any app on the device can register, so an
+     * inbound auth callback is a claim, not a fact. Acting on an unsolicited
+     * one would swap the WebView into whoever sent it (SEC-H1) — silently, and
+     * every pour logged afterwards would land in their account.
+     *
+     * So: take the sign-in this app started (once — the read clears it), and
+     * act only on a callback whose state matches it. Anything else is dropped
+     * without a word, because there is no user here to warn; nobody asked for
+     * this link.
+     */
+    async function handleAuthCallback(callback: NonNullable<AuthCallback>): Promise<void> {
+      const pending = await takePendingSignIn();
+      if (!pending || !statesMatch(pending.state, callback.state)) return;
+
+      void closeNativeSignIn();
+      if ("code" in callback) {
+        // A full navigation, not router.push: the point of this request is the
+        // Set-Cookie it comes back with, and that only lands in the WebView's
+        // cookie store if the WebView itself made the request.
+        window.location.assign(exchangeUrl(callback.code, pending.verifier, callback.next));
+      } else {
+        const message = describeNativeAuthError(callback.error);
+        const retry = new URLSearchParams({ error: message ?? "Sign-in failed." });
+        // Keep the return target on the retry, so trying again still lands
+        // on the scanned page (the sign-in page re-validates it).
+        if (callback.next) retry.set("next", callback.next);
+        router.push(`/sign-in?${retry.toString()}`);
+      }
+    }
 
     const unsubscribeResume = onResume(() => {
       // Server-rendered pages (My Bar totals, pour history) go stale while the

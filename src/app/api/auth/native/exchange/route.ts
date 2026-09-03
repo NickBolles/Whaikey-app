@@ -14,16 +14,22 @@ import { redeemNativeAuthCode, safeReturnPath } from "@/lib/native-auth";
  * relative path (a scanned /add/<handle> code that should survive sign-in), so a
  * code replayed from elsewhere gains nothing beyond what redeeming it already
  * would, and the `next` param can never leave the origin.
+ *
+ * The `code_verifier` is what makes the code worth anything (SEC-H1). Only the
+ * app that started this sign-in has it, so an app that claimed `whaikey://` and
+ * grabbed the code off the callback holds something that redeems to nothing.
  */
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
   const code = request.nextUrl.searchParams.get("code") ?? "";
+  const verifier = request.nextUrl.searchParams.get("code_verifier") ?? "";
   const next = safeReturnPath(request.nextUrl.searchParams.get("next")) ?? "/";
-  const redeemed = await redeemNativeAuthCode(code);
+  const redeemed = await redeemNativeAuthCode(code, verifier);
 
   if (!redeemed) {
-    // Unknown, expired, or already redeemed — all indistinguishable on purpose.
+    // Unknown, expired, already redeemed, or verifier mismatch — all
+    // indistinguishable on purpose, and all having destroyed the code.
     // `next` rides along so retrying sign-in still lands on the scanned target
     // instead of making the person scan again.
     const retry = new URL("/sign-in?error=expired", request.nextUrl.origin);

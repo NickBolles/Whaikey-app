@@ -13,6 +13,7 @@ let mod: typeof import("./auth");
 
 beforeEach(async () => {
   vi.resetModules();
+  localStorage.clear();
   vi.stubEnv("NEXT_PUBLIC_APP_URL", APP_URL);
   mod = await import("./auth");
 });
@@ -58,14 +59,71 @@ describe("parseAuthCallback", () => {
 });
 
 describe("exchangeUrl", () => {
-  it("encodes the code into the in-WebView exchange path", () => {
-    expect(mod.exchangeUrl("abc123")).toBe("/api/auth/native/exchange?code=abc123");
+  it("carries the code and the verifier into the in-WebView exchange path", () => {
+    expect(mod.exchangeUrl("abc123", "v-123")).toBe(
+      "/api/auth/native/exchange?code=abc123&code_verifier=v-123",
+    );
   });
 
-  it("escapes codes containing URL-significant characters", () => {
+  it("escapes values containing URL-significant characters", () => {
     // base64url shouldn't produce these, but a malformed callback must not be
     // able to inject extra query parameters into the exchange request.
-    expect(mod.exchangeUrl("a&b=c")).toBe("/api/auth/native/exchange?code=a%26b%3Dc");
+    expect(mod.exchangeUrl("a&b=c", "d&e=f")).toBe(
+      "/api/auth/native/exchange?code=a%26b%3Dc&code_verifier=d%26e%3Df",
+    );
+  });
+});
+
+describe("callback state", () => {
+  /**
+   * The state nonce is the whole reason an inbound `whaikey://` link can be
+   * trusted: without it, any app on the device can push a code at Whaikey and
+   * silently swap the user into the sender's account (SEC-H1).
+   */
+  it("extracts the state alongside the code", () => {
+    expect(mod.parseAuthCallback("whaikey://auth/callback?code=abc&state=nonce-1")).toEqual({
+      code: "abc",
+      state: "nonce-1",
+    });
+  });
+
+  it("extracts the state on an error callback too", () => {
+    expect(
+      mod.parseAuthCallback("whaikey://auth/callback?error=not_signed_in&state=nonce-1"),
+    ).toEqual({ error: "not_signed_in", state: "nonce-1" });
+  });
+
+  it("accepts only the exact state this app is waiting for", () => {
+    expect(mod.statesMatch("nonce-1", "nonce-1")).toBe(true);
+    expect(mod.statesMatch("nonce-1", "nonce-2")).toBe(false);
+    // A callback with no state at all is the interesting case: that is what an
+    // attacker who has not seen our nonce can produce.
+    expect(mod.statesMatch("nonce-1", undefined)).toBe(false);
+    expect(mod.statesMatch("nonce-1", "")).toBe(false);
+  });
+});
+
+describe("takePendingSignIn", () => {
+  it("returns the sign-in this app started, exactly once", async () => {
+    localStorage.setItem(
+      "whaikey.native-auth.pending.v1",
+      JSON.stringify({ state: "nonce-1", verifier: "v-1" }),
+    );
+    await expect(mod.takePendingSignIn()).resolves.toEqual({ state: "nonce-1", verifier: "v-1" });
+    // Cleared on read, so a replayed callback finds nothing to match.
+    await expect(mod.takePendingSignIn()).resolves.toBeNull();
+  });
+
+  it("reads no pending sign-in when none was started", async () => {
+    localStorage.clear();
+    await expect(mod.takePendingSignIn()).resolves.toBeNull();
+  });
+
+  it("treats corrupt or half-written storage as no pending sign-in", async () => {
+    localStorage.setItem("whaikey.native-auth.pending.v1", "{not json");
+    await expect(mod.takePendingSignIn()).resolves.toBeNull();
+    localStorage.setItem("whaikey.native-auth.pending.v1", JSON.stringify({ state: "only" }));
+    await expect(mod.takePendingSignIn()).resolves.toBeNull();
   });
 });
 
@@ -100,9 +158,11 @@ describe("return path threading", () => {
   });
 
   it("exchangeUrl carries next, encoded", () => {
-    expect(mod.exchangeUrl("abc", "/add/sasha")).toBe(
-      "/api/auth/native/exchange?code=abc&next=%2Fadd%2Fsasha",
+    expect(mod.exchangeUrl("abc", "v-1", "/add/sasha")).toBe(
+      "/api/auth/native/exchange?code=abc&code_verifier=v-1&next=%2Fadd%2Fsasha",
     );
-    expect(mod.exchangeUrl("abc")).toBe("/api/auth/native/exchange?code=abc");
+    expect(mod.exchangeUrl("abc", "v-1")).toBe(
+      "/api/auth/native/exchange?code=abc&code_verifier=v-1",
+    );
   });
 });

@@ -53,7 +53,7 @@ An AI-native whiskey tracking app, inspired by wine apps like **Vivino** (social
 - **Passport:** countries / regions / styles met, catalog-share tier badges (Oak → Amber) that never downgrade, crests on profile and bottle, passport hooks on the discovery rail.
 - **Whiskey School:** 9 lessons with quizzes and a flavor-wheel explorer.
 - **Catalog pipeline:** 9 source adapters (TTB COLA, Iowa, Oregon, Utah, BC, Systembolaget, Vinmonopolet, WHISKY:EDITION, CSV), enrichment, sold-verification queue with a subscription-CLI worker, a source-provenance graph, issue-driven feedback review, 4 scheduled workflows.
-- **Native:** Capacitor shell loading the deployed site, capability layer with web fallbacks, device-code sign-in, offline pour queue, push-token registration, Android debug + iOS compile in CI, release workflow awaiting credentials.
+- **Native:** Capacitor shell loading the deployed site, capability layer with web fallbacks, PKCE + state-bound device-code sign-in, offline pour queue, push-token registration, Android debug + iOS compile in CI, release workflow awaiting credentials.
 
 ### 2.2 Live but weaker than it reads
 
@@ -71,7 +71,7 @@ An AI-native whiskey tracking app, inspired by wine apps like **Vivino** (social
 - **No age gate, no data export, no account deletion, no Terms, no Privacy Policy, no billing or entitlements, no analytics, no error monitoring, no settings page, no sign-out control, no moderation queue.**
 - No clubs, blind flights, samples, distillery visits, passport diffing, palate share card, flights/blind mode, 100-point rating mode, similar-bottles rail, chat tools `log_pour_draft` / `recommend_bottles` / `get_price_info`.
 - No `minShellVersion` kill switch for the native shell; no reviewer demo account (the app is social-login-only).
-- No HTTP security headers; native sign-in lacks state/PKCE binding (review SEC-H1–H3).
+- No HTTP security headers (review SEC-H3).
 
 ### 2.4 The UX diagnosis
 
@@ -256,7 +256,7 @@ Tracks run in parallel and are named so that "Phase 2" is never ambiguous: **C**
 
 ### 5.2 Now — two lanes, in parallel
 
-**Lane A (C): stop the bleeding.** ✅ WP-1 offline queue + idempotency · WP-2/3 native auth binding and cookie storage · WP-4 security headers · WP-5 aggregate leak, body limits, AI timeouts.
+**Lane A (C): stop the bleeding.** ✅ WP-1 offline queue + idempotency · ✅ WP-2/3 native auth binding and cookie storage (bar the Universal Link callback, blocked on the bundle id) · WP-4 security headers · WP-5 aggregate leak, body limits, AI timeouts.
 
 **Lane B (C): the focus and polish pass**, in STORYBOARD.md §5 order. WP-6 back/nav/toast/loading · WP-7 pour sheet · WP-8 bottle action bar · WP-9 My Bar shelf-first · WP-10 journal edit/delete + one Share sheet · WP-11 settings, export, delete · WP-12 the new nav (Home · Bar · ＋ · Explore · You), `/passport` with six dimensions and counters on Bar, Home cut to three modules · WP-13 first run · WP-14 shared search/row components · WP-15 share-page CTA.
 
@@ -454,7 +454,7 @@ Supersedes the old open-questions list; SOCIAL.md §14's decision table is incor
 | Platform | **Decided:** Next.js + Capacitor; iPhone polished first, both built in CI | NATIVE_APP.md §1.4 tripwires |
 | AI provider | **Decided:** runtime selection, OpenRouter preferred when configured; ids in code | Revisit if caching/web-search loss on OpenRouter costs more than its convenience |
 | Embeddings / semantic search | **Deferred** behind a search evaluation | Unfreezes per §5.4 |
-| App name and bundle id (`com.whaikey.app`) | **Open — decide before any store record exists** (irreversible on both stores) | Owner |
+| App name and bundle id (`com.whaikey.app`) | **Open — decide before any store record exists** (irreversible on both stores). Also blocks the Universal/App Link auth callback, which needs association files naming a real team id and bundle id (NATIVE_APP.md §2.3) | Owner |
 | Production domain (`app.whaikey.com` assumed) | **Open** | Owner; blocks deep links, OAuth redirect, `.well-known`, shell URL |
 | Reviewer/demo access under social-login-only | **Open** | Options: env-flagged review-only credential provider bound to one fixed account; a signed long-lived reviewer link; a guest mode. Conflicts with AGENTS.md's password rule, so it needs an explicit owner call |
 | Palate card provenance (review SEC-M7) | **Open** | Preferred: social projections exclude "Only me" pours; else state the aggregation in SOCIAL §7.1 and the UI |
