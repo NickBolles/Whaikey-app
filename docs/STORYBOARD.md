@@ -24,6 +24,17 @@ The visual style does not change. DESIGN.md's tokens, recipes and rules all stan
 | D10 | **Explore is a dedicated tab**, and Home links to it. | (agreed with v1) |
 | D11 | **The palate ring on avatars has eight equal segments, one per flavor family, each faded toward the track when that family is not part of the person's palate.** Intensity is encoded by fade, not by segment length. | v2's first draft, which varied arc length |
 | D12 | **The profile shows the full two-tier palate wheel** (as today), with the ring avatar in its centre and the description and signature-descriptor chips beneath it. **"This month" stays on the Home dashboard as it is now**; it is not a profile block. | v2's first draft, which shrank the wheel and moved the month review to the profile |
+| D13 | **Profile order:** identity → palate card → **Sharing · Settings** → **Passport (earned crests only, no greyed "next")** → **Friends card** (several friends with ring avatars) → **Journal card** (one card, "Open journal →"). | D8's greyed next crests and the two-row journal summary |
+| D14 | **The bottle breakdown card has a ⋯ menu** for everything beyond Log a pour · Add to bar / On shelf · Wishlist: edit shelf details, mark finished, remove, share, compare, report a catalog error. Same menu behind the bottle page header ⋯. | — |
+| D15 | **Friends page:** no "Find people / How you're found" tabs. One search field with a **scan-code button at its end**; **Show my code** to the right of the "Friends" header (and on the profile's Friends card); **How you're found** behind a settings icon on Friends and under Profile → Settings → Privacy. | v2's first Friends board |
+| D16 | **The camera stays live in the pour sheet's bottle slot while you log** (thumbnail beside the bottle row once identified, so you can snap the glass or label) and **pauses automatically after ~2 minutes**. A captured photo attaches to the pour. | — |
+| D17 | **The flavor wheel in the sheet is the app's existing `FlavorWheelInput`, unchanged.** The board's wheel drawing is a stand-in. | the board's simplified wheel |
+| D18 | **Pour size keeps today's slider, made sleeker** (thinner track, smaller tick labels, value in the section label). | v2's chip row |
+| D19 | **Default pour visibility is Friends** for new accounts. "Who can see this" collapses under a **More ▾** disclosure at the bottom of the sheet. | Only me default; visibility as a top-level row |
+| D20 | **A Tags row sits directly under pour size** with quick-select tags (Campfire · Dinner · With friends · Tasting · …) plus "+ add". The free-text People field moves under More ▾ as "With…". Tags are private pour data stored in `pours.context.tags`. | the People chip in the serving row |
+| D21 | **My Bar keeps the live page's structure over the board's**, with these changes: a much slimmer top (compact stats line, flavor map collapsed to one line with "Open flavor map →"), a slimmer fill spine, a **Pour** quick action per row, plus sort and shelf search. First bottle visible without scrolling. | v2's Bar board as a whole |
+
+The round-3 brief with before/after screenshots and action items per area is [docs/plans/2026-09-ux-refinement-brief.md](./plans/2026-09-ux-refinement-brief.md).
 
 Open questions the owner has not decided (implementing agent: pick the recommended default, flag it in the PR):
 
@@ -137,9 +148,10 @@ The sheet opens **fully expanded** from ＋, from any Pour button, from the toni
 │        ╭────────╮                  │     tap a wedge → leaves; hold → intensity;
 │       │  wheel   │                 │     drag; the signature interaction
 │        ╰────────╯                  │
-│ Neat  Rocks  Splash  Cocktail  👤  │  5. SERVING + PEOPLE
-│ Pour size   15 · 25 · 30 · 45 · 60 │  6. SIZE (compact chips, not a slider headline)
-│ Who can see  🔒 Only me · Friends · Followers · Public │  7. VISIBILITY quick tags (D9)
+│ Neat  Rocks  Splash  Cocktail      │  5. SERVING
+│ Pour size · 45 ml  ──────●──────    │  6. SIZE — today's slider, sleeker (D18)
+│ Tags  Campfire · Dinner · With friends · +  │  7. TAGS quick-select (D20)
+│ More ▾  Who can see · Friends ▾ · With… · Photo │  8. MORE (visibility defaults to Friends, D19)
 ├────────────────────────────────────┤
 │ [        Save pour         ]       │  sticky footer; disabled until a bottle is set,
 │  Pick a bottle to save · Discard   │  with the reason shown inline
@@ -148,12 +160,13 @@ The sheet opens **fully expanded** from ＋, from any Pour button, from the toni
 
 Rules:
 - **Everything is visible; nothing is behind a disclosure.** The sheet scrolls; the footer is sticky.
-- **Order is bottle → rating → words → wheel → context → visibility.** The bottle slot is first because it is the one required thing, but it does not block anything below it: you can type, dictate, tap the wheel and rate with the slot still empty (D4). Save stays disabled with "Pick a bottle to save" until it is filled; ✕ or swipe-down with content keeps a draft (Q2).
+- **Order is bottle → rating → words → wheel (the app's own, D17) → serving → size → tags → More.** The bottle slot is first because it is the one required thing, but it does not block anything below it: you can type, dictate, tap the wheel and rate with the slot still empty (D4). Save stays disabled with "Pick a bottle to save" until it is filled; ✕ or swipe-down with content keeps a draft (Q2).
 - **Scan is the default way to fill the slot** (D5): the viewfinder is live as soon as the sheet opens (permission already granted) and about 150 px tall; a barcode hit or a confident label match fills the slot with a toast and an Undo; the text field is directly beneath for typing; recents are one tap. When a bottle is prefilled (Pour button, tonight card), the slot renders as a bottle row with **Change**.
 - **Scanning a bottle you don't own** swaps the slot for the **bottle breakdown** card (§3.4) with Log a pour / Add to bar / Wishlist / Just looking. "Log a pour" collapses it back to the filled slot and continues in the same sheet.
 - **One Save.** The sticky-header Save, the second "Save pour" and "Just drinking? Log without notes" go away. An unrated pour is allowed.
 - **After Save**: toast with Undo, sheet closes, you are where you were. The "Poured." page is deleted. Edit reopens the same sheet prefilled.
-- Pour size stays (it is useful data) but as a compact chip row below the wheel, never larger than the rating.
+- Pour size keeps its slider (D18), below the wheel and never larger than the rating. Tags (D20) sit directly under it; the People field and "Who can see this" live under More ▾ with Friends as the default (D19).
+- The camera keeps running in the bottle slot while you log and pauses after ~2 minutes (D16); a photo taken there attaches to the pour.
 
 ### 2.3 ＋ at a store (D6)
 
@@ -175,9 +188,9 @@ Each board: purpose · primary action · above the fold (390×844) · below the 
 - **States**: no bottles → one card: "Add your first bottle" (scan / type). Bottles but no pours → tonight card says "Pour it when you're ready". No friends → the friends module is absent (the invite lives in Friends).
 - **Guardrail**: the tonight reason is palate/occasion only; "only 15 % left — finish it before it fades" is removed. Low fill is a Bar fact.
 
-### 3.2 Bar
+### 3.2 Bar (D21: the live page's structure, slimmed)
 
-- **Purpose**: find a bottle you own and act on it.
+- **Purpose**: find a bottle you own and act on it. The live `/bar` page stays; the board shows only the parts to take from it: a top slim enough that the first bottle is visible without scrolling, a slimmer fill spine, a Pour action per row, sort and shelf search.
 - **Header row**: "My Bar · 47" · **+ Add** (opens a small sheet: **Scan your shelf** (batch, §3.9) · Type a name · Import).
 - **Above the fold**: control line `[Search your bar] Sort ▾ Filter` → segmented **Bar · Wishlist · Tasted** (Tasted derived from pours) → the shelf list.
 - **Row**: fill spine · name · distillery · top three flavor chips · your rating + pour count · a **Pour** button. Tapping the rating/pour count opens `/history?bottleId=` (D9).
@@ -190,16 +203,16 @@ Each board: purpose · primary action · above the fold (390×844) · below the 
 ### 3.4 Bottle breakdown card (new; D6)
 
 `<BottleBreakdown>` — the "what is this, and what is it to me?" card:
-- Name (Fraunces 22), distillery, category chip, origin · age · ABV · cask, crests at 34 px.
+- Name (Fraunces 22), distillery, category chip, origin · age · ABV · cask, and the bottle's **passport crests** (country · region · style, `BottleStamps`) at 34 px.
 - Mini flavor radar (~110 px) with the palate-match chip and one sentence ("Sweet and woody, a little fruit").
 - Price as a range with source label; your history line if any; the passport hook ("opens Islands · you've met 3 of 6 Scotch regions").
-- Actions: `[Log a pour]` primary · `Add to bar` · `♡ Wishlist` · "Just looking" text link. If already on the shelf: `On your shelf ▾` (Edit details · Remove) replaces Add.
+- Actions: `[Log a pour]` primary · `Add to bar` · `♡ Wishlist` · "Just looking" text link. If already on the shelf: `On shelf` replaces Add. A **⋯** in the card corner holds the rest (D14): edit shelf details · mark finished · remove · share · compare · report a catalog error.
 - Shown: in the pour sheet after a scan or search pick; as the top block of the bottle page; after a pick in Explore search.
 
 ### 3.5 Bottle page
 
 - **Above the fold**: the breakdown card (§3.4) with its action bar sticky.
-- **Below**: Your history (average, sparkline, last three, "All N pours →" deep-linking the journal) → Same Dram + Compare → community rating (≥ 3 public raters only) → description → pairings → sources and reviews last → "Ask about this bottle".
+- **Below**: Your history (average, sparkline, last three, "All N pours →" deep-linking the journal) → Same Dram as one clean sentence + Compare → community rating (≥ 3 public raters only) → description → pairings → sources and reviews last → "Ask about this bottle".
 - Shelf details (fill, paid, store, location, notes) open as a sheet from "Edit details". Fill auto-decrements on pours and the sheet says so.
 - **Not here**: sources above the fold; an inline edit form; a standalone "I've tried it" button (Tasted is derived).
 
@@ -216,11 +229,8 @@ Keep the current page's structure and copy; condense the identity row and make t
 - **Identity row (condensed)**: name (Fraunces 22) with @handle · bio · location on one muted line beneath; Edit (own) or Follow / Following · Follows you · ⋯ and the match chip (others). No separate avatar here: the avatar is inside the wheel.
 - **Palate card**: the **full two-tier palate wheel** (D12) at ~290 px, families inside, all ~55 leaves outside, heat as opacity. In its centre, the **palate ring avatar** at ~88 px. Beneath the wheel: the label "Your palate · from N rated pours", the one-line description ("Sweet and fruity, warming up to peat. Almost nothing floral yet."), and the **signature descriptor chips** (up to six, wedge-coloured).
 - **No "This month" block**: the month review belongs to the Home dashboard (D12).
-- **Passport summary**: heading "Passport · 5 countries · 3 regions · 4 badges" → one row of crests: earned first, then **the next two or three unearned greyed** (dashed frame, no numeral) → "View passport →".
-- **Journal summary** (own view: all pours; public: recent public notes): three compact rows → "View journal →".
-- **Friends summary**: avatars row (palate rings) + "Following 1 · Followers 1" → "Find people →".
-- **Sharing** (own): shared links count, default visibility → the existing controls.
-- **Settings** (own): account · sign out · rating scale · units · privacy · export · delete.
+- **Then, in order (D13):** the **Sharing · Settings** row directly under the palate card → **Passport** (earned crests only, "View passport →") → **Friends card** (up to four friends with ring avatars, handle and match chip; "Show my code" and "Find people →") → **Journal card** (count, last pour, "Open journal →").
+- **Sharing** (own): shared links count, default visibility → the existing controls. **Settings** (own): account · sign out · rating scale · units · privacy (incl. how you're found) · export · delete.
 - **Palate ring avatar** is a shared component used wherever an avatar appears (header, comments, friends, feed) at 28–96 px. Ring = 3–5 px stroke, **eight equal segments** in `flavor-wheel.ts` wedge colours with small gaps; each segment's opacity follows that family's share of the palate vector, from a faint track (~12 %) when absent to full colour at the peak (D11). No ring until the palate has ≥ 3 rated pours; the track alone renders before that.
 
 ### 3.8 Journal (`/history`; D9)
@@ -237,7 +247,7 @@ Reached from Bar → + Add. Redesigned viewfinder-first: the camera fills the sc
 
 ### 3.10 Friends (tab)
 
-The existing `/friends` page minus the profile card (the profile is in the header): Find people (handle / phone / QR) · following · followers · requests · the full "From your friends" feed (Q4) · comparisons you've opened.
+Header row: "Friends" · **Show my code** · settings icon (opens **How you're found**, the existing discovery settings, as a sheet). One search field "@handle or phone number" with the **scan-code** button at its trailing edge (D15). Then Following / Followers / Requests, then the full "From your friends" feed (Q4).
 
 ### 3.11 Compare, Note discussion, Learn — unchanged. These remain the reference compositions.
 
