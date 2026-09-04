@@ -1831,43 +1831,35 @@ export async function createReport(
   reporterId: string,
   input: { subjectType: ReportSubjectType; subjectId: string; reason: string },
 ): Promise<boolean> {
-  return db.transaction(async (tx) => {
-    /**
-     * One snapshot for every read in here, not just one transaction.
-     *
-     * Read committed takes a fresh snapshot per statement, so grouping the
-     * visibility check and the content read into a transaction narrowed the
-     * window without closing it: an author editing between two statements
-     * still had the report record their replacement. Repeatable read gives
-     * every statement below the same view of the database, which is the
-     * property this actually needs.
-     *
-     * Cheap here specifically: this transaction inserts one new row and
-     * updates nothing, so it has no row to lose a first-updater-wins conflict
-     * on. The alternative — `select … for update` on the subject — would let
-     * a reporter block its author's edits, which is a worse thing to build
-     * into a reporting path than a slightly stricter isolation level.
-     */
-    await tx.execute(sql`set transaction isolation level repeatable read`);
-    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`report-rl:${reporterId}`}))`);
+  /**
+   * Two transactions, because they need opposite things from their snapshots.
+   *
+   * The capture needs every read to agree with every other read; the limiter
+   * needs to see what the request ahead of it just committed. One transaction
+   * cannot give both, and trying cost a working rate limiter: at repeatable
+   * read the snapshot is fixed by the first *query*, which was the blocking
+   * `pg_advisory_xact_lock` — so every waiter pinned a view from before the
+   * lock holder inserted, and the duplicate check and hourly count could not
+   * see it. Concurrent reports from one reporter would all have been admitted,
+   * defeating the flood control SOCIAL §11 requires. Separating them gives
+   * each phase the isolation it actually wants.
+   */
 
-    /**
-     * Visibility, owner and snapshot are read in ONE transaction, and the
-     * visibility check used to sit outside it.
-     *
-     * The subject must be VISIBLE to the reporter, not merely exist — a bare
-     * existence check would make the 201/404 split an oracle for probing
-     * private pour/comment ids, and you can only report what reached you. But
-     * checking that outside the transaction left a window between "the
-     * reporter could see this" and "here is what it said": an author editing
-     * in between had the report record their replacement text, which is the
-     * bug the snapshot exists to prevent, one window smaller. The transaction
-     * runs at repeatable read (above), so every read below sees one snapshot
-     * and there is no window between them at all — for a comment the body also
-     * comes off the same row the visibility check reads, which would have been
-     * enough on its own, but the pour and profile projections need more than
-     * one table and the isolation level is what makes those consistent too.
-     */
+  /**
+   * Phase one: what was reported, read consistently.
+   *
+   * Repeatable read, and read-only — so the first query is the subject read
+   * rather than something that blocks, and the snapshot is taken at the moment
+   * this request looks at the world. The subject must be VISIBLE to the
+   * reporter, not merely exist: a bare existence check would make the 201/404
+   * split an oracle for probing private pour and comment ids, and you can only
+   * report what reached you. Visibility and content come off one snapshot, so
+   * an author editing mid-request cannot have the report record their
+   * replacement text — the bug the snapshot column exists to prevent.
+   */
+  const captured = await db.transaction(async (tx) => {
+    await tx.execute(sql`set transaction isolation level repeatable read`);
+
     let subjectVisible = false;
     let subjectOwnerId: string | null = null;
     let subjectSnapshot: string | null = null;
@@ -1888,7 +1880,7 @@ export async function createReport(
         (await canViewPour(tx, reporterId, comment.pourId)) &&
         !(await isBlockedEither(tx, reporterId, comment.userId));
       subjectOwnerId = comment?.userId ?? null;
-      // Straight off the row the check just read: no second read to race.
+      // Straight off the row the check just read.
       subjectSnapshot = comment?.body ?? null;
     } else {
       const profile = await tx.query.userProfiles.findFirst({
@@ -1899,10 +1891,29 @@ export async function createReport(
         profile != null && profile.socialEnabled && !(await isBlockedEither(tx, reporterId, profile.userId));
       subjectOwnerId = profile?.userId ?? null;
     }
-    if (!subjectVisible) return false;
+    if (!subjectVisible) return null;
     if (subjectSnapshot == null) {
       subjectSnapshot = await subjectPreview(tx, input.subjectType, input.subjectId);
     }
+    return { subjectOwnerId, subjectSnapshot };
+  });
+  if (!captured) return false;
+
+  /**
+   * Phase two: serialize this reporter, then write.
+   *
+   * Read committed on purpose — each statement here takes a fresh view, so the
+   * duplicate check and the hourly count see whatever the request that held
+   * the lock before us committed. That is exactly the freshness phase one must
+   * not have.
+   *
+   * The subject is not re-read. Visibility was true when the reporter looked,
+   * which is the question this path asks; a withdrawal in the microseconds
+   * since does not unmake the thing they saw.
+   */
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`report-rl:${reporterId}`}))`);
+
     const existing = await tx.query.reports.findFirst({
       where: and(
         eq(schema.reports.reporterId, reporterId),
@@ -1927,8 +1938,8 @@ export async function createReport(
       // Who to answer for it, and what they said. The owner is recorded because
       // the subject can be hard-deleted, and a report whose subject is gone
       // still has an account behind it.
-      subjectOwnerId,
-      subjectSnapshot,
+      subjectOwnerId: captured.subjectOwnerId,
+      subjectSnapshot: captured.subjectSnapshot,
     });
     return true;
   });

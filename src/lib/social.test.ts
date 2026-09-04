@@ -610,6 +610,32 @@ describe("comments", () => {
     // And who to answer for it. The subject can be hard-deleted; the account
     // behind it is what an account-level action needs, so the report carries it.
     expect(rows[0].subjectOwnerId).toBe(commenter.id);
+  });
+
+  /**
+   * The limiter has to see what the request ahead of it committed. Putting the
+   * capture and the limiter in one repeatable-read transaction pinned every
+   * waiter's snapshot before the advisory lock — so concurrent reports from
+   * one reporter all read a pre-lock view, and both the duplicate check and
+   * the hourly count went blind. SOCIAL §11 requires the queue not be
+   * floodable, so this is the property that has to hold.
+   */
+  it("createReport still limits a reporter firing several at once", async () => {
+    const c = await addComment(db, commenter.id, pourId, "spam-ish");
+
+    // The same subject, concurrently: exactly one report, not five.
+    await Promise.all(
+      Array.from({ length: 5 }, () =>
+        createReport(db, owner.id, { subjectType: "comment", subjectId: c!.id, reason: "spam" }),
+      ),
+    );
+    const forSubject = await db
+      .select()
+      .from(schema.reports)
+      .where(eq(schema.reports.subjectId, c!.id));
+    expect(forSubject).toHaveLength(1);
+    // And the snapshot survived the split into two transactions.
+    expect(forSubject[0].subjectSnapshot).toBe("spam-ish");
     // A fabricated subject never reaches the queue.
     await expect(
       createReport(db, owner.id, { subjectType: "pour", subjectId: "no-such-pour", reason: "spam" }),
