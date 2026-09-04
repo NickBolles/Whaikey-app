@@ -31,6 +31,7 @@ import {
 import {
   AccountSuspendedError,
   canViewPour,
+  getAddTarget,
   getFriendFeed,
   getFriendNotesForBottle,
   getOwnProfile,
@@ -2740,6 +2741,12 @@ describe("a suspended account cannot keep reading", () => {
     // palate live. The gate belongs after the self check, not before the row
     // is even loaded.
     expect(await getProfileView(db, viewer.id, "viewer_all")).not.toBeNull();
+    // And their own QR code / add link, which returns the "that's you" state
+    // rather than a 404.
+    const own = await getAddTarget(db, viewer.id, "viewer_all");
+    expect(own?.isSelf).toBe(true);
+    // Somebody else's still refuses.
+    expect(await getAddTarget(db, viewer.id, "author")).toBeNull();
   });
 
   it("reads again once reinstated", async () => {

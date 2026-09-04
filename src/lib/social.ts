@@ -594,6 +594,20 @@ export async function listBlocked(db: DB, userId: string): Promise<ProfileSummar
  * than repeating the condition, which is the difference between one rule and
  * five copies of it.
  *
+ * **Where it goes matters as much as whether it is there.** In any function
+ * that has a self exception, the call belongs *inside* it — a guard evaluated
+ * before the target row is loaded cannot know whether the read is cross-user,
+ * and above the exception it locked accounts out of their own profile page
+ * (`getProfileView`) and their own QR code (`getAddTarget`), twice, one
+ * function at a time. The current placements, audited together:
+ * `canViewPourContext` after its self check; `getProfileView` and
+ * `getAddTarget` inside `!isSelf`; `getFriendFeed` and
+ * `getFriendNotesForBottle` at the top, because a feed of other people has no
+ * self case; `findProfileByPhone` at the top for the same reason, discovery
+ * being about somebody else by construction; and `createReport`'s profile
+ * branch before its own visibility test, where the only self case is
+ * reporting yourself, which is not an action worth preserving.
+ *
  * **What it deliberately does not gate**, so the line is a decision rather
  * than an oversight: the account's own data — `getOwnProfile`, its palate,
  * its journal — and its own relationship lists (`listFollowing`,
@@ -837,12 +851,19 @@ export interface AddTarget {
  * "that's your own code" instead of a follow button.
  */
 export async function getAddTarget(db: DB, viewerId: string, handle: string): Promise<AddTarget | null> {
-  if (await suspendedViewer(db, viewerId)) return null;
   const row = await db.query.userProfiles.findFirst({ where: eq(schema.userProfiles.handle, normalizeHandle(handle)) });
   if (!row) return null;
 
   const isSelf = viewerId === row.userId;
   if (!isSelf) {
+    /**
+     * Inside `!isSelf`, for the reason `getProfileView` says: a guard placed
+     * before the row is loaded cannot know whether this is a cross-user read.
+     * Above it, a suspended account scanning its **own** QR code got `null`
+     * and a 404 instead of the "that's your own code" state this function
+     * exists to return.
+     */
+    if (await suspendedViewer(db, viewerId)) return null;
     if (!row.socialEnabled) return null;
     if (await isBlockedEither(db, viewerId, row.userId)) return null;
   }
