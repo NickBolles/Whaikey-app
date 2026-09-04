@@ -400,7 +400,7 @@ Still owed: under-age *existing* accounts (social off, export offered, deletion 
 ### 9.2 Privacy: export, deletion, retention
 - Export: JSON + CSV of bottles, pours, notes, chat, profile (minus phone hash), shares, passport; one tap, free forever.
 - Deletion: hard delete of the user row (every user-owned table cascades), revocation of shares and push devices, session clear; comments on others' pours are soft-deleted to "[deleted]"; contributions to community aggregates are recomputed on next refresh. Policy stated in the Privacy Policy.
-- Retention: native auth codes deleted on redemption and swept; rate-limit rows swept after 48 h; phone probes swept per `social.ts`; chat history kept until the user deletes it.
+- Retention: native auth codes deleted on redemption and swept; rate-limit rows swept after 48 h (`sweepExpiredCounters`, added in WP-18 — the Privacy Policy claimed this and nothing did it); phone probes swept per `social.ts`; chat history kept until the user deletes it.
 - Private by default everywhere; visibility never raised by the system; money never crosses a social boundary; palate provenance decided in §12.
 
 ### 9.3 Terms & Privacy Policy
