@@ -1939,8 +1939,22 @@ export async function editComment(db: DB, userId: string, commentId: string, bod
   const [row] = await db
     .update(schema.comments)
     .set({ body: trimmed, editedAt: now })
-    .where(eq(schema.comments.id, commentId))
+    /**
+     * Still predicated on the row being undeleted, not only on its id.
+     *
+     * The check above is a read, and a moderator's hide can land between it
+     * and this write: the update then replaced the body of a comment that was
+     * already hidden, leaving `deletedAt` untouched — so `unhideSubject`, which
+     * restores by matching `deletedAt` against the hide's own timestamp, still
+     * matched and republished text written while hidden and never reviewed.
+     * The same instant is the whole basis of that match, so what has to be
+     * excluded is the body changing underneath it.
+     */
+    .where(and(eq(schema.comments.id, commentId), isNull(schema.comments.deletedAt)))
     .returning();
+  // Lost the race with a hide or a delete: nothing to show, and nothing was
+  // written.
+  if (!row) return null;
 
   const author = await getOwnProfile(db, userId);
   return {
@@ -1971,7 +1985,11 @@ export async function softDeleteComment(db: DB, userId: string, commentId: strin
   const updated = await db
     .update(schema.comments)
     .set({ deletedAt: new Date() })
-    .where(eq(schema.comments.id, commentId))
+    // Same race, mirrored: a hide landing between the read above and this
+    // write would have its `deletedAt` overwritten with a later instant, and
+    // the unhide that matches on that instant would then restore nothing while
+    // recording a lift. Already gone is a no-op, not a second deletion.
+    .where(and(eq(schema.comments.id, commentId), isNull(schema.comments.deletedAt)))
     .returning({ id: schema.comments.id });
   return updated.length > 0;
 }

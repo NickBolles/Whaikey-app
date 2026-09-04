@@ -28,7 +28,7 @@ import {
   reinstateAccount,
   suspendAccount,
 } from "./moderation";
-import { AccountSuspendedError, setSocialEnabled } from "./social";
+import { AccountSuspendedError, editComment, setSocialEnabled, softDeleteComment } from "./social";
 
 /**
  * Review PLAN-C9 and PLAN.md §9.4. Reports have existed since social shipped
@@ -1459,11 +1459,68 @@ describe("a hidden subject that is then deleted", () => {
   });
 
   it("still refuses a hide on a subject that was never there", async () => {
-    // The existence check only moved off the already-hidden branch; a first
-    // hide on nothing is still nothing to hide.
+    // No report claims it, so nothing says the subject was ever real.
     await expect(
       hideSubject(db, operator.id, "pour", uid("ghost"), { note: "nope" }),
     ).rejects.toBeInstanceOf(UnknownSubjectError);
+  });
+
+  /**
+   * The same stranding one step earlier: no hide has been recorded yet, so the
+   * already-hidden branch above does not apply and the first Hide threw. The
+   * operator was left able only to dismiss a valid complaint as unfounded or
+   * to suspend the account — a heavier decision reached for because the
+   * lighter one errored.
+   */
+  it("resolves a report whose subject was deleted before any hide", async () => {
+    const bottle = await createTestBottle(db);
+    const pourId = uid("pour");
+    await db
+      .insert(schema.pours)
+      .values({ id: pourId, userId: author.id, bottleId: bottle.id, visibility: "public" });
+    const reportId = await report("pour", pourId);
+
+    await db.delete(schema.pours).where(eq(schema.pours.id, pourId));
+
+    await hideSubject(db, operator.id, "pour", pourId, { reportId, note: "already gone" });
+    expect(await countOpenReports(db)).toBe(0);
+    const hides = (await listModerationActions(db, 10)).filter((a) => a.action === "hide");
+    expect(hides).toHaveLength(1);
+    expect(hides[0].note).toBe("already gone");
+  });
+
+  it("will not let a report close over a subject it is not about", async () => {
+    const bottle = await createTestBottle(db);
+    const pourId = uid("pour");
+    await db
+      .insert(schema.pours)
+      .values({ id: pourId, userId: author.id, bottleId: bottle.id, visibility: "public" });
+    const reportId = await report("pour", pourId);
+
+    // A real, open report — but named alongside a subject it says nothing
+    // about. The report row is what proves a subject existed, so it has to be
+    // the report's own subject.
+    await expect(
+      hideSubject(db, operator.id, "pour", uid("ghost"), { reportId, note: "nope" }),
+    ).rejects.toBeInstanceOf(ReportSubjectMismatchError);
+    expect(await countOpenReports(db)).toBe(1);
+    expect(await listModerationActions(db, 10)).toHaveLength(0);
+  });
+
+  it("drops a hide whose subject is gone off the standing list", async () => {
+    const bottle = await createTestBottle(db);
+    const pourId = uid("pour");
+    await db
+      .insert(schema.pours)
+      .values({ id: pourId, userId: author.id, bottleId: bottle.id, visibility: "public" });
+    await hideSubject(db, operator.id, "pour", pourId, { note: "graphic" });
+    expect((await listStandingHides(db)).hides).toHaveLength(1);
+
+    await db.delete(schema.pours).where(eq(schema.pours.id, pourId));
+
+    // This list carries the only control that lifts a hide, so a row whose
+    // subject is gone is a button that can do nothing.
+    expect((await listStandingHides(db)).hides).toHaveLength(0);
   });
 });
 
@@ -1922,5 +1979,87 @@ describe("backfilling report owners filed before the column existed", () => {
     // Unrecoverable, and it was unresolvable before the backfill too. Writing
     // any owner here would be inventing one.
     expect(await ownerOf(orphan)).toBeNull();
+  });
+});
+
+
+/**
+ * `editComment` reads the row, checks it is not deleted, then writes on the id
+ * alone. A hide landing between the two replaced the body of an
+ * already-hidden comment while leaving `deletedAt` untouched — and
+ * `unhideSubject` restores by matching `deletedAt` against the hide's own
+ * timestamp, so the match still succeeded and published text written while
+ * hidden and never reviewed.
+ */
+describe("an edit racing a hide", () => {
+  async function hiddenComment(body: string) {
+    const bottle = await createTestBottle(db);
+    const pourId = uid("pour");
+    await db
+      .insert(schema.pours)
+      .values({ id: pourId, userId: author.id, bottleId: bottle.id, visibility: "public" });
+    const commentId = uid("comment");
+    await db.insert(schema.comments).values({ id: commentId, pourId, userId: author.id, body });
+    return commentId;
+  }
+
+  it("cannot replace the body of a comment a moderator has hidden", async () => {
+    const commentId = await hiddenComment("the reported text");
+    await hideSubject(db, operator.id, "comment", commentId, { note: "abuse" });
+
+    // The author's edit is the write half of the race: it arrives believing
+    // the row was undeleted, which it was when the check ran.
+    expect(await editComment(db, author.id, commentId, "something harmless")).toBeNull();
+
+    const row = await db.query.comments.findFirst({
+      where: eq(schema.comments.id, commentId),
+    });
+    expect(row?.body).toBe("the reported text");
+    expect(row?.deletedAt).not.toBeNull();
+  });
+
+  it("restores the reported text, not a replacement, when the hide is lifted", async () => {
+    const commentId = await hiddenComment("the reported text");
+    await hideSubject(db, operator.id, "comment", commentId, { note: "abuse" });
+    await editComment(db, author.id, commentId, "something harmless");
+
+    await unhideSubject(
+      db,
+      operator.id,
+      "comment",
+      commentId,
+      "appeal upheld",
+      await standingHideId("comment", commentId),
+    );
+
+    const row = await db.query.comments.findFirst({
+      where: eq(schema.comments.id, commentId),
+    });
+    expect(row?.deletedAt).toBeNull();
+    // What comes back is what was reviewed.
+    expect(row?.body).toBe("the reported text");
+  });
+
+  it("makes the author's own delete a no-op once a hide stands", async () => {
+    const commentId = await hiddenComment("the reported text");
+    await hideSubject(db, operator.id, "comment", commentId, { note: "abuse" });
+
+    // Overwriting `deletedAt` with a later instant would break the timestamp
+    // match the unhide depends on, stranding the comment down with the hide
+    // recorded as lifted.
+    expect(await softDeleteComment(db, author.id, commentId)).toBe(false);
+
+    await unhideSubject(
+      db,
+      operator.id,
+      "comment",
+      commentId,
+      "appeal upheld",
+      await standingHideId("comment", commentId),
+    );
+    const row = await db.query.comments.findFirst({
+      where: eq(schema.comments.id, commentId),
+    });
+    expect(row?.deletedAt).toBeNull();
   });
 });

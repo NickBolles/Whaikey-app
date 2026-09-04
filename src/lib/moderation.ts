@@ -747,7 +747,27 @@ export async function hideSubject(
     }
 
     const changed = await applyHide(tx, subjectType, subjectId, now);
-    if (!changed) throw new UnknownSubjectError();
+    /**
+     * Nothing to hide is a refusal only when nothing claims it.
+     *
+     * The already-hidden branch above stopped refusing on "the subject is
+     * gone" because a standing hide proves it existed. The *first* hide had
+     * the same problem one step earlier and it is the ordinary case, not an
+     * exotic one: a report is filed, the author hard-deletes the pour
+     * (`deletePour` leaves no row), and the operator's Hide throws. What is
+     * left is to dismiss a valid complaint as unfounded, or to suspend the
+     * account — a heavier decision reached for because the lighter one
+     * errored. Neither is the truth, which is that the takedown has already
+     * happened.
+     *
+     * An **open report about this exact subject** is the proof, and it is the
+     * report row that supplies it: `resolveOpenReport` matches the subject
+     * against the report and rolls the whole transaction back on a mismatch or
+     * a report somebody else already handled. So a fabricated id still gets
+     * `UnknownSubjectError` — with no report to claim, there is nothing saying
+     * the subject was ever real.
+     */
+    if (!changed && !options.reportId) throw new UnknownSubjectError();
     await record(tx, actorId, "hide", subjectType, subjectId, options, now);
     if (options.reportId) {
       await resolveOpenReport(tx, options.reportId, { subjectType, subjectId });
@@ -1470,9 +1490,25 @@ export async function listStandingHides(
     // subject hidden with nothing able to unhide it.
     .leftJoin(user, eq(user.id, latest.actorId))
     .where(
-      options.before !== undefined
-        ? and(eq(latest.action, "hide"), sql`${latest.seq} < ${options.before}`)
-        : eq(latest.action, "hide"),
+      and(
+        eq(latest.action, "hide"),
+        /**
+         * And the subject still has to be there.
+         *
+         * This list carries the only control that lifts a hide, so a row whose
+         * subject is gone is a button that can do nothing — `unhideSubject`
+         * would update no rows and record a lift of nothing. That state is
+         * ordinary: the author hard-deletes the pour after it is hidden, and
+         * now also when a hide is recorded against a subject already deleted.
+         * A hidden comment is soft-deleted, so its row is still here and it
+         * stays on the list, which is the point — that one *can* be lifted.
+         */
+        sql`(
+          (${latest.subjectType} = 'pour' and exists (select 1 from pours p where p.id = ${latest.subjectId}))
+          or (${latest.subjectType} = 'comment' and exists (select 1 from comments c where c.id = ${latest.subjectId}))
+        )`,
+        options.before !== undefined ? sql`${latest.seq} < ${options.before}` : undefined,
+      ),
     )
     .orderBy(desc(latest.seq))
     // One extra row is how the page knows there is another one.
