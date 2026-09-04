@@ -1910,6 +1910,7 @@ export async function createReport(
           pourId: schema.comments.pourId,
           userId: schema.comments.userId,
           body: schema.comments.body,
+          deletedAt: schema.comments.deletedAt,
           authorSocialEnabled: schema.userProfiles.socialEnabled,
         })
         .from(schema.comments)
@@ -1918,6 +1919,16 @@ export async function createReport(
         .limit(1);
       subjectVisible =
         comment != null &&
+        /**
+         * A deleted comment is a tombstone with no body — `listComments`
+         * returns `body: null` for one, to *everybody* including its author.
+         * So there is nothing here anyone could have read and nothing left to
+         * moderate, and capturing `comments.body` anyway would put text no
+         * reporter ever saw into the queue as their evidence. Its own rule
+         * rather than part of the withdrawn-author predicate, because this one
+         * applies to the author too.
+         */
+        comment.deletedAt == null &&
         // The same rule `listComments` applies, from the same helper. Checking
         // the pour and the block relationship but not this made the report
         // path laxer than the read path: a stale id could report a comment the

@@ -653,6 +653,19 @@ describe("comments", () => {
       .set({ socialEnabled: true })
       .where(eq(schema.userProfiles.userId, commenter.id));
 
+    // Nor a deleted one: `listComments` returns `body: null` for a tombstone,
+    // to everybody including its author, so there is nothing anyone could have
+    // read and nothing left to moderate — capturing the row's body anyway
+    // would put text no reporter ever saw into the queue as their evidence.
+    const c4 = await addComment(db, commenter.id, pourId, "then deleted");
+    await db
+      .update(schema.comments)
+      .set({ deletedAt: new Date() })
+      .where(eq(schema.comments.id, c4!.id));
+    await expect(
+      createReport(db, owner.id, { subjectType: "comment", subjectId: c4!.id, reason: "spam" }),
+    ).resolves.toBe(false);
+
     // A fabricated subject never reaches the queue.
     await expect(
       createReport(db, owner.id, { subjectType: "pour", subjectId: "no-such-pour", reason: "spam" }),
