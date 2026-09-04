@@ -39,7 +39,17 @@ export function PolicyPage({
       <header className="flex flex-col gap-2">
         <h1 className="font-display text-3xl font-semibold tracking-tight">{title}</h1>
         <p className="text-sm text-muted">
-          {identity.effectiveDate
+          {/*
+            Keyed on the WHOLE legal identity, not the date alone. With a date
+            set and the support address still missing, the header said "In
+            effect since …" directly above a banner saying the document is
+            unfinished and should not be treated as an agreement — the two
+            halves of one screen contradicting each other, decided by which
+            environment variables happened to be filled in first. A document is
+            in effect when it is finished, and `missing` is already the
+            definition of finished used by the banner below.
+          */}
+          {missing.length === 0
             ? `In effect since ${identity.effectiveDate}.`
             : "Not yet in effect — see the note below."}
           {updated && ` ${updated}`}

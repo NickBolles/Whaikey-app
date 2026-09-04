@@ -989,6 +989,61 @@ describe("review-pass hardening", () => {
     expect(own!.some((c) => c.author?.userId === legacy.id)).toBe(true);
   });
 
+  it("keeps a legacy cheer withdrawn when its author claims a handle", async () => {
+    const owner = await createTestUser(db);
+    const viewer = await createTestUser(db);
+    const legacy = await createTestUser(db);
+    const bottle = await createTestBottle(db);
+    await claim(db, owner, "owner_ch", { isPublic: true });
+    await claim(db, viewer, "viewer_ch", { isPublic: true });
+
+    const pour = await insertPour(db, owner.id, bottle.id, { visibility: "public", rating: 4 });
+    await insertNote(db, pour.id, { freeform: "mine" });
+    // Cheered under the old behaviour, before anything required a profile.
+    await db.insert(schema.reactions).values({
+      id: uid("reaction"),
+      pourId: pour.id,
+      userId: legacy.id,
+      kind: "cheers",
+      createdAt: new Date(Date.now() - 60_000),
+    });
+
+    // The same door the comment above closes, on the table rendered beside it:
+    // the comment rule shipped with no equivalent for reactions, so claiming a
+    // handle silently republished the cheer.
+    await claim(db, legacy, "legacy_ch", { isPublic: true });
+
+    const note = await getSocialNote(db, viewer.id, pour.id);
+    expect(note!.cheersCount).toBe(0);
+
+    // And the feed's batch count says the same thing as the note's — the pair
+    // that drifted the first time this rule was applied to one query and not
+    // the other. The follow is what puts the pour in the feed at all; without
+    // it the assertion would pass on an empty list and prove nothing.
+    await followByHandle(db, viewer.id, "owner_ch");
+    const feed = await getFriendFeed(db, viewer.id);
+    const item = feed.find((f) => f.pourId === pour.id);
+    expect(item).toBeDefined();
+    expect(item!.cheersCount).toBe(0);
+  });
+
+  it("counts a cheer given after the author claimed their handle", async () => {
+    const owner = await createTestUser(db);
+    const viewer = await createTestUser(db);
+    const cheerer = await createTestUser(db);
+    const bottle = await createTestBottle(db);
+    await claim(db, owner, "owner_ca", { isPublic: true });
+    await claim(db, viewer, "viewer_ca", { isPublic: true });
+    await claim(db, cheerer, "after_ca", { isPublic: true });
+
+    const pour = await insertPour(db, owner.id, bottle.id, { visibility: "public", rating: 4 });
+    await insertNote(db, pour.id, { freeform: "mine" });
+    await cheerPour(db, cheerer.id, pour.id);
+
+    const note = await getSocialNote(db, viewer.id, pour.id);
+    expect(note!.cheersCount).toBe(1);
+  });
+
   it("shows a comment written after the author claimed their handle", async () => {
     const owner = await createTestUser(db);
     const viewer = await createTestUser(db);

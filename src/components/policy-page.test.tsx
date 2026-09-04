@@ -156,3 +156,34 @@ describe("PolicyPage legal identity", () => {
     expect(who).toHaveTextContent("The operating company and governing law are not yet published here.");
   });
 });
+
+describe("the in-effect label against the unfinished banner", () => {
+  it("does not declare itself in effect while a required fact is missing", () => {
+    setEnv({
+      NEXT_PUBLIC_LEGAL_ENTITY: "Whaikey Ltd",
+      NEXT_PUBLIC_LEGAL_JURISDICTION: "New Zealand",
+      NEXT_PUBLIC_POLICY_EFFECTIVE_DATE: "2026-09-01",
+      // No support address.
+    });
+    render(<PolicyPage title="Privacy">{body}</PolicyPage>);
+    // The header keyed on the date alone, so this page said "In effect since
+    // 2026-09-01." directly above a banner saying it is unfinished and must
+    // not be treated as an agreement — one screen contradicting itself,
+    // decided by which env vars happened to be set first.
+    expect(screen.queryByText(/In effect since/)).not.toBeInTheDocument();
+    expect(screen.getByText(/Not yet in effect/)).toBeInTheDocument();
+    expect(screen.getByText(/This document is not finished/)).toBeInTheDocument();
+  });
+
+  it("declares itself in effect only once every fact is set", () => {
+    setEnv({
+      NEXT_PUBLIC_LEGAL_ENTITY: "Whaikey Ltd",
+      NEXT_PUBLIC_LEGAL_JURISDICTION: "New Zealand",
+      NEXT_PUBLIC_SUPPORT_EMAIL: "hello@example.com",
+      NEXT_PUBLIC_POLICY_EFFECTIVE_DATE: "2026-09-01",
+    });
+    render(<PolicyPage title="Privacy">{body}</PolicyPage>);
+    expect(screen.getByText(/In effect since 2026-09-01/)).toBeInTheDocument();
+    expect(screen.queryByText(/This document is not finished/)).not.toBeInTheDocument();
+  });
+});

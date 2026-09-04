@@ -155,12 +155,20 @@ function SubmissionRow({
         className="w-full rounded-xl border border-border-subtle bg-surface py-2.5 px-3 text-sm text-foreground placeholder:text-muted focus:outline-none focus:border-accent/70"
       />
 
-      <div className="flex flex-wrap gap-2">
+      {/*
+        Real height and 12px of separation, for the reason spelled out beside
+        the moderation queue's row and in `globals.css`: `tap-target` grows the
+        hit area without growing the control, so on adjacent buttons the areas
+        overlap and the later one in DOM order wins the tap. Consequential here
+        because "Add to catalog" publishes the bottle AND its barcode as
+        catalog truth for everybody, one tap from Decline.
+      */}
+      <div className="flex flex-wrap gap-3">
         <button
           type="button"
           disabled={busy}
           onClick={() => onAct({ action: "approve", submissionId: submission.id, note })}
-          className="btn-primary px-4 py-2 text-sm font-medium disabled:opacity-50"
+          className="btn-primary inline-flex min-h-11 items-center px-4 py-2 text-sm font-medium disabled:opacity-50"
         >
           Add to catalog
         </button>
@@ -169,7 +177,7 @@ function SubmissionRow({
           disabled={busy || note.trim().length === 0}
           title={note.trim() ? undefined : "A decline needs a reason the submitter can read"}
           onClick={() => onAct({ action: "reject", submissionId: submission.id, reason: note })}
-          className="btn-secondary px-4 py-2 text-sm font-medium disabled:opacity-50"
+          className="btn-secondary inline-flex min-h-11 items-center px-4 py-2 text-sm font-medium disabled:opacity-50"
         >
           Decline
         </button>
@@ -197,7 +205,7 @@ function SubmissionRow({
               note,
             })
           }
-          className="px-4 py-2 text-sm text-muted hover:text-foreground transition-colors disabled:opacity-50"
+          className="inline-flex min-h-11 items-center px-4 py-2 text-sm text-muted hover:text-foreground transition-colors disabled:opacity-50"
         >
           Mark duplicate
         </button>

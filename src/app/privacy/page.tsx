@@ -55,6 +55,23 @@ export default function PrivacyPage() {
             the account.
           </li>
           <li>
+            <strong className="text-foreground">Your passport</strong> — which regions, countries,
+            distilleries and cask types you have met, the tier you reached in each, and when you
+            reached it. It is a record of what you have tried, so it is kept as long as the journal
+            it is derived from.
+          </li>
+          <li>
+            <strong className="text-foreground">Bottles you send to the catalog</strong> — what you
+            proposed, the barcode if it came from a scan, and the decision on it including the
+            reason if it was declined. Declining takes nothing off your own shelf.
+          </li>
+          <li>
+            <strong className="text-foreground">Why the app suggested something</strong> — the
+            one-line reason behind a recommendation is cached against your account so the same
+            suggestion reads the same way twice. It is written from your own journal and says
+            nothing your journal does not.
+          </li>
+          <li>
             <strong className="text-foreground">Your age answer</strong> — the date of birth and
             market you gave the gate, once, and whether it met the minimum.
           </li>

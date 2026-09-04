@@ -1197,6 +1197,9 @@ async function countCheers(db: DB, pourId: string, viewerId: string | null): Pro
     // Unconditional: a stepped-back author's cheer is hidden from a signed-out
     // reader too, and the count has to say the same thing the card does.
     contributorVisibleSql(schema.reactions.userId, viewerId),
+    // And a cheer from before its author had a profile stays withdrawn once
+    // they claim one — the same rule comments got, on the table beside them.
+    actedAfterAuthorJoinedSql(schema.reactions.userId, schema.reactions.createdAt, viewerId),
   ];
   const rows = await db
     .select({ n: sql<number>`count(*)` })
@@ -1206,22 +1209,38 @@ async function countCheers(db: DB, pourId: string, viewerId: string | null): Pro
 }
 
 /**
- * SQL for the second half of `commentWithdrawnByAuthor`: the comment was
- * written after its author had a profile.
+ * SQL for the second half of `commentWithdrawnByAuthor`, generalised: this
+ * social act was performed **after** its author had a profile.
  *
- * The counts have to ask this too. `contributorVisibleSql` only checks that an
- * enabled profile exists, so once a legacy commenter claims a handle their old
- * comments would be counted beside a thread that omits them — the same
- * count/thread disagreement that predicate was split out to prevent, arriving
- * through the door the profile opens.
+ * `contributorVisibleSql` only asks whether an enabled profile exists, so
+ * claiming a handle flips `socialEnabled` from null to true and republishes
+ * every historical act at once — with nobody choosing it, which is precisely
+ * what `docs/SOCIAL.md` forbids: visibility is opt-in per object and never
+ * raised retroactively.
+ *
+ * **Written against columns rather than for comments**, because it shipped as
+ * a comments-only helper and the cheer beside the comment went unfixed: the
+ * count/thread disagreement was closed for one table and left open for the
+ * one rendered next to it. A legacy cheer is exactly the same shape — no
+ * per-object visibility control, so the withdrawal has to be derived, and
+ * `cheerPour` requires a profile now, so only rows written under the old
+ * behaviour can satisfy this.
+ *
+ * `<=` on the profile side (so the act must not PREDATE the profile): an act
+ * sharing its millisecond with the profile came after it, and erring visible
+ * there is the safe direction — the author chose to act as a social account.
  */
-function commentWrittenAfterAuthorJoinedSql(viewerId: string | null) {
+function actedAfterAuthorJoinedSql(
+  userCol: AnyColumn,
+  createdAtCol: AnyColumn,
+  viewerId: string | null,
+) {
   const after = sql`exists (
     select 1 from user_profiles sp
-    where sp.user_id = ${schema.comments.userId} and sp.created_at <= ${schema.comments.createdAt}
+    where sp.user_id = ${userCol} and sp.created_at <= ${createdAtCol}
   )`;
   if (!viewerId) return after;
-  return sql`(${schema.comments.userId} = ${viewerId} or ${after})`;
+  return sql`(${userCol} = ${viewerId} or ${after})`;
 }
 
 async function countComments(db: DB, pourId: string, viewerId: string | null): Promise<number> {
@@ -1231,7 +1250,7 @@ async function countComments(db: DB, pourId: string, viewerId: string | null): P
     // Same rule `listComments` applies per row, in the same shape: the count
     // beside a thread and the thread itself are one claim.
     contributorVisibleSql(schema.comments.userId, viewerId),
-    commentWrittenAfterAuthorJoinedSql(viewerId),
+    actedAfterAuthorJoinedSql(schema.comments.userId, schema.comments.createdAt, viewerId),
   ];
   const rows = await db
     .select({ n: sql<number>`count(*)` })
@@ -1432,6 +1451,7 @@ export async function getFriendFeed(db: DB, viewerId: string, opts: { limit?: nu
         inArray(schema.reactions.pourId, pourIds),
         eq(schema.reactions.kind, "cheers"),
         contributorVisibleSql(schema.reactions.userId, viewerId),
+        actedAfterAuthorJoinedSql(schema.reactions.userId, schema.reactions.createdAt, viewerId),
       ),
     )
     .groupBy(schema.reactions.pourId);
@@ -1445,7 +1465,7 @@ export async function getFriendFeed(db: DB, viewerId: string, opts: { limit?: nu
         inArray(schema.comments.pourId, pourIds),
         isNull(schema.comments.deletedAt),
         contributorVisibleSql(schema.comments.userId, viewerId),
-        commentWrittenAfterAuthorJoinedSql(viewerId),
+        actedAfterAuthorJoinedSql(schema.comments.userId, schema.comments.createdAt, viewerId),
       ),
     )
     .groupBy(schema.comments.pourId);

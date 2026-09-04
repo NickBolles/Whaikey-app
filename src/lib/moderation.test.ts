@@ -2375,7 +2375,7 @@ describe("telling a deleted subject from a withheld one", () => {
     expect(row.editedSinceReport).toBe(false);
   });
 
-  it("still shows a private profile that has an audience", async () => {
+  it("withholds a private profile even when it keeps a follower", async () => {
     const follower = await createTestUser(db);
     await profileFor(follower, "follower_pv");
     await db
@@ -2390,9 +2390,17 @@ describe("telling a deleted subject from a withheld one", () => {
     });
     await report("profile", author.id);
 
-    // Private with an accepted follower is still shared with somebody, which
-    // is the question this asks — not "may the operator see it".
-    expect((await listOpenReports(db))[0].liveReadable).toBe(true);
+    /*
+     * This test previously asserted the opposite, on the reasoning that
+     * "private with an accepted follower is still shared with somebody". The
+     * question is not whether an audience exists but whether the operator
+     * would be reading what the REPORTER could have seen — and somebody who
+     * reported a public profile is not among the handful of followers a
+     * private one keeps. docs/STORYBOARD.md §3.17 withholds the "now" half
+     * once the subject is made private, with no exception for a remaining
+     * audience, and the snapshot is unaffected either way.
+     */
+    expect((await listOpenReports(db))[0].liveReadable).toBe(false);
   });
 
   it("reports a deleted subject as gone", async () => {

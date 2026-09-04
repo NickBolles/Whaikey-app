@@ -500,19 +500,39 @@ async function listOpenReportsIn(
   const stillReadable = (row: (typeof rows)[number]): boolean => {
     if (row.subjectType === "profile") {
       /**
-       * A profile is still shared if it is public, or private with an audience.
+       * A profile's current text is shown only while it is PUBLIC.
        *
        * `socialEnabled` alone was the whole test, so a profile reported while
        * public, then made **private** and edited, had its new display name and
        * bio rendered to the operator under "Now" — content no reporter could
-       * ever have seen. Exactly the failure `sharedWithAnyone` exists to stop
-       * for pours, on the one subject type that did not use it: private with
-       * no accepted follower is shared with nobody, and "is it still shared
-       * with anyone at all" is the question this asks.
+       * ever have seen.
+       *
+       * The first fix admitted a private profile that still had an accepted
+       * follower, on the reasoning that it is "shared with somebody". That
+       * reasoning was wrong in the place it mattered, and the docstring above
+       * it said so without my noticing: the test is not whether an audience
+       * exists but whether the operator would be reading something the
+       * **reporter** could have seen — and a reporter who filed against a
+       * public profile is precisely not among the handful of followers a
+       * private one keeps. `docs/STORYBOARD.md` §3.17 is binding and says the
+       * "now" half is withheld when the subject has been "deleted, made
+       * private, or its author has stepped back", with no exception for a
+       * remaining audience.
+       *
+       * The cost of being wrong the other way is small and the asymmetry
+       * decides it: the snapshot is the primary evidence and is always shown,
+       * so withholding the annotation loses an operator a little context and
+       * says why, while admitting it means reading a user's writing that only
+       * a private audience was ever given.
+       *
+       * Deliberately stricter than `sharedWithAnyone` is for pours, because a
+       * pour's `followers` tier is an audience the author chose FOR THAT POUR,
+       * whereas a profile going private is the author revoking the audience
+       * the report was filed about.
        */
       const profile = profileById.get(row.subjectId);
       if (profile?.socialEnabled !== true) return false;
-      return profile.isPublic || hasFollower.has(row.subjectId);
+      return profile.isPublic;
     }
     if (row.subjectType === "comment") {
       const comment = commentById.get(row.subjectId);

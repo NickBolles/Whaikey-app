@@ -40,6 +40,18 @@ import PrivacyPage from "./page";
  * they are one disclosure (a session and its messages; a request and its code),
  * and pointing a new table at a convenient existing phrase fails until it is
  * either given its own sentence or declared as part of that one.
+ *
+ * **`notPersonal` is the second way past, and it cannot be closed the same
+ * way.** `passport_tiers` shipped here exempted as "tier definitions for the
+ * passport, identical for everyone" — a claim about the schema that the schema
+ * flatly contradicts: `user_id`, `family`, `value`, `tier`, `achieved_at`, one
+ * row per person per badge. Nothing mechanical catches that, because the
+ * sentence is doing exactly what it was designed to do (record a judgement)
+ * and the judgement was simply wrong. The only guard is that the claim has to
+ * be WRITTEN, in words, next to the table it is about, where a reader can
+ * check it against `schema.ts` — which is how this one was caught. So write
+ * these as falsifiable statements about columns, never as reassurance, and
+ * read the table definition before writing one.
  */
 
 type Verdict = { disclosed: string; sharedWith?: string[] } | { notPersonal: string };
@@ -64,7 +76,14 @@ const INVENTORY: Record<string, Verdict> = {
   tasting_notes: { disclosed: "pours, ratings, tasting", sharedWith: ["pours"] },
   user_bottles: { disclosed: "the bottles on your shelf, and what you paid" },
   pour_shares: { disclosed: "any share links you create" },
-  passport_tiers: { notPersonal: "Tier definitions for the passport, identical for everyone." },
+  // Was `notPersonal: "Tier definitions … identical for everyone"` — a claim
+  // about the schema that the schema contradicts (user_id, family, value,
+  // tier, achieved_at: one row per person per badge). See the file docstring:
+  // a false exemption is the second way past this check, and the only guard
+  // against it is that the sentence has to be written and can be read.
+  passport_tiers: {
+    disclosed: "which regions, countries, distilleries and cask types you have met",
+  },
 
   // --- Age gate ---
   age_verifications: { disclosed: "the date of birth and" },
@@ -95,7 +114,9 @@ const INVENTORY: Record<string, Verdict> = {
   ai_rate_limits: { disclosed: "rate-limit counters are dropped after a couple of days" },
   pairings: { notPersonal: "Generated pairing copy keyed to a bottle, not to a person." },
   pairing_generation_locks: { notPersonal: "A generation mutex; rows carry no user content." },
-  rec_explanations: { notPersonal: "Cached recommendation copy, regenerated from the journal it describes." },
+  // Same: "cached copy, regenerated from the journal" describes where it came
+  // from, not what it is. It is per-user text keyed to `user_id`, stored.
+  rec_explanations: { disclosed: "the\n            one-line reason behind a recommendation is cached against your account" },
 
   // --- Devices ---
   push_devices: { disclosed: "Device push tokens" },
@@ -103,7 +124,12 @@ const INVENTORY: Record<string, Verdict> = {
   // --- Catalog: about bottles, not about people ---
   distilleries: { notPersonal: "Catalog reference data." },
   bottles: { notPersonal: "The shared bottle catalog." },
-  bottle_submissions: { notPersonal: "A proposed catalog edit; it describes a bottle, and the submitter is already covered by the account bullet." },
+  // Also wrongly exempted, found by checking the rest after `passport_tiers`
+  // rather than waiting to be told twice: the row ties a person to what they
+  // proposed and carries the decision and decline reason written about them.
+  // "The submitter is covered by the account bullet" was false — that bullet
+  // covers a name and an email, not a submission history.
+  bottle_submissions: { disclosed: "what you\n            proposed, the barcode if it came from a scan" },
   bottle_aliases: { notPersonal: "Alternative catalog names." },
   bottle_upcs: { notPersonal: "Barcodes against catalog rows." },
   critic_notes: { notPersonal: "Published critic notes, sourced and attributed." },
