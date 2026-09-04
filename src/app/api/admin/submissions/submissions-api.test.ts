@@ -36,9 +36,9 @@ afterEach(() => {
 });
 
 describe("POST /api/admin/submissions", () => {
-  it("needs a session", async () => {
+  it("gives a signed-out caller the same 404 as any other non-operator", async () => {
     setSessionUser(null);
-    expect((await submissionsPOST(post({ action: "approve", submissionId: "x" }))).status).toBe(401);
+    expect((await submissionsPOST(post({ action: "approve", submissionId: "x" }))).status).toBe(404);
   });
 
   /** 404, not 403 — same reason as the moderation endpoint. */

@@ -27,6 +27,7 @@ interface QueuedReportView {
   preview: string | null;
   subjectOwnerId: string | null;
   subjectOwnerSuspended: boolean;
+  subjectOwnerSuspendedAt: string | null;
   alreadyHidden: boolean;
 }
 
@@ -40,6 +41,15 @@ interface AuditView {
   actorName: string;
   /** Only the hide currently in force over its subject can be lifted. */
   standing: boolean;
+}
+
+interface StandingHideView {
+  actionId: string;
+  subjectType: "pour" | "comment";
+  subjectId: string;
+  note: string | null;
+  at: string;
+  actorName: string;
 }
 
 interface SuspendedView {
@@ -58,6 +68,7 @@ export function ModerationQueue({
   slaHours,
   audit,
   suspended,
+  standingHides,
 }: {
   reports: QueuedReportView[];
   open: number;
@@ -66,6 +77,7 @@ export function ModerationQueue({
   slaHours: number;
   audit: AuditView[];
   suspended: SuspendedView[];
+  standingHides: StandingHideView[];
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
@@ -153,6 +165,39 @@ export function ModerationQueue({
         </section>
       )}
 
+      {standingHides.length > 0 && (
+        <section className="flex flex-col gap-2">
+          {/* Everything currently taken down, however long ago. The audit list
+              below is bounded history, so a hide older than its last fifty
+              entries would otherwise lose the only control that lifts it. */}
+          <h2 className="section-label">Hidden right now</h2>
+          <ul className="flex flex-col gap-1.5">
+            {standingHides.map((hide) => (
+              <li key={hide.actionId} className="card-flat p-3 text-xs text-muted">
+                {hide.subjectType} <code>{hide.subjectId.slice(0, 8)}</code> · {hide.actorName} ·{" "}
+                {new Date(hide.at).toLocaleString()}
+                {hide.note && <div className="mt-1 italic">{hide.note}</div>}
+                <button
+                  type="button"
+                  disabled={busy === hide.actionId}
+                  onClick={() =>
+                    void act(hide.actionId, {
+                      action: "unhide",
+                      subjectType: hide.subjectType,
+                      subjectId: hide.subjectId,
+                      expectedActionId: hide.actionId,
+                    })
+                  }
+                  className="mt-2 block text-accent hover:underline disabled:opacity-50"
+                >
+                  Lift this hide
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       <section className="flex flex-col gap-2">
         <h2 className="section-label">Recent actions</h2>
         {audit.length === 0 ? (
@@ -165,33 +210,11 @@ export function ModerationQueue({
                 {entry.subjectType} <code>{entry.subjectId.slice(0, 8)}</code> · {entry.actorName} ·{" "}
                 {new Date(entry.createdAt).toLocaleString()}
                 {entry.note && <div className="mt-1 italic">{entry.note}</div>}
-                {/* A hide sticks — its author cannot undo it — so an upheld
-                    appeal has to be actionable here. The report it came from
-                    is resolved and gone from the queue above by then.
-
-                    Only on the hide that is currently in force: `unhideSubject`
-                    acts on the subject, not on this row, so a button on a
-                    lifted or superseded entry would take down today's decision
-                    from months-old history. */}
-                {entry.standing && entry.subjectType !== "profile" && (
-                  <button
-                    type="button"
-                    disabled={busy === entry.id}
-                    onClick={() =>
-                      void act(entry.id, {
-                        action: "unhide",
-                        subjectType: entry.subjectType,
-                        subjectId: entry.subjectId,
-                        // Which hide this row is: the server refuses if a
-                        // different one is in force by the time it arrives.
-                        expectedActionId: entry.id,
-                      })
-                    }
-                    className="mt-2 block text-accent hover:underline disabled:opacity-50"
-                  >
-                    Lift this hide
-                  </button>
-                )}
+                {/* Lifting lives in "Hidden right now" above, which is not
+                    bounded by this list's history window. Here `standing` is
+                    only a label: it says which entries still describe the
+                    world. */}
+                {entry.standing && <div className="mt-1 text-accent">still in force</div>}
               </li>
             ))}
           </ul>
@@ -294,7 +317,13 @@ function ReportRow({
             type="button"
             disabled={busy}
             onClick={() =>
-              onAct({ action: "reinstate", userId: report.subjectOwnerId, note })
+              onAct({
+                action: "reinstate",
+                userId: report.subjectOwnerId,
+                note,
+                // Which suspension this row showed — a newer one is not ours.
+                expectedSuspendedAt: report.subjectOwnerSuspendedAt,
+              })
             }
             className="btn-secondary px-4 py-2 text-sm font-medium disabled:opacity-50"
           >

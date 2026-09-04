@@ -3,7 +3,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { feedback } from "@/db/schema";
-import { getSessionUser, withErrorHandling, UnauthorizedError } from "@/lib/session";
+import { getSessionUser, withErrorHandling } from "@/lib/session";
 import { readJsonWithinLimit } from "@/lib/body-limit";
 import { isOperator } from "@/lib/operator";
 
@@ -27,7 +27,9 @@ const bodySchema = z.object({ id: z.string().min(1) });
 export async function POST(request: Request): Promise<NextResponse> {
   return withErrorHandling(async () => {
     const user = await getSessionUser();
-    if (!user) throw new UnauthorizedError();
+    // One answer for everybody who is not an operator, signed in or not. A 401
+    // here and a 404 there lets an anonymous prober tell a real admin endpoint
+    // from a wrong URL — which is the whole thing the 404 was for.
     if (!isOperator(user)) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }

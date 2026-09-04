@@ -9,6 +9,7 @@ import {
   countOpenReports,
   listModerationActions,
   listOpenReports,
+  listStandingHides,
   listSuspendedAccounts,
 } from "@/lib/moderation";
 import { ModerationQueue } from "./moderation-queue";
@@ -31,7 +32,7 @@ export default async function AdminReportsPage() {
   if (!isOperator(user)) notFound();
 
   const db = getDb();
-  const [reports, open, breached, audit, suspended] = await Promise.all([
+  const [reports, open, breached, audit, suspended, standingHides] = await Promise.all([
     // One bounded page. The header carries the true open count, so a backlog
     // is visible without the page trying to render all of it.
     listOpenReports(db),
@@ -42,17 +43,26 @@ export default async function AdminReportsPage() {
     // away with the row. An appeal arriving later needs somewhere to be acted
     // on, and this is it.
     listSuspendedAccounts(db),
+    // Its own query, not a filter over the audit list: that list is bounded
+    // history, so a hide older than fifty actions would lose the only control
+    // that lifts it — and an appeal about it would have no answer in the app.
+    listStandingHides(db),
   ]);
 
   return (
     <ModerationQueue
-      reports={reports.map((r) => ({ ...r, createdAt: r.createdAt.toISOString() }))}
+      reports={reports.map((r) => ({
+        ...r,
+        createdAt: r.createdAt.toISOString(),
+        subjectOwnerSuspendedAt: r.subjectOwnerSuspendedAt?.toISOString() ?? null,
+      }))}
       open={open}
       pageSize={REPORT_PAGE_SIZE}
       breached={breached}
       slaHours={REPORT_SLA_HOURS}
       audit={audit.map((a) => ({ ...a, createdAt: a.createdAt.toISOString() }))}
       suspended={suspended.map((a) => ({ ...a, suspendedAt: a.suspendedAt.toISOString() }))}
+      standingHides={standingHides.map((h) => ({ ...h, at: h.at.toISOString() }))}
     />
   );
 }

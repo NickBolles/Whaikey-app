@@ -21,6 +21,7 @@ import {
   ReportAlreadyHandledError,
   StaleModerationViewError,
   listOwnModerationHolds,
+  listStandingHides,
   reinstateAccount,
   suspendAccount,
 } from "./moderation";
@@ -765,6 +766,20 @@ describe("what moderation is holding, on a page its owner always has", () => {
    * pour can go private or its author can switch social off — after which the
    * only place the reason existed is unreachable by the person it is for.
    */
+  /**
+   * Walking the account's pours and asking about each is one query per pour on
+   * every /sharing load, for an account that almost always has none. The work
+   * has to scale with how much moderation touched them, not with how much they
+   * have written.
+   */
+  it("costs nothing extra for an account with a long journal and no holds", async () => {
+    const bottle = await createTestBottle(db);
+    for (let i = 0; i < 40; i += 1) {
+      await db.insert(schema.pours).values({ id: uid("pour"), userId: author.id, bottleId: bottle.id });
+    }
+    expect(await listOwnModerationHolds(db, author.id)).toEqual([]);
+  });
+
   it("lists this user's held pours and comments, and nobody else's", async () => {
     const bottle = await createTestBottle(db);
     const myPour = uid("pour");
@@ -798,5 +813,44 @@ describe("what moderation is holding, on a page its owner always has", () => {
     const [action] = await db.select().from(schema.moderationActions);
     await unhideSubject(db, operator.id, "pour", pourId, "upheld", action.id, new Date(2_000));
     expect(await listOwnModerationHolds(db, author.id)).toHaveLength(0);
+  });
+});
+
+describe("standing hides outlive the history window", () => {
+  /**
+   * `listModerationActions` is bounded history. A hide older than its window
+   * would fall off the only list carrying a lift control, so an appeal about
+   * something taken down months ago had no answer available in the product.
+   */
+  it("lists a hide the recent-actions window no longer reaches", async () => {
+    const bottle = await createTestBottle(db);
+    const pourId = uid("pour");
+    await db.insert(schema.pours).values({ id: pourId, userId: author.id, bottleId: bottle.id });
+    await hideSubject(db, operator.id, "pour", pourId, { note: "old hide" }, new Date(1_000));
+
+    // Push it past a small history window with unrelated decisions.
+    for (let i = 0; i < 5; i += 1) {
+      const rid = await report("profile", author.id, new Date(2_000 + i));
+      await dismissReport(db, operator.id, rid, `later ${i}`, new Date(10_000 + i));
+    }
+
+    const recent = await listModerationActions(db, 3);
+    expect(recent.some((e) => e.note === "old hide")).toBe(false);
+
+    const standing = await listStandingHides(db);
+    expect(standing).toHaveLength(1);
+    expect(standing[0]).toMatchObject({ subjectType: "pour", subjectId: pourId, note: "old hide" });
+    expect(standing[0].actorName).toBe("Op");
+  });
+
+  it("drops one as soon as it is lifted", async () => {
+    const bottle = await createTestBottle(db);
+    const pourId = uid("pour");
+    await db.insert(schema.pours).values({ id: pourId, userId: author.id, bottleId: bottle.id });
+    await hideSubject(db, operator.id, "pour", pourId, { note: "reason" }, new Date(1_000));
+    const [{ actionId }] = await listStandingHides(db);
+
+    await unhideSubject(db, operator.id, "pour", pourId, "upheld", actionId, new Date(2_000));
+    expect(await listStandingHides(db)).toHaveLength(0);
   });
 });

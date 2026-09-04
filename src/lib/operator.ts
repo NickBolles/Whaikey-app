@@ -21,7 +21,12 @@ export function operatorIds(): Set<string> {
   );
 }
 
-export function isOperator(user: Pick<SessionUser, "id"> | null | undefined): boolean {
+export function isOperator<T extends Pick<SessionUser, "id">>(
+  user: T | null | undefined,
+  // A type guard, so a caller that has checked does not also have to prove the
+  // session is non-null: "not an operator" and "not signed in" are one answer
+  // everywhere this is used, and the narrowing keeps them one branch.
+): user is T {
   if (!user) return false;
   const ids = operatorIds();
   // An empty allowlist grants nobody. A deploy that forgets the variable gets

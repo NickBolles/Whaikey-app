@@ -44,6 +44,8 @@ export interface QueuedReport {
   /** The account that owns the reported thing, when there is one. */
   subjectOwnerId: string | null;
   subjectOwnerSuspended: boolean;
+  /** Which suspension, so this row's Reinstate cannot lift a newer one. */
+  subjectOwnerSuspendedAt: Date | null;
   /** Already hidden by an earlier action — the queue says so rather than repeating it. */
   alreadyHidden: boolean;
 }
@@ -102,6 +104,7 @@ interface SubjectDescription {
   preview: string | null;
   subjectOwnerId: string | null;
   subjectOwnerSuspended: boolean;
+  subjectOwnerSuspendedAt: Date | null;
   alreadyHidden: boolean;
 }
 
@@ -115,6 +118,7 @@ async function describeSubject(
     preview: null,
     subjectOwnerId: null,
     subjectOwnerSuspended: false,
+    subjectOwnerSuspendedAt: null,
     alreadyHidden: false,
   };
 
@@ -127,7 +131,7 @@ async function describeSubject(
     return {
       preview: row.body.slice(0, 500),
       subjectOwnerId: row.userId,
-      subjectOwnerSuspended: await isSuspended(db, row.userId),
+      ...(await suspensionOf(db, row.userId)),
       alreadyHidden: await isModerationHidden(db, "comment", subjectId),
     };
   }
@@ -148,7 +152,7 @@ async function describeSubject(
     return {
       preview: text ? text.slice(0, 500) : "(no written note)",
       subjectOwnerId: row.userId,
-      subjectOwnerSuspended: await isSuspended(db, row.userId),
+      ...(await suspensionOf(db, row.userId)),
       /**
        * "Already handled" means a moderation hide stands — never that the
        * content happens to be out of sight.
@@ -173,6 +177,7 @@ async function describeSubject(
     preview: [`@${row.handle}`, row.displayName, row.bio].filter(Boolean).join(" · ").slice(0, 500),
     subjectOwnerId: subjectId,
     subjectOwnerSuspended: row.suspendedAt != null,
+    subjectOwnerSuspendedAt: row.suspendedAt,
     // For a profile there is no hide, so "handled" means suspended. Reading
     // `socialEnabled` here would call every account that has stepped back of
     // its own accord already-actioned, which is somebody's privacy choice
@@ -181,12 +186,19 @@ async function describeSubject(
   };
 }
 
-async function isSuspended(db: DB, userId: string): Promise<boolean> {
+/** Whether an account is suspended, and by which decision. */
+async function suspensionOf(
+  db: DB,
+  userId: string,
+): Promise<{ subjectOwnerSuspended: boolean; subjectOwnerSuspendedAt: Date | null }> {
   const row = await db.query.userProfiles.findFirst({
     columns: { suspendedAt: true },
     where: eq(userProfiles.userId, userId),
   });
-  return row?.suspendedAt != null;
+  return {
+    subjectOwnerSuspended: row?.suspendedAt != null,
+    subjectOwnerSuspendedAt: row?.suspendedAt ?? null,
+  };
 }
 
 export class UnknownSubjectError extends Error {
@@ -606,31 +618,157 @@ export async function listOwnModerationHolds(
   db: DB,
   userId: string,
 ): Promise<OwnModerationNotice[]> {
-  const [ownPours, ownComments] = await Promise.all([
-    db.select({ id: pours.id }).from(pours).where(eq(pours.userId, userId)),
+  /**
+   * Two queries, driven from the actions rather than from the content.
+   *
+   * The obvious shape — walk the user's pours and ask about each — is one
+   * query per pour on every `/sharing` load, for an account that in the
+   * overwhelming majority of cases has no holds at all. Starting from
+   * `moderation_actions` and joining to the user's rows bounds the work by
+   * how much moderation has touched them, which is the number that is small.
+   */
+  const [pourActions, commentActions] = await Promise.all([
     db
-      .select({ id: comments.id, body: comments.body })
-      .from(comments)
-      .where(and(eq(comments.userId, userId), isNotNull(comments.deletedAt))),
+      .select({
+        id: moderationActions.id,
+        subjectId: moderationActions.subjectId,
+        action: moderationActions.action,
+        note: moderationActions.note,
+        createdAt: moderationActions.createdAt,
+      })
+      .from(moderationActions)
+      .innerJoin(
+        pours,
+        and(eq(pours.id, moderationActions.subjectId), eq(pours.userId, userId)),
+      )
+      .where(
+        and(
+          eq(moderationActions.subjectType, "pour"),
+          sql`${moderationActions.action} in ('hide', 'unhide')`,
+        ),
+      )
+      .orderBy(desc(moderationActions.createdAt), desc(moderationActions.id)),
+    db
+      .select({
+        id: moderationActions.id,
+        subjectId: moderationActions.subjectId,
+        action: moderationActions.action,
+        note: moderationActions.note,
+        createdAt: moderationActions.createdAt,
+        body: comments.body,
+      })
+      .from(moderationActions)
+      .innerJoin(
+        comments,
+        and(eq(comments.id, moderationActions.subjectId), eq(comments.userId, userId)),
+      )
+      .where(
+        and(
+          eq(moderationActions.subjectType, "comment"),
+          sql`${moderationActions.action} in ('hide', 'unhide')`,
+        ),
+      )
+      .orderBy(desc(moderationActions.createdAt), desc(moderationActions.id)),
   ]);
 
+  // Newest first, so the first row seen for a subject is the one in force.
   const held: OwnModerationNotice[] = [];
-  for (const row of ownPours) {
-    const notice = await moderationNoticeFor(db, "pour", row.id);
-    if (notice) held.push({ ...notice, subjectType: "pour", subjectId: row.id, preview: null });
+  const seen = new Set<string>();
+  for (const row of pourActions) {
+    if (seen.has(row.subjectId)) continue;
+    seen.add(row.subjectId);
+    if (row.action !== "hide") continue;
+    held.push({
+      action: "hide",
+      reason: row.note,
+      at: row.createdAt,
+      subjectType: "pour",
+      subjectId: row.subjectId,
+      preview: null,
+    });
   }
-  for (const row of ownComments) {
-    const notice = await moderationNoticeFor(db, "comment", row.id);
-    if (notice) {
-      held.push({
-        ...notice,
-        subjectType: "comment",
-        subjectId: row.id,
-        preview: row.body.slice(0, 140),
-      });
-    }
+  seen.clear();
+  for (const row of commentActions) {
+    if (seen.has(row.subjectId)) continue;
+    seen.add(row.subjectId);
+    if (row.action !== "hide") continue;
+    held.push({
+      action: "hide",
+      reason: row.note,
+      at: row.createdAt,
+      subjectType: "comment",
+      subjectId: row.subjectId,
+      preview: row.body.slice(0, 140),
+    });
   }
   return held.sort((a, b) => b.at.getTime() - a.at.getTime());
+}
+
+export interface StandingHide {
+  actionId: string;
+  subjectType: "pour" | "comment";
+  subjectId: string;
+  note: string | null;
+  at: Date;
+  actorName: string;
+}
+
+/**
+ * Every hide currently in force, newest first.
+ *
+ * Its own query rather than a filter over the recent-actions list: that list
+ * is bounded history, so once fifty newer actions exist a hide that still
+ * stands drops off it — and the only control that lifts one went with it. An
+ * appeal about something hidden two months ago would have had no answer
+ * available in the product.
+ *
+ * `distinct on` picks the latest hide/unhide per subject inside the database,
+ * so the bound is on standing hides rather than on how much history has to be
+ * read to find them.
+ */
+export async function listStandingHides(db: DB, limit = 200): Promise<StandingHide[]> {
+  // `distinct on` picks the latest hide/unhide per subject inside the
+  // database, so the work is bounded by how many subjects moderation has
+  // touched rather than by how much history has to be read to find them.
+  const latest = db
+    .selectDistinctOn([moderationActions.subjectType, moderationActions.subjectId], {
+      id: moderationActions.id,
+      subjectType: moderationActions.subjectType,
+      subjectId: moderationActions.subjectId,
+      action: moderationActions.action,
+      note: moderationActions.note,
+      createdAt: moderationActions.createdAt,
+      actorId: moderationActions.actorId,
+    })
+    .from(moderationActions)
+    .where(sql`${moderationActions.action} in ('hide', 'unhide')`)
+    .orderBy(
+      moderationActions.subjectType,
+      moderationActions.subjectId,
+      desc(moderationActions.createdAt),
+      desc(moderationActions.id),
+    )
+    .as("latest");
+
+  const rows = await db
+    .select({
+      actionId: latest.id,
+      subjectType: latest.subjectType,
+      subjectId: latest.subjectId,
+      note: latest.note,
+      at: latest.createdAt,
+      actorName: user.name,
+    })
+    .from(latest)
+    .innerJoin(user, eq(user.id, latest.actorId))
+    .where(eq(latest.action, "hide"))
+    .orderBy(desc(latest.createdAt))
+    .limit(limit);
+
+  return rows.map((row) => ({
+    ...row,
+    subjectType: row.subjectType as "pour" | "comment",
+  }));
 }
 
 /**

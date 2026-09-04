@@ -48,19 +48,16 @@ afterEach(() => {
 });
 
 describe("POST /api/admin/moderation", () => {
-  it("needs a session", async () => {
-    setSessionUser(null);
-    expect((await moderationPOST(post({ action: "dismiss", reportId: "x" }))).status).toBe(401);
-  });
-
   /**
-   * 404, not 403. A 403 tells a signed-in stranger the endpoint exists and who
-   * it is for; there is nothing to gain from confirming either.
+   * 404 signed out too, not 401. A 401 here and a 404 for a signed-in stranger
+   * lets an anonymous prober tell a real admin endpoint from a wrong URL,
+   * which is the whole thing the 404 was for.
    */
-  it("does not exist for anyone who is not an operator", async () => {
+  it("gives everyone who is not an operator the same answer", async () => {
+    setSessionUser(null);
+    expect((await moderationPOST(post({ action: "dismiss", reportId: "x" }))).status).toBe(404);
     setSessionUser(author);
-    const res = await moderationPOST(post({ action: "dismiss", reportId: "x" }));
-    expect(res.status).toBe(404);
+    expect((await moderationPOST(post({ action: "dismiss", reportId: "x" }))).status).toBe(404);
   });
 
   it("hides a reported comment and closes the report", async () => {
