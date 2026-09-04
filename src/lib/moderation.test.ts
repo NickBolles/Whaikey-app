@@ -1427,3 +1427,41 @@ describe("a second report about an already-suspended account", () => {
     expect(profile?.suspendedReason).toBe("second");
   });
 });
+
+/**
+ * The deleted-subject hole, one branch over from the Suspend one. A standing
+ * hide is proof the subject existed, so refusing to resolve a later report
+ * because the pour has since been deleted refuses on the wrong grounds — and
+ * it strands exactly the ordinary case: several reports, first one hidden,
+ * owner deletes the pour, rest stuck behind a button that throws.
+ */
+describe("a hidden subject that is then deleted", () => {
+  it("still resolves the reports it left open", async () => {
+    const bottle = await createTestBottle(db);
+    const pourId = uid("pour");
+    await db
+      .insert(schema.pours)
+      .values({ id: pourId, userId: author.id, bottleId: bottle.id, visibility: "public" });
+    const first = await report("pour", pourId);
+    const second = await report("pour", pourId, new Date(), author.id);
+
+    await hideSubject(db, operator.id, "pour", pourId, { reportId: first, note: "graphic" });
+    await db.delete(schema.pours).where(eq(schema.pours.id, pourId));
+
+    // The queue still offers "Resolve as hidden" here, because the hide stands.
+    await hideSubject(db, operator.id, "pour", pourId, { reportId: second, note: "same" });
+    expect(await countOpenReports(db)).toBe(0);
+    // And still exactly one hide: the second records nothing.
+    expect(
+      (await listModerationActions(db, 10)).filter((a) => a.action === "hide"),
+    ).toHaveLength(1);
+  });
+
+  it("still refuses a hide on a subject that was never there", async () => {
+    // The existence check only moved off the already-hidden branch; a first
+    // hide on nothing is still nothing to hide.
+    await expect(
+      hideSubject(db, operator.id, "pour", uid("ghost"), { note: "nope" }),
+    ).rejects.toBeInstanceOf(UnknownSubjectError);
+  });
+});

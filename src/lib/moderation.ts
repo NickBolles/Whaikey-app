@@ -409,7 +409,22 @@ export async function hideSubject(
      * is handled, by the action already in force.
      */
     if (await isModerationHidden(tx, subjectType, subjectId)) {
-      if (!(await exists(tx, subjectType, subjectId))) throw new UnknownSubjectError();
+      /**
+       * No existence check on this branch, deliberately.
+       *
+       * A standing hide is proof the subject existed, so refusing here because
+       * it has since been deleted refuses on the wrong grounds — and it hit
+       * the ordinary case: several reports about one pour, the first hidden,
+       * the owner then deletes it (`deletePour` is a hard delete), and every
+       * remaining report is stuck. The queue offered "Resolve as hidden",
+       * because the hide does stand, and the click threw. Those reports could
+       * then only be closed by dismissing real complaints as unfounded.
+       *
+       * The report is still claimed against *this* subject by
+       * `resolveOpenReport`, which reads the report row rather than the
+       * subject, so nothing here lets a report be closed by an unrelated
+       * decision.
+       */
       if (options.reportId) {
         await resolveOpenReport(tx, options.reportId, { subjectType, subjectId });
       }

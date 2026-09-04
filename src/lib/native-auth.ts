@@ -6,7 +6,7 @@ import {
   timingSafeEqual,
 } from "node:crypto";
 import { and, eq, lt, sql } from "drizzle-orm";
-import { getDb, schema } from "@/db";
+import { getDb, schema, type DB } from "@/db";
 
 /**
  * Handing a signed-in session from the system browser into the app's WebView
@@ -229,9 +229,25 @@ export async function consumeNativeAuthRequest(
  * sitting in the table, which is precisely when nobody is looking.
  */
 async function sweepExpiredCodes(now: Date): Promise<void> {
-  await getDb()
+  await sweepNativeAuth(getDb(), now);
+}
+
+/**
+ * The same sweep, callable from scheduled housekeeping.
+ *
+ * The comment above is right that cleanup on issue alone leaves session
+ * cookies sitting through a quiet week — and it is right one level up too:
+ * both call sites are on the native sign-in path, so a deployment with *no*
+ * native traffic never sweeps at all. `/privacy` says these are deleted when
+ * they expire, and a promise that holds only while the feature is in use is
+ * not the promise it makes. Pending requests go with them: same path, same
+ * silence, and they are unauthenticated rows.
+ */
+export async function sweepNativeAuth(db: DB, now = new Date()): Promise<void> {
+  await db
     .delete(schema.nativeAuthCodes)
     .where(lt(schema.nativeAuthCodes.expiresAt, new Date(now.getTime() - CODE_TTL_MS)));
+  await db.delete(schema.nativeAuthRequests).where(lt(schema.nativeAuthRequests.expiresAt, now));
 }
 
 /**

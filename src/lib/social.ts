@@ -600,6 +600,21 @@ async function recordPhoneProbe(db: DB, userId: string): Promise<void> {
 }
 
 /**
+ * The same pruning, on a schedule rather than on traffic.
+ *
+ * Above it happens inside a *permitted* probe, which is the wrong condition
+ * for a retention promise: an account that stops looking people up — or a
+ * deployment where nobody uses phone discovery at all — keeps its rows, and
+ * `/privacy` says phone lookups are pruned without qualification. Same shape
+ * as the AI counters and the native codes: cleanup that rides on a feature is
+ * cleanup that stops when the feature is idle.
+ */
+export async function sweepExpiredPhoneLookups(db: DB, now = new Date()): Promise<void> {
+  const hourAgo = new Date(now.getTime() - 60 * 60 * 1000);
+  await db.delete(schema.phoneLookups).where(lt(schema.phoneLookups.createdAt, hourAgo));
+}
+
+/**
  * Set (or replace) the caller's phone number. Requires an existing profile —
  * returns null otherwise (route maps that to 409 profile_required). Throws
  * PhoneTakenError when the hash collides with another account's number
