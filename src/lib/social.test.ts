@@ -636,6 +636,23 @@ describe("comments", () => {
     expect(forSubject).toHaveLength(1);
     // And the snapshot survived the split into two transactions.
     expect(forSubject[0].subjectSnapshot).toBe("spam-ish");
+    // A stepped-back author's comment is not reportable either, because
+    // `listComments` already stopped showing it — the report path checked the
+    // pour and the block relationship but not this, so a stale id could pull a
+    // withdrawn comment's current body into the queue as evidence.
+    const c3 = await addComment(db, commenter.id, pourId, "was visible");
+    await db
+      .update(schema.userProfiles)
+      .set({ socialEnabled: false })
+      .where(eq(schema.userProfiles.userId, commenter.id));
+    await expect(
+      createReport(db, owner.id, { subjectType: "comment", subjectId: c3!.id, reason: "spam" }),
+    ).resolves.toBe(false);
+    await db
+      .update(schema.userProfiles)
+      .set({ socialEnabled: true })
+      .where(eq(schema.userProfiles.userId, commenter.id));
+
     // A fabricated subject never reaches the queue.
     await expect(
       createReport(db, owner.id, { subjectType: "pour", subjectId: "no-such-pour", reason: "spam" }),

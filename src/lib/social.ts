@@ -1647,6 +1647,25 @@ export interface CommentView {
  * w.r.t. the viewer are dropped entirely (replies to a dropped comment keep
  * rendering under it — orphan-tolerant); ordered oldest-first.
  */
+/**
+ * A stepped-back author's comments vanish for everyone but themself (US-11).
+ *
+ * A pure predicate rather than a rule written twice: `listComments` applies it
+ * per row inside a bulk read, and `createReport` applies it to one comment, so
+ * neither can call the other without reintroducing an N+1 or a cycle — but
+ * both can call this. It exists because the report path did *not* apply it,
+ * and a caller holding a stale comment id could report a comment the app had
+ * stopped showing them, capturing its current body — possibly a revision made
+ * after the step-back — into the queue as report-time evidence.
+ */
+export function commentWithdrawnByAuthor(
+  authorSocialEnabled: boolean | null | undefined,
+  authorId: string,
+  viewerId: string | null,
+): boolean {
+  return authorSocialEnabled === false && authorId !== viewerId;
+}
+
 export async function listComments(db: DB, viewerId: string | null, pourId: string): Promise<CommentView[] | null> {
   if (!(await canViewPour(db, viewerId, pourId))) return null;
 
@@ -1679,8 +1698,7 @@ export async function listComments(db: DB, viewerId: string | null, pourId: stri
   const out: CommentView[] = [];
   for (const row of rows) {
     if (blocked.has(row.userId)) continue;
-    // A stepped-back author's comments vanish for everyone but themself (US-11).
-    if (row.authorSocialEnabled === false && row.userId !== viewerId) continue;
+    if (commentWithdrawnByAuthor(row.authorSocialEnabled, row.userId, viewerId)) continue;
     const deleted = row.deletedAt != null;
     const isAuthor = viewerId != null && viewerId === row.userId;
     const canEdit = isAuthor && !deleted && now - row.createdAt.getTime() <= COMMENT_EDIT_WINDOW_MS;
@@ -1886,12 +1904,26 @@ export async function createReport(
       subjectVisible = pour != null && (await canViewPour(tx, reporterId, input.subjectId));
       subjectOwnerId = pour?.userId ?? null;
     } else if (input.subjectType === "comment") {
-      const comment = await tx.query.comments.findFirst({
-        columns: { id: true, pourId: true, userId: true, body: true },
-        where: eq(schema.comments.id, input.subjectId),
-      });
+      const [comment] = await tx
+        .select({
+          id: schema.comments.id,
+          pourId: schema.comments.pourId,
+          userId: schema.comments.userId,
+          body: schema.comments.body,
+          authorSocialEnabled: schema.userProfiles.socialEnabled,
+        })
+        .from(schema.comments)
+        .leftJoin(schema.userProfiles, eq(schema.userProfiles.userId, schema.comments.userId))
+        .where(eq(schema.comments.id, input.subjectId))
+        .limit(1);
       subjectVisible =
         comment != null &&
+        // The same rule `listComments` applies, from the same helper. Checking
+        // the pour and the block relationship but not this made the report
+        // path laxer than the read path: a stale id could report a comment the
+        // app no longer showed, and the snapshot would preserve a revision
+        // written after its author stepped back.
+        !commentWithdrawnByAuthor(comment.authorSocialEnabled, comment.userId, reporterId) &&
         (await canViewPour(tx, reporterId, comment.pourId)) &&
         !(await isBlockedEither(tx, reporterId, comment.userId));
       subjectOwnerId = comment?.userId ?? null;
