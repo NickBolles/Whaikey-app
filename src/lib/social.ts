@@ -345,19 +345,40 @@ export async function unfollow(db: DB, followerId: string, followeeId: string): 
   return deleted.length > 0;
 }
 
+/**
+ * Accepting a follow is an exposure-raising write, so it answers to the same
+ * lock and the same state check as the others.
+ *
+ * A suspended account keeps whatever pending requests it had, and approving
+ * one grants a *new* reader — an account that cannot post while suspended
+ * could still widen its audience, and the new follower would find the profile
+ * waiting for them on reinstatement. `denyFollow` and `removeFollower` need no
+ * such guard: they only ever narrow.
+ */
 export async function approveFollow(db: DB, followeeId: string, followerId: string): Promise<boolean> {
-  const updated = await db
-    .update(schema.follows)
-    .set({ state: "accepted" })
-    .where(
-      and(
-        eq(schema.follows.followeeId, followeeId),
-        eq(schema.follows.followerId, followerId),
-        eq(schema.follows.state, "pending"),
-      ),
-    )
-    .returning({ id: schema.follows.id });
-  return updated.length > 0;
+  return db.transaction(async (tx) => {
+    // The same key `makeEverythingPrivate` and `suspendAccount` contend on, so
+    // an approval in flight cannot land just after a suspension commits.
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`social-reset:${followeeId}`}))`);
+    const profile = await tx.query.userProfiles.findFirst({
+      columns: { socialEnabled: true, suspendedAt: true },
+      where: eq(schema.userProfiles.userId, followeeId),
+    });
+    if (!profile?.socialEnabled || profile.suspendedAt != null) return false;
+
+    const updated = await tx
+      .update(schema.follows)
+      .set({ state: "accepted" })
+      .where(
+        and(
+          eq(schema.follows.followeeId, followeeId),
+          eq(schema.follows.followerId, followerId),
+          eq(schema.follows.state, "pending"),
+        ),
+      )
+      .returning({ id: schema.follows.id });
+    return updated.length > 0;
+  });
 }
 
 export async function denyFollow(db: DB, followeeId: string, followerId: string): Promise<boolean> {

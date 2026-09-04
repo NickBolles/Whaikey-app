@@ -28,5 +28,18 @@ export function legalIdentity(): LegalIdentity {
 }
 
 export function isComplete(identity: LegalIdentity): boolean {
-  return Boolean(identity.entity && identity.jurisdiction && identity.contactEmail);
+  /**
+   * The effective date counts.
+   *
+   * It was left out at first as "optional", which let a page with the three
+   * identity facts set suppress the unfinished banner while its own header
+   * said "Not yet in effect — see the note below" and pointed at a note that
+   * was not rendered. A policy that declares itself ineffective is not
+   * launch-ready, and one that cites a missing note is worse than either
+   * state on its own. A legal document with no date from which it binds is
+   * unfinished, so the banner — which is the store-readiness check — says so.
+   */
+  return Boolean(
+    identity.entity && identity.jurisdiction && identity.contactEmail && identity.effectiveDate,
+  );
 }

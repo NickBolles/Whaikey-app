@@ -36,9 +36,10 @@ export function PolicyPage({
         <div role="note" className="card border-danger/50 p-4 text-sm leading-relaxed">
           <strong className="text-foreground">This document is not finished.</strong>{" "}
           <span className="text-muted">
-            It does not yet name the company it binds, the law it is governed by, or an address to
-            reach. Those are set by the operator before launch (PLAN.md §9.3); until then treat
-            this as a description of how the app behaves, not as an agreement.
+            It does not yet name the company it binds, the law it is governed by, an address to
+            reach, or the date it takes effect. Those are set by the operator before launch
+            (PLAN.md §9.3); until then treat this as a description of how the app behaves, not as
+            an agreement.
           </span>
         </div>
       )}

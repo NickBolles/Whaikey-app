@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
@@ -599,6 +599,40 @@ describe("comments", () => {
    * social could post comments that moderation then could not answer for,
    * because suspension lives on the profile row that does not exist.
    */
+  /**
+   * Accepting a follow grants a new reader, so it is an exposure-raising write
+   * like any other. A suspended account could still do it, and the new
+   * follower would find the profile waiting on reinstatement.
+   */
+  it("refuses to approve a follow while the account is suspended", async () => {
+    const fan = await createTestUser(db);
+    await db.insert(schema.follows).values({
+      id: crypto.randomUUID(),
+      followerId: fan.id,
+      followeeId: owner.id,
+      state: "pending",
+    });
+
+    await db
+      .update(schema.userProfiles)
+      .set({ suspendedAt: new Date(), socialEnabled: false })
+      .where(eq(schema.userProfiles.userId, owner.id));
+    expect(await approveFollow(db, owner.id, fan.id)).toBe(false);
+
+    // Still pending, not silently accepted.
+    const still = await db.query.follows.findFirst({
+      where: and(eq(schema.follows.followerId, fan.id), eq(schema.follows.followeeId, owner.id)),
+    });
+    expect(still?.state).toBe("pending");
+
+    // Reinstated and re-enabled, the same approval works.
+    await db
+      .update(schema.userProfiles)
+      .set({ suspendedAt: null, socialEnabled: true })
+      .where(eq(schema.userProfiles.userId, owner.id));
+    expect(await approveFollow(db, owner.id, fan.id)).toBe(true);
+  });
+
   it("refuses a comment from an account with no social profile", async () => {
     const stranger = await createTestUser(db);
     expect(await addComment(db, stranger.id, pourId, "hello")).toBeNull();
