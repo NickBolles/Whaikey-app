@@ -1,9 +1,10 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
-import { desc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { feedback, user as userTable } from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
 import { isOperator } from "@/lib/operator";
+import { listFeedback } from "@/lib/feedback";
+import { FeedbackList } from "./feedback-list";
 
 export const dynamic = "force-dynamic";
 
@@ -12,51 +13,49 @@ export const dynamic = "force-dynamic";
  *
  * The point of storing feedback rather than mailing it is that somebody reads
  * it — a table nobody opens is the same mistake as the reports table this lane
- * exists to fix.
+ * exists to fix. Which is also why each row can be marked handled: a list with
+ * no way to say "dealt with" is that mistake one level down.
  */
 export default async function AdminFeedbackPage() {
   const viewer = await getSessionUser();
   if (!isOperator(viewer)) notFound();
 
-  const rows = await getDb()
-    .select({
-      id: feedback.id,
-      body: feedback.body,
-      contact: feedback.contact,
-      platform: feedback.platform,
-      appVersion: feedback.appVersion,
-      createdAt: feedback.createdAt,
-      senderName: userTable.name,
-      senderEmail: userTable.email,
-    })
-    .from(feedback)
-    .leftJoin(userTable, eq(userTable.id, feedback.userId))
-    .orderBy(desc(feedback.createdAt))
-    .limit(100);
+  const rows = await listFeedback(getDb());
+
+  const outstanding = rows.filter((r) => r.handledAt == null).length;
 
   return (
     <div className="px-4 py-8 max-w-3xl mx-auto w-full flex flex-col gap-6">
       <header className="flex flex-col gap-1">
         <h1 className="font-display text-2xl font-semibold">Feedback</h1>
         <p className="text-sm text-muted">
-          {rows.length === 0 ? "Nothing yet." : `${rows.length} most recent`}
+          {rows.length === 0
+            ? "Nothing yet."
+            : `${outstanding} outstanding · ${rows.length} most recent`}
         </p>
+        <nav className="flex gap-3 text-sm">
+          <Link href="/admin/reports" className="text-accent hover:underline">
+            Reports →
+          </Link>
+          <Link href="/admin/submissions" className="text-accent hover:underline">
+            Submitted bottles →
+          </Link>
+        </nav>
       </header>
 
-      <ul className="flex flex-col gap-3">
-        {rows.map((row) => (
-          <li key={row.id} className="card p-4 flex flex-col gap-2">
-            <p className="text-sm leading-relaxed whitespace-pre-wrap">{row.body}</p>
-            <p className="text-xs text-muted">
-              {row.senderName ? `${row.senderName} (${row.senderEmail})` : "signed out"}
-              {row.contact && ` · replies to ${row.contact}`}
-              {row.platform && ` · ${row.platform}`}
-              {row.appVersion && ` ${row.appVersion}`}
-              {` · ${row.createdAt.toLocaleString()}`}
-            </p>
-          </li>
-        ))}
-      </ul>
+      <FeedbackList
+        rows={rows.map((row) => ({
+          id: row.id,
+          body: row.body,
+          contact: row.contact,
+          platform: row.platform,
+          appVersion: row.appVersion,
+          createdAt: row.createdAt.toISOString(),
+          handled: row.handledAt != null,
+          senderName: row.senderName,
+          senderEmail: row.senderEmail,
+        }))}
+      />
     </div>
   );
 }

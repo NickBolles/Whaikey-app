@@ -438,7 +438,7 @@ UGC: **yes** (profiles, feeds, comments) — moderation, report and block flows 
 ### 9.7 Support & feedback
 **Built — WP-18.** `/support` is the public URL, and its form posts to `POST /api/feedback` with the app version and platform attached.
 
-It **works signed out**, and that is the point rather than a convenience: the people best placed to tell you the app is broken are the ones who could not get into it, so a support channel that requires a session cannot hear about a sign-in bug. Signed-out submissions carry an optional contact address and are throttled per instance. Feedback lands at `/admin/feedback` for the operator. The GitHub issue form remains for catalog corrections only.
+It **works signed out**, and that is the point rather than a convenience: the people best placed to tell you the app is broken are the ones who could not get into it, so a support channel that requires a session cannot hear about a sign-in bug. Signed-out submissions carry an optional contact address and are throttled per instance. Feedback lands at `/admin/feedback`, outstanding first and oldest-outstanding first, with a **mark handled** action — `handledAt` is what makes it a queue rather than a pile, and a list nobody can mark off is the reports mistake one level down. The three operator screens link to each other. The GitHub issue form remains for catalog corrections only.
 
 Not built: anything that *sends* — no mail goes out, so a reply happens because an operator read the queue. That changes when there is a mail path (§8).
 

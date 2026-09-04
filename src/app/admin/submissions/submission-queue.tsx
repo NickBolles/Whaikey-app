@@ -70,9 +70,14 @@ export function SubmissionQueue({ submissions }: { submissions: SubmissionView[]
             ? "Nothing waiting."
             : `${submissions.length} waiting on review`}
         </p>
-        <Link href="/admin/reports" className="text-sm text-accent hover:underline w-fit">
-          Reports queue →
-        </Link>
+        <nav className="flex gap-3 text-sm">
+          <Link href="/admin/reports" className="text-accent hover:underline">
+            Reports →
+          </Link>
+          <Link href="/admin/feedback" className="text-accent hover:underline">
+            Feedback →
+          </Link>
+        </nav>
       </header>
 
       {error && (

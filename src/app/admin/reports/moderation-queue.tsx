@@ -91,9 +91,14 @@ export function ModerationQueue({
             </strong>
           )}
         </p>
-        <Link href="/admin/submissions" className="text-sm text-accent hover:underline w-fit">
-          Submitted bottles →
-        </Link>
+        <nav className="flex gap-3 text-sm">
+          <Link href="/admin/submissions" className="text-accent hover:underline">
+            Submitted bottles →
+          </Link>
+          <Link href="/admin/feedback" className="text-accent hover:underline">
+            Feedback →
+          </Link>
+        </nav>
       </header>
 
       {error && (
