@@ -29,7 +29,8 @@ interface QueuedReportView {
   editedSinceReport: boolean;
   subjectOwnerId: string | null;
   subjectOwnerSuspended: boolean;
-  subjectOwnerSuspendedAt: string | null;
+  /** The suspension in force, so Reinstate cannot lift a newer one. */
+  subjectOwnerSuspensionId: string | null;
   alreadyHidden: boolean;
 }
 
@@ -62,6 +63,7 @@ interface SuspendedView {
   displayName: string | null;
   reason: string | null;
   suspendedAt: string;
+  suspensionId: string | null;
 }
 
 export function ModerationQueue({
@@ -362,7 +364,10 @@ function ReportRow({
             Suspend author
           </button>
         )}
-        {report.subjectOwnerId && report.subjectOwnerSuspended && (
+        {/* A suspension with no recorded action behind it cannot be named, and
+            an unnamed reinstatement is the stale-lift bug with no guard at all
+            — so the control is withheld rather than sent without one. */}
+        {report.subjectOwnerId && report.subjectOwnerSuspended && report.subjectOwnerSuspensionId && (
           <button
             type="button"
             disabled={busy || note.trim().length === 0}
@@ -373,7 +378,7 @@ function ReportRow({
                 userId: report.subjectOwnerId,
                 note,
                 // Which suspension this row showed — a newer one is not ours.
-                expectedSuspendedAt: report.subjectOwnerSuspendedAt,
+                expectedActionId: report.subjectOwnerSuspensionId,
               })
             }
             className="btn-secondary px-4 py-2 text-sm font-medium disabled:opacity-50"
@@ -429,23 +434,29 @@ function SuspendedRow({
         className="w-full rounded-xl border border-border-subtle bg-surface py-2.5 px-3 text-sm text-foreground placeholder:text-muted focus:outline-none focus:border-accent/70"
       />
 
-      <button
-        type="button"
-        disabled={busy || note.trim().length === 0}
-        title={note.trim() ? undefined : "Reversing a decision is a decision; say why"}
-        onClick={() =>
-          onAct({
-            action: "reinstate",
-            userId: account.userId,
-            note,
-            // Which suspension this row is; a newer one is not ours to lift.
-            expectedSuspendedAt: account.suspendedAt,
-          })
-        }
-        className="btn-secondary self-start px-4 py-2 text-sm font-medium disabled:opacity-50"
-      >
-        Reinstate
-      </button>
+      {account.suspensionId ? (
+        <button
+          type="button"
+          disabled={busy || note.trim().length === 0}
+          title={note.trim() ? undefined : "Reversing a decision is a decision; say why"}
+          onClick={() =>
+            onAct({
+              action: "reinstate",
+              userId: account.userId,
+              note,
+              // Which suspension this row is; a newer one is not ours to lift.
+              expectedActionId: account.suspensionId,
+            })
+          }
+          className="btn-secondary self-start px-4 py-2 text-sm font-medium disabled:opacity-50"
+        >
+          Reinstate
+        </button>
+      ) : (
+        <p className="text-xs text-muted">
+          No recorded decision behind this suspension, so it cannot be lifted from here.
+        </p>
+      )}
       {/* Reinstating leaves social off: coming back is theirs to choose again. */}
       <p className="text-xs text-muted">
         They come back with their social surfaces still switched off, to turn on again themselves.

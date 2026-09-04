@@ -66,7 +66,7 @@ const bodySchema = z.discriminatedUnion("action", [
     userId: z.string().min(1),
     note: z.string().trim().min(1).max(1000),
     /** Which suspension the operator was looking at. Required, same reason. */
-    expectedSuspendedAt: z.string().datetime(),
+    expectedActionId: z.string().min(1),
   }),
   z.object({
     action: z.literal("dismiss"),
@@ -134,7 +134,7 @@ export async function POST(request: Request): Promise<NextResponse> {
           user.id,
           input.userId,
           input.note,
-          input.expectedSuspendedAt,
+          input.expectedActionId,
         );
       } else {
         await dismissReport(db, user.id, input.reportId, input.note);

@@ -69,9 +69,27 @@ export async function reserveAiRequest(db: DB, userId: string, now = new Date())
  * Outside the reservation transaction on purpose: a failed sweep must never
  * fail the request it rode in on, and a delete that rolled back with a
  * rejected reservation would never run at all.
+ *
+ * Called from two places, and it needs both: opportunistically from
+ * `reserveAiRequest`, and on a schedule from `/api/cron/sweep`. The
+ * opportunistic call alone made the retention claim conditional on AI traffic
+ * — a dormant account or a quiet deployment kept its counters indefinitely,
+ * which is not what `/privacy` says.
  */
-export async function sweepExpiredCounters(db: DB, now = new Date()): Promise<void> {
-  if (now.getTime() - lastSweep < SWEEP_INTERVAL_MS) return;
+export async function sweepExpiredCounters(
+  db: DB,
+  now = new Date(),
+  /**
+   * `force` skips the once-per-process hour throttle.
+   *
+   * That throttle exists to keep housekeeping off the request path, which is
+   * the right default here and the wrong one for the scheduled call in
+   * `/api/cron/sweep`: a schedule that asks for a sweep should get one rather
+   * than be silently absorbed by whichever request last ran it.
+   */
+  options: { force?: boolean } = {},
+): Promise<void> {
+  if (!options.force && now.getTime() - lastSweep < SWEEP_INTERVAL_MS) return;
   lastSweep = now.getTime();
   const cutoff = new Date(now.getTime() - RATE_LIMIT_RETENTION_MS);
   try {

@@ -1,4 +1,4 @@
-import { and, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import type { DB } from "@/db";
 import {
   comments,
@@ -9,6 +9,7 @@ import {
   user,
   userProfiles,
   userSocialPrefs,
+  tastingNotes,
   type ModerationActionKind,
   type ReportSubjectType,
 } from "@/db/schema";
@@ -60,8 +61,13 @@ export interface QueuedReport {
   /** The account that owns the reported thing, when there is one. */
   subjectOwnerId: string | null;
   subjectOwnerSuspended: boolean;
-  /** Which suspension, so this row's Reinstate cannot lift a newer one. */
-  subjectOwnerSuspendedAt: Date | null;
+  /**
+   * Which suspension, so this row's Reinstate cannot lift a newer one.
+   *
+   * The `suspend` action's id rather than its timestamp: two suspensions can
+   * share a millisecond, and then a stale page lifts the wrong one.
+   */
+  subjectOwnerSuspensionId: string | null;
   /** Already hidden by an earlier action — the queue says so rather than repeating it. */
   alreadyHidden: boolean;
 }
@@ -105,39 +111,185 @@ export async function listOpenReports(
     .where(eq(reports.state, "open"))
     .orderBy(reports.createdAt)
     .limit(limit);
+  if (rows.length === 0) return [];
 
-  return Promise.all(
-    rows.map(async ({ subjectSnapshot, recordedOwnerId, ...row }) => {
-      const subject = await describeSubject(db, row.subjectType, row.subjectId, recordedOwnerId);
-      return {
-        ...row,
-        ageHours: Math.floor((now.getTime() - row.createdAt.getTime()) / 3_600_000),
-        ...subject,
-        reportedPreview: subjectSnapshot,
-        // A subject that has since been deleted reads as `preview: null`, and
-        // that is a change worth flagging too: the operator is looking at a
-        // report whose target is gone.
-        editedSinceReport: subjectSnapshot != null && subjectSnapshot !== subject.preview,
-      };
-    }),
+  /**
+   * Everything the page needs, in a fixed number of queries.
+   *
+   * This described each report on its own, which is four or five statements a
+   * row — around 500 for a full page. That is the wrong shape anywhere and
+   * especially here: the number of rows is the size of the backlog, so the
+   * queue got slowest exactly when abuse was arriving fastest, and the tool
+   * for responding to it would time out at the moment it was needed. Two
+   * rounds now, because the owners are not known until the subjects are read.
+   */
+  const idsOf = (type: ReportSubjectType) =>
+    Array.from(new Set(rows.filter((r) => r.subjectType === type).map((r) => r.subjectId)));
+  const commentIds = idsOf("comment");
+  const pourIds = idsOf("pour");
+  const profileIds = idsOf("profile");
+
+  const [commentRows, pourRows, noteRows] = await Promise.all([
+    commentIds.length
+      ? db
+          .select({ id: comments.id, body: comments.body, userId: comments.userId })
+          .from(comments)
+          .where(inArray(comments.id, commentIds))
+      : [],
+    pourIds.length
+      ? db
+          .select({ id: pours.id, userId: pours.userId })
+          .from(pours)
+          .where(inArray(pours.id, pourIds))
+      : [],
+    pourIds.length
+      ? db
+          .select({
+            pourId: tastingNotes.pourId,
+            nose: tastingNotes.nose,
+            palate: tastingNotes.palate,
+            finish: tastingNotes.finish,
+            freeform: tastingNotes.freeform,
+          })
+          .from(tastingNotes)
+          .where(inArray(tastingNotes.pourId, pourIds))
+      : [],
+  ]);
+  const commentById = new Map(commentRows.map((r) => [r.id, r]));
+  const pourById = new Map(pourRows.map((r) => [r.id, r]));
+  const noteByPour = new Map(noteRows.map((r) => [r.pourId, r]));
+
+  const ownerOf = (row: (typeof rows)[number]): string | null => {
+    const live =
+      row.subjectType === "comment"
+        ? (commentById.get(row.subjectId)?.userId ?? null)
+        : row.subjectType === "pour"
+          ? (pourById.get(row.subjectId)?.userId ?? null)
+          : row.subjectId;
+    // The recorded owner is the fallback, because the subject can be hard
+    // deleted and the account behind it still has to be reachable.
+    return live ?? row.recordedOwnerId ?? null;
+  };
+
+  const ownerIds = Array.from(
+    new Set([...rows.map(ownerOf).filter((id): id is string => id != null), ...profileIds]),
   );
+
+  const [profileRows, hideActions, suspendActions] = await Promise.all([
+    ownerIds.length
+      ? db
+          .select({
+            userId: userProfiles.userId,
+            handle: userProfiles.handle,
+            displayName: userProfiles.displayName,
+            bio: userProfiles.bio,
+            suspendedAt: userProfiles.suspendedAt,
+          })
+          .from(userProfiles)
+          .where(inArray(userProfiles.userId, ownerIds))
+      : [],
+    latestActionsBySubject(db, "comment", commentIds, ["hide", "unhide"]).then(async (byComment) => {
+      const byPour = await latestActionsBySubject(db, "pour", pourIds, ["hide", "unhide"]);
+      return { comment: byComment, pour: byPour };
+    }),
+    latestActionsBySubject(db, "profile", ownerIds, ["suspend", "reinstate"]),
+  ]);
+  const profileById = new Map(profileRows.map((r) => [r.userId, r]));
+
+  return rows.map(({ subjectSnapshot, recordedOwnerId, ...row }) => {
+    const ownerId = ownerOf({ ...row, subjectSnapshot, recordedOwnerId });
+    const profile = ownerId ? profileById.get(ownerId) : undefined;
+
+    let preview: string | null = null;
+    if (row.subjectType === "comment") {
+      preview = commentById.get(row.subjectId)?.body ?? null;
+    } else if (row.subjectType === "pour") {
+      if (pourById.has(row.subjectId)) {
+        const note = noteByPour.get(row.subjectId);
+        const text = [note?.nose, note?.palate, note?.finish, note?.freeform]
+          .filter(Boolean)
+          .join(" · ");
+        preview = text ? text : "(no written note)";
+      }
+    } else {
+      const own = profileById.get(row.subjectId);
+      preview = own
+        ? [`@${own.handle}`, own.displayName, own.bio].filter(Boolean).join(" · ")
+        : null;
+    }
+
+    const standingSuspension = ownerId ? suspendActions.get(ownerId) : undefined;
+    /**
+     * "Already handled" means a moderation hide stands — never that the
+     * content happens to be out of sight, which an owner could arrange for
+     * themselves. For a profile there is no hide, so it means suspended:
+     * reading `socialEnabled` would put a moderation label on an account that
+     * stepped back of its own accord (US-11).
+     */
+    const alreadyHidden =
+      row.subjectType === "profile"
+        ? profileById.get(row.subjectId)?.suspendedAt != null
+        : (row.subjectType === "comment" ? hideActions.comment : hideActions.pour).get(
+            row.subjectId,
+          )?.action === "hide";
+
+    return {
+      ...row,
+      ageHours: Math.floor((now.getTime() - row.createdAt.getTime()) / 3_600_000),
+      preview,
+      reportedPreview: subjectSnapshot,
+      // A subject that has since been deleted reads as `preview: null`, and
+      // that is a change worth flagging too: the operator is looking at a
+      // report whose target is gone.
+      editedSinceReport: subjectSnapshot != null && subjectSnapshot !== preview,
+      subjectOwnerId: ownerId,
+      subjectOwnerSuspended: profile?.suspendedAt != null,
+      subjectOwnerSuspensionId:
+        standingSuspension?.action === "suspend" ? standingSuspension.id : null,
+      alreadyHidden,
+    };
+  });
 }
 
-interface SubjectDescription {
-  preview: string | null;
-  subjectOwnerId: string | null;
-  subjectOwnerSuspended: boolean;
-  subjectOwnerSuspendedAt: Date | null;
-  alreadyHidden: boolean;
+/**
+ * The newest of `kinds` per subject, in one statement for the whole page.
+ *
+ * `distinct on` with `order by seq desc` is the same "newest decision wins"
+ * rule every single-subject read uses, applied to a set — and it is the
+ * sequence, not the timestamp, for the reason the column exists.
+ */
+async function latestActionsBySubject(
+  db: DB,
+  subjectType: ReportSubjectType,
+  subjectIds: string[],
+  kinds: readonly ModerationActionKind[],
+): Promise<Map<string, { id: string; action: ModerationActionKind }>> {
+  if (subjectIds.length === 0) return new Map();
+  const rows = await db
+    .selectDistinctOn([moderationActions.subjectId], {
+      subjectId: moderationActions.subjectId,
+      id: moderationActions.id,
+      action: moderationActions.action,
+    })
+    .from(moderationActions)
+    .where(
+      and(
+        eq(moderationActions.subjectType, subjectType),
+        inArray(moderationActions.subjectId, subjectIds),
+        inArray(moderationActions.action, [...kinds]),
+      ),
+    )
+    .orderBy(moderationActions.subjectId, desc(moderationActions.seq));
+  return new Map(rows.map((r) => [r.subjectId, { id: r.id, action: r.action }]));
 }
 
 /**
  * Enough of the reported thing to judge it, and nothing more.
  *
- * Exported because a report stores this at the moment it is filed
- * (`createReport`) and the queue renders it again at review time. One function
- * for both, so "what was reported" and "what it says now" are the same
- * projection of two different moments rather than two projections that drift.
+ * Used when a report is **filed** (`createReport` stores the result as the
+ * report's snapshot). The queue's own reads are bulk-loaded in
+ * `listOpenReports`, but they build the same projection from the same columns,
+ * so "what was reported" and "what it says now" stay comparable.
  *
  * **Not truncated.** It was capped at 500 characters, which is a reasonable
  * length for a preview and a wrong one for the only view there is: a comment
@@ -179,102 +331,6 @@ export async function subjectPreview(
   });
   if (!row) return null;
   return [`@${row.handle}`, row.displayName, row.bio].filter(Boolean).join(" · ");
-}
-
-async function describeSubject(
-  db: DB,
-  subjectType: ReportSubjectType,
-  subjectId: string,
-  /**
-   * The owner recorded when the report was filed.
-   *
-   * Used whenever the subject itself is gone, because `deletePour` is a hard
-   * delete: without it, deleting the reported pour emptied this whole
-   * description and the queue dropped the Suspend control with it, so removing
-   * the content put the account out of moderation's reach while its report sat
-   * open. Deleting the evidence is not an answer for having posted it.
-   */
-  recordedOwnerId: string | null = null,
-): Promise<SubjectDescription> {
-  const empty: SubjectDescription = {
-    preview: null,
-    subjectOwnerId: recordedOwnerId,
-    ...(recordedOwnerId
-      ? await suspensionOf(db, recordedOwnerId)
-      : { subjectOwnerSuspended: false, subjectOwnerSuspendedAt: null }),
-    alreadyHidden: false,
-  };
-
-  if (subjectType === "comment") {
-    const row = await db.query.comments.findFirst({
-      columns: { body: true, userId: true, deletedAt: true },
-      where: eq(comments.id, subjectId),
-    });
-    if (!row) return empty;
-    return {
-      preview: await subjectPreview(db, "comment", subjectId),
-      subjectOwnerId: row.userId,
-      ...(await suspensionOf(db, row.userId)),
-      alreadyHidden: await isModerationHidden(db, "comment", subjectId),
-    };
-  }
-
-  if (subjectType === "pour") {
-    const row = await db.query.pours.findFirst({
-      columns: { userId: true, visibility: true },
-      where: eq(pours.id, subjectId),
-    });
-    if (!row) return empty;
-    return {
-      preview: await subjectPreview(db, "pour", subjectId),
-      subjectOwnerId: row.userId,
-      ...(await suspensionOf(db, row.userId)),
-      /**
-       * "Already handled" means a moderation hide stands — never that the
-       * content happens to be out of sight.
-       *
-       * Reading `visibility === "private"` let an owner disable the Hide
-       * button by making the reported pour private themselves: no moderation
-       * action was ever recorded, so nothing stopped them republishing it
-       * afterwards. Temporarily hiding your own content would have been a way
-       * round the one mechanism that sticks. Same reading as the profile row,
-       * where the flag means suspended rather than socially switched off.
-       */
-      alreadyHidden: await isModerationHidden(db, "pour", subjectId),
-    };
-  }
-
-  const row = await db.query.userProfiles.findFirst({
-    columns: { socialEnabled: true, suspendedAt: true },
-    where: eq(userProfiles.userId, subjectId),
-  });
-  if (!row) return empty;
-  return {
-    preview: await subjectPreview(db, "profile", subjectId),
-    subjectOwnerId: subjectId,
-    subjectOwnerSuspended: row.suspendedAt != null,
-    subjectOwnerSuspendedAt: row.suspendedAt,
-    // For a profile there is no hide, so "handled" means suspended. Reading
-    // `socialEnabled` here would call every account that has stepped back of
-    // its own accord already-actioned, which is somebody's privacy choice
-    // wearing a moderation label.
-    alreadyHidden: row.suspendedAt != null,
-  };
-}
-
-/** Whether an account is suspended, and by which decision. */
-async function suspensionOf(
-  db: DB,
-  userId: string,
-): Promise<{ subjectOwnerSuspended: boolean; subjectOwnerSuspendedAt: Date | null }> {
-  const row = await db.query.userProfiles.findFirst({
-    columns: { suspendedAt: true },
-    where: eq(userProfiles.userId, userId),
-  });
-  return {
-    subjectOwnerSuspended: row?.suspendedAt != null,
-    subjectOwnerSuspendedAt: row?.suspendedAt ?? null,
-  };
 }
 
 export class UnknownSubjectError extends Error {
@@ -514,37 +570,56 @@ export async function reinstateAccount(
   userId: string,
   note: string | undefined,
   /**
-   * The suspension the operator was looking at, as an ISO timestamp.
-   * **Required**, for the same reason `unhideSubject`'s action id is: a guard
-   * that can be left out is one a stale client leaves out.
+   * The suspension the operator was looking at, as the id of the `suspend`
+   * action that imposed it. **Required**, for the same reason
+   * `unhideSubject`'s is: a guard that can be left out is one a stale client
+   * leaves out.
+   *
+   * This was `suspendedAt`, and a timestamp is not an identity — the third
+   * time that mistake has surfaced in this queue. `suspendAccount` overwrites
+   * `suspendedAt` with a `now` captured *before* it waits on the lock, so two
+   * suspensions serialized behind that lock can carry the same millisecond
+   * while differing in reason and in the decision recorded. A page showing the
+   * first then satisfied the predicate and lifted the second. The action id is
+   * unique by construction and names the decision rather than the moment.
    */
-  expectedSuspendedAt: string,
+  expectedActionId: string,
   now = new Date(),
 ): Promise<void> {
   await db.transaction(async (tx) => {
     await tx.execute(
       sql`select pg_advisory_xact_lock(hashtext(${moderationLockKey("profile", userId)}))`,
     );
-    const rows = await tx
-      .update(userProfiles)
-      .set({ suspendedAt: null, suspendedReason: null, updatedAt: now })
+
+    const [current] = await tx
+      .select({ id: moderationActions.id, action: moderationActions.action })
+      .from(moderationActions)
       .where(
         and(
-          eq(userProfiles.userId, userId),
-          eq(userProfiles.suspendedAt, new Date(expectedSuspendedAt)),
+          eq(moderationActions.subjectType, "profile"),
+          eq(moderationActions.subjectId, userId),
+          sql`${moderationActions.action} in ('suspend', 'reinstate')`,
         ),
       )
-      .returning({ userId: userProfiles.userId });
-    if (rows.length === 0) {
-      // Either the account was never suspended, or it is suspended by a
-      // decision this page never showed. Both are "not yours to lift".
+      .orderBy(desc(moderationActions.seq))
+      .limit(1);
+    if (current?.action !== "suspend" || current.id !== expectedActionId) {
       const exists = await tx.query.userProfiles.findFirst({
-        columns: { suspendedAt: true },
+        columns: { userId: true },
         where: eq(userProfiles.userId, userId),
       });
       if (!exists) throw new UnknownSubjectError();
+      // Either not suspended, or suspended by a decision this page never
+      // showed. Both are "not yours to lift".
       throw new StaleModerationViewError();
     }
+
+    const rows = await tx
+      .update(userProfiles)
+      .set({ suspendedAt: null, suspendedReason: null, updatedAt: now })
+      .where(and(eq(userProfiles.userId, userId), isNotNull(userProfiles.suspendedAt)))
+      .returning({ userId: userProfiles.userId });
+    if (rows.length === 0) throw new StaleModerationViewError();
     await record(tx, actorId, "reinstate", "profile", userId, { note }, now);
   });
 }
@@ -1003,6 +1078,14 @@ export interface SuspendedAccount {
   displayName: string | null;
   reason: string | null;
   suspendedAt: Date;
+  /**
+   * The `suspend` action in force, which is what Reinstate names.
+   *
+   * Null only for a suspension with no recorded action behind it, and then the
+   * queue withholds Reinstate rather than lifting a decision it cannot
+   * identify.
+   */
+  suspensionId: string | null;
 }
 
 /**
@@ -1038,7 +1121,23 @@ export async function listSuspendedAccounts(
     .orderBy(desc(userProfiles.suspendedAt), desc(userProfiles.userId))
     .limit(limit + 1);
 
-  const page = rows.slice(0, limit).map((row) => ({ ...row, suspendedAt: row.suspendedAt as Date }));
+  const window = rows.slice(0, limit);
+  // One statement for the page, not one per account: the same rule the queue
+  // uses, and the id is what Reinstate has to name.
+  const standing = await latestActionsBySubject(
+    db,
+    "profile",
+    window.map((r) => r.userId),
+    ["suspend", "reinstate"],
+  );
+  const page = window.map((row) => {
+    const current = standing.get(row.userId);
+    return {
+      ...row,
+      suspendedAt: row.suspendedAt as Date,
+      suspensionId: current?.action === "suspend" ? current.id : null,
+    };
+  });
   const last = page[page.length - 1];
   return {
     accounts: page,

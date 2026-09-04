@@ -77,13 +77,11 @@ async function standingHideId(subjectType: "pour" | "comment", subjectId: string
 }
 
 /** The suspension currently in force — what the queue's Reinstate button sends. */
-async function suspendedAtIso(userId: string): Promise<string> {
-  const row = await db.query.userProfiles.findFirst({
-    columns: { suspendedAt: true },
-    where: eq(schema.userProfiles.userId, userId),
-  });
-  if (!row?.suspendedAt) throw new Error(`not suspended: ${userId}`);
-  return row.suspendedAt.toISOString();
+async function standingSuspensionId(userId: string): Promise<string> {
+  const { accounts } = await listSuspendedAccounts(db);
+  const hit = accounts.find((a) => a.userId === userId);
+  if (!hit?.suspensionId) throw new Error(`no standing suspension for ${userId}`);
+  return hit.suspensionId;
 }
 
 beforeEach(async () => {
@@ -335,7 +333,7 @@ describe("suspension", () => {
       operator.id,
       author.id,
       "appealed successfully",
-      await suspendedAtIso(author.id),
+      await standingSuspensionId(author.id),
     );
 
     const [profile] = await db
@@ -446,7 +444,7 @@ describe("suspension", () => {
     expect(suspended).toHaveLength(1);
     expect(suspended[0]).toMatchObject({ userId: author.id, reason: "repeated abuse" });
 
-    await reinstateAccount(db, operator.id, author.id, "appeal upheld", await suspendedAtIso(author.id));
+    await reinstateAccount(db, operator.id, author.id, "appeal upheld", await standingSuspensionId(author.id));
     expect((await listSuspendedAccounts(db)).accounts).toHaveLength(0);
   });
 
@@ -874,7 +872,7 @@ describe("acting on a stale view", () => {
 
   it("refuses a reinstatement aimed at a suspension that has been replaced", async () => {
     await suspendAccount(db, operator.id, author.id, "first", {}, new Date(1_000));
-    const stale = new Date(1_000).toISOString();
+    const stale = await standingSuspensionId(author.id);
     await reinstateAccount(db, operator.id, author.id, "lifted", stale, new Date(2_000));
     await suspendAccount(db, operator.id, author.id, "again", {}, new Date(3_000));
 
@@ -1333,5 +1331,49 @@ describe("a second report on an already-hidden subject", () => {
     // lifting restore nothing.
     const actions = await listModerationActions(db, 10);
     expect(actions.filter((a) => a.action === "hide")).toHaveLength(1);
+  });
+});
+
+/**
+ * The third time a timestamp was asked to be an identity. `suspendAccount`
+ * captures `now` before it waits on the lock and overwrites `suspendedAt`, so
+ * two suspensions can carry the same millisecond while differing in reason and
+ * in the decision recorded — and the old guard, which compared timestamps,
+ * let a page showing the first lift the second.
+ */
+describe("reinstatement names a decision, not a moment", () => {
+  it("refuses a guard from a superseded suspension sharing its timestamp", async () => {
+    const sameMoment = new Date("2026-09-04T12:00:00.000Z");
+    await suspendAccount(db, operator.id, author.id, "first reason", {}, sameMoment);
+    const stale = await standingSuspensionId(author.id);
+
+    // A second decision at the identical timestamp: same `suspendedAt`, new
+    // reason, new action.
+    await suspendAccount(db, operator.id, author.id, "second reason", {}, sameMoment);
+    const current = await standingSuspensionId(author.id);
+    expect(current).not.toBe(stale);
+    const profile = await db.query.userProfiles.findFirst({
+      where: eq(schema.userProfiles.userId, author.id),
+    });
+    expect(profile?.suspendedAt?.toISOString()).toBe(sameMoment.toISOString());
+    expect(profile?.suspendedReason).toBe("second reason");
+
+    // The old timestamp guard could not tell these apart. The action id can.
+    await expect(
+      reinstateAccount(db, operator.id, author.id, "stale tab", stale),
+    ).rejects.toBeInstanceOf(StaleModerationViewError);
+
+    // The account is still suspended, by the decision nobody reviewed.
+    const after = await db.query.userProfiles.findFirst({
+      where: eq(schema.userProfiles.userId, author.id),
+    });
+    expect(after?.suspendedAt).not.toBeNull();
+
+    // And the current decision lifts normally.
+    await reinstateAccount(db, operator.id, author.id, "appeal upheld", current);
+    const lifted = await db.query.userProfiles.findFirst({
+      where: eq(schema.userProfiles.userId, author.id),
+    });
+    expect(lifted?.suspendedAt).toBeNull();
   });
 });

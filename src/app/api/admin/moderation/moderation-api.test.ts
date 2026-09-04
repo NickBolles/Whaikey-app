@@ -4,6 +4,7 @@ import type { DB } from "@/db";
 import * as schema from "@/db/schema";
 import { createTestBottle, createTestUser, setupTestDb, setSessionUser, uid } from "@/test/helpers";
 import { POST as moderationPOST } from "./route";
+import { listSuspendedAccounts } from "@/lib/moderation";
 
 vi.mock("@/lib/session", async () => {
   const { mockSessionModule } = await import("@/test/helpers");
@@ -110,6 +111,15 @@ describe("POST /api/admin/moderation", () => {
       (await moderationPOST(post({ action: "reinstate", userId: author.id }))).status,
     ).toBe(400);
 
+    // The action in force, which is what the guard names — a timestamp cannot
+    // tell two suspensions in the same millisecond apart.
+    async function standingSuspensionId(): Promise<string> {
+      const { accounts } = await listSuspendedAccounts(db);
+      const hit = accounts.find((a) => a.userId === author.id);
+      if (!hit?.suspensionId) throw new Error("no standing suspension");
+      return hit.suspensionId;
+    }
+
     // And a reason, like every other action: reversing a decision is a
     // decision, and "why was this put back" is an appeal question too.
     expect(
@@ -118,7 +128,7 @@ describe("POST /api/admin/moderation", () => {
           post({
             action: "reinstate",
             userId: author.id,
-            expectedSuspendedAt: profile.suspendedAt!.toISOString(),
+            expectedActionId: await standingSuspensionId(),
           }),
         )
       ).status,
@@ -131,7 +141,7 @@ describe("POST /api/admin/moderation", () => {
             action: "reinstate",
             userId: author.id,
             note: "appeal upheld",
-            expectedSuspendedAt: profile.suspendedAt!.toISOString(),
+            expectedActionId: await standingSuspensionId(),
           }),
         )
       ).status,

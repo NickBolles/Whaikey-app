@@ -84,11 +84,7 @@ export default async function AdminReportsPage({
 
   return (
     <ModerationQueue
-      reports={reports.map((r) => ({
-        ...r,
-        createdAt: r.createdAt.toISOString(),
-        subjectOwnerSuspendedAt: r.subjectOwnerSuspendedAt?.toISOString() ?? null,
-      }))}
+      reports={reports.map((r) => ({ ...r, createdAt: r.createdAt.toISOString() }))}
       open={open}
       pageSize={REPORT_PAGE_SIZE}
       breached={breached}
