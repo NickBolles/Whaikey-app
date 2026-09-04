@@ -380,12 +380,12 @@ describe("suspension", () => {
     await suspendAccount(db, operator.id, author.id, "repeated abuse", { reportId });
     expect(await listOpenReports(db)).toHaveLength(0);
 
-    const suspended = await listSuspendedAccounts(db);
+    const { accounts: suspended } = await listSuspendedAccounts(db);
     expect(suspended).toHaveLength(1);
     expect(suspended[0]).toMatchObject({ userId: author.id, reason: "repeated abuse" });
 
     await reinstateAccount(db, operator.id, author.id, "appeal upheld", await suspendedAtIso(author.id));
-    expect(await listSuspendedAccounts(db)).toHaveLength(0);
+    expect((await listSuspendedAccounts(db)).accounts).toHaveLength(0);
   });
 
   /** A reason the account cannot read does not tell them what to appeal. */
@@ -1028,5 +1028,37 @@ describe("standing hides are paged, not capped", () => {
       before = cursor(result.nextCursor);
     }
     expect(seen.sort()).toEqual(["tied 0", "tied 1", "tied 2", "tied 3"]);
+  });
+});
+
+describe("suspended accounts are paged too", () => {
+  /**
+   * This list carries the only reinstate control in the product, so anything
+   * that falls off it is an account nobody can bring back — the same reasoning
+   * as the standing hides, and the same compound cursor.
+   */
+  it("hands back a cursor and does not lose accounts sharing a timestamp", async () => {
+    const sameInstant = new Date(9_000);
+    const ids: string[] = [];
+    for (let i = 0; i < 4; i += 1) {
+      const u = await createTestUser(db, { name: `Sus ${i}` });
+      await profileFor(u, `sus${i}`);
+      await suspendAccount(db, operator.id, u.id, `reason ${i}`, {}, sameInstant);
+      ids.push(u.id);
+    }
+
+    const seen: string[] = [];
+    let before: { at: Date; userId: string } | undefined;
+    for (let page = 0; page < 4; page += 1) {
+      const result = await listSuspendedAccounts(db, { limit: 2, before });
+      seen.push(...result.accounts.map((a) => a.userId));
+      if (!result.nextCursor) break;
+      const cut = result.nextCursor.lastIndexOf("|");
+      before = {
+        at: new Date(result.nextCursor.slice(0, cut)),
+        userId: result.nextCursor.slice(cut + 1),
+      };
+    }
+    expect(seen.sort()).toEqual(ids.sort());
   });
 });

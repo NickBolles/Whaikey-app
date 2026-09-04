@@ -888,6 +888,15 @@ export async function commentNoticesForAuthor(
   return notices.filter((notice): notice is ModerationNotice => notice != null);
 }
 
+/**
+ * How many suspended accounts one page shows.
+ *
+ * Paged for the same reason the standing hides are: this list carries the only
+ * reinstate control in the product, so anything that falls off it is an
+ * account nobody can bring back.
+ */
+export const SUSPENDED_PAGE_SIZE = 100;
+
 export interface SuspendedAccount {
   userId: string;
   handle: string | null;
@@ -904,7 +913,11 @@ export interface SuspendedAccount {
  * arriving later through `/support` would find no control anywhere. A
  * suspension you cannot lift is a ban, and the Terms promise otherwise.
  */
-export async function listSuspendedAccounts(db: DB): Promise<SuspendedAccount[]> {
+export async function listSuspendedAccounts(
+  db: DB,
+  options: { limit?: number; before?: { at: Date; userId: string } } = {},
+): Promise<{ accounts: SuspendedAccount[]; nextCursor: string | null }> {
+  const limit = options.limit ?? SUSPENDED_PAGE_SIZE;
   const rows = await db
     .select({
       userId: userProfiles.userId,
@@ -914,9 +927,24 @@ export async function listSuspendedAccounts(db: DB): Promise<SuspendedAccount[]>
       suspendedAt: userProfiles.suspendedAt,
     })
     .from(userProfiles)
-    .where(isNotNull(userProfiles.suspendedAt))
-    .orderBy(desc(userProfiles.suspendedAt));
-  return rows.map((row) => ({ ...row, suspendedAt: row.suspendedAt as Date }));
+    .where(
+      options.before
+        ? and(
+            isNotNull(userProfiles.suspendedAt),
+            sql`(${userProfiles.suspendedAt}, ${userProfiles.userId}) < (${options.before.at}, ${options.before.userId})`,
+          )
+        : isNotNull(userProfiles.suspendedAt),
+    )
+    .orderBy(desc(userProfiles.suspendedAt), desc(userProfiles.userId))
+    .limit(limit + 1);
+
+  const page = rows.slice(0, limit).map((row) => ({ ...row, suspendedAt: row.suspendedAt as Date }));
+  const last = page[page.length - 1];
+  return {
+    accounts: page,
+    nextCursor:
+      rows.length > limit && last ? `${last.suspendedAt.toISOString()}|${last.userId}` : null,
+  };
 }
 
 /** Every open report, counted in SQL — the page shows at most one page of them. */

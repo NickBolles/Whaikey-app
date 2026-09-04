@@ -70,6 +70,7 @@ export function ModerationQueue({
   suspended,
   standingHides,
   olderHidesCursor,
+  olderSuspendedCursor,
 }: {
   reports: QueuedReportView[];
   open: number;
@@ -80,6 +81,7 @@ export function ModerationQueue({
   suspended: SuspendedView[];
   standingHides: StandingHideView[];
   olderHidesCursor: string | null;
+  olderSuspendedCursor: string | null;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
@@ -164,6 +166,14 @@ export function ModerationQueue({
               />
             ))}
           </ul>
+          {olderSuspendedCursor && (
+            <Link
+              href={`/admin/reports?suspendedBefore=${encodeURIComponent(olderSuspendedCursor)}`}
+              className="text-sm text-accent hover:underline w-fit"
+            >
+              Older suspensions →
+            </Link>
+          )}
         </section>
       )}
 

@@ -27,15 +27,28 @@ export const dynamic = "force-dynamic";
  * `notFound()` rather than a 403 for a non-operator: the queue's existence is
  * not something a signed-in stranger needs confirmed.
  */
-/** `<iso>|<actionId>`; anything else is treated as no cursor rather than an error. */
-function parseHidesCursor(raw?: string): { at: Date; actionId: string } | undefined {
+/**
+ * `<iso>|<id>`; anything else is treated as no cursor rather than an error,
+ * since these are URLs a human can edit.
+ */
+function parseCursor(raw?: string): { at: Date; id: string } | undefined {
   if (!raw) return undefined;
   const cut = raw.lastIndexOf("|");
   if (cut < 1) return undefined;
   const at = new Date(raw.slice(0, cut));
-  const actionId = raw.slice(cut + 1);
-  if (Number.isNaN(at.getTime()) || !actionId) return undefined;
-  return { at, actionId };
+  const id = raw.slice(cut + 1);
+  if (Number.isNaN(at.getTime()) || !id) return undefined;
+  return { at, id };
+}
+
+function parseHidesCursor(raw?: string): { at: Date; actionId: string } | undefined {
+  const parsed = parseCursor(raw);
+  return parsed && { at: parsed.at, actionId: parsed.id };
+}
+
+function parseSuspendedCursor(raw?: string): { at: Date; userId: string } | undefined {
+  const parsed = parseCursor(raw);
+  return parsed && { at: parsed.at, userId: parsed.id };
 }
 
 export default async function AdminReportsPage({
@@ -43,9 +56,9 @@ export default async function AdminReportsPage({
 }: {
   // A cursor rather than a cap: past a cap, the oldest takedowns lose the only
   // control that lifts them, which is the audit-window bug one level out.
-  searchParams: Promise<{ hidesBefore?: string }>;
+  searchParams: Promise<{ hidesBefore?: string; suspendedBefore?: string }>;
 }) {
-  const { hidesBefore } = await searchParams;
+  const { hidesBefore, suspendedBefore } = await searchParams;
   const user = await getSessionUser();
   if (!isOperator(user)) notFound();
 
@@ -60,7 +73,7 @@ export default async function AdminReportsPage({
     // Suspending resolves the report, so the reinstate control next to it goes
     // away with the row. An appeal arriving later needs somewhere to be acted
     // on, and this is it.
-    listSuspendedAccounts(db),
+    listSuspendedAccounts(db, { before: parseSuspendedCursor(suspendedBefore) }),
     // Its own query, not a filter over the audit list: that list is bounded
     // history, so a hide older than fifty actions would lose the only control
     // that lifts it — and an appeal about it would have no answer in the app.
@@ -79,7 +92,11 @@ export default async function AdminReportsPage({
       breached={breached}
       slaHours={REPORT_SLA_HOURS}
       audit={audit.map((a) => ({ ...a, createdAt: a.createdAt.toISOString() }))}
-      suspended={suspended.map((a) => ({ ...a, suspendedAt: a.suspendedAt.toISOString() }))}
+      suspended={suspended.accounts.map((a) => ({
+        ...a,
+        suspendedAt: a.suspendedAt.toISOString(),
+      }))}
+      olderSuspendedCursor={suspended.nextCursor}
       standingHides={standingHides.hides.map((h) => ({ ...h, at: h.at.toISOString() }))}
       olderHidesCursor={standingHides.nextCursor}
     />
