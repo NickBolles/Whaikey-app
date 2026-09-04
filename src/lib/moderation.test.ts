@@ -28,7 +28,13 @@ import {
   reinstateAccount,
   suspendAccount,
 } from "./moderation";
-import { AccountSuspendedError, editComment, setSocialEnabled, softDeleteComment } from "./social";
+import {
+  AccountSuspendedError,
+  editComment,
+  listComments,
+  setSocialEnabled,
+  softDeleteComment,
+} from "./social";
 
 /**
  * Review PLAN-C9 and PLAN.md §9.4. Reports have existed since social shipped
@@ -1995,12 +2001,15 @@ describe("backfilling report owners filed before the column existed", () => {
  * hidden and never reviewed.
  */
 describe("an edit racing a hide", () => {
+  let commentPourId: string;
+
   async function hiddenComment(body: string) {
     const bottle = await createTestBottle(db);
     const pourId = uid("pour");
     await db
       .insert(schema.pours)
       .values({ id: pourId, userId: author.id, bottleId: bottle.id, visibility: "public" });
+    commentPourId = pourId;
     const commentId = uid("comment");
     await db.insert(schema.comments).values({ id: commentId, pourId, userId: author.id, body });
     return commentId;
@@ -2043,14 +2052,42 @@ describe("an edit racing a hide", () => {
     expect(row?.body).toBe("the reported text");
   });
 
-  it("makes the author's own delete a no-op once a hide stands", async () => {
+  /**
+   * The author keeps their own control while a hide stands. The hide takes the
+   * comment from everyone else; it does not take away the author's decision
+   * about their own words — and `softDeleteComment` leaves `deletedAt` at the
+   * hide's instant, so the lift's timestamp match still holds and simply finds
+   * nothing to restore.
+   */
+  it("lets the author withdraw their comment while a hide stands, and does not give it back", async () => {
     const commentId = await hiddenComment("the reported text");
     await hideSubject(db, operator.id, "comment", commentId, { note: "abuse" });
 
-    // Overwriting `deletedAt` with a later instant would break the timestamp
-    // match the unhide depends on, stranding the comment down with the hide
-    // recorded as lifted.
-    expect(await softDeleteComment(db, author.id, commentId)).toBe(false);
+    expect(await softDeleteComment(db, author.id, commentId)).toBe(true);
+    const withdrawn = await db.query.comments.findFirst({
+      where: eq(schema.comments.id, commentId),
+    });
+    expect(withdrawn?.authorDeletedAt).not.toBeNull();
+
+    await unhideSubject(
+      db,
+      operator.id,
+      "comment",
+      commentId,
+      "appeal upheld",
+      await standingHideId("comment", commentId),
+    );
+    const row = await db.query.comments.findFirst({
+      where: eq(schema.comments.id, commentId),
+    });
+    // Upholding the appeal returns control, not the comment: its author had
+    // already decided it should go.
+    expect(row?.deletedAt).not.toBeNull();
+  });
+
+  it("still restores one the author left alone", async () => {
+    const commentId = await hiddenComment("the reported text");
+    await hideSubject(db, operator.id, "comment", commentId, { note: "abuse" });
 
     await unhideSubject(
       db,
@@ -2064,6 +2101,21 @@ describe("an edit racing a hide", () => {
       where: eq(schema.comments.id, commentId),
     });
     expect(row?.deletedAt).toBeNull();
+    expect(row?.body).toBe("the reported text");
+  });
+
+  it("keeps the delete control in front of the author while hidden", async () => {
+    const commentId = await hiddenComment("the reported text");
+    await hideSubject(db, operator.id, "comment", commentId, { note: "abuse" });
+
+    const own = await listComments(db, author.id, commentPourId);
+    const row = own!.find((c) => c.id === commentId);
+    // Tombstoned for everyone, still theirs to withdraw for good.
+    expect(row?.canDelete).toBe(true);
+
+    await softDeleteComment(db, author.id, commentId);
+    const after = await listComments(db, author.id, commentPourId);
+    expect(after!.find((c) => c.id === commentId)?.canDelete).toBe(false);
   });
 });
 
@@ -2471,5 +2523,78 @@ describe("resolving a report against a decision already in force", () => {
     expect(notice?.reason).toBe("graphic");
     const { hides } = await listStandingHides(db);
     expect(hides.map((h) => h.subjectId)).toContain(first.commentId);
+  });
+});
+
+
+/**
+ * `account.encryptOAuthTokens` only encrypts tokens written after it, so every
+ * row already in the table kept its plaintext values — for accounts that may
+ * never sign in again — while `/privacy` had just started saying the
+ * provider's tokens are encrypted at rest. Migration 0032 clears them, which
+ * is the stronger answer and the one the app can afford: nothing reads these
+ * columns.
+ */
+describe("clearing OAuth tokens written before encryption was on", () => {
+  const statements = readFileSync("src/db/migrations/0032_clear_legacy_oauth_tokens.sql", "utf8")
+    .split("--> statement-breakpoint")
+    .map((chunk) =>
+      chunk
+        .split("\n")
+        .filter((line) => !line.trimStart().startsWith("--"))
+        .join("\n")
+        .trim(),
+    )
+    .filter((chunk) => chunk.length > 0);
+
+  async function runMigration() {
+    for (const statement of statements) await db.execute(sql.raw(statement));
+  }
+
+  it("empties every token column and leaves the account itself", async () => {
+    await db.insert(schema.account).values({
+      id: uid("account"),
+      accountId: "google-123",
+      providerId: "google",
+      userId: author.id,
+      accessToken: "plaintext-access",
+      refreshToken: "plaintext-refresh",
+      idToken: "plaintext-id",
+      accessTokenExpiresAt: new Date(),
+      refreshTokenExpiresAt: new Date(),
+      scope: "openid email",
+    });
+
+    await runMigration();
+
+    const row = await db.query.account.findFirst({
+      where: eq(schema.account.userId, author.id),
+    });
+    expect(row).toBeDefined();
+    expect(row?.accessToken).toBeNull();
+    expect(row?.refreshToken).toBeNull();
+    expect(row?.idToken).toBeNull();
+    expect(row?.accessTokenExpiresAt).toBeNull();
+    expect(row?.refreshTokenExpiresAt).toBeNull();
+    // The link to the provider is what signs the user in; only the tokens go.
+    expect(row?.accountId).toBe("google-123");
+    expect(row?.providerId).toBe("google");
+  });
+
+  it("runs again without complaint", async () => {
+    await db.insert(schema.account).values({
+      id: uid("account"),
+      accountId: "apple-123",
+      providerId: "apple",
+      userId: author.id,
+      idToken: "plaintext-id",
+    });
+    await runMigration();
+    // A second run touches nothing and does not throw.
+    await expect(runMigration()).resolves.not.toThrow();
+    const row = await db.query.account.findFirst({
+      where: eq(schema.account.userId, author.id),
+    });
+    expect(row?.idToken).toBeNull();
   });
 });

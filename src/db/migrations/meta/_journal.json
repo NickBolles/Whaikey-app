@@ -225,6 +225,20 @@
       "when": 1788530611411,
       "tag": "0031_powerful_madrox",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1788537522299,
+      "tag": "0032_clear_legacy_oauth_tokens",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1788537608233,
+      "tag": "0033_goofy_robin_chapel",
+      "breakpoints": true
     }
   ]
 }

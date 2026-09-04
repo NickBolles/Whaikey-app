@@ -1984,7 +1984,23 @@ export async function unhideSubject(
         await tx
           .update(comments)
           .set({ deletedAt: null })
-          .where(and(eq(comments.id, subjectId), eq(comments.deletedAt, hiddenAt)));
+          .where(
+            and(
+              eq(comments.id, subjectId),
+              eq(comments.deletedAt, hiddenAt),
+              /**
+               * And the author has not withdrawn it in the meantime.
+               *
+               * They can now do that while the hide stands — the hide takes
+               * the comment from everyone else, it does not take away their
+               * own control over their words — and `softDeleteComment` leaves
+               * `deletedAt` at the hide's instant so this match still holds.
+               * Without this the lift would hand back something its author had
+               * already decided to remove.
+               */
+              isNull(comments.authorDeletedAt),
+            ),
+          );
       }
     }
     await record(tx, actorId, "unhide", subjectType, subjectId, { note }, now);

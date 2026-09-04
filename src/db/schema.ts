@@ -662,7 +662,24 @@ export const comments = pgTable(
     body: text("body").notNull(),
     createdAt: createdAt(),
     editedAt: timestamp("edited_at", { withTimezone: true, mode: "date" }),
+    /** Set by whatever removed it from view — the author, or a moderation hide. */
     deletedAt: timestamp("deleted_at", { withTimezone: true, mode: "date" }),
+    /**
+     * Set when the **author** (or the pour's owner) withdrew it.
+     *
+     * `deletedAt` alone could not tell the two apart, and a moderation hide
+     * shares that column: while a hide stood, the author had no way to delete
+     * their own comment — the control was gone and the write refused — and
+     * lifting the hide republished it whether or not they had wanted it gone.
+     * A takedown is not supposed to take away the author's own control over
+     * their words; `docs/SOCIAL.md` gives comments soft deletion and a hide is
+     * not an exception to it.
+     *
+     * Recorded separately rather than by overwriting `deletedAt`, because the
+     * lift matches that timestamp against the hide's own to avoid republishing
+     * what the author removed — so it is the one value that must not move.
+     */
+    authorDeletedAt: timestamp("author_deleted_at", { withTimezone: true, mode: "date" }),
   },
   (t) => [index("comments_pour_idx").on(t.pourId)],
 );

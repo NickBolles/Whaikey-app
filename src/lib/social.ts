@@ -1773,6 +1773,7 @@ export async function listComments(db: DB, viewerId: string | null, pourId: stri
       createdAt: schema.comments.createdAt,
       editedAt: schema.comments.editedAt,
       deletedAt: schema.comments.deletedAt,
+      authorDeletedAt: schema.comments.authorDeletedAt,
       authorHandle: schema.userProfiles.handle,
       authorDisplayName: schema.userProfiles.displayName,
       authorAvatarUrl: schema.userProfiles.avatarUrl,
@@ -1801,7 +1802,17 @@ export async function listComments(db: DB, viewerId: string | null, pourId: stri
     const deleted = row.deletedAt != null;
     const isAuthor = viewerId != null && viewerId === row.userId;
     const canEdit = isAuthor && !deleted && now - row.createdAt.getTime() <= COMMENT_EDIT_WINDOW_MS;
-    const canDelete = !deleted && viewerId != null && (isAuthor || viewerId === pour.userId);
+    /**
+     * Offered while a moderation hide stands, withheld once the author has
+     * withdrawn it.
+     *
+     * `!deleted` covered both, so a hide removed the author's own delete
+     * control along with the content — and their comment came back if the hide
+     * was later lifted. What the control is for is the author's decision about
+     * their own words, which a takedown does not replace.
+     */
+    const canDelete =
+      row.authorDeletedAt == null && viewerId != null && (isAuthor || viewerId === pour.userId);
     out.push({
       id: row.id,
       pourId: row.pourId,
@@ -1974,7 +1985,16 @@ export async function editComment(db: DB, userId: string, commentId: string, bod
 /** Author, or the pour's owner, may soft-delete. Tombstones (blanks body/author on read) without removing the row. */
 export async function softDeleteComment(db: DB, userId: string, commentId: string): Promise<boolean> {
   const existing = await db.query.comments.findFirst({ where: eq(schema.comments.id, commentId) });
-  if (!existing || existing.deletedAt != null) return false;
+  /**
+   * `authorDeletedAt`, not `deletedAt`.
+   *
+   * A moderation hide sets `deletedAt` too, and testing it here meant that
+   * while a hide stood the author could not withdraw their own comment at all
+   * — and lifting the hide then republished it whether or not they had wanted
+   * it gone. A takedown removes the content from everyone else; it is not
+   * supposed to take away the author's own control over their words.
+   */
+  if (!existing || existing.authorDeletedAt != null) return false;
 
   const isAuthor = existing.userId === userId;
   if (!isAuthor) {
@@ -1982,14 +2002,25 @@ export async function softDeleteComment(db: DB, userId: string, commentId: strin
     if (pour?.userId !== userId) return false;
   }
 
+  const now = new Date();
   const updated = await db
     .update(schema.comments)
-    .set({ deletedAt: new Date() })
-    // Same race, mirrored: a hide landing between the read above and this
-    // write would have its `deletedAt` overwritten with a later instant, and
-    // the unhide that matches on that instant would then restore nothing while
-    // recording a lift. Already gone is a no-op, not a second deletion.
-    .where(and(eq(schema.comments.id, commentId), isNull(schema.comments.deletedAt)))
+    .set({
+      authorDeletedAt: now,
+      /**
+       * `coalesce`, so a hide's timestamp is never overwritten.
+       *
+       * The lift matches `deletedAt` against the hide's own instant precisely
+       * so it cannot republish what an author removed; moving it would break
+       * that match in the other direction and strand the comment down with the
+       * hide recorded as lifted. If nothing has removed it yet, this is what
+       * removes it.
+       */
+      deletedAt: sql`coalesce(${schema.comments.deletedAt}, ${now})`,
+    })
+    // Still predicated, for the race the read above cannot close: two
+    // withdrawals of the same comment are one withdrawal.
+    .where(and(eq(schema.comments.id, commentId), isNull(schema.comments.authorDeletedAt)))
     .returning({ id: schema.comments.id });
   return updated.length > 0;
 }
