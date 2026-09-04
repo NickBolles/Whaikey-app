@@ -175,26 +175,12 @@ export function ModerationQueue({
           <h2 className="section-label">Hidden right now</h2>
           <ul className="flex flex-col gap-1.5">
             {standingHides.map((hide) => (
-              <li key={hide.actionId} className="card-flat p-3 text-xs text-muted">
-                {hide.subjectType} <code>{hide.subjectId.slice(0, 8)}</code> · {hide.actorName} ·{" "}
-                {new Date(hide.at).toLocaleString()}
-                {hide.note && <div className="mt-1 italic">{hide.note}</div>}
-                <button
-                  type="button"
-                  disabled={busy === hide.actionId}
-                  onClick={() =>
-                    void act(hide.actionId, {
-                      action: "unhide",
-                      subjectType: hide.subjectType,
-                      subjectId: hide.subjectId,
-                      expectedActionId: hide.actionId,
-                    })
-                  }
-                  className="mt-2 block text-accent hover:underline disabled:opacity-50"
-                >
-                  Lift this hide
-                </button>
-              </li>
+              <StandingHideRow
+                key={hide.actionId}
+                hide={hide}
+                busy={busy === hide.actionId}
+                onAct={(body) => void act(hide.actionId, body)}
+              />
             ))}
           </ul>
           {olderHidesCursor && (
@@ -325,7 +311,8 @@ function ReportRow({
         {report.subjectOwnerId && report.subjectOwnerSuspended && (
           <button
             type="button"
-            disabled={busy}
+            disabled={busy || note.trim().length === 0}
+            title={note.trim() ? undefined : "Reversing a decision is a decision; say why"}
             onClick={() =>
               onAct({
                 action: "reinstate",
@@ -342,7 +329,8 @@ function ReportRow({
         )}
         <button
           type="button"
-          disabled={busy}
+          disabled={busy || note.trim().length === 0}
+          title={note.trim() ? undefined : "Every decision records why, dismissals included"}
           onClick={() => onAct({ action: "dismiss", reportId: report.id, note })}
           className="px-4 py-2 text-sm text-muted hover:text-foreground transition-colors disabled:opacity-50"
         >
@@ -389,7 +377,8 @@ function SuspendedRow({
 
       <button
         type="button"
-        disabled={busy}
+        disabled={busy || note.trim().length === 0}
+        title={note.trim() ? undefined : "Reversing a decision is a decision; say why"}
         onClick={() =>
           onAct({
             action: "reinstate",
@@ -407,6 +396,57 @@ function SuspendedRow({
       <p className="text-xs text-muted">
         They come back with their social surfaces still switched off, to turn on again themselves.
       </p>
+    </li>
+  );
+}
+
+function StandingHideRow({
+  hide,
+  busy,
+  onAct,
+}: {
+  hide: StandingHideView;
+  busy: boolean;
+  onAct: (body: Record<string, unknown>) => void;
+}) {
+  const [note, setNote] = useState("");
+
+  return (
+    <li className="card-flat p-3 text-xs text-muted flex flex-col gap-2">
+      <div>
+        {hide.subjectType} <code>{hide.subjectId.slice(0, 8)}</code> · {hide.actorName} ·{" "}
+        {new Date(hide.at).toLocaleString()}
+        {hide.note && <div className="mt-1 italic">{hide.note}</div>}
+      </div>
+
+      <label className="sr-only" htmlFor={`lift-${hide.actionId}`}>
+        Reason for lifting
+      </label>
+      <input
+        id={`lift-${hide.actionId}`}
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+        placeholder="Why — recorded in the audit trail"
+        className="w-full rounded-xl border border-border-subtle bg-surface py-2 px-3 text-xs text-foreground placeholder:text-muted focus:outline-none focus:border-accent/70"
+      />
+
+      <button
+        type="button"
+        disabled={busy || note.trim().length === 0}
+        title={note.trim() ? undefined : "Reversing a decision is a decision; say why"}
+        onClick={() =>
+          onAct({
+            action: "unhide",
+            subjectType: hide.subjectType,
+            subjectId: hide.subjectId,
+            expectedActionId: hide.actionId,
+            note,
+          })
+        }
+        className="self-start text-accent hover:underline disabled:opacity-50"
+      >
+        Lift this hide
+      </button>
     </li>
   );
 }

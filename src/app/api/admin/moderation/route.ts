@@ -43,7 +43,10 @@ const bodySchema = z.discriminatedUnion("action", [
     action: z.literal("unhide"),
     subjectType: z.enum(HIDEABLE_SUBJECT_TYPES),
     subjectId: z.string().min(1),
-    note: z.string().max(1000).optional(),
+    // Required, like every other action's. Reversing a decision is a decision;
+    // "why was this put back" is an appeal question as much as "why was it
+    // taken down", and the trail is what both get answered from.
+    note: z.string().trim().min(1).max(1000),
     // Which hide the operator was looking at. Required, not optional: a page
     // is a snapshot, a reversal of a decision nobody reviewed is worse than a
     // refused click, and a guard that can be omitted is one a stale client
@@ -61,14 +64,16 @@ const bodySchema = z.discriminatedUnion("action", [
   z.object({
     action: z.literal("reinstate"),
     userId: z.string().min(1),
-    note: z.string().max(1000).optional(),
+    note: z.string().trim().min(1).max(1000),
     /** Which suspension the operator was looking at. Required, same reason. */
     expectedSuspendedAt: z.string().datetime(),
   }),
   z.object({
     action: z.literal("dismiss"),
     reportId: z.string().min(1),
-    note: z.string().max(1000).optional(),
+    // Especially here: a report closed with no recorded reason is the case the
+    // reporter is most likely to come back about.
+    note: z.string().trim().min(1).max(1000),
   }),
 ]);
 

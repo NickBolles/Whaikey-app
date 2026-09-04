@@ -110,12 +110,27 @@ describe("POST /api/admin/moderation", () => {
       (await moderationPOST(post({ action: "reinstate", userId: author.id }))).status,
     ).toBe(400);
 
+    // And a reason, like every other action: reversing a decision is a
+    // decision, and "why was this put back" is an appeal question too.
     expect(
       (
         await moderationPOST(
           post({
             action: "reinstate",
             userId: author.id,
+            expectedSuspendedAt: profile.suspendedAt!.toISOString(),
+          }),
+        )
+      ).status,
+    ).toBe(400);
+
+    expect(
+      (
+        await moderationPOST(
+          post({
+            action: "reinstate",
+            userId: author.id,
+            note: "appeal upheld",
             expectedSuspendedAt: profile.suspendedAt!.toISOString(),
           }),
         )
@@ -156,6 +171,27 @@ describe("POST /api/admin/moderation", () => {
     );
     expect(res.status).toBe(400);
     expect(await db.select().from(schema.moderationActions)).toHaveLength(0);
+  });
+
+  /**
+   * PLAN §9.4 and the Terms say every moderation action records why. A report
+   * closed with no reason is the case its reporter is most likely to come back
+   * about, and a reversal with none is the case its subject will.
+   */
+  it("will not dismiss without a reason either", async () => {
+    const reportId = uid("report");
+    await db.insert(schema.reports).values({
+      id: reportId,
+      subjectType: "profile",
+      subjectId: author.id,
+      reporterId: reporter.id,
+      reason: "abuse",
+    });
+
+    expect((await moderationPOST(post({ action: "dismiss", reportId }))).status).toBe(400);
+    expect(
+      (await moderationPOST(post({ action: "dismiss", reportId, note: "not a violation" }))).status,
+    ).toBe(200);
   });
 
   it("404s an action against something that isn't there", async () => {
