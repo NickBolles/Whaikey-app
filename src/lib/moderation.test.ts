@@ -4,6 +4,7 @@ import type { DB } from "@/db";
 import * as schema from "@/db/schema";
 import { createTestBottle, createTestUser, setupTestDb, uid } from "@/test/helpers";
 import {
+  CannotHideProfileError,
   REPORT_SLA_HOURS,
   UnknownSubjectError,
   countBreachedReports,
@@ -92,6 +93,23 @@ describe("the queue", () => {
     expect(row.subjectOwnerId).toBe(author.id);
     expect(row.alreadyHidden).toBe(false);
   });
+
+  /**
+   * An account that stepped back of its own accord (US-11's "make everything
+   * private") is not an actioned account. Reading `socialEnabled` here would
+   * put a moderation label on somebody's privacy choice.
+   */
+  it("does not call a self-stepped-back profile already handled", async () => {
+    await db
+      .update(schema.userProfiles)
+      .set({ socialEnabled: false })
+      .where(eq(schema.userProfiles.userId, author.id));
+    await report("profile", author.id);
+
+    const [row] = await listOpenReports(db);
+    expect(row.alreadyHidden).toBe(false);
+    expect(row.subjectOwnerSuspended).toBe(false);
+  });
 });
 
 describe("hiding", () => {
@@ -112,6 +130,24 @@ describe("hiding", () => {
     // something to appeal about.
     expect(row.body).toBe("no");
     expect(await listOpenReports(db)).toHaveLength(0);
+  });
+
+  /**
+   * A profile's only lever is `socialEnabled`, which lives in the account's
+   * own settings. "Hiding" one would last until its owner found the toggle
+   * they already have, while telling the operator they had acted — so the
+   * action that does not stick is not offered at all.
+   */
+  it("refuses to hide a profile, because a profile is suspended or it is not", async () => {
+    await expect(hideSubject(db, operator.id, "profile", author.id, {})).rejects.toBeInstanceOf(
+      CannotHideProfileError,
+    );
+    const [profile] = await db
+      .select()
+      .from(schema.userProfiles)
+      .where(eq(schema.userProfiles.userId, author.id));
+    expect(profile.socialEnabled).toBe(true);
+    expect(await db.select().from(schema.moderationActions)).toHaveLength(0);
   });
 
   it("makes a reported pour private rather than deleting somebody's journal", async () => {

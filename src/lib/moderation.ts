@@ -146,7 +146,11 @@ async function describeSubject(
     preview: [`@${row.handle}`, row.displayName, row.bio].filter(Boolean).join(" · ").slice(0, 500),
     subjectOwnerId: subjectId,
     subjectOwnerSuspended: row.suspendedAt != null,
-    alreadyHidden: !row.socialEnabled,
+    // For a profile there is no hide, so "handled" means suspended. Reading
+    // `socialEnabled` here would call every account that has stepped back of
+    // its own accord already-actioned, which is somebody's privacy choice
+    // wearing a moderation label.
+    alreadyHidden: row.suspendedAt != null,
   };
 }
 
@@ -165,15 +169,29 @@ export class UnknownSubjectError extends Error {
   }
 }
 
+export class CannotHideProfileError extends Error {
+  constructor() {
+    super("A profile is suspended, not hidden");
+    this.name = "CannotHideProfileError";
+  }
+}
+
 /**
- * Take a thing out of the social surfaces.
+ * Take a piece of content out of the social surfaces.
  *
  * Each subject type already has the right mechanism, so this uses it rather
  * than inventing a parallel "hidden" flag that every read path would have to
- * learn: a comment soft-deletes (it already renders as removed), a pour goes
- * private (it leaves every projection and stays in its owner's journal), and a
- * profile has social switched off. Nobody's own records are destroyed by a
- * moderation action — that is deletion, and it is not this.
+ * learn: a comment soft-deletes (it already renders as removed) and a pour
+ * goes private (it leaves every projection and stays in its owner's journal).
+ * Nobody's own records are destroyed by a moderation action — that is
+ * deletion, and it is not this.
+ *
+ * **A profile is not hideable, and the honest reason is that it cannot be.**
+ * The only lever a profile has is `socialEnabled`, which is a switch in the
+ * account's own settings — so "hiding" one would last exactly as long as it
+ * took its owner to find the toggle they already have, while telling the
+ * operator they had acted. A profile is suspended or it is not; suspension is
+ * the action that sticks, and it is the one this queue offers.
  */
 export async function hideSubject(
   db: DB,
@@ -183,6 +201,7 @@ export async function hideSubject(
   options: { reportId?: string; note?: string } = {},
   now = new Date(),
 ): Promise<void> {
+  if (subjectType === "profile") throw new CannotHideProfileError();
   const changed = await applyHide(db, subjectType, subjectId, now);
   if (!changed) throw new UnknownSubjectError();
   await record(db, actorId, "hide", subjectType, subjectId, options, now);
@@ -204,35 +223,22 @@ async function applyHide(
     // same report must not produce an error for the second one.
     return rows.length > 0 || (await exists(db, "comment", subjectId));
   }
-  if (subjectType === "pour") {
-    const rows = await db
-      .update(pours)
-      .set({ visibility: "private" })
-      .where(eq(pours.id, subjectId))
-      .returning({ id: pours.id });
-    return rows.length > 0;
-  }
   const rows = await db
-    .update(userProfiles)
-    .set({ socialEnabled: false, isPublic: false, discoverable: false, updatedAt: now })
-    .where(eq(userProfiles.userId, subjectId))
-    .returning({ userId: userProfiles.userId });
+    .update(pours)
+    .set({ visibility: "private" })
+    .where(eq(pours.id, subjectId))
+    .returning({ id: pours.id });
   return rows.length > 0;
 }
 
-async function exists(db: DB, subjectType: ReportSubjectType, subjectId: string): Promise<boolean> {
+/** Only the hideable subjects reach this; a profile is suspended, not hidden. */
+async function exists(db: DB, subjectType: "comment" | "pour", subjectId: string): Promise<boolean> {
   if (subjectType === "comment") {
-    return (await db.query.comments.findFirst({ columns: { id: true }, where: eq(comments.id, subjectId) })) != null;
+    return (
+      (await db.query.comments.findFirst({ columns: { id: true }, where: eq(comments.id, subjectId) })) != null
+    );
   }
-  if (subjectType === "pour") {
-    return (await db.query.pours.findFirst({ columns: { id: true }, where: eq(pours.id, subjectId) })) != null;
-  }
-  return (
-    (await db.query.userProfiles.findFirst({
-      columns: { userId: true },
-      where: eq(userProfiles.userId, subjectId),
-    })) != null
-  );
+  return (await db.query.pours.findFirst({ columns: { id: true }, where: eq(pours.id, subjectId) })) != null;
 }
 
 /**

@@ -117,6 +117,24 @@ describe("POST /api/admin/moderation", () => {
     expect(profile.suspendedAt).toBeNull();
   });
 
+  /**
+   * Rejected by the schema, before anything reaches the database: a profile
+   * has no hide that sticks, so offering one would tell the operator they had
+   * acted when its owner can undo it from their own settings.
+   */
+  it("will not hide a profile — that action is suspend", async () => {
+    const res = await moderationPOST(
+      post({ action: "hide", subjectType: "profile", subjectId: author.id }),
+    );
+    expect(res.status).toBe(400);
+    const [profile] = await db
+      .select()
+      .from(schema.userProfiles)
+      .where(eq(schema.userProfiles.userId, author.id));
+    expect(profile.socialEnabled).toBe(true);
+    expect(await db.select().from(schema.moderationActions)).toHaveLength(0);
+  });
+
   it("404s an action against something that isn't there", async () => {
     const res = await moderationPOST(
       post({ action: "hide", subjectType: "pour", subjectId: "nope" }),

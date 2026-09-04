@@ -166,7 +166,7 @@ function ReportRow({
 
       <p className="text-xs text-muted">
         reported by {report.reporterHandle ? `@${report.reporterHandle}` : "a deleted account"}
-        {report.alreadyHidden && " · already hidden"}
+        {report.alreadyHidden && report.subjectType !== "profile" && " · already hidden"}
         {report.subjectOwnerSuspended && " · author suspended"}
       </p>
 
@@ -182,22 +182,28 @@ function ReportRow({
       />
 
       <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          disabled={busy || report.alreadyHidden}
-          onClick={() =>
-            onAct({
-              action: "hide",
-              subjectType: report.subjectType,
-              subjectId: report.subjectId,
-              reportId: report.id,
-              note,
-            })
-          }
-          className="btn-secondary px-4 py-2 text-sm font-medium disabled:opacity-50"
-        >
-          Hide
-        </button>
+        {/* No Hide for a profile: its only lever is a switch in the account's
+            own settings, so hiding one would last until its owner found the
+            toggle they already have — while telling the operator they had
+            acted. A profile is suspended or it is not. */}
+        {report.subjectType !== "profile" && (
+          <button
+            type="button"
+            disabled={busy || report.alreadyHidden}
+            onClick={() =>
+              onAct({
+                action: "hide",
+                subjectType: report.subjectType,
+                subjectId: report.subjectId,
+                reportId: report.id,
+                note,
+              })
+            }
+            className="btn-secondary px-4 py-2 text-sm font-medium disabled:opacity-50"
+          >
+            Hide
+          </button>
+        )}
         {report.subjectOwnerId && !report.subjectOwnerSuspended && (
           <button
             type="button"

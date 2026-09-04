@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getDb } from "@/db";
-import { REPORT_SUBJECT_TYPES } from "@/db/schema";
 import { getSessionUser, withErrorHandling, UnauthorizedError } from "@/lib/session";
 import { readJsonWithinLimit } from "@/lib/body-limit";
 import { isOperator } from "@/lib/operator";
 import {
+  CannotHideProfileError,
   UnknownSubjectError,
   dismissReport,
   hideSubject,
@@ -19,10 +19,16 @@ export const runtime = "nodejs";
 /** An id, an action and a sentence of reasoning. */
 const MAX_BODY_BYTES = 4 * 1024;
 
+/** The report subjects that can be taken down. A profile is suspended instead. */
+const HIDEABLE_SUBJECT_TYPES = ["comment", "pour"] as const;
+
 const bodySchema = z.discriminatedUnion("action", [
   z.object({
     action: z.literal("hide"),
-    subjectType: z.enum(REPORT_SUBJECT_TYPES),
+    // Not every report subject: a profile is suspended, not hidden — hiding
+    // one would only turn off a switch its owner can turn back on, while
+    // telling the operator they had acted (src/lib/moderation.ts).
+    subjectType: z.enum(HIDEABLE_SUBJECT_TYPES),
     subjectId: z.string().min(1),
     reportId: z.string().min(1).optional(),
     note: z.string().max(1000).optional(),
@@ -94,6 +100,12 @@ export async function POST(request: Request): Promise<NextResponse> {
     } catch (err) {
       if (err instanceof UnknownSubjectError) {
         return NextResponse.json({ error: "Nothing to act on" }, { status: 404 });
+      }
+      if (err instanceof CannotHideProfileError) {
+        return NextResponse.json(
+          { error: "A profile is suspended, not hidden" },
+          { status: 400 },
+        );
       }
       throw err;
     }
