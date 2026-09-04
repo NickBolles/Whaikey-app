@@ -194,7 +194,16 @@ export async function logPour(db: DB, userId: string, input: PourInput): Promise
         columns: { socialEnabled: true },
         where: eq(schema.userProfiles.userId, userId),
       });
-      if (profile && !profile.socialEnabled) visibility = "private";
+      /**
+       * No profile is the same answer as social switched off, and used not to
+       * be: a missing row left the explicit visibility standing, so the pour
+       * was stored "public" while `canViewPourContext` — which reads
+       * `authorSocialEnabled ?? false` — showed it to nobody. A visibility
+       * that is not in force is worse than a wrong one, because creating a
+       * profile later would publish it retroactively with no fresh decision,
+       * which is exactly what the US-11 rule above refuses to do.
+       */
+      if (!profile || !profile.socialEnabled) visibility = "private";
     }
     if (visibility !== "private") {
       // docs/SOCIAL.md §11: notes are user-generated text and cross-user
@@ -378,7 +387,11 @@ export async function updatePourVisibility(
         .innerJoin(schema.bottles, eq(schema.bottles.id, schema.pours.bottleId))
         .where(and(eq(schema.pours.id, pourId), eq(schema.pours.userId, userId)))
         .limit(1);
-      if (row?.status === "user_submitted") throw new PendingBottleError();
+      // Not found, or not theirs: answer that before any social check, so a
+      // missing pour cannot come back as "social is turned off" — which would
+      // be both wrong and a small oracle about somebody else's row.
+      if (!row) return null;
+      if (row.status === "user_submitted") throw new PendingBottleError();
     }
     if (visibility !== "private") {
       // Same lock as makeEverythingPrivate: the check and the write are
@@ -415,7 +428,11 @@ export async function updatePourVisibility(
         columns: { socialEnabled: true },
         where: eq(schema.userProfiles.userId, userId),
       });
-      if (profile && !profile.socialEnabled) throw new SocialDisabledError();
+      // No profile is the same answer as social switched off, for the reason
+      // `logPour` gives: the visibility would be stored without being in
+      // force, and creating a profile later would publish the pour with no
+      // fresh decision. Same door, same rule.
+      if (!profile?.socialEnabled) throw new SocialDisabledError();
     }
     const rows = await tx
       .update(schema.pours)

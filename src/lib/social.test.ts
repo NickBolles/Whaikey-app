@@ -593,6 +593,25 @@ describe("comments", () => {
     expect(listed?.[0].parentId).toBe(c1!.id); // orphaned, but still renders
   });
 
+  /**
+   * Commenting is a social act, and nothing used to check the *commenter's*
+   * own profile — only the pour author's. An account that had never opted into
+   * social could post comments that moderation then could not answer for,
+   * because suspension lives on the profile row that does not exist.
+   */
+  it("refuses a comment from an account with no social profile", async () => {
+    const stranger = await createTestUser(db);
+    expect(await addComment(db, stranger.id, pourId, "hello")).toBeNull();
+    // And once they have one, the same call works.
+    await db.insert(schema.userProfiles).values({
+      userId: stranger.id,
+      handle: "stranger",
+      displayName: "Stranger",
+      socialEnabled: true,
+    });
+    expect(await addComment(db, stranger.id, pourId, "hello")).not.toBeNull();
+  });
+
   it("createReport records a report, absorbs duplicates, and rejects fabricated subjects", async () => {
     const c1 = await addComment(db, commenter.id, pourId, "spam-ish");
     await expect(

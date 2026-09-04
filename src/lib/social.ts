@@ -1746,6 +1746,32 @@ export async function addComment(
   if (!ctx) return null;
   if (!(await canViewPourContext(db, userId, ctx))) return null;
 
+  /**
+   * The commenter needs a social profile of their own.
+   *
+   * Nothing here used to check it — only the *pour author's* state — so an
+   * account that had never opted into social at all could post comments.
+   * Three things followed. Moderation could not answer for it, because
+   * suspension is stored on the profile row and `suspendAccount` throws
+   * without one: the operator could hide each comment and never stop the
+   * next. `listComments` rendered `authorHandle ?? row.userId`, publishing an
+   * internal id as a display handle. And it contradicts the model itself —
+   * `commentWithdrawnByAuthor` exists because a *stepped-back* author's
+   * comments must vanish, which makes no sense if a never-opted-in account
+   * may post them freely.
+   *
+   * Closing it here rather than teaching moderation to cope: content that
+   * should not exist is better prevented than moderated. If some later path
+   * does produce reportable content from an account with no profile, the
+   * answer is to move suspension off the profile row — noted in the review
+   * rather than built now, because nothing reaches that state today.
+   */
+  const commenter = await db.query.userProfiles.findFirst({
+    columns: { socialEnabled: true },
+    where: eq(schema.userProfiles.userId, userId),
+  });
+  if (!commenter?.socialEnabled) return null;
+
   const ownerPrefs = await getSocialPrefs(db, ctx.authorId);
   if (!ownerPrefs.allowComments) return null;
 

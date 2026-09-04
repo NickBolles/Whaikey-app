@@ -276,6 +276,14 @@ describe("a pour of an unreviewed bottle", () => {
    */
   it("is private whatever was asked for, and stays that way after promotion", async () => {
     const { logPour } = await import("@/lib/pours");
+    // Publishing is a social act and needs a claimed handle; this test is
+    // about the pending-bottle rule, not about opting into social.
+    await db.insert(schema.userProfiles).values({
+      userId: alice.id,
+      handle: "alice",
+      displayName: "Alice",
+      socialEnabled: true,
+    });
     const { bottle } = await submitBottle(db, alice.id, {
       name: "Alice's Barrel Pick",
       category: "bourbon",
@@ -310,6 +318,12 @@ describe("a pour of an unreviewed bottle", () => {
   it("cannot be published or shared after the fact either", async () => {
     const { logPour, updatePourVisibility, PendingBottleError } = await import("@/lib/pours");
     const { createPourShare } = await import("@/lib/pour-sharing");
+    await db.insert(schema.userProfiles).values({
+      userId: alice.id,
+      handle: "alice",
+      displayName: "Alice",
+      socialEnabled: true,
+    });
     const { bottle } = await submitBottle(db, alice.id, {
       name: "Alice's Barrel Pick",
       category: "bourbon",
