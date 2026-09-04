@@ -784,6 +784,18 @@ export async function hideSubject(
        * decision.
        */
       if (options.reportId) {
+        /**
+         * The state does not change, but the decision still happened.
+         *
+         * This branch resolved the report and recorded nothing, so the
+         * operator's reason, identity and the time they acted were all
+         * discarded — on the row the queue labels "Resolve as hidden".
+         * STORYBOARD §3.17 requires a reason for every action without
+         * exception, and "why was my report closed" is exactly the question
+         * the trail exists to answer. `resolve` rather than a second `hide`:
+         * see the action's comment in the schema.
+         */
+        await record(tx, actorId, "resolve", subjectType, subjectId, options, now);
         await resolveOpenReport(tx, options.reportId, { subjectType, subjectId });
       }
       return;
@@ -980,7 +992,13 @@ export async function suspendAccount(
       // not be: a second report about the same account is usually about a
       // different comment.
       await hideReportedSubject(tx, actorId, options.reportId, reason, now);
-      if (options.reportId) await resolveOpenReport(tx, options.reportId, { ownerId: userId });
+      if (options.reportId) {
+        // Same as `hideSubject`'s already-hidden branch: "Resolve as
+        // suspended" is a decision with a required reason, and on a profile
+        // report there is no hide beside it to carry one.
+        await record(tx, actorId, "resolve", "profile", userId, { reportId: options.reportId, note: reason }, now);
+        await resolveOpenReport(tx, options.reportId, { ownerId: userId });
+      }
       return;
     }
 

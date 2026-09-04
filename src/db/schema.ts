@@ -729,7 +729,29 @@ export const reports = pgTable(
  * a hidden pour cannot be re-published by its owner, so an appeal upheld has
  * to be actionable by an operator rather than by asking the owner to try again.
  */
-export const MODERATION_ACTIONS = ["hide", "unhide", "suspend", "reinstate", "dismiss"] as const;
+/**
+ * `resolve` is the odd one: a decision that changed no state.
+ *
+ * Several reports about one comment is the ordinary case, and the later ones
+ * are genuinely handled by the hide or the suspension already in force — the
+ * queue offers "Resolve as hidden" and "Resolve as suspended" for exactly
+ * that. Applying a second hide or a second suspension would overwrite a
+ * timestamp that means something, so those branches change nothing; but the
+ * operator still made a decision, with a reason `docs/STORYBOARD.md` §3.17
+ * requires "for every action without exception". Recording it as `hide` would
+ * put a rival entry in front of `isModerationHidden` and the lift's timestamp
+ * match; recording it as `dismiss` would tell an appeal the complaint was
+ * unfounded. It is its own thing, and it is deliberately outside every
+ * hide/unhide and suspend/reinstate filter in this file.
+ */
+export const MODERATION_ACTIONS = [
+  "hide",
+  "unhide",
+  "suspend",
+  "reinstate",
+  "dismiss",
+  "resolve",
+] as const;
 export type ModerationActionKind = (typeof MODERATION_ACTIONS)[number];
 
 export const moderationActions = pgTable(

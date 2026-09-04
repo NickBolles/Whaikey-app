@@ -2376,3 +2376,100 @@ describe("standing lists run oldest first", () => {
     expect(next.nextCursor).toBeNull();
   });
 });
+
+
+/**
+ * "Resolve as hidden" and "Resolve as suspended" change no state — the hide or
+ * the suspension already in force is what handles the later report — but they
+ * are still decisions, and STORYBOARD §3.17 requires a reason for every action
+ * without exception. Both branches resolved the report and recorded nothing,
+ * so the reason, the operator and the time were discarded.
+ */
+describe("resolving a report against a decision already in force", () => {
+  async function reportedComment(body = "abuse") {
+    const bottle = await createTestBottle(db);
+    const pourId = uid("pour");
+    await db
+      .insert(schema.pours)
+      .values({ id: pourId, userId: author.id, bottleId: bottle.id, visibility: "public" });
+    const commentId = uid("comment");
+    await db.insert(schema.comments).values({ id: commentId, pourId, userId: author.id, body });
+    const reportId = await report("comment", commentId);
+    await db
+      .update(schema.reports)
+      .set({ subjectOwnerId: author.id })
+      .where(eq(schema.reports.id, reportId));
+    return { commentId, reportId };
+  }
+
+  it("records the operator's reason when the subject is already hidden", async () => {
+    const first = await reportedComment();
+    const second = await report("comment", first.commentId);
+    await hideSubject(db, operator.id, "comment", first.commentId, {
+      reportId: first.reportId,
+      note: "graphic",
+    });
+
+    await hideSubject(db, operator.id, "comment", first.commentId, {
+      reportId: second,
+      note: "same comment, second complaint",
+    });
+
+    expect(await countOpenReports(db)).toBe(0);
+    // Still exactly one hide — a second would put a rival entry in front of
+    // the lift's timestamp match.
+    const rows = await db
+      .select()
+      .from(schema.moderationActions)
+      .where(eq(schema.moderationActions.subjectId, first.commentId));
+    expect(rows.filter((r) => r.action === "hide")).toHaveLength(1);
+    const resolved = rows.filter((r) => r.action === "resolve");
+    expect(resolved).toHaveLength(1);
+    expect(resolved[0].note).toBe("same comment, second complaint");
+    expect(resolved[0].reportId).toBe(second);
+    expect(resolved[0].actorId).toBe(operator.id);
+  });
+
+  it("records it on a profile report closed against a standing suspension", async () => {
+    await suspendAccount(db, operator.id, author.id, "abuse");
+    const second = await report("profile", author.id);
+
+    await suspendAccount(db, operator.id, author.id, "already answered for", {
+      reportId: second,
+    });
+
+    expect(await countOpenReports(db)).toBe(0);
+    const rows = await db
+      .select()
+      .from(schema.moderationActions)
+      .where(eq(schema.moderationActions.subjectId, author.id));
+    // One suspension, and the second report's closure named and reasoned.
+    expect(rows.filter((r) => r.action === "suspend")).toHaveLength(1);
+    const resolved = rows.filter((r) => r.action === "resolve");
+    expect(resolved).toHaveLength(1);
+    expect(resolved[0].note).toBe("already answered for");
+    expect(resolved[0].reportId).toBe(second);
+  });
+
+  it("leaves the standing hide and its notice untouched", async () => {
+    const first = await reportedComment();
+    const second = await report("comment", first.commentId);
+    await hideSubject(db, operator.id, "comment", first.commentId, {
+      reportId: first.reportId,
+      note: "graphic",
+    });
+    await hideSubject(db, operator.id, "comment", first.commentId, {
+      reportId: second,
+      note: "second complaint",
+    });
+
+    // `resolve` is outside every hide/unhide filter: the hide still stands,
+    // the standing list still lifts it, and the author's notice still reads
+    // the reason they were given.
+    expect(await isModerationHidden(db, "comment", first.commentId)).toBe(true);
+    const notice = await moderationNoticeFor(db, "comment", first.commentId);
+    expect(notice?.reason).toBe("graphic");
+    const { hides } = await listStandingHides(db);
+    expect(hides.map((h) => h.subjectId)).toContain(first.commentId);
+  });
+});
