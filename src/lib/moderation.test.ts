@@ -31,6 +31,11 @@ import {
 import {
   AccountSuspendedError,
   canViewPour,
+  getFriendFeed,
+  getFriendNotesForBottle,
+  getOwnProfile,
+  getProfileView,
+  listBlocked,
   editComment,
   listComments,
   setSocialEnabled,
@@ -2639,6 +2644,60 @@ describe("a suspended account cannot keep reading", () => {
     expect(await canViewPour(db, viewer.id, pourId)).toBe(false);
     // Their own journal is untouched: suspension is not a ban from the product.
     expect(await canViewPour(db, viewer.id, ownPourId)).toBe(true);
+  });
+
+  it("closes every cross-user read surface, not just the pour gate", async () => {
+    const viewer = await createTestUser(db);
+    await profileFor(viewer, "viewer_all");
+    const bottle = await createTestBottle(db);
+
+    await db.insert(schema.follows).values({
+      id: uid("f"),
+      followerId: viewer.id,
+      followeeId: author.id,
+      state: "accepted",
+    });
+    await db.insert(schema.follows).values({
+      id: uid("f"),
+      followerId: author.id,
+      followeeId: viewer.id,
+      state: "accepted",
+    });
+    const pourId = uid("pour");
+    await db.insert(schema.pours).values({
+      id: pourId,
+      userId: author.id,
+      bottleId: bottle.id,
+      visibility: "public",
+      rating: 4,
+    });
+    await db
+      .insert(schema.tastingNotes)
+      // Same Dram inner-joins on non-empty flavor tags, so a text-only note
+      // would never appear and the "before" half would prove nothing.
+      .values({
+        id: uid("note"),
+        pourId,
+        extractedBy: "user",
+        freeform: "theirs",
+        flavorTags: { vanilla: 2 },
+      });
+
+    // Everything works before the suspension.
+    expect(await getFriendFeed(db, viewer.id)).not.toHaveLength(0);
+    expect(await getFriendNotesForBottle(db, viewer.id, bottle.id)).not.toHaveLength(0);
+    expect(await getProfileView(db, viewer.id, "author")).not.toBeNull();
+
+    await suspendAccount(db, operator.id, viewer.id, "abuse");
+
+    // The first version of this guard reached only canViewPourContext, so all
+    // three of these kept working.
+    expect(await getFriendFeed(db, viewer.id)).toHaveLength(0);
+    expect(await getFriendNotesForBottle(db, viewer.id, bottle.id)).toHaveLength(0);
+    expect(await getProfileView(db, viewer.id, "author")).toBeNull();
+    // Their own records are untouched — a suspension is not a ban.
+    expect(await getOwnProfile(db, viewer.id)).not.toBeNull();
+    expect(await listBlocked(db, viewer.id)).toEqual([]);
   });
 
   it("reads again once reinstated", async () => {

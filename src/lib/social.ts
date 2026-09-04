@@ -584,6 +584,30 @@ export async function listBlocked(db: DB, userId: string): Promise<ProfileSummar
 }
 
 /**
+ * The viewer-side half of a suspension, in one place.
+ *
+ * A suspension takes the account off the social surfaces in **both**
+ * directions, and the first version of this guard reached only
+ * `canViewPourContext` — so the feed, Same Dram, profile views and phone
+ * discovery all still worked, because suspension deliberately leaves the
+ * follow edges alone. Every cross-user read projection calls this now rather
+ * than repeating the condition, which is the difference between one rule and
+ * five copies of it.
+ *
+ * **What it deliberately does not gate**, so the line is a decision rather
+ * than an oversight: the account's own data — `getOwnProfile`, its palate,
+ * its journal — and its own relationship lists (`listFollowing`,
+ * `listFollowers`, `listBlocked`). Those are the account's own records, which
+ * a suspension explicitly does not touch, and `listBlocked` in particular is a
+ * safety control that must never be taken away. A suspension is not a ban from
+ * the product.
+ */
+async function suspendedViewer(db: DB, viewerId: string | null): Promise<boolean> {
+  if (!viewerId) return false;
+  return isSuspended(db, viewerId);
+}
+
+/**
  * Whether this account is under a moderation suspension.
  *
  * Read on the **viewer** side of a cross-user read. `socialEnabled` is not a
@@ -783,6 +807,8 @@ export async function setPhoneDiscoverable(db: DB, userId: string, discoverable:
  * match (harmless; the UI can say "that's you").
  */
 export async function findProfileByPhone(db: DB, viewerId: string, rawPhone: string): Promise<ProfileSummary | null> {
+  // Discovery is a social surface like any other (see `suspendedViewer`).
+  if (await suspendedViewer(db, viewerId)) return null;
   const canonical = normalizePhone(rawPhone); // throws InvalidPhoneError
   const hash = hashPhone(canonical);
 
@@ -811,6 +837,7 @@ export interface AddTarget {
  * "that's your own code" instead of a follow button.
  */
 export async function getAddTarget(db: DB, viewerId: string, handle: string): Promise<AddTarget | null> {
+  if (await suspendedViewer(db, viewerId)) return null;
   const row = await db.query.userProfiles.findFirst({ where: eq(schema.userProfiles.handle, normalizeHandle(handle)) });
   if (!row) return null;
 
@@ -1025,7 +1052,7 @@ async function canViewPourContext(db: DB, viewerId: string | null, ctx: PourAuth
    * After the self check, so a suspended account still reads its own pours —
    * suspension is not a ban from the product, and the journal is theirs.
    */
-  if (await isSuspended(db, viewerId)) return false;
+  if (await suspendedViewer(db, viewerId)) return false;
   if (await isBlockedEither(db, viewerId, ctx.authorId)) return false;
 
   switch (ctx.visibility) {
@@ -1293,6 +1320,7 @@ export interface FeedItem extends SocialNote {
  * the viewer's own flavorTags on the same bottle ("you tasted this too").
  */
 export async function getFriendFeed(db: DB, viewerId: string, opts: { limit?: number } = {}): Promise<FeedItem[]> {
+  if (await suspendedViewer(db, viewerId)) return [];
   const limit = Math.min(Math.max(opts.limit ?? 20, 1), 100);
 
   const blocked = await getBlockedCounterparts(db, viewerId);
@@ -1467,6 +1495,7 @@ export interface FriendBottleNote {
 
 /** Same Dram source: one entry per followee (their latest note on this bottle), visibility+block enforced. */
 export async function getFriendNotesForBottle(db: DB, viewerId: string, bottleId: string): Promise<FriendBottleNote[]> {
+  if (await suspendedViewer(db, viewerId)) return [];
   const blocked = await getBlockedCounterparts(db, viewerId);
   const followeeIds = (await getAcceptedFolloweeIds(db, viewerId)).filter((id) => !blocked.has(id));
   if (followeeIds.length === 0) return [];
@@ -1684,6 +1713,8 @@ async function listRecentVisibleNotes(
  * identity-only shape, even for a public profile.
  */
 export async function getProfileView(db: DB, viewerId: string | null, handle: string): Promise<ProfileView | null> {
+  // Their own profile stays reachable: `getOwnProfile` is not gated.
+  if (await suspendedViewer(db, viewerId)) return null;
   const row = await db.query.userProfiles.findFirst({ where: eq(schema.userProfiles.handle, normalizeHandle(handle)) });
   if (!row) return null;
 
