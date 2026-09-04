@@ -27,6 +27,8 @@ interface QueuedReportView {
   preview: string | null;
   reportedPreview: string | null;
   liveReadable: boolean;
+  /** Still a row, as opposed to merely out of the operator's reach. */
+  subjectExists: boolean;
   editedSinceReport: boolean;
   subjectOwnerId: string | null;
   subjectOwnerSuspended: boolean;
@@ -279,7 +281,9 @@ function ReportRow({
         <p className="text-sm text-muted leading-relaxed whitespace-pre-wrap max-h-64 overflow-y-auto">
           {report.reportedPreview ??
             report.preview ??
-            "(the reported thing no longer exists)"}
+            (report.subjectExists
+              ? "(nothing to show — see below)"
+              : "(the reported thing no longer exists)")}
         </p>
         {/* Withdrawn from view is not the same as never existed, and neither is
             an invitation to read what replaced it: STORYBOARD §3.17 says an
@@ -298,16 +302,32 @@ function ReportRow({
             {report.preview ?? "(deleted)"}
           </p>
         ) : null}
-        {report.reportedPreview == null && report.preview != null ? (
+        {/* A report with no snapshot says so, whether or not there is current
+            text to offer instead. It used to say it only when there was — so a
+            legacy report whose subject still exists but has gone private fell
+            through to "no longer exists" above, which is a false claim about
+            the state of a complaint somebody is waiting on, and binding
+            STORYBOARD §3.17 requires the opposite: an old report says no copy
+            was kept rather than mischaracterising its subject. */}
+        {report.reportedPreview == null ? (
           <p className="text-xs text-muted/70">
-            Filed before reports kept a copy — this is the current text, not
-            what was reported.
+            {report.preview != null
+              ? "Filed before reports kept a copy — this is the current text, not what was reported."
+              : report.subjectExists
+                ? "Filed before reports kept a copy, and the subject is not visible now — deleted, made private, or its author stepped back. No record of what was reported was kept."
+                : "Filed before reports kept a copy, and the subject no longer exists. No record of what was reported was kept."}
           </p>
         ) : null}
       </div>
 
       <p className="text-xs text-muted">
-        reported by {report.reporterHandle ? `@${report.reporterHandle}` : "a deleted account"}
+        {/* Not "a deleted account": `reports.reporter_id` is notNull and
+            cascades, so a deleted reporter takes the report row with it and an
+            open row is never evidence of one. A null handle means the account
+            never claimed a social profile, which /api/social/reports allows on
+            purpose — reporting is a safety action, not a social one. */}
+        reported by{" "}
+        {report.reporterHandle ? `@${report.reporterHandle}` : "an account with no handle"}
         {report.alreadyHidden && report.subjectType !== "profile" && " · already hidden"}
         {report.subjectOwnerSuspended && " · author suspended"}
       </p>

@@ -750,6 +750,22 @@ export const moderationActions = pgTable(
      */
     actorId: text("actor_id").references(() => user.id, { onDelete: "set null" }),
     action: text("action").$type<ModerationActionKind>().notNull(),
+    /**
+     * For a `hide`: whether this action is what removed the row.
+     *
+     * `unhideSubject` restores a comment by matching its `deletedAt` against
+     * the hide's own `createdAt`, so that it never republishes something the
+     * author deliberately deleted. Two instants can be the same millisecond,
+     * though — an author's delete and a hide landing right behind it — and
+     * then the match succeeds on a coincidence and the lift publishes text its
+     * author removed. A timestamp is not an identity; this records the fact
+     * instead of inferring it.
+     *
+     * False when the row was already gone when the hide landed. Null on hides
+     * recorded before this column existed, where the timestamp match is still
+     * the best available answer.
+     */
+    tookDown: boolean("took_down"),
     subjectType: text("subject_type").$type<ReportSubjectType>().notNull(),
     subjectId: text("subject_id").notNull(),
     /** The report this answered, when it came from the queue. */

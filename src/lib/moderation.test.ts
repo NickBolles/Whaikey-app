@@ -2063,3 +2063,125 @@ describe("an edit racing a hide", () => {
     expect(row?.deletedAt).toBeNull();
   });
 });
+
+
+/**
+ * `unhideSubject` restores a comment by matching its `deletedAt` against the
+ * hide's own `createdAt`, so it never republishes what an author deliberately
+ * deleted. Two instants can share a millisecond, though — an author's delete
+ * and a hide landing right behind it — and then the match succeeds on a
+ * coincidence. A timestamp is not an identity; the hide records whether it was
+ * the thing that took the row down.
+ */
+describe("a hide landing in the same millisecond as the author's own delete", () => {
+  async function comment(body = "the author's text") {
+    const bottle = await createTestBottle(db);
+    const pourId = uid("pour");
+    await db
+      .insert(schema.pours)
+      .values({ id: pourId, userId: author.id, bottleId: bottle.id, visibility: "public" });
+    const commentId = uid("comment");
+    await db.insert(schema.comments).values({ id: commentId, pourId, userId: author.id, body });
+    return commentId;
+  }
+
+  it("does not republish it when the hide is lifted", async () => {
+    const commentId = await comment();
+    const sameMoment = new Date(1_000);
+
+    // The author's own deletion, and a hide arriving at the same instant.
+    await db
+      .update(schema.comments)
+      .set({ deletedAt: sameMoment })
+      .where(eq(schema.comments.id, commentId));
+    await hideSubject(db, operator.id, "comment", commentId, { note: "abuse" }, sameMoment);
+
+    await unhideSubject(
+      db,
+      operator.id,
+      "comment",
+      commentId,
+      "appeal upheld",
+      await standingHideId("comment", commentId),
+      new Date(2_000),
+    );
+
+    const row = await db.query.comments.findFirst({
+      where: eq(schema.comments.id, commentId),
+    });
+    // Still the author's decision, which the lift has no business reversing.
+    expect(row?.deletedAt).not.toBeNull();
+  });
+
+  it("still restores one the hide actually took down", async () => {
+    const commentId = await comment();
+    await hideSubject(db, operator.id, "comment", commentId, { note: "abuse" });
+
+    await unhideSubject(
+      db,
+      operator.id,
+      "comment",
+      commentId,
+      "appeal upheld",
+      await standingHideId("comment", commentId),
+    );
+
+    const row = await db.query.comments.findFirst({
+      where: eq(schema.comments.id, commentId),
+    });
+    expect(row?.deletedAt).toBeNull();
+  });
+
+  it("records which of the two it was", async () => {
+    const took = await comment();
+    await hideSubject(db, operator.id, "comment", took, { note: "abuse" });
+    const already = await comment();
+    await db
+      .update(schema.comments)
+      .set({ deletedAt: new Date(1_000) })
+      .where(eq(schema.comments.id, already));
+    await hideSubject(db, operator.id, "comment", already, { note: "abuse" });
+
+    const rows = await db
+      .select()
+      .from(schema.moderationActions)
+      .where(eq(schema.moderationActions.action, "hide"));
+    expect(rows.find((r) => r.subjectId === took)?.tookDown).toBe(true);
+    expect(rows.find((r) => r.subjectId === already)?.tookDown).toBe(false);
+  });
+});
+
+/**
+ * `liveReadable` is false both when the subject is gone and when it is merely
+ * out of the operator's reach, so a report with no snapshot and nothing
+ * readable could not tell those apart — and the queue said "no longer exists"
+ * about a subject that was simply private.
+ */
+describe("telling a deleted subject from a withheld one", () => {
+  it("reports a private-but-present subject as existing", async () => {
+    const bottle = await createTestBottle(db);
+    const pourId = uid("pour");
+    await db
+      .insert(schema.pours)
+      .values({ id: pourId, userId: author.id, bottleId: bottle.id, visibility: "private" });
+    await report("pour", pourId);
+
+    const [row] = await listOpenReports(db);
+    expect(row.subjectExists).toBe(true);
+    expect(row.liveReadable).toBe(false);
+    expect(row.preview).toBeNull();
+  });
+
+  it("reports a deleted subject as gone", async () => {
+    const bottle = await createTestBottle(db);
+    const pourId = uid("pour");
+    await db
+      .insert(schema.pours)
+      .values({ id: pourId, userId: author.id, bottleId: bottle.id, visibility: "public" });
+    await report("pour", pourId);
+    await db.delete(schema.pours).where(eq(schema.pours.id, pourId));
+
+    const [row] = await listOpenReports(db);
+    expect(row.subjectExists).toBe(false);
+  });
+});

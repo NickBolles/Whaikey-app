@@ -77,6 +77,16 @@ export interface QueuedReport {
    */
   liveReadable: boolean;
   /**
+   * Whether the reported thing is still a row at all.
+   *
+   * Distinct from `liveReadable`, which is false both when the subject is gone
+   * and when it is merely out of the operator's reach. The queue needs the
+   * difference: with no snapshot and nothing readable, saying "no longer
+   * exists" about a subject that is simply private is a false statement about
+   * the state of a complaint somebody is waiting on.
+   */
+  subjectExists: boolean;
+  /**
    * The subject has changed since it was reported.
    *
    * The operator has to be told, because otherwise editing the abuse away is a
@@ -551,6 +561,12 @@ async function listOpenReportsIn(
        * same report.
        */
       liveReadable: readable,
+      subjectExists:
+        row.subjectType === "comment"
+          ? commentById.has(row.subjectId)
+          : row.subjectType === "pour"
+            ? pourById.has(row.subjectId)
+            : profileById.has(row.subjectId),
       // A subject that has since been deleted reads as `preview: null` while
       // still readable, and that is a change worth flagging: the operator is
       // looking at a report whose target is gone. A subject that is merely out
@@ -767,20 +783,45 @@ export async function hideSubject(
      * `UnknownSubjectError` — with no report to claim, there is nothing saying
      * the subject was ever real.
      */
-    if (!changed && !options.reportId) throw new UnknownSubjectError();
-    await record(tx, actorId, "hide", subjectType, subjectId, options, now);
+    if (changed === "missing" && !options.reportId) throw new UnknownSubjectError();
+    await record(tx, actorId, "hide", subjectType, subjectId, options, now, {
+      /**
+       * Only a hide that actually removed the row may be undone by lifting it.
+       *
+       * `already-gone` on a comment means its **author** deleted it, and a
+       * `missing` subject has nothing to put back at all. Recorded rather than
+       * inferred from the timestamps: the author's `deletedAt` and this
+       * action's `createdAt` can fall in the same millisecond, and then the
+       * match `unhideSubject` uses succeeds on a coincidence and republishes
+       * text its author removed. The fourth time in this queue that a
+       * timestamp has been asked to be an identity.
+       */
+      tookDown: changed === "took-down",
+    });
     if (options.reportId) {
       await resolveOpenReport(tx, options.reportId, { subjectType, subjectId });
     }
   });
 }
 
+/**
+ * What a hide actually did, which is not the same question as whether it
+ * succeeded.
+ *
+ * `took-down` means this action removed the row; `already-gone` means it was
+ * already out of view when the hide landed, which for a comment means its
+ * author deleted it (a moderation hide would have returned on the
+ * already-hidden branch above). Both are successes. The difference matters at
+ * lift time and nowhere else: only the first may be restored.
+ */
+type HideOutcome = "took-down" | "already-gone" | "missing";
+
 async function applyHide(
   db: DB,
   subjectType: ReportSubjectType,
   subjectId: string,
   now: Date,
-): Promise<boolean> {
+): Promise<HideOutcome> {
   if (subjectType === "comment") {
     const rows = await db
       .update(comments)
@@ -789,14 +830,15 @@ async function applyHide(
       .returning({ id: comments.id });
     // Already hidden is a success, not a failure: two operators working the
     // same report must not produce an error for the second one.
-    return rows.length > 0 || (await exists(db, "comment", subjectId));
+    if (rows.length > 0) return "took-down";
+    return (await exists(db, "comment", subjectId)) ? "already-gone" : "missing";
   }
   const rows = await db
     .update(pours)
     .set({ visibility: "private" })
     .where(eq(pours.id, subjectId))
     .returning({ id: pours.id });
-  if (rows.length === 0) return false;
+  if (rows.length === 0) return "missing";
 
   /**
    * A `/s/<code>` link is a separate door and `getPublicPourShare` opens it on
@@ -810,7 +852,12 @@ async function applyHide(
     .update(pourShares)
     .set({ revokedAt: now })
     .where(and(eq(pourShares.pourId, subjectId), isNull(pourShares.revokedAt)));
-  return true;
+  /**
+   * A pour is always "took down": the hide sets its visibility rather than
+   * removing the row, and `unhideSubject` restores nothing for a pour anyway —
+   * it hands back control, and the owner republishes if they choose.
+   */
+  return "took-down";
 }
 
 /** Only the hideable subjects reach this; a profile is suspended, not hidden. */
@@ -1229,6 +1276,8 @@ async function record(
   subjectId: string,
   options: { reportId?: string; note?: string },
   now: Date,
+  /** Only a `hide` records this; see the column. */
+  extra: { tookDown?: boolean } = {},
 ): Promise<void> {
   await db.insert(moderationActions).values({
     id: crypto.randomUUID(),
@@ -1238,6 +1287,7 @@ async function record(
     subjectId,
     reportId: options.reportId ?? null,
     note: options.note?.trim() || null,
+    tookDown: extra.tookDown ?? null,
     createdAt: now,
   });
 }
@@ -1828,7 +1878,7 @@ export async function unhideSubject(
        * when the hide is what set it.
        */
       const standing = await tx
-        .select({ createdAt: moderationActions.createdAt })
+        .select({ createdAt: moderationActions.createdAt, tookDown: moderationActions.tookDown })
         .from(moderationActions)
         .where(
           and(
@@ -1839,7 +1889,16 @@ export async function unhideSubject(
         )
         .orderBy(desc(moderationActions.seq))
         .limit(1);
-      const hiddenAt = standing[0]?.createdAt;
+      /**
+       * A hide that found the row already gone put nothing there to restore.
+       *
+       * The timestamp match below cannot tell that apart on its own: an
+       * author's delete and a hide landing behind it can share a millisecond,
+       * and then it republishes what the author removed. `tookDown` records
+       * the fact. Null means the hide predates the column, where the match is
+       * still the best answer available.
+       */
+      const hiddenAt = standing[0]?.tookDown === false ? undefined : standing[0]?.createdAt;
       if (hiddenAt) {
         await tx
           .update(comments)
