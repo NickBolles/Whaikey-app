@@ -956,6 +956,58 @@ describe("review-pass hardening", () => {
     expect(own!.some((c) => c.author?.userId === stepped.id)).toBe(true);
   });
 
+  it("keeps a legacy comment withdrawn when its author claims a handle", async () => {
+    const owner = await createTestUser(db);
+    const viewer = await createTestUser(db);
+    const legacy = await createTestUser(db);
+    const bottle = await createTestBottle(db);
+    await claim(db, owner, "owner_cl", { isPublic: true });
+    await claim(db, viewer, "viewer_cl", { isPublic: true });
+
+    const pour = await insertPour(db, owner.id, bottle.id, { visibility: "public", rating: 4 });
+    await insertNote(db, pour.id, { freeform: "mine" });
+    // Written under the old behaviour, when nothing required a profile.
+    await db.insert(schema.comments).values({
+      id: uid("comment"),
+      pourId: pour.id,
+      userId: legacy.id,
+      body: "written before the commenter needed a profile",
+      createdAt: new Date(Date.now() - 60_000),
+    });
+
+    // Claiming a handle is exactly what flips `socialEnabled` to true. It must
+    // not publish a back catalogue nobody chose to publish.
+    await claim(db, legacy, "legacy_cl", { isPublic: true });
+
+    const comments = await listComments(db, viewer.id, pour.id);
+    expect(comments!.some((c) => c.author?.userId === legacy.id)).toBe(false);
+    const note = await getSocialNote(db, viewer.id, pour.id);
+    expect(note!.commentCount).toBe(0);
+
+    // The author still sees their own.
+    const own = await listComments(db, legacy.id, pour.id);
+    expect(own!.some((c) => c.author?.userId === legacy.id)).toBe(true);
+  });
+
+  it("shows a comment written after the author claimed their handle", async () => {
+    const owner = await createTestUser(db);
+    const viewer = await createTestUser(db);
+    const commenter = await createTestUser(db);
+    const bottle = await createTestBottle(db);
+    await claim(db, owner, "owner_af", { isPublic: true });
+    await claim(db, viewer, "viewer_af", { isPublic: true });
+    await claim(db, commenter, "after_af", { isPublic: true });
+
+    const pour = await insertPour(db, owner.id, bottle.id, { visibility: "public", rating: 4 });
+    await insertNote(db, pour.id, { freeform: "mine" });
+    await addComment(db, commenter.id, pour.id, "said with a handle");
+
+    const comments = await listComments(db, viewer.id, pour.id);
+    expect(comments!.some((c) => c.author?.userId === commenter.id)).toBe(true);
+    const note = await getSocialNote(db, viewer.id, pour.id);
+    expect(note!.commentCount).toBe(1);
+  });
+
   it("counts a legacy profile-less contributor exactly as the thread does, signed in or out", async () => {
     const owner = await createTestUser(db);
     const viewer = await createTestUser(db);

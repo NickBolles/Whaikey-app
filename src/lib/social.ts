@@ -1110,6 +1110,25 @@ async function countCheers(db: DB, pourId: string, viewerId: string | null): Pro
   return Number(rows[0]?.n ?? 0);
 }
 
+/**
+ * SQL for the second half of `commentWithdrawnByAuthor`: the comment was
+ * written after its author had a profile.
+ *
+ * The counts have to ask this too. `contributorVisibleSql` only checks that an
+ * enabled profile exists, so once a legacy commenter claims a handle their old
+ * comments would be counted beside a thread that omits them — the same
+ * count/thread disagreement that predicate was split out to prevent, arriving
+ * through the door the profile opens.
+ */
+function commentWrittenAfterAuthorJoinedSql(viewerId: string | null) {
+  const after = sql`exists (
+    select 1 from user_profiles sp
+    where sp.user_id = ${schema.comments.userId} and sp.created_at <= ${schema.comments.createdAt}
+  )`;
+  if (!viewerId) return after;
+  return sql`(${schema.comments.userId} = ${viewerId} or ${after})`;
+}
+
 async function countComments(db: DB, pourId: string, viewerId: string | null): Promise<number> {
   const conditions = [
     eq(schema.comments.pourId, pourId),
@@ -1117,6 +1136,7 @@ async function countComments(db: DB, pourId: string, viewerId: string | null): P
     // Same rule `listComments` applies per row, in the same shape: the count
     // beside a thread and the thread itself are one claim.
     contributorVisibleSql(schema.comments.userId, viewerId),
+    commentWrittenAfterAuthorJoinedSql(viewerId),
   ];
   const rows = await db
     .select({ n: sql<number>`count(*)` })
@@ -1329,6 +1349,7 @@ export async function getFriendFeed(db: DB, viewerId: string, opts: { limit?: nu
         inArray(schema.comments.pourId, pourIds),
         isNull(schema.comments.deletedAt),
         contributorVisibleSql(schema.comments.userId, viewerId),
+        commentWrittenAfterAuthorJoinedSql(viewerId),
       ),
     )
     .groupBy(schema.comments.pourId);
@@ -1743,8 +1764,12 @@ export interface CommentView {
  * after the step-back — into the queue as report-time evidence.
  */
 export function commentWithdrawnByAuthor(
-  authorSocialEnabled: boolean | null | undefined,
-  authorId: string,
+  author: {
+    socialEnabled: boolean | null | undefined;
+    /** When the author's profile was created, if they have one. */
+    profileCreatedAt: Date | null | undefined;
+  },
+  comment: { userId: string; createdAt: Date },
   viewerId: string | null,
 ): boolean {
   /**
@@ -1762,7 +1787,34 @@ export function commentWithdrawnByAuthor(
    * `updatePourVisibility` and `addComment` already apply. The author still
    * sees their own comment, exactly as a stepped-back author does.
    */
-  return authorSocialEnabled !== true && authorId !== viewerId;
+  // The author always sees their own, exactly as a stepped-back author does.
+  if (comment.userId === viewerId) return false;
+  if (author.socialEnabled !== true) return true;
+  /**
+   * And a comment written **before** its author had a profile stays withdrawn
+   * once they claim one.
+   *
+   * Clamping the account's old pours at `createProfile` closed the same door
+   * one table over and left this one open: claiming a handle flipped
+   * `socialEnabled` from null to true and republished every historical comment
+   * at once, under whatever parent pours are still readable, with no
+   * per-object choice by anyone. `docs/SOCIAL.md` is unambiguous — visibility
+   * is opt-in per object and never raised retroactively.
+   *
+   * Derived rather than stored, because the comparison **is** the question:
+   * `addComment` requires a profile now, so no new comment can predate its
+   * author's, and only rows written under the old behaviour can satisfy this.
+   * A stored flag would need a per-comment control to clear it, and there
+   * isn't one — comments have no visibility of their own. That is the honest
+   * limitation here: these stay withdrawn until Lane B gives comments a
+   * per-object control, or the author deletes and reposts. Publishing them
+   * instead would break the rule the whole model rests on.
+   *
+   * `<`, not `<=`: a comment sharing its millisecond with the profile was
+   * written after it, and erring visible there is the safe direction — the
+   * author chose to post it as a social account.
+   */
+  return author.profileCreatedAt != null && comment.createdAt < author.profileCreatedAt;
 }
 
 export async function listComments(db: DB, viewerId: string | null, pourId: string): Promise<CommentView[] | null> {
@@ -1785,6 +1837,7 @@ export async function listComments(db: DB, viewerId: string | null, pourId: stri
       authorDisplayName: schema.userProfiles.displayName,
       authorAvatarUrl: schema.userProfiles.avatarUrl,
       authorSocialEnabled: schema.userProfiles.socialEnabled,
+      authorProfileCreatedAt: schema.userProfiles.createdAt,
     })
     .from(schema.comments)
     .leftJoin(schema.userProfiles, eq(schema.userProfiles.userId, schema.comments.userId))
@@ -1797,7 +1850,14 @@ export async function listComments(db: DB, viewerId: string | null, pourId: stri
   const out: CommentView[] = [];
   for (const row of rows) {
     if (blocked.has(row.userId)) continue;
-    if (commentWithdrawnByAuthor(row.authorSocialEnabled, row.userId, viewerId)) continue;
+    if (
+      commentWithdrawnByAuthor(
+        { socialEnabled: row.authorSocialEnabled, profileCreatedAt: row.authorProfileCreatedAt },
+        row,
+        viewerId,
+      )
+    )
+      continue;
     const deleted = row.deletedAt != null;
     const isAuthor = viewerId != null && viewerId === row.userId;
     const canEdit = isAuthor && !deleted && now - row.createdAt.getTime() <= COMMENT_EDIT_WINDOW_MS;
@@ -2054,7 +2114,9 @@ export async function createReport(
           userId: schema.comments.userId,
           body: schema.comments.body,
           deletedAt: schema.comments.deletedAt,
+          createdAt: schema.comments.createdAt,
           authorSocialEnabled: schema.userProfiles.socialEnabled,
+          authorProfileCreatedAt: schema.userProfiles.createdAt,
         })
         .from(schema.comments)
         .leftJoin(schema.userProfiles, eq(schema.userProfiles.userId, schema.comments.userId))
@@ -2077,7 +2139,14 @@ export async function createReport(
         // path laxer than the read path: a stale id could report a comment the
         // app no longer showed, and the snapshot would preserve a revision
         // written after its author stepped back.
-        !commentWithdrawnByAuthor(comment.authorSocialEnabled, comment.userId, reporterId) &&
+        !commentWithdrawnByAuthor(
+          {
+            socialEnabled: comment.authorSocialEnabled,
+            profileCreatedAt: comment.authorProfileCreatedAt,
+          },
+          comment,
+          reporterId,
+        ) &&
         (await canViewPour(tx, reporterId, comment.pourId)) &&
         !(await isBlockedEither(tx, reporterId, comment.userId));
       subjectOwnerId = comment?.userId ?? null;
