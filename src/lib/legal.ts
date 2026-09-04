@@ -42,11 +42,27 @@ function isoDateOrNull(raw: string | undefined): string | null {
   return parsed.toISOString().slice(0, 10) === value ? value : null;
 }
 
+/**
+ * An address a `mailto:` can actually reach, or null.
+ *
+ * Same reason the date is parsed rather than counted: a presence check let
+ * `support.example.com` suppress the banner and publish an unusable contact
+ * link on both policy pages and `/support`, on the one fact a reader needs
+ * when something has gone wrong. Deliberately a shape test and not an
+ * RFC 5322 implementation — the failure this catches is a typo, and a
+ * validator strict enough to argue with a real address would be its own bug.
+ */
+function emailOrNull(raw: string | undefined): string | null {
+  const value = raw?.trim();
+  if (!value || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return null;
+  return value;
+}
+
 export function legalIdentity(): LegalIdentity {
   return {
     entity: process.env.NEXT_PUBLIC_LEGAL_ENTITY?.trim() || null,
     jurisdiction: process.env.NEXT_PUBLIC_LEGAL_JURISDICTION?.trim() || null,
-    contactEmail: process.env.NEXT_PUBLIC_SUPPORT_EMAIL?.trim() || null,
+    contactEmail: emailOrNull(process.env.NEXT_PUBLIC_SUPPORT_EMAIL),
     effectiveDate: isoDateOrNull(process.env.NEXT_PUBLIC_POLICY_EFFECTIVE_DATE),
   };
 }
@@ -56,6 +72,8 @@ export function missingLegalFacts(identity: LegalIdentity): string[] {
   const missing: string[] = [];
   if (!identity.entity) missing.push("the company it binds");
   if (!identity.jurisdiction) missing.push("the law it is governed by");
+  // Absent covers malformed, as with the date: an unusable `mailto:` is not a
+  // contact address, and this banner is what says whether the page is finished.
   if (!identity.contactEmail) missing.push("an address to reach");
   /**
    * The effective date counts, and it was optional at first.

@@ -31,7 +31,9 @@ export default function PrivacyPage() {
           <li>
             <strong className="text-foreground">Your account</strong> — the name, email address and
             avatar your sign-in provider gives us. There is no password: sign-in is Google or Apple
-            only, and we never see a credential.
+            only, so we never see one. Signing in also leaves the tokens the provider issues for it,
+            encrypted at rest. They exist because sign-in works that way; Whaikey never uses them to
+            read anything from Google or Apple, and they are deleted with the account.
           </li>
           <li>
             <strong className="text-foreground">Your journal</strong> — pours, ratings, tasting

@@ -91,6 +91,38 @@ describe("PolicyPage legal identity", () => {
     }
   });
 
+  it("treats a malformed support email as not set", () => {
+    // A presence check published an unusable `mailto:` on both policy pages
+    // and /support — on the one fact a reader needs when something has gone
+    // wrong — while the banner said the page was finished.
+    for (const bad of ["support.example.com", "support@", "@whaikey.test", "not an address"]) {
+      setEnv({
+        NEXT_PUBLIC_LEGAL_ENTITY: "Whaikey, LLC",
+        NEXT_PUBLIC_LEGAL_JURISDICTION: "the State of Delaware, USA",
+        NEXT_PUBLIC_SUPPORT_EMAIL: bad,
+        NEXT_PUBLIC_POLICY_EFFECTIVE_DATE: "2026-09-04",
+      });
+      render(<PolicyPage title="Terms">{body}</PolicyPage>);
+
+      expect(screen.getByRole("note")).toHaveTextContent("an address to reach");
+      expect(document.querySelector(`a[href="mailto:${bad}"]`)).toBeNull();
+      cleanup();
+    }
+  });
+
+  it("publishes a well-formed support email", () => {
+    setEnv({
+      NEXT_PUBLIC_LEGAL_ENTITY: "Whaikey, LLC",
+      NEXT_PUBLIC_LEGAL_JURISDICTION: "the State of Delaware, USA",
+      NEXT_PUBLIC_SUPPORT_EMAIL: "support@whaikey.test",
+      NEXT_PUBLIC_POLICY_EFFECTIVE_DATE: "2026-09-04",
+    });
+    render(<PolicyPage title="Terms">{body}</PolicyPage>);
+
+    expect(screen.queryByRole("note")).toBeNull();
+    expect(document.querySelector('a[href="mailto:support@whaikey.test"]')).not.toBeNull();
+  });
+
   /**
    * Each identity fact stands on its own. The company used to gate both, so a
    * configured jurisdiction was thrown away and called unpublished while the

@@ -70,6 +70,18 @@ export const auth = betterAuth({
   trustedOrigins: trustedOrigins(),
   socialProviders: socialProviders(),
   emailAndPassword: { enabled: false },
+  /**
+   * Better Auth's `account` table keeps the provider's access, refresh and id
+   * tokens. Whaikey never calls Google or Apple on a user's behalf — the
+   * providers are an identity source and nothing else — but the rows exist
+   * because the adapter writes them, so they are encrypted at rest with
+   * `BETTER_AUTH_SECRET` rather than sitting in plaintext beside the journal.
+   *
+   * `/privacy` names them, their purpose and their retention. It used to say
+   * "we never see a credential" and list only the name, email and avatar,
+   * which was a data inventory missing its most sensitive row.
+   */
+  account: { encryptOAuthTokens: true },
 });
 
 export type Session = typeof auth.$Infer.Session;
