@@ -607,6 +607,9 @@ describe("comments", () => {
     // report days later must see what the reporter saw, not whatever the
     // author has since rewritten it to.
     expect(rows[0].subjectSnapshot).toBe("spam-ish");
+    // And who to answer for it. The subject can be hard-deleted; the account
+    // behind it is what an account-level action needs, so the report carries it.
+    expect(rows[0].subjectOwnerId).toBe(commenter.id);
     // A fabricated subject never reaches the queue.
     await expect(
       createReport(db, owner.id, { subjectType: "pour", subjectId: "no-such-pour", reason: "spam" }),

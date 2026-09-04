@@ -1,0 +1,1 @@
+ALTER TABLE "reports" ADD COLUMN "subject_owner_id" text;

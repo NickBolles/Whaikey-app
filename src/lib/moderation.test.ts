@@ -1213,3 +1213,125 @@ describe("an operator can be deleted without taking the trail with them", () => 
     expect(await isModerationHidden(db, "pour", pourId)).toBe(true);
   });
 });
+
+/**
+ * Deleting the reported thing must not delete the account's answer for it.
+ * `deletePour` is a hard delete, so without the owner recorded on the report
+ * the queue lost the Suspend control the moment the author removed the
+ * evidence — moderation reachable only while the subject cooperated.
+ */
+describe("a deleted subject does not take its author out of reach", () => {
+  it("keeps the recorded owner, and the report, after the pour is gone", async () => {
+    const bottle = await createTestBottle(db);
+    const pourId = uid("pour");
+    await db
+      .insert(schema.pours)
+      .values({ id: pourId, userId: author.id, bottleId: bottle.id, visibility: "public" });
+    await db.insert(schema.tastingNotes).values({ id: uid("note"), pourId, freeform: "something awful" });
+
+    await db.insert(schema.reports).values({
+      id: uid("report"),
+      subjectType: "pour",
+      subjectId: pourId,
+      reporterId: reporter.id,
+      reason: "abuse",
+      subjectOwnerId: author.id,
+      subjectSnapshot: await subjectPreview(db, "pour", pourId),
+    });
+
+    await db.delete(schema.pours).where(eq(schema.pours.id, pourId));
+
+    const [row] = await listOpenReports(db);
+    // The content is gone; what it said and who posted it are not.
+    expect(row.preview).toBeNull();
+    expect(row.reportedPreview).toContain("something awful");
+    expect(row.subjectOwnerId).toBe(author.id);
+    expect(row.subjectOwnerSuspended).toBe(false);
+
+    // And the account-level action still works, which is the whole point.
+    await suspendAccount(db, operator.id, author.id, "repeated abuse", { reportId: row.id });
+    const after = await db.query.userProfiles.findFirst({
+      where: eq(schema.userProfiles.userId, author.id),
+    });
+    expect(after?.suspendedAt).not.toBeNull();
+  });
+
+  it("reports a recorded owner as suspended once they are", async () => {
+    await suspendAccount(db, operator.id, author.id, "abuse");
+    await db.insert(schema.reports).values({
+      id: uid("report"),
+      subjectType: "pour",
+      subjectId: uid("gone"),
+      reporterId: reporter.id,
+      reason: "abuse",
+      subjectOwnerId: author.id,
+    });
+    const [row] = await listOpenReports(db);
+    // Otherwise the queue offers Suspend on an account that already is.
+    expect(row.subjectOwnerSuspended).toBe(true);
+  });
+});
+
+/**
+ * The preview is not a preview — it is the only view. There is no expansion
+ * control and deliberately no link to the content, so a 500-character cap put
+ * anything after it beyond the operator's reach: a comment runs to 1,000
+ * characters and a tasting note to 11,000.
+ */
+describe("the operator sees the whole reported text", () => {
+  it("does not truncate a long comment", async () => {
+    const bottle = await createTestBottle(db);
+    const pourId = uid("pour");
+    await db
+      .insert(schema.pours)
+      .values({ id: pourId, userId: author.id, bottleId: bottle.id, visibility: "public" });
+    const body = `${"a".repeat(900)}THE-ABUSIVE-PART`;
+    const commentId = uid("comment");
+    await db.insert(schema.comments).values({ id: commentId, pourId, userId: author.id, body });
+
+    expect(await subjectPreview(db, "comment", commentId)).toContain("THE-ABUSIVE-PART");
+  });
+
+  it("does not truncate a long tasting note", async () => {
+    const bottle = await createTestBottle(db);
+    const pourId = uid("pour");
+    await db
+      .insert(schema.pours)
+      .values({ id: pourId, userId: author.id, bottleId: bottle.id, visibility: "public" });
+    await db
+      .insert(schema.tastingNotes)
+      .values({ id: uid("note"), pourId, freeform: `${"b".repeat(900)}THE-ABUSIVE-PART` });
+
+    expect(await subjectPreview(db, "pour", pourId)).toContain("THE-ABUSIVE-PART");
+  });
+});
+
+/**
+ * Several people reporting one comment is the normal case, and the second
+ * report is genuinely handled by the hide already in force. `hideSubject` was
+ * built for it; the queue just needs to be able to reach that path.
+ */
+describe("a second report on an already-hidden subject", () => {
+  it("resolves through hide without recording a second action", async () => {
+    const bottle = await createTestBottle(db);
+    const pourId = uid("pour");
+    await db
+      .insert(schema.pours)
+      .values({ id: pourId, userId: author.id, bottleId: bottle.id, visibility: "public" });
+    const commentId = uid("comment");
+    await db.insert(schema.comments).values({ id: commentId, pourId, userId: author.id, body: "no" });
+
+    const first = await report("comment", commentId);
+    const second = await report("comment", commentId, new Date(), author.id);
+
+    await hideSubject(db, operator.id, "comment", commentId, { reportId: first, note: "abuse" });
+    await hideSubject(db, operator.id, "comment", commentId, { reportId: second, note: "same abuse" });
+
+    // Both reports handled...
+    expect(await countOpenReports(db)).toBe(0);
+    // ...by one hide. A second would orphan the first's `deletedAt` and make
+    // lifting restore nothing.
+    const actions = await listModerationActions(db, 10);
+    expect(actions.filter((a) => a.action === "hide")).toHaveLength(1);
+  });
+});

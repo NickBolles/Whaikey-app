@@ -269,13 +269,17 @@ function ReportRow({
         {report.editedSinceReport ? (
           <p className="text-xs font-semibold text-danger">Edited since it was reported</p>
         ) : null}
-        <p className="text-sm text-muted leading-relaxed whitespace-pre-wrap">
+        {/* The whole text, scrolled rather than cut: a comment runs to 1,000
+            characters and a tasting note to 11,000, and there is no expansion
+            control or link to the content, so anything trimmed here is
+            something the operator can never read. */}
+        <p className="text-sm text-muted leading-relaxed whitespace-pre-wrap max-h-64 overflow-y-auto">
           {report.reportedPreview ??
             report.preview ??
             "(the reported thing no longer exists)"}
         </p>
         {report.editedSinceReport ? (
-          <p className="text-xs text-muted leading-relaxed whitespace-pre-wrap border-l-2 border-border pl-3">
+          <p className="text-xs text-muted leading-relaxed whitespace-pre-wrap border-l-2 border-border pl-3 max-h-40 overflow-y-auto">
             <span className="font-semibold">Now: </span>
             {report.preview ?? "(deleted)"}
           </p>
@@ -313,7 +317,18 @@ function ReportRow({
         {report.subjectType !== "profile" && (
           <button
             type="button"
-            disabled={busy || report.alreadyHidden || note.trim().length === 0}
+            /*
+              Enabled even when the subject is already hidden. Several people
+              reporting one comment is the normal case, and handling the first
+              report set `alreadyHidden` on all the rest — which disabled the
+              only control that resolves them, leaving real reports open until
+              somebody dismissed them as if they were unfounded. `hideSubject`
+              was written for exactly this: a hide over a hide records no second
+              action and resolves the report anyway, because that report
+              genuinely is handled by the action already in force. The button
+              was the only thing standing in the way of the path behind it.
+            */
+            disabled={busy || note.trim().length === 0}
             title={note.trim() ? undefined : "A hide needs a reason its author can appeal"}
             onClick={() =>
               onAct({
@@ -326,7 +341,7 @@ function ReportRow({
             }
             className="btn-secondary px-4 py-2 text-sm font-medium disabled:opacity-50"
           >
-            Hide
+            {report.alreadyHidden ? "Resolve as hidden" : "Hide"}
           </button>
         )}
         {report.subjectOwnerId && !report.subjectOwnerSuspended && (

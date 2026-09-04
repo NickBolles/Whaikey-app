@@ -96,6 +96,7 @@ export async function listOpenReports(
       subjectId: reports.subjectId,
       reason: reports.reason,
       subjectSnapshot: reports.subjectSnapshot,
+      recordedOwnerId: reports.subjectOwnerId,
       createdAt: reports.createdAt,
       reporterHandle: userProfiles.handle,
     })
@@ -106,8 +107,8 @@ export async function listOpenReports(
     .limit(limit);
 
   return Promise.all(
-    rows.map(async ({ subjectSnapshot, ...row }) => {
-      const subject = await describeSubject(db, row.subjectType, row.subjectId);
+    rows.map(async ({ subjectSnapshot, recordedOwnerId, ...row }) => {
+      const subject = await describeSubject(db, row.subjectType, row.subjectId, recordedOwnerId);
       return {
         ...row,
         ageHours: Math.floor((now.getTime() - row.createdAt.getTime()) / 3_600_000),
@@ -137,6 +138,13 @@ interface SubjectDescription {
  * (`createReport`) and the queue renders it again at review time. One function
  * for both, so "what was reported" and "what it says now" are the same
  * projection of two different moments rather than two projections that drift.
+ *
+ * **Not truncated.** It was capped at 500 characters, which is a reasonable
+ * length for a preview and a wrong one for the only view there is: a comment
+ * runs to 1,000 characters and a tasting note to 11,000, the queue has no
+ * expansion and deliberately no link to the content, and abuse placed after
+ * the cutoff would never reach the operator at all. A report the operator
+ * cannot read is a report they cannot act on, so the queue scrolls instead.
  */
 export async function subjectPreview(
   db: DB,
@@ -148,7 +156,7 @@ export async function subjectPreview(
       columns: { body: true },
       where: eq(comments.id, subjectId),
     });
-    return row ? row.body.slice(0, PREVIEW_MAX) : null;
+    return row ? row.body : null;
   }
   if (subjectType === "pour") {
     const pour = await db.query.pours.findFirst({
@@ -163,29 +171,37 @@ export async function subjectPreview(
     const text = [note?.nose, note?.palate, note?.finish, note?.freeform]
       .filter(Boolean)
       .join(" · ");
-    return text ? text.slice(0, PREVIEW_MAX) : "(no written note)";
+    return text ? text : "(no written note)";
   }
   const row = await db.query.userProfiles.findFirst({
     columns: { handle: true, displayName: true, bio: true },
     where: eq(userProfiles.userId, subjectId),
   });
   if (!row) return null;
-  return [`@${row.handle}`, row.displayName, row.bio].filter(Boolean).join(" · ").slice(0, PREVIEW_MAX);
+  return [`@${row.handle}`, row.displayName, row.bio].filter(Boolean).join(" · ");
 }
-
-/** How much of the reported thing an operator needs to judge it. */
-export const PREVIEW_MAX = 500;
 
 async function describeSubject(
   db: DB,
   subjectType: ReportSubjectType,
   subjectId: string,
+  /**
+   * The owner recorded when the report was filed.
+   *
+   * Used whenever the subject itself is gone, because `deletePour` is a hard
+   * delete: without it, deleting the reported pour emptied this whole
+   * description and the queue dropped the Suspend control with it, so removing
+   * the content put the account out of moderation's reach while its report sat
+   * open. Deleting the evidence is not an answer for having posted it.
+   */
+  recordedOwnerId: string | null = null,
 ): Promise<SubjectDescription> {
   const empty: SubjectDescription = {
     preview: null,
-    subjectOwnerId: null,
-    subjectOwnerSuspended: false,
-    subjectOwnerSuspendedAt: null,
+    subjectOwnerId: recordedOwnerId,
+    ...(recordedOwnerId
+      ? await suspensionOf(db, recordedOwnerId)
+      : { subjectOwnerSuspended: false, subjectOwnerSuspendedAt: null }),
     alreadyHidden: false,
   };
 
@@ -574,7 +590,7 @@ async function resolveOpenReport(
   about: { subjectType: ReportSubjectType; subjectId: string } | { ownerId: string },
 ): Promise<void> {
   const report = await tx.query.reports.findFirst({
-    columns: { subjectType: true, subjectId: true },
+    columns: { subjectType: true, subjectId: true, subjectOwnerId: true },
     where: and(eq(reports.id, reportId), eq(reports.state, "open")),
   });
   if (!report) throw new ReportAlreadyHandledError();
@@ -582,7 +598,19 @@ async function resolveOpenReport(
   const matches =
     "subjectId" in about
       ? report.subjectType === about.subjectType && report.subjectId === about.subjectId
-      : (await reportSubjectOwner(tx, report.subjectType, report.subjectId)) === about.ownerId;
+      : /**
+         * The owner recorded on the report answers first, and the live subject
+         * only as a fallback for reports filed before it was recorded.
+         *
+         * Asking the subject who owns it fails once the subject is gone —
+         * `deletePour` is a hard delete — so suspending the author of a
+         * deleted pour could not claim the report about it. The report then had
+         * no honest way to close at all: it stayed open past the SLA unless
+         * somebody dismissed it as unfounded. Deleting the evidence would have
+         * been a way to keep a complaint permanently unresolvable.
+         */
+        (report.subjectOwnerId ??
+          (await reportSubjectOwner(tx, report.subjectType, report.subjectId))) === about.ownerId;
   if (!matches) throw new ReportSubjectMismatchError();
 
   const rows = await tx

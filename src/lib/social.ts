@@ -1831,33 +1831,60 @@ export async function createReport(
   reporterId: string,
   input: { subjectType: ReportSubjectType; subjectId: string; reason: string },
 ): Promise<boolean> {
-  // The subject must be VISIBLE to the reporter, not merely exist — a bare
-  // existence check would make the 201/404 split an oracle for probing
-  // private pour/comment ids, and you can only report what reached you.
-  let subjectVisible = false;
-  if (input.subjectType === "pour") {
-    subjectVisible = await canViewPour(db, reporterId, input.subjectId);
-  } else if (input.subjectType === "comment") {
-    const comment = await db.query.comments.findFirst({
-      columns: { id: true, pourId: true, userId: true },
-      where: eq(schema.comments.id, input.subjectId),
-    });
-    subjectVisible =
-      comment != null &&
-      (await canViewPour(db, reporterId, comment.pourId)) &&
-      !(await isBlockedEither(db, reporterId, comment.userId));
-  } else {
-    const profile = await db.query.userProfiles.findFirst({
-      columns: { userId: true, socialEnabled: true },
-      where: eq(schema.userProfiles.userId, input.subjectId),
-    });
-    subjectVisible =
-      profile != null && profile.socialEnabled && !(await isBlockedEither(db, reporterId, profile.userId));
-  }
-  if (!subjectVisible) return false;
-
-  await db.transaction(async (tx) => {
+  return db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`report-rl:${reporterId}`}))`);
+
+    /**
+     * Visibility, owner and snapshot are read in ONE transaction, and the
+     * visibility check used to sit outside it.
+     *
+     * The subject must be VISIBLE to the reporter, not merely exist — a bare
+     * existence check would make the 201/404 split an oracle for probing
+     * private pour/comment ids, and you can only report what reached you. But
+     * checking that outside the transaction left a window between "the
+     * reporter could see this" and "here is what it said": an author editing
+     * in between had the report record their replacement text, which is the
+     * bug the snapshot exists to prevent, one window smaller. At read
+     * committed each statement still takes its own view, so this narrows the
+     * gap to a statement rather than a round trip — and for a comment it
+     * closes it, because the body is read in the same row as the owner the
+     * visibility check needs.
+     */
+    let subjectVisible = false;
+    let subjectOwnerId: string | null = null;
+    let subjectSnapshot: string | null = null;
+    if (input.subjectType === "pour") {
+      const pour = await tx.query.pours.findFirst({
+        columns: { userId: true },
+        where: eq(schema.pours.id, input.subjectId),
+      });
+      subjectVisible = pour != null && (await canViewPour(tx, reporterId, input.subjectId));
+      subjectOwnerId = pour?.userId ?? null;
+    } else if (input.subjectType === "comment") {
+      const comment = await tx.query.comments.findFirst({
+        columns: { id: true, pourId: true, userId: true, body: true },
+        where: eq(schema.comments.id, input.subjectId),
+      });
+      subjectVisible =
+        comment != null &&
+        (await canViewPour(tx, reporterId, comment.pourId)) &&
+        !(await isBlockedEither(tx, reporterId, comment.userId));
+      subjectOwnerId = comment?.userId ?? null;
+      // Straight off the row the check just read: no second read to race.
+      subjectSnapshot = comment?.body ?? null;
+    } else {
+      const profile = await tx.query.userProfiles.findFirst({
+        columns: { userId: true, socialEnabled: true },
+        where: eq(schema.userProfiles.userId, input.subjectId),
+      });
+      subjectVisible =
+        profile != null && profile.socialEnabled && !(await isBlockedEither(tx, reporterId, profile.userId));
+      subjectOwnerId = profile?.userId ?? null;
+    }
+    if (!subjectVisible) return false;
+    if (subjectSnapshot == null) {
+      subjectSnapshot = await subjectPreview(tx, input.subjectType, input.subjectId);
+    }
     const existing = await tx.query.reports.findFirst({
       where: and(
         eq(schema.reports.reporterId, reporterId),
@@ -1866,7 +1893,7 @@ export async function createReport(
         eq(schema.reports.state, "open"),
       ),
     });
-    if (existing) return;
+    if (existing) return true;
     const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
     const recent = await tx
       .select({ n: sql<number>`count(*)` })
@@ -1879,13 +1906,14 @@ export async function createReport(
       subjectId: input.subjectId,
       reporterId,
       reason: input.reason.trim(),
-      // What the reporter is complaining about, captured now. Read inside the
-      // transaction so the snapshot and the report are one write: a subject
-      // edited between the two would otherwise be recorded as the original.
-      subjectSnapshot: await subjectPreview(tx, input.subjectType, input.subjectId),
+      // Who to answer for it, and what they said. The owner is recorded because
+      // the subject can be hard-deleted, and a report whose subject is gone
+      // still has an account behind it.
+      subjectOwnerId,
+      subjectSnapshot,
     });
+    return true;
   });
-  return true;
 }
 
 export const commentCreateSchema = z.object({

@@ -688,6 +688,16 @@ export const reports = pgTable(
       .references(() => user.id, { onDelete: "cascade" }),
     reason: text("reason").notNull(),
     /**
+     * Who owned the reported thing when it was reported.
+     *
+     * The subject can be deleted — `deletePour` is a hard delete — and without
+     * this the queue lost the owner along with it, taking the Suspend control
+     * with it: deleting the reported pour was a way to put the account itself
+     * out of reach of moderation while the report stayed open. The content
+     * going away is not the account being answered for.
+     */
+    subjectOwnerId: text("subject_owner_id"),
+    /**
      * What the reported thing said **when it was reported**.
      *
      * The queue used to render the subject's current text, which let a
