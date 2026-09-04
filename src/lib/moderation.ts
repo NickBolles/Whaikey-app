@@ -223,6 +223,9 @@ export async function hideSubject(
   // One transaction: content hidden with no audit row is a decision nobody can
   // answer an appeal from, and an audit row with nothing hidden is worse.
   await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${moderationLockKey(subjectType, subjectId)}))`,
+    );
     const changed = await applyHide(tx, subjectType, subjectId, now);
     if (!changed) throw new UnknownSubjectError();
     await record(tx, actorId, "hide", subjectType, subjectId, options, now);
@@ -533,6 +536,18 @@ export async function countBreachedReports(db: DB, now = new Date()): Promise<nu
  *
  * `moderation_actions_subject_idx` covers this lookup.
  */
+/**
+ * The lock a moderation hold is read and written under.
+ *
+ * Keyed on the subject rather than its owner, because the check needs to
+ * serialize with the hide and the hide does not know the owner. Without it the
+ * owner's visibility PATCH can read "no hide", block on the row, and commit
+ * after the hide finishes — putting back exactly what was taken down.
+ */
+export function moderationLockKey(subjectType: ReportSubjectType, subjectId: string): string {
+  return `moderation:${subjectType}:${subjectId}`;
+}
+
 export async function isModerationHidden(
   db: DB,
   subjectType: ReportSubjectType,
@@ -610,6 +625,9 @@ export async function unhideSubject(
 ): Promise<void> {
   if (subjectType === "profile") throw new CannotHideProfileError();
   await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${moderationLockKey(subjectType, subjectId)}))`,
+    );
     if (subjectType === "comment") {
       await tx.update(comments).set({ deletedAt: null }).where(eq(comments.id, subjectId));
     }

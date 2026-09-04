@@ -399,6 +399,33 @@ describe("a hide that sticks", () => {
     await expect(updatePourVisibility(db, author.id, pourId, "private")).resolves.toBeTruthy();
   });
 
+  /**
+   * Revoking the links that exist and leaving the mint open is a pause, not a
+   * takedown: `getPublicPourShare` never consults visibility, so one press of
+   * Share would serve the same content at a fresh code.
+   */
+  it("cannot be re-shared at a new code while it stands", async () => {
+    const { createPourShare } = await import("./pour-sharing");
+    const { ModeratedError } = await import("./pours");
+    const bottle = await createTestBottle(db);
+    const pourId = uid("pour");
+    await db.insert(schema.pours).values({
+      id: pourId,
+      userId: author.id,
+      bottleId: bottle.id,
+      visibility: "public",
+    });
+
+    await hideSubject(db, operator.id, "pour", pourId, { note: "abusive" });
+    await expect(createPourShare(db, author.id, pourId)).rejects.toBeInstanceOf(ModeratedError);
+
+    // And can be shared again once an operator lifts it.
+    await unhideSubject(db, operator.id, "pour", pourId, "appeal upheld");
+    await expect(createPourShare(db, author.id, pourId)).resolves.toMatchObject({
+      code: expect.any(String),
+    });
+  });
+
   it("is lifted by an operator, and then the owner decides again", async () => {
     const { updatePourVisibility } = await import("./pours");
     const bottle = await createTestBottle(db);

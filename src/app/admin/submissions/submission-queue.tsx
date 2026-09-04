@@ -35,7 +35,13 @@ interface SubmissionView {
   isOwn: boolean;
 }
 
-export function SubmissionQueue({ submissions }: { submissions: SubmissionView[] }) {
+export function SubmissionQueue({
+  submissions,
+  pending,
+}: {
+  submissions: SubmissionView[];
+  pending: number;
+}) {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -66,9 +72,8 @@ export function SubmissionQueue({ submissions }: { submissions: SubmissionView[]
       <header className="flex flex-col gap-1">
         <h1 className="font-display text-2xl font-semibold">Submitted bottles</h1>
         <p className="text-sm text-muted">
-          {submissions.length === 0
-            ? "Nothing waiting."
-            : `${submissions.length} waiting on review`}
+          {pending === 0 ? "Nothing waiting." : `${pending} waiting on review`}
+          {pending > submissions.length && ` · showing the ${submissions.length} oldest`}
         </p>
         <nav className="flex gap-3 text-sm">
           <Link href="/admin/reports" className="text-accent hover:underline">
@@ -123,9 +128,11 @@ function SubmissionRow({
   return (
     <li className="card p-4 flex flex-col gap-3">
       <div className="flex items-baseline justify-between gap-3">
-        <Link href={`/bottles/${submission.bottleId}`} className="font-medium hover:underline">
-          {submission.name}
-        </Link>
+        {/* `/bottles/[id]` is 404 for anyone but the submitter while the
+            bottle is pending — `catalogVisibleTo` says so and the operator is
+            not an exception to it. The queue carries the facts a review needs
+            inline instead of linking somewhere that would just fail. */}
+        <span className="font-medium">{submission.name}</span>
         <span className="text-xs text-muted">{submission.ageHours}h old</span>
       </div>
 

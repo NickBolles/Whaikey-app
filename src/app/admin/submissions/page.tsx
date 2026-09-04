@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { getDb } from "@/db";
 import { getSessionUser } from "@/lib/session";
 import { isOperator } from "@/lib/operator";
-import { listPendingSubmissions } from "@/lib/catalog";
+import { countPendingSubmissions, listPendingSubmissions } from "@/lib/catalog";
 import { SubmissionQueue } from "./submission-queue";
 
 export const dynamic = "force-dynamic";
@@ -20,10 +20,17 @@ export default async function AdminSubmissionsPage() {
   const user = await getSessionUser();
   if (!isOperator(user)) notFound();
 
-  const submissions = await listPendingSubmissions(getDb());
+  const db = getDb();
+  // One bounded page and the true backlog beside it: the array length alone
+  // would read "100 waiting" forever once there were more than a hundred.
+  const [submissions, pending] = await Promise.all([
+    listPendingSubmissions(db),
+    countPendingSubmissions(db),
+  ]);
 
   return (
     <SubmissionQueue
+      pending={pending}
       submissions={submissions.map((s) => ({
         ...s,
         createdAt: s.createdAt.toISOString(),

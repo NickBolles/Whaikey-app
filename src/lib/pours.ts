@@ -5,7 +5,7 @@ import * as schema from "@/db/schema";
 import { POUR_VISIBILITIES, SERVING_STYLES, type Pour, type PourVisibility, type TastingNote } from "@/db/schema";
 import { canViewBottle } from "@/lib/catalog-visibility";
 import { isValidLeaf } from "@/lib/flavor-wheel";
-import { isModerationHidden } from "@/lib/moderation";
+import { isModerationHidden, moderationLockKey } from "@/lib/moderation";
 import { refreshUserPalate } from "@/lib/palate-store";
 import { getSocialPrefs } from "@/lib/social";
 
@@ -390,7 +390,16 @@ export async function updatePourVisibility(
        * "hide" had, and the answer there was to refuse the action; here the
        * action is right and it is this door that has to close. Only an
        * operator's `unhide` reopens it.
+       *
+       * Under the subject's moderation lock, which `hideSubject` also takes:
+       * unlocked, this read can see "no hide", then block on the row and
+       * commit after the hide completes, putting back exactly what was taken
+       * down. The hide has no idea who the owner is, so the lock is keyed on
+       * the subject rather than on the account.
        */
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtext(${moderationLockKey("pour", pourId)}))`,
+      );
       if (await isModerationHidden(tx, "pour", pourId)) throw new ModeratedError();
 
       // Same lock as makeEverythingPrivate: the check and the write are
