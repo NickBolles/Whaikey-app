@@ -213,18 +213,24 @@ async function listOpenReportsIn(
 
   /**
    * The pours a reported comment sits under, which are not the reported pours.
-   * Needed because a comment's visibility is its pour's visibility.
+   * Needed because a comment is only as visible as its pour, and its pour's
+   * *owner* is not necessarily its author.
    */
   const parentPourIds = Array.from(
     new Set(commentRows.map((c) => c.pourId).filter((id) => !pourById.has(id))),
   );
-  const [parentPourRows, profileRows, hideActions, suspendActions] = await Promise.all([
-    parentPourIds.length
-      ? db
-          .select({ id: pours.id, userId: pours.userId, visibility: pours.visibility })
-          .from(pours)
-          .where(inArray(pours.id, parentPourIds))
-      : [],
+  const parentPourRows = parentPourIds.length
+    ? await db
+        .select({ id: pours.id, userId: pours.userId, visibility: pours.visibility })
+        .from(pours)
+        .where(inArray(pours.id, parentPourIds))
+    : [];
+  // Parent-pour owners join the profile lookup: a comment under a pour whose
+  // owner has stepped back is withdrawn with the pour, whatever its own
+  // author's settings say.
+  for (const p of parentPourRows) ownerIds.push(p.userId);
+
+  const [profileRows, hideActions, suspendActions] = await Promise.all([
     ownerIds.length
       ? db
           .select({
@@ -263,7 +269,26 @@ async function listOpenReportsIn(
    * So the live projection is gated on the same conditions that made the
    * subject reportable in the first place, rather than on the operator's
    * privileges — which are for acting, not for reading.
+   *
+   * This deliberately does not delegate to `canViewPourContext`, because it is
+   * a different question: that one asks "may *this viewer* see it", and half
+   * its answer is friends-and-followers relative to a viewer the queue does
+   * not have. This asks "is it still shared with anyone at all". But it must
+   * stay **at least as strict** on the parts that are not viewer-relative —
+   * the author's `socialEnabled` and the visibility tier — and getting that
+   * incomplete is exactly what went wrong on the first attempt, which checked
+   * a comment author's switch and never its pour owner's.
    */
+  const sharedWithAnyone = (pourId: string): boolean => {
+    const pour = pourVisibility.get(pourId);
+    if (!pour || pour.visibility === "private") return false;
+    // The **pour owner's** switch, which is what `canViewPourContext` keys on
+    // before it looks at the tier at all. Checking the comment author's and
+    // not the pour owner's was the gap: a comment under a withdrawn pour is
+    // withdrawn with it, whatever its own author's settings say.
+    return profileById.get(pour.userId)?.socialEnabled === true;
+  };
+
   const stillReadable = (row: (typeof rows)[number]): boolean => {
     if (row.subjectType === "profile") {
       return profileById.get(row.subjectId)?.socialEnabled === true;
@@ -271,13 +296,13 @@ async function listOpenReportsIn(
     if (row.subjectType === "comment") {
       const comment = commentById.get(row.subjectId);
       if (!comment || comment.deletedAt != null) return false;
-      const parent = pourVisibility.get(comment.pourId);
-      if (!parent || parent.visibility === "private") return false;
+      if (!sharedWithAnyone(comment.pourId)) return false;
+      // The comment's own author too: strictly stricter than the pour's rule,
+      // and a comment by someone who has stepped back should not resurface in
+      // an operator's view either.
       return profileById.get(comment.userId)?.socialEnabled === true;
     }
-    const pour = pourVisibility.get(row.subjectId);
-    if (!pour || pour.visibility === "private") return false;
-    return profileById.get(pour.userId)?.socialEnabled === true;
+    return sharedWithAnyone(row.subjectId);
   };
 
   return rows.map(({ subjectSnapshot, recordedOwnerId, ...row }) => {

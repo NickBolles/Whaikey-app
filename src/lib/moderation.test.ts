@@ -1530,6 +1530,51 @@ describe("the queue does not show what was never shared", () => {
     expect(row.liveReadable).toBe(false);
   });
 
+  /**
+   * The pour's owner is not necessarily the comment's author, and
+   * `canViewPourContext` keys on the *pour author's* switch before it looks at
+   * the tier at all. The first version of this gate checked only the comment
+   * author's, so a comment under a withdrawn pour stayed readable.
+   */
+  it("withholds a comment whose pour owner stepped back, not just its author", async () => {
+    const bottle = await createTestBottle(db);
+    const pourId = uid("pour");
+    // The pour belongs to `reporter`; the comment on it is by `author`.
+    await db
+      .insert(schema.pours)
+      .values({ id: pourId, userId: reporter.id, bottleId: bottle.id, visibility: "public" });
+    const commentId = uid("comment");
+    await db
+      .insert(schema.comments)
+      .values({ id: commentId, pourId, userId: author.id, body: "something awful" });
+    await db.insert(schema.reports).values({
+      id: uid("report"),
+      subjectType: "comment",
+      subjectId: commentId,
+      reporterId: reporter.id,
+      reason: "abuse",
+      subjectOwnerId: author.id,
+      subjectSnapshot: await subjectPreview(db, "comment", commentId),
+    });
+
+    // The pour's OWNER steps back. The comment's author is untouched, and the
+    // pour's visibility column still says "public".
+    await db
+      .update(schema.userProfiles)
+      .set({ socialEnabled: false })
+      .where(eq(schema.userProfiles.userId, reporter.id));
+    await db
+      .update(schema.comments)
+      .set({ body: "PRIVATE-REVISION" })
+      .where(eq(schema.comments.id, commentId));
+
+    const [row] = await listOpenReports(db);
+    expect(row.reportedPreview).toBe("something awful");
+    expect(row.liveReadable).toBe(false);
+    expect(row.preview).toBeNull();
+    expect(row.editedSinceReport).toBe(false);
+  });
+
   it("still shows the current text while the subject is public", async () => {
     const { commentId } = await reportedComment("something awful");
     await db
