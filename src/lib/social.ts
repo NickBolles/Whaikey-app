@@ -1832,6 +1832,23 @@ export async function createReport(
   input: { subjectType: ReportSubjectType; subjectId: string; reason: string },
 ): Promise<boolean> {
   return db.transaction(async (tx) => {
+    /**
+     * One snapshot for every read in here, not just one transaction.
+     *
+     * Read committed takes a fresh snapshot per statement, so grouping the
+     * visibility check and the content read into a transaction narrowed the
+     * window without closing it: an author editing between two statements
+     * still had the report record their replacement. Repeatable read gives
+     * every statement below the same view of the database, which is the
+     * property this actually needs.
+     *
+     * Cheap here specifically: this transaction inserts one new row and
+     * updates nothing, so it has no row to lose a first-updater-wins conflict
+     * on. The alternative — `select … for update` on the subject — would let
+     * a reporter block its author's edits, which is a worse thing to build
+     * into a reporting path than a slightly stricter isolation level.
+     */
+    await tx.execute(sql`set transaction isolation level repeatable read`);
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`report-rl:${reporterId}`}))`);
 
     /**
@@ -1844,11 +1861,12 @@ export async function createReport(
      * checking that outside the transaction left a window between "the
      * reporter could see this" and "here is what it said": an author editing
      * in between had the report record their replacement text, which is the
-     * bug the snapshot exists to prevent, one window smaller. At read
-     * committed each statement still takes its own view, so this narrows the
-     * gap to a statement rather than a round trip — and for a comment it
-     * closes it, because the body is read in the same row as the owner the
-     * visibility check needs.
+     * bug the snapshot exists to prevent, one window smaller. The transaction
+     * runs at repeatable read (above), so every read below sees one snapshot
+     * and there is no window between them at all — for a comment the body also
+     * comes off the same row the visibility check reads, which would have been
+     * enough on its own, but the pour and profile projections need more than
+     * one table and the isolation level is what makes those consistent too.
      */
     let subjectVisible = false;
     let subjectOwnerId: string | null = null;

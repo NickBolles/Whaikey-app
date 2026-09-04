@@ -346,7 +346,17 @@ function ReportRow({
             {report.alreadyHidden ? "Resolve as hidden" : "Hide"}
           </button>
         )}
-        {report.subjectOwnerId && !report.subjectOwnerSuspended && (
+        {/*
+          Shown even when the author is already suspended, for the same reason
+          Hide is shown over a standing hide: several reports about one account
+          is the ordinary case, and the later ones are genuinely handled by the
+          suspension in force. Hiding this control left a profile report with
+          only Dismiss — recording a real complaint as unfounded — or Reinstate,
+          which lifts the sanction to close a report agreeing with it.
+          `suspendAccount` records nothing over a standing suspension and
+          resolves the report, so the click is safe and honest.
+        */}
+        {report.subjectOwnerId && (
           <button
             type="button"
             disabled={busy || note.trim().length === 0}
@@ -361,7 +371,7 @@ function ReportRow({
             }
             className="btn-secondary px-4 py-2 text-sm font-medium disabled:opacity-50"
           >
-            Suspend author
+            {report.subjectOwnerSuspended ? "Resolve as suspended" : "Suspend author"}
           </button>
         )}
         {/* A suspension with no recorded action behind it cannot be named, and

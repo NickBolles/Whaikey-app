@@ -504,6 +504,45 @@ export async function suspendAccount(
      * social surface and still handing out URLs.
      */
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`social-reset:${userId}`}))`);
+    /**
+     * And the moderation lock, in that order.
+     *
+     * Reinstatement takes only `moderation:profile`, so with the social-reset
+     * lock alone these two paths did not exclude each other and the action-id
+     * guard bought nothing: a stale reinstatement could validate suspension A,
+     * let B commit, and then clear B — the exact decision-nobody-reviewed the
+     * guard exists to refuse. A guard is only as good as the lock the decision
+     * it names is read under.
+     *
+     * `social-reset` first is the global order (`makeEverythingPrivate`,
+     * `createPourShare`, `updatePourVisibility`); reversing it here would be
+     * the ABBA deadlock.
+     */
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${moderationLockKey("profile", userId)}))`,
+    );
+
+    /**
+     * A suspension over a suspension records nothing, exactly as a hide over a
+     * hide does.
+     *
+     * Several open reports about one account is the ordinary case, and the
+     * later ones are genuinely handled by the suspension already in force.
+     * Applying a second would overwrite `suspendedAt` and `suspendedReason`
+     * with a fresh decision nobody asked for — losing the reason the account
+     * was told, and appending a rival `suspend` action for the same state. The
+     * first suspension's timestamp is the one that means something, so it is
+     * the one kept, and the later report is still resolved.
+     */
+    const standing = await tx.query.userProfiles.findFirst({
+      columns: { suspendedAt: true },
+      where: eq(userProfiles.userId, userId),
+    });
+    if (!standing) throw new UnknownSubjectError();
+    if (standing.suspendedAt != null) {
+      if (options.reportId) await resolveOpenReport(tx, options.reportId, { ownerId: userId });
+      return;
+    }
 
     const rows = await tx
       .update(userProfiles)
