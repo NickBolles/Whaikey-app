@@ -1,5 +1,6 @@
+import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
 import { createTestBottle, createTestUser, setupTestDb, uid } from "@/test/helpers";
@@ -1818,5 +1819,108 @@ describe("suspending takes the reported content down with the account", () => {
     expect(
       (await listModerationActions(db, 20)).filter((a) => a.action === "suspend"),
     ).toHaveLength(1);
+  });
+});
+
+/**
+ * Migration 0030 backfills `reports.subject_owner_id` for rows filed before
+ * 0029 added the column.
+ *
+ * The guarantee it protects — a report stays claimable after a hard `deletePour`
+ * — held only for reports filed after that deployment, because older rows carry
+ * null and fall back to deriving the owner from a subject that may be gone.
+ * Testing the shipped SQL itself rather than a re-implementation of it: a
+ * backfill that is right in the test and wrong in the file is the failure mode.
+ */
+describe("backfilling report owners filed before the column existed", () => {
+  const statements = readFileSync("src/db/migrations/0030_backfill_report_subject_owner.sql", "utf8")
+    .split("--> statement-breakpoint")
+    .map((chunk) =>
+      chunk
+        .split("\n")
+        .filter((line) => !line.trimStart().startsWith("--"))
+        .join("\n")
+        .trim(),
+    )
+    .filter((chunk) => chunk.length > 0);
+
+  async function runBackfill() {
+    for (const statement of statements) await db.execute(sql.raw(statement));
+  }
+
+  /** A report as the old code wrote them: no owner recorded. */
+  async function legacyReport(subjectType: schema.ReportSubjectType, subjectId: string) {
+    const id = uid("report");
+    await db.insert(schema.reports).values({
+      id,
+      subjectType,
+      subjectId,
+      subjectOwnerId: null,
+      reporterId: reporter.id,
+      reason: "abuse",
+    });
+    return id;
+  }
+
+  async function ownerOf(reportId: string) {
+    const row = await db.query.reports.findFirst({ where: eq(schema.reports.id, reportId) });
+    return row?.subjectOwnerId ?? null;
+  }
+
+  it("derives the owner of every subject type", async () => {
+    const bottle = await createTestBottle(db);
+    const pourId = uid("pour");
+    await db
+      .insert(schema.pours)
+      .values({ id: pourId, userId: author.id, bottleId: bottle.id, visibility: "public" });
+    const commentId = uid("comment");
+    await db
+      .insert(schema.comments)
+      .values({ id: commentId, pourId, userId: author.id, body: "abuse" });
+
+    const onPour = await legacyReport("pour", pourId);
+    const onComment = await legacyReport("comment", commentId);
+    const onProfile = await legacyReport("profile", author.id);
+
+    await runBackfill();
+
+    expect(await ownerOf(onPour)).toBe(author.id);
+    expect(await ownerOf(onComment)).toBe(author.id);
+    // A profile report's subject IS its owner.
+    expect(await ownerOf(onProfile)).toBe(author.id);
+  });
+
+  it("leaves a recorded owner alone, and re-running changes nothing", async () => {
+    const bottle = await createTestBottle(db);
+    const pourId = uid("pour");
+    await db
+      .insert(schema.pours)
+      .values({ id: pourId, userId: author.id, bottleId: bottle.id, visibility: "public" });
+
+    // A row that already names an owner — even one the live subject disagrees
+    // with — is the recorded fact and must not be re-derived over.
+    const id = uid("report");
+    await db.insert(schema.reports).values({
+      id,
+      subjectType: "pour",
+      subjectId: pourId,
+      subjectOwnerId: reporter.id,
+      reporterId: reporter.id,
+      reason: "abuse",
+    });
+
+    await runBackfill();
+    expect(await ownerOf(id)).toBe(reporter.id);
+
+    await runBackfill();
+    expect(await ownerOf(id)).toBe(reporter.id);
+  });
+
+  it("leaves a report whose subject is already gone null rather than guessing", async () => {
+    const orphan = await legacyReport("pour", uid("pour"));
+    await runBackfill();
+    // Unrecoverable, and it was unresolvable before the backfill too. Writing
+    // any owner here would be inventing one.
+    expect(await ownerOf(orphan)).toBeNull();
   });
 });
