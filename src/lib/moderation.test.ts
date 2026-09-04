@@ -1612,6 +1612,54 @@ describe("the queue does not show what was never shared", () => {
     expect(withFriends.preview).toContain("something awful");
   });
 
+  /**
+   * The pour's tier having members is not enough: `listComments` skips a
+   * comment for any viewer blocked either way with its author, so a comment
+   * whose author has blocked every friend of the pour owner is readable by
+   * nobody even though the pour is shared.
+   */
+  it("withholds a comment whose author has blocked the whole audience", async () => {
+    const bottle = await createTestBottle(db);
+    const pourId = uid("pour");
+    // reporter owns a friends-tier pour; reporter and author are friends, so
+    // the tier is not empty.
+    await db
+      .insert(schema.pours)
+      .values({ id: pourId, userId: reporter.id, bottleId: bottle.id, visibility: "friends" });
+    await db.insert(schema.follows).values([
+      { id: uid("f"), followerId: reporter.id, followeeId: author.id, state: "accepted" },
+      { id: uid("f"), followerId: author.id, followeeId: reporter.id, state: "accepted" },
+    ]);
+    const commentId = uid("comment");
+    await db
+      .insert(schema.comments)
+      .values({ id: commentId, pourId, userId: author.id, body: "something awful" });
+    await db.insert(schema.reports).values({
+      id: uid("report"),
+      subjectType: "comment",
+      subjectId: commentId,
+      reporterId: reporter.id,
+      reason: "abuse",
+      subjectOwnerId: author.id,
+      subjectSnapshot: await subjectPreview(db, "comment", commentId),
+    });
+
+    // The only member of the tier is the pour owner, and the comment's author
+    // has blocked them — so nobody can read the comment.
+    await db
+      .insert(schema.blocks)
+      .values({ id: uid("b"), blockerId: author.id, blockedId: reporter.id });
+    await db
+      .update(schema.comments)
+      .set({ body: "PRIVATE-REVISION" })
+      .where(eq(schema.comments.id, commentId));
+
+    const [row] = await listOpenReports(db);
+    expect(row.reportedPreview).toBe("something awful");
+    expect(row.liveReadable).toBe(false);
+    expect(row.preview).toBeNull();
+  });
+
   it("still shows the current text while the subject is public", async () => {
     const { commentId } = await reportedComment("something awful");
     await db
@@ -1649,10 +1697,7 @@ describe("suspending takes the reported content down with the account", () => {
   it("hides the comment in the same transaction, and the hide outlives reinstatement", async () => {
     const { commentId, reportId } = await reportedComment();
 
-    await suspendAccount(db, operator.id, author.id, "repeated abuse", {
-      reportId,
-      subject: { subjectType: "comment", subjectId: commentId },
-    });
+    await suspendAccount(db, operator.id, author.id, "repeated abuse", { reportId });
 
     expect(await isModerationHidden(db, "comment", commentId)).toBe(true);
     expect(await countOpenReports(db)).toBe(0);
@@ -1665,31 +1710,30 @@ describe("suspending takes the reported content down with the account", () => {
     expect(row?.deletedAt).not.toBeNull();
   });
 
-  it("records one hide and one suspend, not two of either", async () => {
+  it("records one hide and one suspend, both linked to the report", async () => {
     const { commentId, reportId } = await reportedComment();
-    await suspendAccount(db, operator.id, author.id, "abuse", {
-      reportId,
-      subject: { subjectType: "comment", subjectId: commentId },
-    });
+    await suspendAccount(db, operator.id, author.id, "abuse", { reportId });
     const actions = await listModerationActions(db, 10);
     expect(actions.filter((a) => a.action === "hide")).toHaveLength(1);
     expect(actions.filter((a) => a.action === "suspend")).toHaveLength(1);
+    // Both carry the report id: a trail that cannot say which complaint caused
+    // a takedown answers an appeal with half the story.
+    const rows = await db
+      .select()
+      .from(schema.moderationActions)
+      .where(eq(schema.moderationActions.subjectId, commentId));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].reportId).toBe(reportId);
   });
 
   it("still takes down a second report's subject while the account is already suspended", async () => {
     const first = await reportedComment();
-    await suspendAccount(db, operator.id, author.id, "abuse", {
-      reportId: first.reportId,
-      subject: { subjectType: "comment", subjectId: first.commentId },
-    });
+    await suspendAccount(db, operator.id, author.id, "abuse", { reportId: first.reportId });
     const second = await reportedComment();
 
     // The account is already answered for; this report is about a different
     // comment, which still has to come down.
-    await suspendAccount(db, operator.id, author.id, "abuse again", {
-      reportId: second.reportId,
-      subject: { subjectType: "comment", subjectId: second.commentId },
-    });
+    await suspendAccount(db, operator.id, author.id, "abuse again", { reportId: second.reportId });
     expect(await isModerationHidden(db, "comment", second.commentId)).toBe(true);
     expect(await countOpenReports(db)).toBe(0);
     // Still one suspension: the standing decision is not replaced.

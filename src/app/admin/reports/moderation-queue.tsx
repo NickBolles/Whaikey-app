@@ -378,13 +378,10 @@ function ReportRow({
                 action: "suspend",
                 userId: report.subjectOwnerId,
                 reason: note,
+                // The server reads the subject off this report and takes it
+                // down with the account; sending it from here would make the
+                // protection something a stale tab can omit.
                 reportId: report.id,
-                // Take the reported thing down with the account. Suspending
-                // alone left it to come back on reinstatement, and resolving
-                // the report removes the only row that knows its id.
-                ...(report.subjectType === "profile"
-                  ? {}
-                  : { subjectType: report.subjectType, subjectId: report.subjectId }),
               })
             }
             className="btn-secondary px-4 py-2 text-sm font-medium disabled:opacity-50"

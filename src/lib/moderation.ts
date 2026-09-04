@@ -1,7 +1,19 @@
-import { and, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import {
+  and,
+  desc,
+  eq,
+  exists as sqlExists,
+  inArray,
+  isNotNull,
+  isNull,
+  notExists,
+  or,
+  sql,
+} from "drizzle-orm";
 import type { DB } from "@/db";
 import { alias } from "drizzle-orm/pg-core";
 import {
+  blocks,
   comments,
   follows,
   moderationActions,
@@ -234,6 +246,10 @@ async function listOpenReportsIn(
   // owner has stepped back is withdrawn with the pour, whatever its own
   // author's settings say.
   for (const p of parentPourRows) ownerIds.push(p.userId);
+  const visibilityByPour = new Map(
+    [...pourRows, ...parentPourRows].map((p) => [p.id, p.visibility] as const),
+  );
+  const pourVisibilityOf = (pourId: string): string | undefined => visibilityByPour.get(pourId);
 
   /**
    * Which owners still have an audience for a friends- or followers-tier pour.
@@ -279,6 +295,119 @@ async function listOpenReportsIn(
   ]);
   const hasFollower = new Set(followerOf.map((r) => r.userId));
   const hasFriend = new Set(friendOf.map((r) => r.userId));
+
+  /**
+   * Comments whose author still has *somebody* who can read them.
+   *
+   * The pour's tier having members is not enough: `listComments` skips a
+   * comment for any viewer blocked either way with **its author**, so a
+   * comment whose author has blocked every one of the pour's friends is
+   * readable by nobody even though the pour is shared. Blocks involving the
+   * *pour owner* are already covered, because `blockUser` deletes the follow
+   * edges in both directions — a block involving the comment's author leaves
+   * those edges untouched, which is the gap.
+   *
+   * Only the two relationship tiers need this. A public pour's audience is
+   * every signed-in account rather than a follow set, and an author cannot
+   * block their way through all of it.
+   *
+   * The audience is the pour's tier **plus its owner** (who reads every
+   * comment on their own pour) **minus the comment's author** — reading your
+   * own comment is not it being shared, which is the whole distinction this
+   * gate turns on.
+   *
+   * Two statements for the page, with the block test as a `not exists`: an
+   * audience can be large and the question is only whether one member
+   * survives it.
+   */
+  const tieredCommentIds = commentRows
+    .filter((c) => {
+      const v = pourVisibilityOf(c.pourId);
+      return v === "friends" || v === "followers";
+    })
+    .map((c) => c.id);
+  const readableComments = new Set<string>(
+    tieredCommentIds.length
+      ? (
+          await db
+            .selectDistinct({ commentId: comments.id })
+            .from(comments)
+            .innerJoin(pours, eq(pours.id, comments.pourId))
+            .innerJoin(
+              follows,
+              and(eq(follows.followeeId, pours.userId), eq(follows.state, "accepted")),
+            )
+            .where(
+              and(
+                inArray(comments.id, tieredCommentIds),
+                // Not the author: their own comment is not shared with them.
+                sql`${follows.followerId} <> ${comments.userId}`,
+                or(
+                  eq(pours.visibility, "followers"),
+                  and(
+                    eq(pours.visibility, "friends"),
+                    sqlExists(
+                      db
+                        .select({ one: sql`1` })
+                        .from(mutual)
+                        .where(
+                          and(
+                            eq(mutual.followerId, pours.userId),
+                            eq(mutual.followeeId, follows.followerId),
+                            eq(mutual.state, "accepted"),
+                          ),
+                        ),
+                    ),
+                  ),
+                ),
+                notExists(
+                  db
+                    .select({ one: sql`1` })
+                    .from(blocks)
+                    .where(
+                      or(
+                        and(
+                          eq(blocks.blockerId, follows.followerId),
+                          eq(blocks.blockedId, comments.userId),
+                        ),
+                        and(
+                          eq(blocks.blockerId, comments.userId),
+                          eq(blocks.blockedId, follows.followerId),
+                        ),
+                      ),
+                    ),
+                ),
+              ),
+            )
+        ).map((r) => r.commentId)
+      : [],
+  );
+  // And the pour's owner, who is not in their own follow set but does read
+  // every comment on their pour.
+  if (tieredCommentIds.length) {
+    const byOwner = await db
+      .selectDistinct({ commentId: comments.id })
+      .from(comments)
+      .innerJoin(pours, eq(pours.id, comments.pourId))
+      .where(
+        and(
+          inArray(comments.id, tieredCommentIds),
+          sql`${pours.userId} <> ${comments.userId}`,
+          notExists(
+            db
+              .select({ one: sql`1` })
+              .from(blocks)
+              .where(
+                or(
+                  and(eq(blocks.blockerId, pours.userId), eq(blocks.blockedId, comments.userId)),
+                  and(eq(blocks.blockerId, comments.userId), eq(blocks.blockedId, pours.userId)),
+                ),
+              ),
+          ),
+        ),
+      );
+    for (const r of byOwner) readableComments.add(r.commentId);
+  }
 
   const [profileRows, hideActions, suspendActions] = await Promise.all([
     ownerIds.length
@@ -352,6 +481,12 @@ async function listOpenReportsIn(
       const comment = commentById.get(row.subjectId);
       if (!comment || comment.deletedAt != null) return false;
       if (!sharedWithAnyone(comment.pourId)) return false;
+      // On a friends- or followers-tier pour, somebody in that tier has to be
+      // able to read *this author*, not merely the pour.
+      const tier = pourVisibilityOf(comment.pourId);
+      if ((tier === "friends" || tier === "followers") && !readableComments.has(comment.id)) {
+        return false;
+      }
       // The comment's own author too: strictly stricter than the pour's rule,
       // and a comment by someone who has stepped back should not resurface in
       // an operator's view either.
@@ -695,7 +830,7 @@ export async function suspendAccount(
    * their own re-enable, `listComments` published it again. A suspension is
    * not a takedown, and the queue has to be able to do both.
    */
-  options: { reportId?: string; subject?: { subjectType: "comment" | "pour"; subjectId: string } } = {},
+  options: { reportId?: string } = {},
   now = new Date(),
 ): Promise<void> {
   if (actorId === userId) {
@@ -750,7 +885,7 @@ export async function suspendAccount(
       // The account is already answered for, but *this* report's subject may
       // not be: a second report about the same account is usually about a
       // different comment.
-      await hideReportedSubject(tx, actorId, options.subject, reason, now);
+      await hideReportedSubject(tx, actorId, options.reportId, reason, now);
       if (options.reportId) await resolveOpenReport(tx, options.reportId, { ownerId: userId });
       return;
     }
@@ -802,7 +937,7 @@ export async function suspendAccount(
       });
 
     await record(tx, actorId, "suspend", "profile", userId, { reportId: options.reportId, note: reason }, now);
-    await hideReportedSubject(tx, actorId, options.subject, reason, now);
+    await hideReportedSubject(tx, actorId, options.reportId, reason, now);
     // A suspension's report has to be about something this account owns —
     // their profile, or a pour or comment of theirs.
     if (options.reportId) await resolveOpenReport(tx, options.reportId, { ownerId: userId });
@@ -824,12 +959,29 @@ export async function suspendAccount(
 async function hideReportedSubject(
   tx: DB,
   actorId: string,
-  subject: { subjectType: "comment" | "pour"; subjectId: string } | undefined,
+  reportId: string | undefined,
   reason: string,
   now: Date,
 ): Promise<void> {
-  if (!subject) return;
-  const { subjectType, subjectId } = subject;
+  if (!reportId) return;
+  /**
+   * The subject comes from the **report**, not from the request.
+   *
+   * It was an optional pair of body fields at first, which made the protection
+   * opt-in from the client: a queue tab loaded before the fields existed sends
+   * `reportId` and nothing else, and the suspension would quietly not take the
+   * content down — the failure mode being invisible, because the report still
+   * resolves and the row still disappears. Reading it from the row the caller
+   * is already claiming also means the request cannot name a *different*
+   * subject to hide than the one it is answering for.
+   */
+  const report = await tx.query.reports.findFirst({
+    columns: { subjectType: true, subjectId: true },
+    where: eq(reports.id, reportId),
+  });
+  if (!report || report.subjectType === "profile") return;
+  const subjectType = report.subjectType;
+  const subjectId = report.subjectId;
   /**
    * Third lock, after `social-reset` and `moderation:profile`. Deadlock-free
    * because nothing else takes those two: `hideSubject` takes this key alone,
@@ -841,7 +993,10 @@ async function hideReportedSubject(
   if (await isModerationHidden(tx, subjectType, subjectId)) return;
   const changed = await applyHide(tx, subjectType, subjectId, now);
   if (!changed) return;
-  await record(tx, actorId, "hide", subjectType, subjectId, { note: reason }, now);
+  // Linked to the report, like the suspension beside it: an append-only trail
+  // that cannot say which complaint caused a takedown answers an appeal with
+  // half the story.
+  await record(tx, actorId, "hide", subjectType, subjectId, { reportId, note: reason }, now);
 }
 
 /**
