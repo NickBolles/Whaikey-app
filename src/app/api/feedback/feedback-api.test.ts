@@ -16,10 +16,10 @@ vi.mock("@/lib/session", async () => {
  */
 let db: DB;
 
-function post(body: unknown): Request {
+function post(body: unknown, ip = "203.0.113.1"): Request {
   return new Request("http://localhost:3000/api/feedback", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", "x-forwarded-for": ip },
     body: JSON.stringify(body),
   });
 }
@@ -56,6 +56,31 @@ describe("POST /api/feedback", () => {
   it("wants a sentence, not a keystroke", async () => {
     expect((await feedbackPOST(post({ body: "help" }))).status).toBe(400);
     expect(await db.select().from(schema.feedback)).toHaveLength(0);
+  });
+
+  /**
+   * The bound that matters here is the one on a single client, not one shared
+   * allowance for everybody signed out: an outage is precisely when many
+   * people write at once, and a global counter would turn that into a silent
+   * drop for all but the first few.
+   */
+  it("bounds one signed-out client without silencing the next person", async () => {
+    // Its own address: the counter is module state and deliberately outlives a
+    // test database, so a shared address would carry the other tests' posts in.
+    const mine = "203.0.113.55";
+    for (let i = 0; i < 5; i++) {
+      const res = await feedbackPOST(post({ body: `Sign-in bounces me, attempt ${i}.` }, mine));
+      expect(res.status).toBe(201);
+    }
+    expect((await feedbackPOST(post({ body: "Still cannot sign in at all." }, mine))).status).toBe(
+      429,
+    );
+
+    // Somebody else reporting the same outage still gets through.
+    const other = await feedbackPOST(
+      post({ body: "Sign-in bounces me too, from another machine." }, "198.51.100.7"),
+    );
+    expect(other.status).toBe(201);
   });
 
   it("bounds how much one account can send", async () => {
