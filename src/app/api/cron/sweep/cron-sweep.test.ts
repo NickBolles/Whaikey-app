@@ -118,6 +118,33 @@ describe("GET /api/cron/sweep", () => {
     ).toBeUndefined();
   });
 
+  it("deletes sessions whose expiry has passed, and keeps live ones", async () => {
+    // Better Auth stops honouring an expired row; nothing deleted it, so a
+    // device that goes quiet left its bearer token, IP address and user agent
+    // behind for good — which /privacy says does not happen.
+    const expired = uid("session");
+    const live = uid("session");
+    await db.insert(schema.session).values({
+      id: expired,
+      token: "expired-token",
+      userId: user.id,
+      ipAddress: "203.0.113.7",
+      userAgent: "a browser",
+      expiresAt: new Date(Date.now() - 60_000),
+    });
+    await db.insert(schema.session).values({
+      id: live,
+      token: "live-token",
+      userId: user.id,
+      expiresAt: new Date(Date.now() + 60 * 60_000),
+    });
+
+    expect((await GET(get("Bearer test-secret"))).status).toBe(200);
+
+    const rows = await db.select().from(schema.session);
+    expect(rows.map((r) => r.id)).toEqual([live]);
+  });
+
   it("is 404 without the secret, and 404 when none is configured", async () => {
     await seedStaleCounter();
     expect((await GET(get())).status).toBe(404);

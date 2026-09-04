@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/db";
 import { sweepExpiredCounters } from "@/lib/ai/rate-limit";
+import { sweepExpiredSessions } from "@/lib/auth";
 import { sweepOrphanedSubmissions } from "@/lib/catalog";
 import { sweepNativeAuth } from "@/lib/native-auth";
 import { sweepExpiredPhoneLookups } from "@/lib/social";
@@ -54,5 +55,11 @@ export async function GET(request: Request): Promise<NextResponse> {
    * catch the result however the account went away.
    */
   await sweepOrphanedSubmissions(db);
+  /**
+   * And expired sessions. Better Auth stops honouring the row; nothing deletes
+   * it, so a device that goes quiet leaves its bearer token, IP address and
+   * user agent behind for good — which `/privacy` says does not happen.
+   */
+  await sweepExpiredSessions(db, now);
   return NextResponse.json({ ok: true });
 }

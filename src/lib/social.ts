@@ -583,6 +583,21 @@ export async function listBlocked(db: DB, userId: string): Promise<ProfileSummar
   }));
 }
 
+/**
+ * Whether this account is under a moderation suspension.
+ *
+ * Read on the **viewer** side of a cross-user read. `socialEnabled` is not a
+ * substitute: an account can switch social off itself (US-11), which is not a
+ * sanction and does not stop it reading.
+ */
+export async function isSuspended(db: DB, userId: string): Promise<boolean> {
+  const row = await db.query.userProfiles.findFirst({
+    columns: { suspendedAt: true },
+    where: eq(schema.userProfiles.userId, userId),
+  });
+  return row?.suspendedAt != null;
+}
+
 export async function isBlockedEither(db: DB, a: string, b: string): Promise<boolean> {
   const rows = await db
     .select({ id: schema.blocks.id })
@@ -996,6 +1011,21 @@ async function canViewPourContext(db: DB, viewerId: string | null, ctx: PourAuth
   if (viewerId != null && viewerId === ctx.authorId) return true;
   if (!ctx.authorSocialEnabled) return false;
   if (viewerId == null) return false;
+  /**
+   * And the **viewer** must not be suspended.
+   *
+   * Every check here was about the author, so a suspended account kept reading
+   * everything it could reach before: `suspendAccount` clears its own exposure
+   * flags but deliberately leaves the follow edges alone (they are what a
+   * reinstatement restores), and an accepted follow is what friends- and
+   * followers-tier pours are gated on. A suspension that stops you posting and
+   * lets you keep reading other people's notes is not a suspension from the
+   * social surfaces, which is what the Terms say it is.
+   *
+   * After the self check, so a suspended account still reads its own pours —
+   * suspension is not a ban from the product, and the journal is theirs.
+   */
+  if (await isSuspended(db, viewerId)) return false;
   if (await isBlockedEither(db, viewerId, ctx.authorId)) return false;
 
   switch (ctx.visibility) {

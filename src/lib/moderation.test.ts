@@ -30,6 +30,7 @@ import {
 } from "./moderation";
 import {
   AccountSuspendedError,
+  canViewPour,
   editComment,
   listComments,
   setSocialEnabled,
@@ -2596,5 +2597,75 @@ describe("clearing OAuth tokens written before encryption was on", () => {
       where: eq(schema.account.userId, author.id),
     });
     expect(row?.idToken).toBeNull();
+  });
+});
+
+
+/**
+ * `suspendAccount` clears the account's own exposure flags and deliberately
+ * leaves its follow edges alone — they are what a reinstatement restores. Every
+ * check in `canViewPourContext` was about the *author*, so a suspended account
+ * kept reading everything an accepted follow reaches. A suspension that stops
+ * you posting and lets you keep reading other people's notes is not a
+ * suspension from the social surfaces, which is what the Terms say it is.
+ */
+describe("a suspended account cannot keep reading", () => {
+  it("loses a followers-only pour it could see before, and keeps its own", async () => {
+    const viewer = await createTestUser(db);
+    await profileFor(viewer, "viewer_sus");
+    const bottle = await createTestBottle(db);
+
+    await db.insert(schema.follows).values({
+      id: uid("f"),
+      followerId: viewer.id,
+      followeeId: author.id,
+      state: "accepted",
+    });
+    const pourId = uid("pour");
+    await db
+      .insert(schema.pours)
+      .values({ id: pourId, userId: author.id, bottleId: bottle.id, visibility: "followers" });
+    const ownPourId = uid("pour");
+    await db
+      .insert(schema.pours)
+      .values({ id: ownPourId, userId: viewer.id, bottleId: bottle.id, visibility: "followers" });
+
+    expect(await canViewPour(db, viewer.id, pourId)).toBe(true);
+
+    await suspendAccount(db, operator.id, viewer.id, "abuse");
+
+    // The follow edge is still there — a reinstatement restores it — but it no
+    // longer opens anything.
+    expect(await canViewPour(db, viewer.id, pourId)).toBe(false);
+    // Their own journal is untouched: suspension is not a ban from the product.
+    expect(await canViewPour(db, viewer.id, ownPourId)).toBe(true);
+  });
+
+  it("reads again once reinstated", async () => {
+    const viewer = await createTestUser(db);
+    await profileFor(viewer, "viewer_rein");
+    const bottle = await createTestBottle(db);
+    await db.insert(schema.follows).values({
+      id: uid("f"),
+      followerId: viewer.id,
+      followeeId: author.id,
+      state: "accepted",
+    });
+    const pourId = uid("pour");
+    await db
+      .insert(schema.pours)
+      .values({ id: pourId, userId: author.id, bottleId: bottle.id, visibility: "followers" });
+
+    await suspendAccount(db, operator.id, viewer.id, "abuse");
+    expect(await canViewPour(db, viewer.id, pourId)).toBe(false);
+
+    await reinstateAccount(
+      db,
+      operator.id,
+      viewer.id,
+      "appeal upheld",
+      await standingSuspensionId(viewer.id),
+    );
+    expect(await canViewPour(db, viewer.id, pourId)).toBe(true);
   });
 });

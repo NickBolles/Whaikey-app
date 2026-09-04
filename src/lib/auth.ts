@@ -1,6 +1,8 @@
+import { lt } from "drizzle-orm";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { getDb, schema } from "@/db";
+import type { DB } from "@/db";
 
 /**
  * Social login only (PLAN.md §2.1 / user decision): no email+password.
@@ -85,3 +87,20 @@ export const auth = betterAuth({
 });
 
 export type Session = typeof auth.$Infer.Session;
+
+/**
+ * Delete sessions whose expiry has passed.
+ *
+ * Better Auth stops honouring an expired session, but nothing removes the row —
+ * so a device that simply stops making requests leaves its bearer token, IP
+ * address and user agent behind indefinitely. `/privacy` says those go when the
+ * session expires, and that sentence was written one commit before this
+ * function existed: expiry made the token useless, not absent, and the page
+ * promised absence.
+ *
+ * `getSessionUser` never reads an expired row, so nothing is signed out by
+ * this that was not already signed out.
+ */
+export async function sweepExpiredSessions(db: DB, now = new Date()): Promise<void> {
+  await db.delete(schema.session).where(lt(schema.session.expiresAt, now));
+}

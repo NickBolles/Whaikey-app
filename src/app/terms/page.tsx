@@ -113,8 +113,11 @@ export default function TermsPage() {
 
       <Section title="Changes">
         <p>
-          When these terms change materially you will be told in the app before the change takes
-          effect, and the effective date at the top will move.
+          <strong className="text-foreground">There is no announcement mechanism yet.</strong> When
+          these terms change, the effective date at the top changes with them — that date is the
+          only notice this app currently gives, and checking it is the only way to know. Telling you
+          in the app before a material change is an open commitment (PLAN.md §9.3), not a built one.
+          This paragraph will say something better the day it is.
         </p>
       </Section>
     </PolicyPage>
