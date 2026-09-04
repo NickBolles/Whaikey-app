@@ -632,7 +632,7 @@ export async function listModerationActions(db: DB, limit = 100): Promise<AuditE
     })
     .from(moderationActions)
     .innerJoin(user, eq(user.id, moderationActions.actorId))
-    .orderBy(desc(moderationActions.createdAt), desc(moderationActions.id))
+    .orderBy(desc(moderationActions.seq))
     .limit(limit);
 
   // Newest first, so the first hide/unhide seen for a subject is the current
@@ -701,7 +701,7 @@ export async function listOwnModerationHolds(
           sql`${moderationActions.action} in ('hide', 'unhide')`,
         ),
       )
-      .orderBy(desc(moderationActions.createdAt), desc(moderationActions.id)),
+      .orderBy(desc(moderationActions.seq)),
     db
       .select({
         id: moderationActions.id,
@@ -722,7 +722,7 @@ export async function listOwnModerationHolds(
           sql`${moderationActions.action} in ('hide', 'unhide')`,
         ),
       )
-      .orderBy(desc(moderationActions.createdAt), desc(moderationActions.id)),
+      .orderBy(desc(moderationActions.seq)),
   ]);
 
   // Newest first, so the first row seen for a subject is the one in force.
@@ -792,15 +792,14 @@ export interface StandingHide {
 export async function listStandingHides(
   db: DB,
   /**
-   * `before` is a compound cursor — the previous page's last `(at, actionId)`.
+   * `before` is the previous page's last `seq`.
    *
-   * A timestamp alone drops every row that shares the boundary instant: they
-   * are neither on the page that ended nor on the one that follows, and a
-   * standing hide that falls in that gap loses the only control that lifts it.
-   * Two hides in the same millisecond is not exotic — a script, or one
-   * operator working quickly.
+   * The sequence is unique and monotonic, so it is both a total order and a
+   * cursor with no ties to fall through — a timestamp cursor dropped every row
+   * sharing the boundary instant, and those rows are neither on the page that
+   * ended nor on the one that follows.
    */
-  options: { limit?: number; before?: { at: Date; actionId: string } } = {},
+  options: { limit?: number; before?: number } = {},
 ): Promise<{ hides: StandingHide[]; nextCursor: string | null }> {
   const limit = options.limit ?? STANDING_HIDE_PAGE_SIZE;
   // `distinct on` picks the latest hide/unhide per subject inside the
@@ -814,6 +813,7 @@ export async function listStandingHides(
       action: moderationActions.action,
       note: moderationActions.note,
       createdAt: moderationActions.createdAt,
+      seq: moderationActions.seq,
       actorId: moderationActions.actorId,
     })
     .from(moderationActions)
@@ -821,8 +821,7 @@ export async function listStandingHides(
     .orderBy(
       moderationActions.subjectType,
       moderationActions.subjectId,
-      desc(moderationActions.createdAt),
-      desc(moderationActions.id),
+      desc(moderationActions.seq),
     )
     .as("latest");
 
@@ -833,28 +832,32 @@ export async function listStandingHides(
       subjectId: latest.subjectId,
       note: latest.note,
       at: latest.createdAt,
+      seq: latest.seq,
       actorName: user.name,
     })
     .from(latest)
     .innerJoin(user, eq(user.id, latest.actorId))
     .where(
-      options.before
-        ? and(
-            eq(latest.action, "hide"),
-            sql`(${latest.createdAt}, ${latest.id}) < (${options.before.at}, ${options.before.actionId})`,
-          )
+      options.before !== undefined
+        ? and(eq(latest.action, "hide"), sql`${latest.seq} < ${options.before}`)
         : eq(latest.action, "hide"),
     )
-    .orderBy(desc(latest.createdAt), desc(latest.id))
+    .orderBy(desc(latest.seq))
     // One extra row is how the page knows there is another one.
     .limit(limit + 1);
 
   const page = rows.slice(0, limit);
   const last = page[page.length - 1];
   return {
-    hides: page.map((row) => ({ ...row, subjectType: row.subjectType as "pour" | "comment" })),
-    nextCursor:
-      rows.length > limit && last ? `${last.at.toISOString()}|${last.actionId}` : null,
+    hides: page.map((row) => ({
+      actionId: row.actionId,
+      subjectType: row.subjectType as "pour" | "comment",
+      subjectId: row.subjectId,
+      note: row.note,
+      at: row.at,
+      actorName: row.actorName,
+    })),
+    nextCursor: rows.length > limit && last ? String(last.seq) : null,
   };
 }
 
@@ -1003,7 +1006,9 @@ export async function isModerationHidden(
         sql`${moderationActions.action} in ('hide', 'unhide')`,
       ),
     )
-    .orderBy(desc(moderationActions.createdAt), desc(moderationActions.id))
+    // By `seq`, not by time: see the column's comment. Timestamps neither
+    // break ties nor preserve the order decisions were committed in.
+    .orderBy(desc(moderationActions.seq))
     .limit(1);
   return row?.action === "hide";
 }
@@ -1041,7 +1046,7 @@ export async function moderationNoticeFor(
         sql`${moderationActions.action} in ('hide', 'unhide')`,
       ),
     )
-    .orderBy(desc(moderationActions.createdAt), desc(moderationActions.id))
+    .orderBy(desc(moderationActions.seq))
     .limit(1);
   if (row?.action !== "hide") return null;
   return { action: "hide", reason: row.note, at: row.createdAt };
@@ -1090,7 +1095,7 @@ export async function unhideSubject(
           sql`${moderationActions.action} in ('hide', 'unhide')`,
         ),
       )
-      .orderBy(desc(moderationActions.createdAt), desc(moderationActions.id))
+      .orderBy(desc(moderationActions.seq))
       .limit(1);
     if (current?.action !== "hide" || current.id !== expectedActionId) {
       throw new StaleModerationViewError();
@@ -1117,7 +1122,7 @@ export async function unhideSubject(
             eq(moderationActions.action, "hide"),
           ),
         )
-        .orderBy(desc(moderationActions.createdAt), desc(moderationActions.id))
+        .orderBy(desc(moderationActions.seq))
         .limit(1);
       const hiddenAt = standing[0]?.createdAt;
       if (hiddenAt) {

@@ -190,6 +190,13 @@
       "when": 1788496771722,
       "tag": "0026_real_vision",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1788511370203,
+      "tag": "0027_short_firedrake",
+      "breakpoints": true
     }
   ]
 }

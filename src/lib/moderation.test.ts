@@ -982,11 +982,6 @@ describe("standing hides are paged, not capped", () => {
    * A cap is the audit-window bug one level out: past it, the oldest takedowns
    * lose the only control that lifts them.
    */
-  function cursor(raw: string): { at: Date; actionId: string } {
-    const cut = raw.lastIndexOf("|");
-    return { at: new Date(raw.slice(0, cut)), actionId: raw.slice(cut + 1) };
-  }
-
   it("hands back a cursor and the older page follows it", async () => {
     const bottle = await createTestBottle(db);
     for (let i = 0; i < 3; i += 1) {
@@ -999,7 +994,7 @@ describe("standing hides are paged, not capped", () => {
     expect(first.hides.map((h) => h.note)).toEqual(["hide 2", "hide 1"]);
     expect(first.nextCursor).not.toBeNull();
 
-    const next = await listStandingHides(db, { limit: 2, before: cursor(first.nextCursor!) });
+    const next = await listStandingHides(db, { limit: 2, before: Number(first.nextCursor) });
     expect(next.hides.map((h) => h.note)).toEqual(["hide 0"]);
     expect(next.nextCursor).toBeNull();
   });
@@ -1020,12 +1015,12 @@ describe("standing hides are paged, not capped", () => {
     }
 
     const seen: string[] = [];
-    let before: { at: Date; actionId: string } | undefined;
+    let before: number | undefined;
     for (let page = 0; page < 4; page += 1) {
       const result = await listStandingHides(db, { limit: 2, before });
       seen.push(...result.hides.map((h) => h.note!));
       if (!result.nextCursor) break;
-      before = cursor(result.nextCursor);
+      before = Number(result.nextCursor);
     }
     expect(seen.sort()).toEqual(["tied 0", "tied 1", "tied 2", "tied 3"]);
   });
@@ -1060,5 +1055,67 @@ describe("suspended accounts are paged too", () => {
       };
     }
     expect(seen.sort()).toEqual(ids.sort());
+  });
+});
+
+describe("decision order, not clock order", () => {
+  /**
+   * Two actions can share a millisecond, and a request that captured its
+   * timestamp before waiting on the moderation lock commits after one that
+   * captured a later one. Ordering by `(createdAt, id)` disambiguated the rows
+   * without preserving their order — the id is a random UUID — so a freshly
+   * hidden pour could read as lifted, or a lifted one keep blocking its owner.
+   */
+  it("reads the current state right when two actions share a timestamp", async () => {
+    const bottle = await createTestBottle(db);
+    const pourId = uid("pour");
+    await db.insert(schema.pours).values({ id: pourId, userId: author.id, bottleId: bottle.id });
+    const sameInstant = new Date(7_000);
+
+    await hideSubject(db, operator.id, "pour", pourId, { note: "hidden" }, sameInstant);
+    expect(await isModerationHidden(db, "pour", pourId)).toBe(true);
+
+    await unhideSubject(
+      db,
+      operator.id,
+      "pour",
+      pourId,
+      "lifted",
+      await standingHideId("pour", pourId),
+      sameInstant,
+    );
+    expect(await isModerationHidden(db, "pour", pourId)).toBe(false);
+    expect((await listStandingHides(db)).hides).toHaveLength(0);
+    expect(await moderationNoticeFor(db, "pour", pourId)).toBeNull();
+
+    await hideSubject(db, operator.id, "pour", pourId, { note: "again" }, sameInstant);
+    expect(await isModerationHidden(db, "pour", pourId)).toBe(true);
+    expect((await listStandingHides(db)).hides[0].note).toBe("again");
+    // And the audit list agrees about which entry is in force.
+    const standing = (await listModerationActions(db)).filter((e) => e.standing);
+    expect(standing).toHaveLength(1);
+    expect(standing[0].note).toBe("again");
+  });
+
+  /** An earlier-stamped action committing later must not win. */
+  it("is not fooled by a later action carrying an earlier timestamp", async () => {
+    const bottle = await createTestBottle(db);
+    const pourId = uid("pour");
+    await db.insert(schema.pours).values({ id: pourId, userId: author.id, bottleId: bottle.id });
+
+    await hideSubject(db, operator.id, "pour", pourId, { note: "hidden" }, new Date(9_000));
+    await unhideSubject(
+      db,
+      operator.id,
+      "pour",
+      pourId,
+      "lifted",
+      await standingHideId("pour", pourId),
+      // Stamped before the hide it reverses, as a request that waited on the
+      // lock would be.
+      new Date(1_000),
+    );
+
+    expect(await isModerationHidden(db, "pour", pourId)).toBe(false);
   });
 });

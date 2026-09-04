@@ -41,9 +41,11 @@ function parseCursor(raw?: string): { at: Date; id: string } | undefined {
   return { at, id };
 }
 
-function parseHidesCursor(raw?: string): { at: Date; actionId: string } | undefined {
-  const parsed = parseCursor(raw);
-  return parsed && { at: parsed.at, actionId: parsed.id };
+/** The standing-hides cursor is a bare `seq`; anything else is no cursor. */
+function parseHidesCursor(raw?: string): number | undefined {
+  if (!raw) return undefined;
+  const seq = Number(raw);
+  return Number.isSafeInteger(seq) && seq > 0 ? seq : undefined;
 }
 
 function parseSuspendedCursor(raw?: string): { at: Date; userId: string } | undefined {

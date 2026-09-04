@@ -1,4 +1,5 @@
 import {
+  bigserial,
   pgTable,
   text,
   integer,
@@ -708,11 +709,27 @@ export const moderationActions = pgTable(
     reportId: text("report_id").references(() => reports.id, { onDelete: "set null" }),
     /** The operator's reasoning, in their own words. */
     note: text("note"),
+    /**
+     * The order decisions actually happened in.
+     *
+     * `createdAt` cannot answer "is this subject hidden right now": two actions
+     * can share a millisecond, and a request that captured its timestamp before
+     * waiting on the moderation lock commits *after* one that captured a later
+     * one. Ordering by `(createdAt, id)` disambiguates the rows without
+     * preserving their order, since the id is a random UUID — so a freshly
+     * hidden pour could read as lifted, or a lifted one keep blocking its owner.
+     *
+     * The sequence is assigned at insert, inside the per-subject advisory lock
+     * every write to this table takes, so for one subject it is exactly the
+     * order the decisions were made in. Every current-state query orders by it.
+     */
+    seq: bigserial("seq", { mode: "number" }).notNull(),
     createdAt: createdAt(),
   },
   (t) => [
     index("moderation_actions_subject_idx").on(t.subjectType, t.subjectId),
     index("moderation_actions_created_idx").on(t.createdAt),
+    index("moderation_actions_seq_idx").on(t.seq),
   ],
 );
 
