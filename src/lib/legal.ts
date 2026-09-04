@@ -27,19 +27,25 @@ export function legalIdentity(): LegalIdentity {
   };
 }
 
-export function isComplete(identity: LegalIdentity): boolean {
+/** Exactly what a policy page is still missing, in the order it reads. */
+export function missingLegalFacts(identity: LegalIdentity): string[] {
+  const missing: string[] = [];
+  if (!identity.entity) missing.push("the company it binds");
+  if (!identity.jurisdiction) missing.push("the law it is governed by");
+  if (!identity.contactEmail) missing.push("an address to reach");
   /**
-   * The effective date counts.
+   * The effective date counts, and it was optional at first.
    *
-   * It was left out at first as "optional", which let a page with the three
-   * identity facts set suppress the unfinished banner while its own header
-   * said "Not yet in effect — see the note below" and pointed at a note that
-   * was not rendered. A policy that declares itself ineffective is not
-   * launch-ready, and one that cites a missing note is worse than either
-   * state on its own. A legal document with no date from which it binds is
-   * unfinished, so the banner — which is the store-readiness check — says so.
+   * That let a page with the three identity facts set suppress the unfinished
+   * banner while its own header said "Not yet in effect — see the note below"
+   * and pointed at a note that was not rendered. A legal document with no date
+   * from which it binds is not launch-ready, and this banner is the
+   * store-readiness check, so it says so.
    */
-  return Boolean(
-    identity.entity && identity.jurisdiction && identity.contactEmail && identity.effectiveDate,
-  );
+  if (!identity.effectiveDate) missing.push("the date it takes effect");
+  return missing;
+}
+
+export function isComplete(identity: LegalIdentity): boolean {
+  return missingLegalFacts(identity).length === 0;
 }

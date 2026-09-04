@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { isComplete, legalIdentity, type LegalIdentity } from "@/lib/legal";
+import { legalIdentity, missingLegalFacts, type LegalIdentity } from "@/lib/legal";
 
 /**
  * The shared frame for `/terms` and `/privacy` (PLAN.md §9.3).
@@ -10,6 +10,12 @@ import { isComplete, legalIdentity, type LegalIdentity } from "@/lib/legal";
  * missing the party it binds is not a draft detail, and a reader deserves to
  * know which they are looking at.
  */
+/** "a, b and c" — an operator reads this, not a machine. */
+function readableList(items: string[]): string {
+  if (items.length <= 1) return items[0] ?? "";
+  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
+
 export function PolicyPage({
   title,
   updated,
@@ -20,6 +26,7 @@ export function PolicyPage({
   children: React.ReactNode;
 }) {
   const identity = legalIdentity();
+  const missing = missingLegalFacts(identity);
   return (
     <div className="px-4 py-8 max-w-2xl mx-auto w-full flex flex-col gap-6">
       <header className="flex flex-col gap-2">
@@ -32,14 +39,16 @@ export function PolicyPage({
         </p>
       </header>
 
-      {!isComplete(identity) && (
+      {missing.length > 0 && (
         <div role="note" className="card border-danger/50 p-4 text-sm leading-relaxed">
           <strong className="text-foreground">This document is not finished.</strong>{" "}
           <span className="text-muted">
-            It does not yet name the company it binds, the law it is governed by, an address to
-            reach, or the date it takes effect. Those are set by the operator before launch
-            (PLAN.md §9.3); until then treat this as a description of how the app behaves, not as
-            an agreement.
+            {/* Only what is actually absent. A fixed list said the company was
+                unnamed on a page that names it, which makes the notice easy to
+                stop believing — and this notice is the store-readiness check. */}
+            It does not yet name {readableList(missing)}. {missing.length === 1 ? "That is" : "Those are"}{" "}
+            set by the operator before launch (PLAN.md §9.3); until then treat this as a
+            description of how the app behaves, not as an agreement.
           </span>
         </div>
       )}

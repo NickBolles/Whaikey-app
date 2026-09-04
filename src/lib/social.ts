@@ -12,7 +12,7 @@
  * A signed-out viewer (viewerId === null) sees nothing cross-user — share
  * links (src/lib/pour-sharing.ts) are a separate bearer-token mechanism.
  */
-import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, or, sql, type AnyColumn } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, ne, or, sql, type AnyColumn } from "drizzle-orm";
 import { z } from "zod";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
@@ -167,19 +167,47 @@ export async function createProfile(
   const existing = await db.query.userProfiles.findFirst({ where: eq(schema.userProfiles.handle, normalized) });
   if (existing) throw new HandleTakenError(normalized);
 
-  const inserted = await db
-    .insert(schema.userProfiles)
-    .values({
-      userId: user.id,
-      handle: normalized,
-      displayName: user.name,
-      avatarUrl: user.image ?? null,
-    })
-    .onConflictDoNothing()
-    .returning();
-  const row = inserted[0];
-  if (!row) throw new HandleTakenError(normalized);
-  return toSocialProfile(row);
+  return db.transaction(async (tx) => {
+    const inserted = await tx
+      .insert(schema.userProfiles)
+      .values({
+        userId: user.id,
+        handle: normalized,
+        displayName: user.name,
+        avatarUrl: user.image ?? null,
+      })
+      .onConflictDoNothing()
+      .returning();
+    const row = inserted[0];
+    if (!row) throw new HandleTakenError(normalized);
+
+    /**
+     * Claiming a handle must not publish anything written before there was
+     * one.
+     *
+     * `logPour` and `updatePourVisibility` refuse a non-private visibility
+     * from an account with no profile — but that is a guard on *future*
+     * writes, and earlier releases stored `public`/`friends`/`followers` rows
+     * freely. Those are invisible today only because `canViewPourContext`
+     * reads `authorSocialEnabled ?? false`, and **this insert is exactly what
+     * flips that condition**: without this clamp, claiming a handle would
+     * publish every historical note at once, with no per-object choice by
+     * anyone. AGENTS.md is unambiguous that notes are private by default and
+     * that visibility is never raised retroactively.
+     *
+     * Clamped here rather than backfilled by a migration because this is the
+     * only moment the exposure can happen: until the profile exists the rows
+     * are unreadable, and after it exists nothing can write another one. In
+     * the same transaction as the insert, so there is no instant where the
+     * profile is live and the old pours are still public.
+     */
+    await tx
+      .update(schema.pours)
+      .set({ visibility: "private" })
+      .where(and(eq(schema.pours.userId, user.id), ne(schema.pours.visibility, "private")));
+
+    return toSocialProfile(row);
+  });
 }
 
 export async function updateProfile(
@@ -1684,7 +1712,22 @@ export function commentWithdrawnByAuthor(
   authorId: string,
   viewerId: string | null,
 ): boolean {
-  return authorSocialEnabled === false && authorId !== viewerId;
+  /**
+   * A **missing** profile counts as withdrawn, not as enabled.
+   *
+   * `addComment` refuses a commenter with no profile now, but that guards
+   * future writes only: comments written under the old behaviour are still
+   * there, with a null `socialEnabled` from the left join. Read as "not
+   * false" they stayed visible and reportable — and their author cannot be
+   * suspended, because `suspendAccount` needs the profile row that does not
+   * exist, so an operator could hide each one and never stop the next.
+   *
+   * `!== true` rather than `=== false` makes no-profile the same answer as
+   * social-switched-off here, which is the rule `logPour`,
+   * `updatePourVisibility` and `addComment` already apply. The author still
+   * sees their own comment, exactly as a stepped-back author does.
+   */
+  return authorSocialEnabled !== true && authorId !== viewerId;
 }
 
 export async function listComments(db: DB, viewerId: string | null, pourId: string): Promise<CommentView[] | null> {

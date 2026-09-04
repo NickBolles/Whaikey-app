@@ -633,6 +633,52 @@ describe("comments", () => {
     expect(await approveFollow(db, owner.id, fan.id)).toBe(true);
   });
 
+  /**
+   * The write guards are forward-only, and rows written under the old
+   * behaviour are still there. Claiming a handle is the exact moment
+   * `canViewPourContext` starts returning true for them, so it is the moment
+   * the retroactive publication would happen.
+   */
+  it("claiming a handle does not publish pours written before there was one", async () => {
+    const late = await createTestUser(db);
+    const bottle = await createTestBottle(db);
+    // Written the way an earlier release allowed: no profile, non-private.
+    const legacy = uid("pour");
+    await db
+      .insert(schema.pours)
+      .values({ id: legacy, userId: late.id, bottleId: bottle.id, visibility: "public" });
+
+    const { createProfile } = await import("./social");
+    await createProfile(db, { id: late.id, name: "Late Comer" }, "latecomer");
+
+    const after = await db.query.pours.findFirst({ where: eq(schema.pours.id, legacy) });
+    expect(after?.visibility).toBe("private");
+  });
+
+  /**
+   * Legacy comments from profile-less accounts are unsuspendable — the queue
+   * offers Suspend and `suspendAccount` throws on the missing profile row. A
+   * missing profile is the same answer as social switched off, so they are
+   * withdrawn from view and unreportable, as a stepped-back author's are.
+   */
+  it("treats a comment with no author profile as withdrawn", async () => {
+    const ghost = await createTestUser(db);
+    const legacy = uid("comment");
+    await db
+      .insert(schema.comments)
+      .values({ id: legacy, pourId, userId: ghost.id, body: "legacy abuse" });
+
+    const listed = await listComments(db, owner.id, pourId);
+    expect(listed?.some((c) => c.id === legacy)).toBe(false);
+    await expect(
+      createReport(db, owner.id, { subjectType: "comment", subjectId: legacy, reason: "spam" }),
+    ).resolves.toBe(false);
+
+    // Its own author still sees it, exactly as a stepped-back author does.
+    const own = await listComments(db, ghost.id, pourId);
+    expect(own?.some((c) => c.id === legacy)).toBe(true);
+  });
+
   it("refuses a comment from an account with no social profile", async () => {
     const stranger = await createTestUser(db);
     expect(await addComment(db, stranger.id, pourId, "hello")).toBeNull();
