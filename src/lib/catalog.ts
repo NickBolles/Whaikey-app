@@ -1,4 +1,5 @@
-import { and, asc, desc, eq, gt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNull, notExists, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import type { DB } from "@/db";
 import {
   bottleSubmissions,
@@ -498,4 +499,59 @@ export async function getSubmissionForBottle(
     where: and(eq(bottleSubmissions.bottleId, bottleId), eq(bottleSubmissions.submittedBy, userId)),
   });
   return row ?? null;
+}
+
+/**
+ * Delete unapproved bottles whose submitter's account is gone.
+ *
+ * `bottles.submittedBy` is `set null` on account deletion, because a bottle
+ * already promoted into the shared catalog is data everybody's shelf points at
+ * and has to outlive whoever first typed it. But an **unapproved** one is not
+ * shared data yet: `catalogVisibleTo` shows a `user_submitted` bottle only to
+ * its submitter, so with the submitter null it is visible to nobody — and
+ * `bottle_submissions.submittedBy` cascades, so the row that would have put it
+ * back in the review queue is gone too. The result is user-entered content
+ * that survives the account it belongs to, unreachable and unreviewable,
+ * against a Privacy Policy that promises deletion.
+ *
+ * Swept rather than deleted at the point of account deletion because that path
+ * does not exist yet (SEC-M5): today the Privacy Policy describes deletion as
+ * a support request, so the cleanup has to be something that catches the
+ * result however the account went away, including by hand.
+ *
+ * Two rows are deliberately spared:
+ *
+ * - A bottle with a submission row still attached. Its submitter's account may
+ *   be gone, but the queue can still see it, and a decision an operator can
+ *   still make is not orphaned.
+ * - A bottle another submission was marked a **duplicate of**. Not reachable
+ *   through the app today — `markSubmissionDuplicate` refuses a target that is
+ *   still `user_submitted`, so a duplicate always points at a promoted bottle,
+ *   which this sweep never considers. The guard is on the *column*, not on
+ *   that rule: `duplicate_of_bottle_id` has no delete policy, so if the rule
+ *   ever relaxes the delete would throw and take the rest of the sweep with
+ *   it. Skipping a row is a smaller failure than a housekeeping job that stops
+ *   at the first one.
+ */
+export async function sweepOrphanedSubmissions(db: DB): Promise<number> {
+  const dupe = alias(bottleSubmissions, "dupe_of");
+  const rows = await db
+    .delete(bottles)
+    .where(
+      and(
+        eq(bottles.status, "user_submitted"),
+        isNull(bottles.submittedBy),
+        notExists(
+          db
+            .select({ one: sql`1` })
+            .from(bottleSubmissions)
+            .where(eq(bottleSubmissions.bottleId, bottles.id)),
+        ),
+        notExists(
+          db.select({ one: sql`1` }).from(dupe).where(eq(dupe.duplicateOfBottleId, bottles.id)),
+        ),
+      ),
+    )
+    .returning({ id: bottles.id });
+  return rows.length;
 }

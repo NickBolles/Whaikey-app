@@ -18,6 +18,7 @@ import {
   listPendingSubmissions,
   markSubmissionDuplicate,
   rejectSubmission,
+  sweepOrphanedSubmissions,
 } from "./catalog";
 import { canViewBottle } from "./catalog-visibility";
 import { searchBottles, getBottleDetail } from "./search";
@@ -545,6 +546,141 @@ describe("a submitter can be deleted", () => {
       await db.query.bottleSubmissions.findFirst({
         where: eq(schema.bottleSubmissions.id, submissionId),
       }),
+    ).toBeUndefined();
+  });
+});
+
+/**
+ * `bottles.submittedBy` is `set null` so a promoted bottle outlives its
+ * submitter — but an unapproved one is then visible to nobody
+ * (`catalogVisibleTo` shows `user_submitted` only to its submitter) and
+ * reviewable by nobody (`bottle_submissions.submittedBy` cascades away). That
+ * is user-entered content surviving the account it belongs to, against a
+ * Privacy Policy that promises deletion.
+ */
+describe("sweeping unapproved bottles whose submitter is gone", () => {
+  let db: DB;
+  let submitter: schema.User;
+  let reviewer: schema.User;
+
+  beforeEach(async () => {
+    db = await setupTestDb();
+    submitter = await createTestUser(db);
+    reviewer = await createTestUser(db);
+  });
+
+  it("deletes the orphan and leaves everything else alone", async () => {
+    const orphan = await submitBottle(db, submitter.id, {
+      name: "Orphan Single Cask",
+      category: "scotch-single-malt",
+    });
+    const mine = await submitBottle(db, submitter.id, {
+      name: "Still Mine Rye",
+      category: "rye",
+    });
+    const promoted = await submitBottle(db, submitter.id, {
+      name: "Promoted Bourbon",
+      category: "bourbon",
+    });
+    await approveSubmission(db, reviewer.id, promoted.submissionId, "verified");
+
+    // Only the orphan's submission row goes; the others keep an owner or a
+    // catalog status of their own.
+    await db
+      .delete(schema.bottleSubmissions)
+      .where(eq(schema.bottleSubmissions.id, orphan.submissionId));
+    await db
+      .update(schema.bottles)
+      .set({ submittedBy: null })
+      .where(eq(schema.bottles.id, orphan.bottle.id));
+
+    expect(await sweepOrphanedSubmissions(db)).toBe(1);
+
+    expect(
+      await db.query.bottles.findFirst({ where: eq(schema.bottles.id, orphan.bottle.id) }),
+    ).toBeUndefined();
+    // Still has a submitter: theirs to see, and still in the queue.
+    expect(
+      await db.query.bottles.findFirst({ where: eq(schema.bottles.id, mine.bottle.id) }),
+    ).toBeDefined();
+    // Promoted into the shared catalog: outlives its submitter by design.
+    expect(
+      await db.query.bottles.findFirst({ where: eq(schema.bottles.id, promoted.bottle.id) }),
+    ).toBeDefined();
+  });
+
+  it("keeps a bottle whose submission row is still in the queue", async () => {
+    const { bottle } = await submitBottle(db, submitter.id, {
+      name: "Reviewable Without An Owner",
+      category: "bourbon",
+    });
+    // Submitter gone from the bottle, but the submission survives — a decision
+    // an operator can still make is not orphaned.
+    await db
+      .update(schema.bottles)
+      .set({ submittedBy: null })
+      .where(eq(schema.bottles.id, bottle.id));
+
+    expect(await sweepOrphanedSubmissions(db)).toBe(0);
+    expect(
+      await db.query.bottles.findFirst({ where: eq(schema.bottles.id, bottle.id) }),
+    ).toBeDefined();
+  });
+
+  /**
+   * `markSubmissionDuplicate` refuses a target that is still `user_submitted`,
+   * so this state is not reachable through the app — the row is built directly,
+   * because the guard is on the column rather than on that rule.
+   * `duplicate_of_bottle_id` has no delete policy: if the rule ever relaxes,
+   * the delete throws and takes the rest of the sweep with it.
+   */
+  it("skips a bottle a submission points at, rather than throwing on the FK", async () => {
+    const original = await submitBottle(db, submitter.id, {
+      name: "Duplicated Original",
+      category: "bourbon",
+    });
+    const other = await createTestUser(db);
+    const copy = await submitBottle(db, other.id, {
+      name: "Duplicated Original Batch 2",
+      category: "bourbon",
+    });
+    await db
+      .update(schema.bottleSubmissions)
+      .set({ state: "duplicate", duplicateOfBottleId: original.bottle.id })
+      .where(eq(schema.bottleSubmissions.id, copy.submissionId));
+
+    await db
+      .delete(schema.bottleSubmissions)
+      .where(eq(schema.bottleSubmissions.id, original.submissionId));
+    await db
+      .update(schema.bottles)
+      .set({ submittedBy: null })
+      .where(eq(schema.bottles.id, original.bottle.id));
+
+    expect(await sweepOrphanedSubmissions(db)).toBe(0);
+    expect(
+      await db.query.bottles.findFirst({ where: eq(schema.bottles.id, original.bottle.id) }),
+    ).toBeDefined();
+  });
+
+  it("is what the account deletion it cleans up after actually produces", async () => {
+    const { bottle } = await submitBottle(db, submitter.id, {
+      name: "Gone With Their Account",
+      category: "bourbon",
+    });
+
+    // The real path, not a hand-built state: deleting the account cascades the
+    // submission and nulls the bottle's submitter.
+    await db.delete(schema.user).where(eq(schema.user.id, submitter.id));
+    const stranded = await db.query.bottles.findFirst({
+      where: eq(schema.bottles.id, bottle.id),
+    });
+    expect(stranded?.status).toBe("user_submitted");
+    expect(stranded?.submittedBy).toBeNull();
+
+    expect(await sweepOrphanedSubmissions(db)).toBe(1);
+    expect(
+      await db.query.bottles.findFirst({ where: eq(schema.bottles.id, bottle.id) }),
     ).toBeUndefined();
   });
 });

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/db";
 import { sweepExpiredCounters } from "@/lib/ai/rate-limit";
+import { sweepOrphanedSubmissions } from "@/lib/catalog";
 import { sweepNativeAuth } from "@/lib/native-auth";
 import { sweepExpiredPhoneLookups } from "@/lib/social";
 
@@ -42,5 +43,16 @@ export async function GET(request: Request): Promise<NextResponse> {
   // Codes first: they are the ones holding encrypted session cookies.
   await sweepNativeAuth(db, now);
   await sweepExpiredPhoneLookups(db, now);
+  /**
+   * And the one thing here that is not a counter or a token: unapproved
+   * bottles whose submitter's account is gone. `bottles.submittedBy` is
+   * `set null` so a *promoted* bottle outlives its submitter, but an
+   * unapproved one is then visible to nobody and reviewable by nobody, which
+   * is user-entered content surviving the account it belongs to. Swept here
+   * rather than at account deletion because that path does not exist yet
+   * (SEC-M5) — today deletion is a support request, so the cleanup has to
+   * catch the result however the account went away.
+   */
+  await sweepOrphanedSubmissions(db);
   return NextResponse.json({ ok: true });
 }

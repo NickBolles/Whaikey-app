@@ -1,8 +1,10 @@
+import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
 import { createTestUser, setupTestDb, uid } from "@/test/helpers";
 import { RATE_LIMIT_RETENTION_MS } from "@/lib/ai/rate-limit";
+import { submitBottle } from "@/lib/catalog";
 import { GET } from "./route";
 
 /**
@@ -95,6 +97,25 @@ describe("GET /api/cron/sweep", () => {
     expect(await db.select().from(schema.nativeAuthCodes)).toHaveLength(0);
     expect(await db.select().from(schema.nativeAuthRequests)).toHaveLength(0);
     expect(await db.select().from(schema.phoneLookups)).toHaveLength(0);
+  });
+
+  /**
+   * The one thing here that is not a counter or a token. `bottles.submittedBy`
+   * is `set null`, so an unapproved bottle survives its submitter's account
+   * visible to nobody and reviewable by nobody — user-entered content
+   * outliving the account it belongs to.
+   */
+  it("also sweeps unapproved bottles whose submitter's account is gone", async () => {
+    const { bottle } = await submitBottle(db, user.id, {
+      name: "Gone With Their Account",
+      category: "bourbon",
+    });
+    await db.delete(schema.user).where(eq(schema.user.id, user.id));
+
+    expect((await GET(get("Bearer test-secret"))).status).toBe(200);
+    expect(
+      await db.query.bottles.findFirst({ where: eq(schema.bottles.id, bottle.id) }),
+    ).toBeUndefined();
   });
 
   it("is 404 without the secret, and 404 when none is configured", async () => {
