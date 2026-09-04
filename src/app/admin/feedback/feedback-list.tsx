@@ -71,7 +71,7 @@ export function FeedbackList({ rows }: { rows: FeedbackView[] }) {
                 type="button"
                 disabled={busy === row.id}
                 onClick={() => void markHandled(row.id)}
-                className="btn-secondary self-start px-4 py-2 text-sm font-medium disabled:opacity-50"
+                className="btn-secondary inline-flex min-h-11 self-start items-center px-4 py-2 text-sm font-medium disabled:opacity-50"
               >
                 Mark handled
               </button>

@@ -131,6 +131,17 @@ export function ModerationQueue({
             </strong>
           )}
         </p>
+        {/*
+          These stay text-sized, as a decision rather than an oversight. Every
+          BUTTON on the three operator screens now has a real 44px height —
+          swept together after the fourth, fifth and sixth findings arrived one
+          control at a time — but `docs/STORYBOARD.md` §3.17 puts these screens
+          "deliberately outside the design system" and scopes their only visual
+          work to two things: a breached SLA impossible to skim past, and the
+          destructive action hard to mis-tap. Navigation is neither. Mis-tapping
+          a link here costs a press of Back; mis-tapping Suspend, Add to
+          catalog, Mark handled or Lift this hide costs a decision with no undo.
+        */}
         <nav className="flex gap-3 text-sm">
           <Link href="/admin/submissions" className="text-accent hover:underline">
             Submitted bottles →
@@ -570,7 +581,16 @@ function StandingHideRow({
             note,
           })
         }
-        className="self-start text-accent hover:underline disabled:opacity-50"
+        /*
+          Real height rather than `.tap-target` even though this control is
+          isolated enough for it: these rows sit in a list with a small gap, and
+          a 44px overlay on a ~16px text button reaches past the row into its
+          neighbours — every one of which carries its own "Lift this hide" for
+          a DIFFERENT subject. The failure mode of the helper here is lifting
+          the wrong takedown, so the safe version is the one that occupies the
+          space it claims.
+        */
+        className="inline-flex min-h-11 self-start items-center text-accent hover:underline disabled:opacity-50"
       >
         Lift this hide
       </button>
