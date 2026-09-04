@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, isNotNull, ne, sql } from "drizzle-orm";
+import { and, desc, eq, gt, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
@@ -443,15 +443,69 @@ export async function updatePourVisibility(
   });
 }
 
-/** Delete a pour (tasting note cascades). Returns false for missing/others'. */
+/**
+ * Delete a pour (tasting note and comments cascade). Returns false for
+ * missing/others'.
+ *
+ * **This is the one instant at which a report's subject owner stops being
+ * derivable**, so it is where the owner gets recorded. `reports` keeps
+ * `subject_owner_id` precisely so a complaint can still be claimed after its
+ * subject is gone — otherwise deleting the evidence is a way to keep a
+ * complaint permanently unresolvable, and the "Suspend author" action goes
+ * with it. Migration 0030 backfilled the rows that existed when the column
+ * shipped and its comment claimed a lazy backfill was impossible; that is only
+ * true once the subject is *already* gone. While the subject is alive the
+ * owner is derivable at any time, and the last such moment is here.
+ *
+ * Recording it here rather than only in the migration is what closes the
+ * deploy window `scripts/build.mjs` opens: `pnpm db:push` runs before
+ * `next build`, so the previous deployment keeps serving for the length of a
+ * build and any report it files carries a null owner the one-time migration
+ * will never revisit. Same shape as the provider-token gap migration 0032
+ * could not see — a one-time migration cannot cover writes that happen after
+ * it runs, so the guarantee has to live in code that runs on every request.
+ *
+ * Ownership is verified before the backfill because the report's owner is
+ * written from it: an unauthorized caller must not be able to stamp their own
+ * id onto somebody else's report. Comments carry their OWN author, not this
+ * pour's owner — a comment on your note is not yours — so they need a
+ * correlated update, read before the cascade takes them.
+ */
 export async function deletePour(db: DB, userId: string, pourId: string): Promise<boolean> {
-  const deleted = await db
-    .delete(schema.pours)
-    .where(and(eq(schema.pours.id, pourId), eq(schema.pours.userId, userId)))
-    .returning({ id: schema.pours.id });
-  if (deleted.length > 0) {
+  const deleted = await db.transaction(async (tx) => {
+    const own = await tx
+      .select({ id: schema.pours.id })
+      .from(schema.pours)
+      .where(and(eq(schema.pours.id, pourId), eq(schema.pours.userId, userId)));
+    if (own.length === 0) return false;
+
+    // Never overwrite a recorded owner: `is null` only, the same condition
+    // migration 0030 uses, so a re-derivation can never replace a fact.
+    await tx
+      .update(schema.reports)
+      .set({ subjectOwnerId: userId })
+      .where(
+        and(
+          isNull(schema.reports.subjectOwnerId),
+          eq(schema.reports.subjectType, "pour"),
+          eq(schema.reports.subjectId, pourId),
+        ),
+      );
+    await tx.execute(sql`
+      update ${schema.reports} set "subject_owner_id" = c."user_id"
+      from ${schema.comments} as c
+      where ${schema.reports.subjectOwnerId} is null
+        and ${schema.reports.subjectType} = 'comment'
+        and c."id" = ${schema.reports.subjectId}
+        and c."pour_id" = ${pourId}
+    `);
+
+    await tx.delete(schema.pours).where(eq(schema.pours.id, pourId));
+    return true;
+  });
+  if (deleted) {
     // Removing a pour changes the palate; keep the snapshot in sync.
     await refreshUserPalate(db, userId);
   }
-  return deleted.length > 0;
+  return deleted;
 }

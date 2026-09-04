@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
+import { deletePour } from "@/lib/pours";
 import { createTestBottle, createTestUser, setupTestDb, uid } from "@/test/helpers";
 import {
   CannotHideProfileError,
@@ -1269,6 +1270,128 @@ describe("a deleted subject does not take its author out of reach", () => {
       where: eq(schema.userProfiles.userId, author.id),
     });
     expect(after?.suspendedAt).not.toBeNull();
+  });
+
+  /**
+   * The deploy window `scripts/build.mjs` opens: `pnpm db:push` runs before
+   * `next build`, so the PREVIOUS deployment serves for the length of a build
+   * and files reports with no owner recorded — rows migration 0030 has already
+   * run past and will never revisit. These fixtures set that exact shape
+   * (`subjectOwnerId` left null on a report about a live subject) and delete
+   * through `deletePour`, the real path, rather than the raw delete the tests
+   * above use.
+   */
+  it("records the owner as the pour goes, for a report filed with none", async () => {
+    const bottle = await createTestBottle(db);
+    const pourId = uid("pour");
+    await db
+      .insert(schema.pours)
+      .values({ id: pourId, userId: author.id, bottleId: bottle.id, visibility: "public" });
+    const reportId = uid("report");
+    await db.insert(schema.reports).values({
+      id: reportId,
+      subjectType: "pour",
+      subjectId: pourId,
+      reporterId: reporter.id,
+      reason: "abuse",
+      // No subjectOwnerId: what the pre-column deployment writes.
+      subjectSnapshot: await subjectPreview(db, "pour", pourId),
+    });
+
+    expect(await deletePour(db, author.id, pourId)).toBe(true);
+
+    const [row] = await listOpenReports(db);
+    expect(row.subjectOwnerId).toBe(author.id);
+    // The point of recording it: the account-level action still works with the
+    // evidence gone, which is what deleting the pour used to take away.
+    await suspendAccount(db, operator.id, author.id, "repeated abuse", { reportId });
+    const after = await db.query.userProfiles.findFirst({
+      where: eq(schema.userProfiles.userId, author.id),
+    });
+    expect(after?.suspendedAt).not.toBeNull();
+  });
+
+  it("credits a cascaded comment to its own author, not the pour's owner", async () => {
+    const bottle = await createTestBottle(db);
+    const pourId = uid("pour");
+    await db
+      .insert(schema.pours)
+      .values({ id: pourId, userId: author.id, bottleId: bottle.id, visibility: "public" });
+    const commentId = uid("comment");
+    // The commenter is somebody else: a comment on your note is not yours, so
+    // stamping the pour's owner on it would suspend the wrong account.
+    await db
+      .insert(schema.comments)
+      .values({ id: commentId, pourId, userId: reporter.id, body: "something awful" });
+    await db.insert(schema.reports).values({
+      id: uid("report"),
+      subjectType: "comment",
+      subjectId: commentId,
+      reporterId: author.id,
+      reason: "abuse",
+      subjectSnapshot: await subjectPreview(db, "comment", commentId),
+    });
+
+    // Deleting the pour cascades its comments, so this is the same instant of
+    // loss reached by a different door.
+    expect(await deletePour(db, author.id, pourId)).toBe(true);
+
+    const [row] = await listOpenReports(db);
+    expect(row.subjectOwnerId).toBe(reporter.id);
+  });
+
+  it("does not let a failed delete stamp the caller onto somebody's report", async () => {
+    const bottle = await createTestBottle(db);
+    const pourId = uid("pour");
+    await db
+      .insert(schema.pours)
+      .values({ id: pourId, userId: author.id, bottleId: bottle.id, visibility: "public" });
+    await db.insert(schema.reports).values({
+      id: uid("report"),
+      subjectType: "pour",
+      subjectId: pourId,
+      reporterId: reporter.id,
+      reason: "abuse",
+      subjectSnapshot: await subjectPreview(db, "pour", pourId),
+    });
+
+    // The owner is written FROM the caller, so ownership has to be settled
+    // before the backfill runs or a stranger could name themselves the author.
+    expect(await deletePour(db, reporter.id, pourId)).toBe(false);
+    expect(await db.query.pours.findFirst({ where: eq(schema.pours.id, pourId) })).toBeDefined();
+    // Asserted on the STORED column, not on `listOpenReports`: the view reports
+    // the resolved owner (recorded, else derived from the live subject), so
+    // with the pour still there it would answer `author.id` either way and
+    // could not tell a stamp from a derivation.
+    const stored = await db.query.reports.findFirst({
+      where: eq(schema.reports.subjectId, pourId),
+      columns: { subjectOwnerId: true },
+    });
+    expect(stored?.subjectOwnerId).toBeNull();
+  });
+
+  it("never re-derives over an owner already recorded", async () => {
+    const bottle = await createTestBottle(db);
+    const pourId = uid("pour");
+    await db
+      .insert(schema.pours)
+      .values({ id: pourId, userId: author.id, bottleId: bottle.id, visibility: "public" });
+    // A report whose recorded owner disagrees with the live row — the shape a
+    // re-derivation would silently "correct". The recorded value is the fact;
+    // the derivation is only ever a fallback for its absence.
+    await db.insert(schema.reports).values({
+      id: uid("report"),
+      subjectType: "pour",
+      subjectId: pourId,
+      reporterId: reporter.id,
+      reason: "abuse",
+      subjectOwnerId: reporter.id,
+      subjectSnapshot: await subjectPreview(db, "pour", pourId),
+    });
+
+    expect(await deletePour(db, author.id, pourId)).toBe(true);
+    const [row] = await listOpenReports(db);
+    expect(row.subjectOwnerId).toBe(reporter.id);
   });
 
   it("reports a recorded owner as suspended once they are", async () => {

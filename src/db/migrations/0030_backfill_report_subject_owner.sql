@@ -7,11 +7,21 @@
 -- before the column existed carry null and fall back to that derivation, so
 -- the guarantee held only for reports filed after this deployment.
 --
--- Derived now, while the subjects are still there. This cannot be done later:
--- the moment a subject is hard-deleted its owner is unrecoverable, so the
--- backfill has to run at deploy rather than lazily when the queue is worked.
--- A report whose subject is already gone stays null and stays as unresolvable
--- as it was; nothing can recover what was not recorded.
+-- Derived now, while the subjects are still there. A report whose subject is
+-- already gone stays null and stays as unresolvable as it was; nothing can
+-- recover what was not recorded.
+--
+-- An earlier version of this comment said the backfill "cannot be done later",
+-- and that sentence is what hid a gap. It is only true once the subject is
+-- gone: while it is alive the owner is derivable at any time, and the LAST
+-- such moment is the delete itself. `deletePour` now records it there, in the
+-- same transaction as the delete, which is what makes this migration a
+-- backfill of existing rows rather than the only guarantee.
+--
+-- That matters because a one-time migration cannot cover writes that happen
+-- after it runs, and `scripts/build.mjs` applies migrations BEFORE `next
+-- build`: the previous deployment keeps serving for the length of a build, and
+-- every report it files carries a null owner this UPDATE will never revisit.
 --
 -- Statement-breakpoint separated for the runner, and idempotent: only rows
 -- with no recorded owner are touched, so a re-run is a no-op and a recorded
