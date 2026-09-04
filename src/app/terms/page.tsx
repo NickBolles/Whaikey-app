@@ -44,6 +44,16 @@ export default function TermsPage() {
           it visible.
         </p>
         <p>
+          <strong className="text-foreground">One narrow exception, and we would rather name it
+          than have you find it.</strong>{" "}
+          If somebody reports something you made visible, we keep a copy of it as it was at the
+          moment it was reported, and that copy outlives your taking it down. It exists so the
+          complaint can be judged against what was actually posted rather than against a version
+          edited afterwards, and so an appeal has something to be answered from. It is shown only
+          to whoever works the report, never to other users, and it covers nothing you never made
+          visible in the first place.
+        </p>
+        <p>
           You are responsible for what you post. Content that is unlawful, abusive, or that
           impersonates somebody may be <strong className="text-foreground">hidden</strong> from the
           social surfaces, and the account behind it may be{" "}

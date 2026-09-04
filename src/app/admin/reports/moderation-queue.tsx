@@ -343,7 +343,18 @@ function ReportRow({
         className="w-full rounded-xl border border-border-subtle bg-surface py-2.5 px-3 text-sm text-foreground placeholder:text-muted focus:outline-none focus:border-accent/70"
       />
 
-      <div className="flex flex-wrap gap-2">
+      {/*
+        44px of real height and 12px between them, rather than the `tap-target`
+        overlay used elsewhere: that helper grows the hit area WITHOUT growing
+        the control, which is right for a lone compact pill and wrong here.
+        These four sit adjacent, so overlapping 44px hit areas would extend each
+        button underneath its neighbour and the later one in DOM order would
+        win the tap — making a mis-tap between Hide, Suspend, Reinstate and
+        Dismiss more likely, not less, on exactly the controls where a mis-tap
+        suspends the wrong account. docs/STORYBOARD.md §3.17 is binding on the
+        operator screens; separation is as much of the requirement as size.
+      */}
+      <div className="flex flex-wrap gap-3">
         {/* No Hide for a profile: its only lever is a switch in the account's
             own settings, so hiding one would last until its owner found the
             toggle they already have — while telling the operator they had
@@ -373,7 +384,7 @@ function ReportRow({
                 note,
               })
             }
-            className="btn-secondary px-4 py-2 text-sm font-medium disabled:opacity-50"
+            className="btn-secondary inline-flex min-h-11 items-center px-4 py-2 text-sm font-medium disabled:opacity-50"
           >
             {report.alreadyHidden ? "Resolve as hidden" : "Hide"}
           </button>
@@ -404,7 +415,7 @@ function ReportRow({
                 reportId: report.id,
               })
             }
-            className="btn-secondary px-4 py-2 text-sm font-medium disabled:opacity-50"
+            className="btn-secondary inline-flex min-h-11 items-center px-4 py-2 text-sm font-medium disabled:opacity-50"
           >
             {report.subjectOwnerSuspended ? "Resolve as suspended" : "Suspend author"}
           </button>
@@ -432,7 +443,7 @@ function ReportRow({
                 reportId: report.id,
               })
             }
-            className="btn-secondary px-4 py-2 text-sm font-medium disabled:opacity-50"
+            className="btn-secondary inline-flex min-h-11 items-center px-4 py-2 text-sm font-medium disabled:opacity-50"
           >
             Reinstate author
           </button>
@@ -442,7 +453,7 @@ function ReportRow({
           disabled={busy || note.trim().length === 0}
           title={note.trim() ? undefined : "Every decision records why, dismissals included"}
           onClick={() => onAct({ action: "dismiss", reportId: report.id, note })}
-          className="px-4 py-2 text-sm text-muted hover:text-foreground transition-colors disabled:opacity-50"
+          className="inline-flex min-h-11 items-center px-4 py-2 text-sm text-muted hover:text-foreground transition-colors disabled:opacity-50"
         >
           Dismiss
         </button>
@@ -499,7 +510,7 @@ function SuspendedRow({
               expectedActionId: account.suspensionId,
             })
           }
-          className="btn-secondary self-start px-4 py-2 text-sm font-medium disabled:opacity-50"
+          className="btn-secondary inline-flex min-h-11 self-start items-center px-4 py-2 text-sm font-medium disabled:opacity-50"
         >
           Reinstate
         </button>

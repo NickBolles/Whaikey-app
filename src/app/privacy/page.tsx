@@ -59,8 +59,11 @@ export default function PrivacyPage() {
             market you gave the gate, once, and whether it met the minimum.
           </li>
           <li>
-            <strong className="text-foreground">Social data, if you use it</strong> — your handle,
-            profile, who you follow, comments, and any share links you create.
+            <strong className="text-foreground">Social data, if you use it</strong> — your handle
+            and profile, who you follow and who follows you, the accounts you have blocked, the
+            notes you have cheered, the comments you write, and any share links you create. A
+            block is kept until you lift it, because being kept is what makes a block hold; the
+            rest go with the thing they are attached to or with the account.
           </li>
           <li>
             <strong className="text-foreground">A phone number, only if you offer one</strong> — and

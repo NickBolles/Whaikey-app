@@ -24,9 +24,25 @@ import PrivacyPage from "./page";
  * says in words why the table holds nothing about a person. Adding a table
  * without touching this file fails the suite with the question to answer.
  * Neither verdict can be given silently.
+ *
+ * **And a sentence about one table is not a disclosure of another.** The first
+ * version of this file shipped with `blocks` and `reactions` both pointed at a
+ * phrase about follows and comments — so the check passed while the policy
+ * still told nobody that blocking someone or cheering a note is retained. The
+ * enforcement was defeated in the same commit that introduced it, by the
+ * cheapest possible move: reaching for a sentence that was already there
+ * instead of writing the one the table needed. A phrase cannot describe every
+ * table it is pointed at, and nothing here can read English to check.
+ *
+ * What it can check is that reuse was DELIBERATE. A phrase used by more than
+ * one table must be declared on every one of them via `sharedWith`, naming the
+ * others — so two tables share a sentence only when someone wrote down that
+ * they are one disclosure (a session and its messages; a request and its code),
+ * and pointing a new table at a convenient existing phrase fails until it is
+ * either given its own sentence or declared as part of that one.
  */
 
-type Verdict = { disclosed: string } | { notPersonal: string };
+type Verdict = { disclosed: string; sharedWith?: string[] } | { notPersonal: string };
 
 const INVENTORY: Record<string, Verdict> = {
   // --- Account and sign-in ---
@@ -34,36 +50,48 @@ const INVENTORY: Record<string, Verdict> = {
   session: { disclosed: "a session token plus the IP address" },
   account: { disclosed: "the tokens the provider issues for it" },
   verification: { notPersonal: "Better Auth's short-lived sign-in challenges, not user content." },
-  native_auth_requests: { disclosed: "native sign-in codes are deleted the moment they are used" },
-  native_auth_codes: { disclosed: "native sign-in codes are deleted the moment they are used" },
+  native_auth_requests: {
+    disclosed: "native sign-in codes are deleted the moment they are used",
+    sharedWith: ["native_auth_codes"],
+  },
+  native_auth_codes: {
+    disclosed: "native sign-in codes are deleted the moment they are used",
+    sharedWith: ["native_auth_requests"],
+  },
 
   // --- The journal ---
-  pours: { disclosed: "pours, ratings, tasting" },
-  tasting_notes: { disclosed: "pours, ratings, tasting" },
+  pours: { disclosed: "pours, ratings, tasting", sharedWith: ["tasting_notes"] },
+  tasting_notes: { disclosed: "pours, ratings, tasting", sharedWith: ["pours"] },
   user_bottles: { disclosed: "the bottles on your shelf, and what you paid" },
-  pour_shares: { disclosed: "and any share links you create" },
+  pour_shares: { disclosed: "any share links you create" },
   passport_tiers: { notPersonal: "Tier definitions for the passport, identical for everyone." },
 
   // --- Age gate ---
   age_verifications: { disclosed: "the date of birth and" },
 
   // --- Social ---
-  user_profiles: { disclosed: "your handle,\n            profile, who you follow, comments" },
-  user_social_prefs: { disclosed: "your handle,\n            profile, who you follow, comments" },
-  follows: { disclosed: "who you follow" },
-  blocks: { disclosed: "who you follow" },
-  reactions: { disclosed: "who you follow, comments" },
-  comments: { disclosed: "who you follow, comments" },
+  user_profiles: { disclosed: "your handle and profile", sharedWith: ["user_social_prefs"] },
+  user_social_prefs: { disclosed: "your handle and profile", sharedWith: ["user_profiles"] },
+  follows: { disclosed: "who you follow and who follows you" },
+  blocks: { disclosed: "the accounts you have blocked" },
+  reactions: { disclosed: "the notes you have cheered" },
+  comments: { disclosed: "the comments you write" },
   phone_lookups: { disclosed: "We keep a keyed hash for exact-match lookup" },
 
   // --- Moderation and support ---
-  reports: { disclosed: "Support messages and moderation records" },
-  moderation_actions: { disclosed: "Support messages and moderation records" },
+  reports: { disclosed: "Support messages and moderation records", sharedWith: ["moderation_actions"] },
+  moderation_actions: { disclosed: "Support messages and moderation records", sharedWith: ["reports"] },
   feedback: { disclosed: "Anything you send us through support" },
 
   // --- AI ---
-  chat_sessions: { disclosed: "every\n            question you ask the AI and every answer it gives" },
-  chat_messages: { disclosed: "every\n            question you ask the AI and every answer it gives" },
+  chat_sessions: {
+    disclosed: "every question you ask the AI and every answer it gives",
+    sharedWith: ["chat_messages"],
+  },
+  chat_messages: {
+    disclosed: "every question you ask the AI and every answer it gives",
+    sharedWith: ["chat_sessions"],
+  },
   ai_rate_limits: { disclosed: "rate-limit counters are dropped after a couple of days" },
   pairings: { notPersonal: "Generated pairing copy keyed to a bottle, not to a person." },
   pairing_generation_locks: { notPersonal: "A generation mutex; rows carry no user content." },
@@ -128,6 +156,41 @@ describe("the privacy policy against the schema", () => {
       .filter(([, phrase]) => !normalized.includes(phrase.replace(/\s+/g, " ")))
       .map(([table, phrase]) => `${table}: ${phrase}`);
     expect(absent).toEqual([]);
+  });
+
+  it("does not let one table's sentence stand in as another's disclosure", () => {
+    const byPhrase = new Map<string, string[]>();
+    for (const [table, verdict] of Object.entries(INVENTORY)) {
+      if (!("disclosed" in verdict)) continue;
+      byPhrase.set(verdict.disclosed, [...(byPhrase.get(verdict.disclosed) ?? []), table]);
+    }
+    // Sharing has to be declared from BOTH sides: the set of tables using a
+    // phrase must be exactly what each of them says it is. Pointing a new table
+    // at an existing sentence therefore fails until somebody either writes it
+    // its own or names it in the others' `sharedWith`.
+    const undeclared: string[] = [];
+    for (const [phrase, tables] of byPhrase) {
+      for (const table of tables) {
+        const verdict = INVENTORY[table];
+        if (!("disclosed" in verdict)) continue;
+        const declared = new Set([table, ...(verdict.sharedWith ?? [])]);
+        const actual = new Set(tables);
+        if (declared.size !== actual.size || [...actual].some((t) => !declared.has(t))) {
+          undeclared.push(`${table} shares "${phrase}" with ${tables.filter((t) => t !== table).join(", ")} without declaring it`);
+        }
+      }
+    }
+    expect(undeclared).toEqual([]);
+  });
+
+  it("tells the reader that blocking and cheering are retained", () => {
+    render(<PrivacyPage />);
+    // The specific omission the rule above was written for: both of these were
+    // covered by a sentence about follows and comments, which mentions neither.
+    expect(screen.getByText(/the accounts you have blocked/)).toBeInTheDocument();
+    expect(screen.getByText(/the notes you have cheered/)).toBeInTheDocument();
+    // A block outlives the thing it is attached to, which is worth saying.
+    expect(screen.getByText(/A block is kept until you lift it/)).toBeInTheDocument();
   });
 
   it("still tells the reader what the concierge keeps and for how long", () => {
