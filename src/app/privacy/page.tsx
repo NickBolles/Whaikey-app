@@ -36,6 +36,13 @@ export default function PrivacyPage() {
             read anything from Google or Apple, and they are deleted with the account.
           </li>
           <li>
+            <strong className="text-foreground">Your sessions</strong> — for each device you are
+            signed in on, a session token plus the IP address and browser your sign-in came from.
+            They are what keep you signed in and what would show an account being used from
+            somewhere it should not be. They go when the session expires or you sign out, and with
+            the account.
+          </li>
+          <li>
             <strong className="text-foreground">Your journal</strong> — pours, ratings, tasting
             notes, flavour tags, the bottles on your shelf, and what you paid.
           </li>
@@ -143,8 +150,11 @@ export default function PrivacyPage() {
 
       <Section title="Changes">
         <p>
-          Material changes are announced in the app before they take effect, and the effective date
-          at the top moves.
+          <strong className="text-foreground">There is no announcement mechanism yet.</strong> When
+          this text changes, the effective date at the top changes with it — that date is the only
+          notice this app currently gives, and checking it is the only way to know. An in-app notice
+          before a material change is an open commitment (PLAN.md §9.3), not a built one. This
+          paragraph will say something better the day it is.
         </p>
       </Section>
     </PolicyPage>
