@@ -26,6 +26,7 @@ interface QueuedReportView {
   ageHours: number;
   preview: string | null;
   reportedPreview: string | null;
+  liveReadable: boolean;
   editedSinceReport: boolean;
   subjectOwnerId: string | null;
   subjectOwnerSuspended: boolean;
@@ -280,6 +281,17 @@ function ReportRow({
             report.preview ??
             "(the reported thing no longer exists)"}
         </p>
+        {/* Withdrawn from view is not the same as never existed, and neither is
+            an invitation to read what replaced it: STORYBOARD §3.17 says an
+            operator can act on a thing without being able to read what was
+            never shared. The snapshot above is the evidence; this line says why
+            there is nothing under it. */}
+        {!report.liveReadable && report.reportedPreview ? (
+          <p className="text-xs text-muted/70">
+            Not visible now — deleted, made private, or its author stepped back. Judged on what was
+            reported.
+          </p>
+        ) : null}
         {report.editedSinceReport ? (
           <p className="text-xs text-muted leading-relaxed whitespace-pre-wrap border-l-2 border-border pl-3 max-h-40 overflow-y-auto">
             <span className="font-semibold">Now: </span>

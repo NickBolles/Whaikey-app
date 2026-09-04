@@ -50,6 +50,16 @@ export interface QueuedReport {
    */
   reportedPreview: string | null;
   /**
+   * Whether the subject as it stands now is something the operator may read.
+   *
+   * False when it has been deleted, made private, or its author has stepped
+   * back. STORYBOARD §3.17 is binding: an operator can hide a thing and
+   * suspend an account, but cannot read what was never shared — and a
+   * revision written after the content went private was never shared with
+   * anyone.
+   */
+  liveReadable: boolean;
+  /**
    * The subject has changed since it was reported.
    *
    * The operator has to be told, because otherwise editing the abuse away is a
@@ -95,6 +105,26 @@ export async function listOpenReports(
   now = new Date(),
   limit = REPORT_PAGE_SIZE,
 ): Promise<QueuedReport[]> {
+  /**
+   * Every read below comes off one snapshot, for the same reason
+   * `listSuspendedAccounts` does: this builds each row out of several queries,
+   * and a decision landing between two of them yields a row that mixes states
+   * — one half describing the world before it and one half after, with the
+   * guard values taken from whichever half happened to be read second.
+   * Nothing blocks ahead of the first query, so the snapshot is taken when the
+   * page starts rather than after a wait.
+   */
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`set transaction isolation level repeatable read`);
+    return listOpenReportsIn(tx, now, limit);
+  });
+}
+
+async function listOpenReportsIn(
+  db: DB,
+  now: Date,
+  limit: number,
+): Promise<QueuedReport[]> {
   const rows = await db
     .select({
       id: reports.id,
@@ -132,13 +162,19 @@ export async function listOpenReports(
   const [commentRows, pourRows, noteRows] = await Promise.all([
     commentIds.length
       ? db
-          .select({ id: comments.id, body: comments.body, userId: comments.userId })
+          .select({
+            id: comments.id,
+            body: comments.body,
+            userId: comments.userId,
+            pourId: comments.pourId,
+            deletedAt: comments.deletedAt,
+          })
           .from(comments)
           .where(inArray(comments.id, commentIds))
       : [],
     pourIds.length
       ? db
-          .select({ id: pours.id, userId: pours.userId })
+          .select({ id: pours.id, userId: pours.userId, visibility: pours.visibility })
           .from(pours)
           .where(inArray(pours.id, pourIds))
       : [],
@@ -175,7 +211,20 @@ export async function listOpenReports(
     new Set([...rows.map(ownerOf).filter((id): id is string => id != null), ...profileIds]),
   );
 
-  const [profileRows, hideActions, suspendActions] = await Promise.all([
+  /**
+   * The pours a reported comment sits under, which are not the reported pours.
+   * Needed because a comment's visibility is its pour's visibility.
+   */
+  const parentPourIds = Array.from(
+    new Set(commentRows.map((c) => c.pourId).filter((id) => !pourById.has(id))),
+  );
+  const [parentPourRows, profileRows, hideActions, suspendActions] = await Promise.all([
+    parentPourIds.length
+      ? db
+          .select({ id: pours.id, userId: pours.userId, visibility: pours.visibility })
+          .from(pours)
+          .where(inArray(pours.id, parentPourIds))
+      : [],
     ownerIds.length
       ? db
           .select({
@@ -183,6 +232,7 @@ export async function listOpenReports(
             handle: userProfiles.handle,
             displayName: userProfiles.displayName,
             bio: userProfiles.bio,
+            socialEnabled: userProfiles.socialEnabled,
             suspendedAt: userProfiles.suspendedAt,
           })
           .from(userProfiles)
@@ -195,13 +245,52 @@ export async function listOpenReports(
     latestActionsBySubject(db, "profile", ownerIds, ["suspend", "reinstate"]),
   ]);
   const profileById = new Map(profileRows.map((r) => [r.userId, r]));
+  const pourVisibility = new Map<string, { userId: string; visibility: string }>();
+  for (const p of [...pourRows, ...parentPourRows]) pourVisibility.set(p.id, p);
+
+  /**
+   * Whether the subject is STILL something the operator is allowed to read.
+   *
+   * `docs/STORYBOARD.md` §3.17 is binding here: "An operator can hide a thing
+   * and suspend an account; they cannot read what was never shared." The
+   * report-time snapshot is always fair game — the reporter saw it, and it is
+   * the evidence the decision is judged on. The *current* text is not: an
+   * author who makes their pour private, or switches social off, and then
+   * edits, has written something no reporter could ever see, and rendering it
+   * under "Now" would hand the operator private content that no complaint is
+   * about.
+   *
+   * So the live projection is gated on the same conditions that made the
+   * subject reportable in the first place, rather than on the operator's
+   * privileges — which are for acting, not for reading.
+   */
+  const stillReadable = (row: (typeof rows)[number]): boolean => {
+    if (row.subjectType === "profile") {
+      return profileById.get(row.subjectId)?.socialEnabled === true;
+    }
+    if (row.subjectType === "comment") {
+      const comment = commentById.get(row.subjectId);
+      if (!comment || comment.deletedAt != null) return false;
+      const parent = pourVisibility.get(comment.pourId);
+      if (!parent || parent.visibility === "private") return false;
+      return profileById.get(comment.userId)?.socialEnabled === true;
+    }
+    const pour = pourVisibility.get(row.subjectId);
+    if (!pour || pour.visibility === "private") return false;
+    return profileById.get(pour.userId)?.socialEnabled === true;
+  };
 
   return rows.map(({ subjectSnapshot, recordedOwnerId, ...row }) => {
     const ownerId = ownerOf({ ...row, subjectSnapshot, recordedOwnerId });
     const profile = ownerId ? profileById.get(ownerId) : undefined;
 
     let preview: string | null = null;
-    if (row.subjectType === "comment") {
+    const readable = stillReadable({ ...row, subjectSnapshot, recordedOwnerId });
+    if (!readable) {
+      // Nothing to show under "Now", and nothing to compare against either —
+      // an unknown is not a difference, the same rule a pre-snapshot report
+      // gets.
+    } else if (row.subjectType === "comment") {
       preview = commentById.get(row.subjectId)?.body ?? null;
     } else if (row.subjectType === "pour") {
       if (pourById.has(row.subjectId)) {
@@ -238,10 +327,21 @@ export async function listOpenReports(
       ageHours: Math.floor((now.getTime() - row.createdAt.getTime()) / 3_600_000),
       preview,
       reportedPreview: subjectSnapshot,
-      // A subject that has since been deleted reads as `preview: null`, and
-      // that is a change worth flagging too: the operator is looking at a
-      // report whose target is gone.
-      editedSinceReport: subjectSnapshot != null && subjectSnapshot !== preview,
+      /**
+       * Whether the operator may read the subject as it stands now.
+       *
+       * False means withdrawn from view — deleted, made private, or its author
+       * stepped back — not that it never existed. The queue says which, because
+       * "gone" and "no longer yours to read" call for different reading of the
+       * same report.
+       */
+      liveReadable: readable,
+      // A subject that has since been deleted reads as `preview: null` while
+      // still readable, and that is a change worth flagging: the operator is
+      // looking at a report whose target is gone. A subject that is merely out
+      // of the operator's reach is NOT flagged edited — an unknown is not a
+      // difference, the same rule a pre-snapshot report gets.
+      editedSinceReport: readable && subjectSnapshot != null && subjectSnapshot !== preview,
       subjectOwnerId: ownerId,
       subjectOwnerSuspended: profile?.suspendedAt != null,
       subjectOwnerSuspensionId:
@@ -1155,6 +1255,29 @@ export async function listSuspendedAccounts(
   options: { limit?: number; before?: { at: Date; userId: string } } = {},
 ): Promise<{ accounts: SuspendedAccount[]; nextCursor: string | null }> {
   const limit = options.limit ?? SUSPENDED_PAGE_SIZE;
+  /**
+   * One snapshot for the profile state and the standing action.
+   *
+   * Read separately, a reinstatement of A followed by a suspension of B
+   * landing between the two queries produced a row showing **A's** reason and
+   * timestamp with **B's** action id — and that id passes the reinstatement
+   * guard, so the operator would have lifted a decision they never reviewed
+   * using a guard designed to stop exactly that. Nothing blocks ahead of the
+   * first query here, so repeatable read costs nothing and both halves come
+   * off one view.
+   */
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`set transaction isolation level repeatable read`);
+    return listSuspendedAccountsIn(tx, limit, options.before);
+  });
+}
+
+async function listSuspendedAccountsIn(
+  db: DB,
+  limit: number,
+  before: { at: Date; userId: string } | undefined,
+): Promise<{ accounts: SuspendedAccount[]; nextCursor: string | null }> {
+  const options = { before };
   const rows = await db
     .select({
       userId: userProfiles.userId,

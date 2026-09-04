@@ -1465,3 +1465,81 @@ describe("a hidden subject that is then deleted", () => {
     ).rejects.toBeInstanceOf(UnknownSubjectError);
   });
 });
+
+/**
+ * STORYBOARD §3.17 is binding: "An operator can hide a thing and suspend an
+ * account; they cannot read what was never shared." The report-time snapshot
+ * is always fair game — the reporter saw it, and it is what the decision is
+ * judged on. A revision written *after* the content went private is not: no
+ * reporter could ever have seen it, and no complaint is about it.
+ */
+describe("the queue does not show what was never shared", () => {
+  async function reportedComment(body: string) {
+    const bottle = await createTestBottle(db);
+    const pourId = uid("pour");
+    await db
+      .insert(schema.pours)
+      .values({ id: pourId, userId: author.id, bottleId: bottle.id, visibility: "public" });
+    const commentId = uid("comment");
+    await db.insert(schema.comments).values({ id: commentId, pourId, userId: author.id, body });
+    await db.insert(schema.reports).values({
+      id: uid("report"),
+      subjectType: "comment",
+      subjectId: commentId,
+      reporterId: reporter.id,
+      reason: "abuse",
+      subjectOwnerId: author.id,
+      subjectSnapshot: await subjectPreview(db, "comment", commentId),
+    });
+    return { pourId, commentId };
+  }
+
+  it("withholds a revision made after the pour went private", async () => {
+    const { pourId, commentId } = await reportedComment("something awful");
+
+    await db
+      .update(schema.pours)
+      .set({ visibility: "private" })
+      .where(eq(schema.pours.id, pourId));
+    await db
+      .update(schema.comments)
+      .set({ body: "PRIVATE-REVISION" })
+      .where(eq(schema.comments.id, commentId));
+
+    const [row] = await listOpenReports(db);
+    expect(row.reportedPreview).toBe("something awful");
+    expect(row.preview).toBeNull();
+    expect(row.liveReadable).toBe(false);
+    // And not flagged edited: an unknown is not a difference.
+    expect(row.editedSinceReport).toBe(false);
+  });
+
+  it("withholds it when the author steps back instead", async () => {
+    const { commentId } = await reportedComment("something awful");
+    await db
+      .update(schema.userProfiles)
+      .set({ socialEnabled: false })
+      .where(eq(schema.userProfiles.userId, author.id));
+    await db
+      .update(schema.comments)
+      .set({ body: "PRIVATE-REVISION" })
+      .where(eq(schema.comments.id, commentId));
+
+    const [row] = await listOpenReports(db);
+    expect(row.preview).toBeNull();
+    expect(row.liveReadable).toBe(false);
+  });
+
+  it("still shows the current text while the subject is public", async () => {
+    const { commentId } = await reportedComment("something awful");
+    await db
+      .update(schema.comments)
+      .set({ body: "lovely dram" })
+      .where(eq(schema.comments.id, commentId));
+
+    const [row] = await listOpenReports(db);
+    expect(row.liveReadable).toBe(true);
+    expect(row.preview).toBe("lovely dram");
+    expect(row.editedSinceReport).toBe(true);
+  });
+});
