@@ -1059,11 +1059,33 @@ async function hideReportedSubject(
   );
   if (await isModerationHidden(tx, subjectType, subjectId)) return;
   const changed = await applyHide(tx, subjectType, subjectId, now);
-  if (!changed) return;
+  /**
+   * `=== "missing"`, not `!changed`.
+   *
+   * This read `if (!changed) return` while `applyHide` returned a boolean, and
+   * the outcome type made every branch truthy — so the guard silently stopped
+   * guarding and a suspension would record a hide over a subject that is not
+   * there. The second half of the same slip is below: the outcome existed to
+   * be recorded and only `hideSubject` was passing it on. One rule, two call
+   * sites, and the change was applied to one of them.
+   */
+  if (changed === "missing") return;
   // Linked to the report, like the suspension beside it: an append-only trail
   // that cannot say which complaint caused a takedown answers an appeal with
   // half the story.
-  await record(tx, actorId, "hide", subjectType, subjectId, { reportId, note: reason }, now);
+  await record(
+    tx,
+    actorId,
+    "hide",
+    subjectType,
+    subjectId,
+    { reportId, note: reason },
+    now,
+    // Same rule as `hideSubject`: a lift may only restore what this hide took
+    // down. Null here would have been read as a pre-column hide and fall back
+    // to the timestamp match — the exact coincidence the column exists to stop.
+    { tookDown: changed === "took-down" },
+  );
 }
 
 /**

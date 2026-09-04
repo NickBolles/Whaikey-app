@@ -2185,3 +2185,94 @@ describe("telling a deleted subject from a withheld one", () => {
     expect(row.subjectExists).toBe(false);
   });
 });
+
+
+/**
+ * The suspension-created hide is the second caller of `applyHide`, and the
+ * outcome flag was passed by only the first. Its `if (!changed) return` guard
+ * had also stopped guarding, because every value of the outcome type is
+ * truthy — a boolean-to-union refactor applied at one call site out of two.
+ */
+describe("the hide a suspension performs", () => {
+  async function reportedComment(body = "the author's text") {
+    const bottle = await createTestBottle(db);
+    const pourId = uid("pour");
+    await db
+      .insert(schema.pours)
+      .values({ id: pourId, userId: author.id, bottleId: bottle.id, visibility: "public" });
+    const commentId = uid("comment");
+    await db.insert(schema.comments).values({ id: commentId, pourId, userId: author.id, body });
+    const reportId = await report("comment", commentId);
+    // The shape `createReport` writes: the owner recorded on the row, which is
+    // what lets the report still be claimed once its subject is hard-deleted.
+    // The shared helper leaves it null on purpose, to exercise legacy rows.
+    await db
+      .update(schema.reports)
+      .set({ subjectOwnerId: author.id })
+      .where(eq(schema.reports.id, reportId));
+    return { commentId, reportId };
+  }
+
+  it("records that it took the comment down", async () => {
+    const { commentId, reportId } = await reportedComment();
+    await suspendAccount(db, operator.id, author.id, "abuse", { reportId });
+
+    const [row] = await db
+      .select()
+      .from(schema.moderationActions)
+      .where(eq(schema.moderationActions.subjectId, commentId));
+    expect(row.action).toBe("hide");
+    expect(row.tookDown).toBe(true);
+  });
+
+  it("does not republish an author's deletion that shared its millisecond", async () => {
+    const { commentId, reportId } = await reportedComment();
+    const sameMoment = new Date(1_000);
+    await db
+      .update(schema.comments)
+      .set({ deletedAt: sameMoment })
+      .where(eq(schema.comments.id, commentId));
+
+    await suspendAccount(db, operator.id, author.id, "abuse", { reportId }, sameMoment);
+
+    const [row] = await db
+      .select()
+      .from(schema.moderationActions)
+      .where(eq(schema.moderationActions.subjectId, commentId));
+    expect(row.tookDown).toBe(false);
+
+    await unhideSubject(
+      db,
+      operator.id,
+      "comment",
+      commentId,
+      "appeal upheld",
+      await standingHideId("comment", commentId),
+      new Date(2_000),
+    );
+    const comment = await db.query.comments.findFirst({
+      where: eq(schema.comments.id, commentId),
+    });
+    expect(comment?.deletedAt).not.toBeNull();
+  });
+
+  it("records nothing when the reported subject is gone entirely", async () => {
+    const { commentId, reportId } = await reportedComment();
+    await db.delete(schema.comments).where(eq(schema.comments.id, commentId));
+
+    await suspendAccount(db, operator.id, author.id, "abuse", { reportId });
+
+    // A hide over nothing is not a decision, and the trail should not carry
+    // one. The suspension itself still stands.
+    expect(
+      await db
+        .select()
+        .from(schema.moderationActions)
+        .where(eq(schema.moderationActions.subjectId, commentId)),
+    ).toHaveLength(0);
+    const profile = await db.query.userProfiles.findFirst({
+      where: eq(schema.userProfiles.userId, author.id),
+    });
+    expect(profile?.suspendedAt).not.toBeNull();
+  });
+});
