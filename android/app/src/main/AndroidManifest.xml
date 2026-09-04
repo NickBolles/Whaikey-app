@@ -1,8 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!--
+      allowBackup=false (review SEC-L2). Android's auto-backup and `adb backup`
+      capture the WebView's data directory, and this app's session lives in a
+      first-party cookie inside it — so a backup is a copy of the signed-in
+      session, restorable onto another device. There is nothing here worth
+      backing up (every byte of a user's data is on the server), so the whole
+      mechanism is switched off rather than filtered with dataExtractionRules,
+      which would be a longer way to say the same thing with more to get wrong.
+    -->
     <application
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"

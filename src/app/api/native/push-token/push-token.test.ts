@@ -47,16 +47,44 @@ describe("/api/native/push-token", () => {
     expect(await devices()).toHaveLength(1);
   });
 
-  it("moves a token to whoever signed in last", async () => {
+  /**
+   * Review SEC-M6. This used to reassign the token to whoever POSTed it, on
+   * the reasoning that a token identifies a device rather than a person —
+   * which is true, and beside the point: the token is the only credential in
+   * play and it is exactly the thing that leaks. Anyone who learned a victim's
+   * token took their notifications with it.
+   */
+  it("refuses to move a live token to whoever asks", async () => {
     await post({ token: "shared-device", platform: "android" });
 
     const other = await createTestUser(db, { email: "friend@example.com" });
     setSessionUser(other);
-    await post({ token: "shared-device", platform: "android" });
+    const res = await post({ token: "shared-device", platform: "android" });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("token_claimed");
 
     const rows = await devices();
-    // One device, one owner: the previous user must stop receiving notifications
-    // on a phone they no longer hold.
+    expect(rows).toHaveLength(1);
+    expect(rows[0].userId).not.toBe(other.id);
+  });
+
+  /**
+   * The device genuinely changing hands is still supported — it goes through
+   * the owner releasing it. Sign-out deletes the row, and the next person gets
+   * the token immediately rather than waiting out the staleness window.
+   */
+  it("hands the token straight over once its owner signs out", async () => {
+    await post({ token: "shared-device", platform: "android" });
+    const signedOut = await DELETE(
+      new Request("http://localhost:3000/api/native/push-token", { method: "DELETE" }),
+    );
+    expect(signedOut.status).toBe(200);
+
+    const other = await createTestUser(db, { email: "friend@example.com" });
+    setSessionUser(other);
+    expect((await post({ token: "shared-device", platform: "android" })).status).toBe(201);
+
+    const rows = await devices();
     expect(rows).toHaveLength(1);
     expect(rows[0].userId).toBe(other.id);
   });

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { signOut } from "@/lib/auth-client";
+import { signOutCompletely } from "@/lib/sign-out";
 
 /**
  * The one account action reachable from the blocked gate, and it has to
@@ -24,8 +24,14 @@ export function SignOutButton({ className }: { className?: string }) {
         onClick={() => {
           setBusy(true);
           setFailed(false);
-          void signOut()
-            .then(() => {
+          void signOutCompletely()
+            .then(({ pushReleased }) => {
+              if (!pushReleased) {
+                // Said out loud rather than silently accepted: notifications
+                // for this account can keep arriving on this device until the
+                // registration goes stale.
+                console.warn("[push] signed out with this device still registered");
+              }
               // A hard navigation rather than a router push: the session
               // cookie is gone, and every cached server render above this one
               // was made for the account that just left.

@@ -144,10 +144,25 @@ Two consequences to be deliberate about:
   it is a large velocity win over both RN (store review, or EAS Update's own
   constraints) and option B.
 - **Downside: a bad production deploy bricks the installed app**, and there is no
-  version pinning. Mitigation in Phase 2: the shell checks a `/api/native/manifest`
-  endpoint for a `minShellVersion`; if the deployed web app requires a newer native
-  shell than the installed one, the app shows an "Update Whaikey" screen instead of a
-  broken UI. This also gives us a kill switch for a bad deploy.
+  version pinning. **Built (WP-20):** the shell checks `/api/native/manifest` for a
+  `minShellVersion` at boot; below it, the app shows an "Update Whaikey" screen
+  instead of a UI it cannot run. Raising `WHAIKEY_MIN_SHELL_VERSION` above every
+  released build is therefore the kill switch — the only one an app that is not a
+  store binary can have. It fails **open**: an unreachable or unparseable manifest
+  leaves the app running, because a check that locks people out on a network hiccup
+  is a worse outage than the one it prevents. Set the variable before the first
+  store build; unset, there is no floor and nobody is locked out.
+
+  **What the floor does not cover, and cannot from here.** The check runs in the
+  React tree the deploy just sent, so it necessarily runs *after* that tree has
+  mounted: the splash is held until it settles and the gate paints above
+  everything, but a sibling client effect calling a plugin the installed binary
+  lacks has already run by then. Closing that needs the check to happen in the
+  **native launcher**, before the WebView is pointed at `server.url` — the
+  bundled shell deciding whether to load the remote app at all. That is an
+  architecture change to §2.2's option C rather than a patch, and it is the
+  right shape for it; recorded here so the next person to touch the shell knows
+  the gate is a UI gate today, not a boot gate.
 
 Option B stays documented as the Phase 5 escape hatch if offline-first becomes the
 product priority — see §4, Phase 5.

@@ -56,6 +56,7 @@ An AI-native whiskey tracking app, inspired by wine apps like **Vivino** (social
 - **Native:** Capacitor shell loading the deployed site, capability layer with web fallbacks, PKCE + state-bound device-code sign-in, offline pour queue, push-token registration, Android debug + iOS compile in CI, release workflow awaiting credentials.
 - **Adding a bottle the catalog lacks:** `POST /api/bottles` with a dedupe prompt, reached from the search empty state, the scan decision sheet and an unmatched import row (`/bottles/new`). See §2.2 for what "added" means before review.
 - **Age gate:** date of birth + market at first authenticated use, per-market minimum, answered once (§9.1); `/responsible` is the resources page it links to.
+- **Native version floor:** `/api/native/manifest` serves `minShellVersion`; the shell shows "Update Whaikey" below it, and raising it is the kill switch for a bad deploy (WP-20, docs/NATIVE_APP.md §2.2).
 
 ### 2.2 Live but weaker than it reads
 
@@ -72,7 +73,7 @@ An AI-native whiskey tracking app, inspired by wine apps like **Vivino** (social
 
 - **No data export, no account deletion, no Terms, no Privacy Policy, no billing or entitlements, no analytics, no error monitoring, no settings page, no sign-out control, no moderation queue.**
 - No clubs, blind flights, samples, distillery visits, passport diffing, palate share card, flights/blind mode, 100-point rating mode, similar-bottles rail, chat tools `log_pour_draft` / `recommend_bottles` / `get_price_info`.
-- No `minShellVersion` kill switch for the native shell; no reviewer demo account (the app is social-login-only).
+- No reviewer demo account (the app is social-login-only).
 
 ### 2.4 The UX diagnosis
 
@@ -415,7 +416,7 @@ Reports exist (`/api/social/reports`); nothing reads them. Required: an operator
 - [ ] User-photo licence in the ToS before any upload path ships
 
 ### 9.6 Store submission facts
-UGC: **yes** (profiles, feeds, comments) — moderation, report and block flows documented. Age rating per alcohol content. Reviewer access: decision in §12. Support URL and privacy URL live. Native kill switch (`minShellVersion`) live.
+UGC: **yes** (profiles, feeds, comments) — moderation, report and block flows documented. Age rating per alcohol content. Reviewer access: decision in §12. Support URL and privacy URL live. Native kill switch (`minShellVersion`) **live (WP-20)** — set `WHAIKEY_MIN_SHELL_VERSION` before the first store build so the lever exists when it is needed.
 
 ### 9.7 Support & feedback
 An in-app feedback sheet (mails a support address; attaches app version and platform) and a public support URL. The GitHub issue form remains for catalog corrections only.

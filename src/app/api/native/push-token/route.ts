@@ -3,14 +3,17 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { requireUser, withErrorHandling } from "@/lib/session";
+import { registerPushDevice } from "@/lib/push-devices";
 
 /**
  * Push device registration (docs/NATIVE_APP.md §3.2).
  *
- * A token identifies a device install, not a person, so it can legitimately move
- * between users — a shared phone, or someone signing out and a friend signing
- * in. `token` is therefore unique on its own and re-registering reassigns it,
- * which also stops the previous user's notifications from following the device.
+ * A token identifies a device install, not a person, so it can legitimately
+ * move between users — a shared phone, or someone signing out and a friend
+ * signing in. What it is *not* is proof that the caller is holding the device:
+ * re-registering used to reassign the token to whoever asked, so anyone who
+ * learned a victim's token took their notifications with it (review SEC-M6).
+ * `registerPushDevice` holds the rule; see `src/lib/push-devices.ts`.
  */
 const bodySchema = z.object({
   token: z.string().min(1).max(512),
@@ -41,20 +44,25 @@ export async function POST(req: Request) {
       );
     }
 
-    const db = getDb();
-    const now = new Date();
-    await db
-      .insert(schema.pushDevices)
-      .values({
-        id: crypto.randomUUID(),
-        userId: user.id,
-        token: parsed.data.token,
-        platform: parsed.data.platform,
-      })
-      .onConflictDoUpdate({
-        target: schema.pushDevices.token,
-        set: { userId: user.id, platform: parsed.data.platform, updatedAt: now },
-      });
+    const outcome = await registerPushDevice(
+      getDb(),
+      user.id,
+      parsed.data.token,
+      parsed.data.platform,
+    );
+
+    if (outcome === "claimed_by_another") {
+      // Not an oracle worth worrying about: the caller already holds the token,
+      // which is the thing being protected. Saying so lets the app explain why
+      // notifications are off rather than silently never arriving.
+      return NextResponse.json(
+        {
+          error: "token_claimed",
+          message: "This device is still registered to another account.",
+        },
+        { status: 409 },
+      );
+    }
 
     return NextResponse.json({ registered: true }, { status: 201 });
   });
