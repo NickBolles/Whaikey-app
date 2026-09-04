@@ -49,11 +49,17 @@ async function report(
   subjectType: schema.ReportSubjectType,
   subjectId: string,
   createdAt = new Date(),
+  reporterId?: string,
 ): Promise<string> {
   const id = uid("report");
-  await db
-    .insert(schema.reports)
-    .values({ id, subjectType, subjectId, reporterId: reporter.id, reason: "abuse", createdAt });
+  await db.insert(schema.reports).values({
+    id,
+    subjectType,
+    subjectId,
+    reporterId: reporterId ?? reporter.id,
+    reason: "abuse",
+    createdAt,
+  });
   return id;
 }
 
@@ -642,5 +648,62 @@ describe("the audit trail's lift control", () => {
     await unhideSubject(db, operator.id, "pour", pourId, "lifted", new Date(2_000));
 
     expect((await listModerationActions(db)).filter((e) => e.standing)).toHaveLength(0);
+  });
+});
+
+describe("what \"already handled\" means", () => {
+  /**
+   * Reading the pour's own visibility let its owner disable the Hide button by
+   * making it private themselves — no moderation action recorded, so nothing
+   * stopped them republishing afterwards. Hiding your own content is not a way
+   * round the mechanism that sticks.
+   */
+  it("is not satisfied by the owner making their own pour private", async () => {
+    const bottle = await createTestBottle(db);
+    const pourId = uid("pour");
+    await db.insert(schema.pours).values({
+      id: pourId,
+      userId: author.id,
+      bottleId: bottle.id,
+      visibility: "private",
+    });
+    await report("pour", pourId);
+
+    const [row] = await listOpenReports(db);
+    expect(row.alreadyHidden).toBe(false);
+
+    await hideSubject(db, operator.id, "pour", pourId, { note: "abusive" });
+    const [after] = await listOpenReports(db);
+    expect(after.alreadyHidden).toBe(true);
+  });
+
+  /**
+   * Two reports on one comment used to append a second hide with a newer
+   * timestamp while `deletedAt` kept the first one's — after which lifting
+   * matched nothing, restored nothing, and cleared the notice anyway, leaving
+   * an anonymous tombstone with no reason and no way back.
+   */
+  it("records one hide however many operators act on it", async () => {
+    const bottle = await createTestBottle(db);
+    const pourId = uid("pour");
+    await db.insert(schema.pours).values({ id: pourId, userId: reporter.id, bottleId: bottle.id });
+    const commentId = uid("comment");
+    await db.insert(schema.comments).values({ id: commentId, pourId, userId: author.id, body: "no" });
+
+    const first = await report("comment", commentId, new Date("2026-09-01T00:00:00Z"));
+    await hideSubject(db, operator.id, "comment", commentId, { note: "abusive", reportId: first }, new Date(1_000));
+    const second = await report("comment", commentId, new Date("2026-09-02T00:00:00Z"), operator.id);
+    await hideSubject(db, operator.id, "comment", commentId, { note: "again", reportId: second }, new Date(5_000));
+
+    // One decision, and the second reporter's report still closed.
+    const hides = (await db.select().from(schema.moderationActions)).filter((a) => a.action === "hide");
+    expect(hides).toHaveLength(1);
+    expect(hides[0].note).toBe("abusive");
+    expect(await listOpenReports(db)).toHaveLength(0);
+
+    // And lifting still restores, because the timestamps still match.
+    await unhideSubject(db, operator.id, "comment", commentId, "appeal upheld");
+    const [row] = await db.select().from(schema.comments).where(eq(schema.comments.id, commentId));
+    expect(row.deletedAt).toBeNull();
   });
 });

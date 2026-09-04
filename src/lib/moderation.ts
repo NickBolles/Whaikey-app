@@ -128,7 +128,7 @@ async function describeSubject(
       preview: row.body.slice(0, 500),
       subjectOwnerId: row.userId,
       subjectOwnerSuspended: await isSuspended(db, row.userId),
-      alreadyHidden: row.deletedAt != null,
+      alreadyHidden: await isModerationHidden(db, "comment", subjectId),
     };
   }
 
@@ -149,9 +149,18 @@ async function describeSubject(
       preview: text ? text.slice(0, 500) : "(no written note)",
       subjectOwnerId: row.userId,
       subjectOwnerSuspended: await isSuspended(db, row.userId),
-      // "Hidden" for a pour means private: it leaves every social projection
-      // without deleting anything of its owner's.
-      alreadyHidden: row.visibility === "private",
+      /**
+       * "Already handled" means a moderation hide stands — never that the
+       * content happens to be out of sight.
+       *
+       * Reading `visibility === "private"` let an owner disable the Hide
+       * button by making the reported pour private themselves: no moderation
+       * action was ever recorded, so nothing stopped them republishing it
+       * afterwards. Temporarily hiding your own content would have been a way
+       * round the one mechanism that sticks. Same reading as the profile row,
+       * where the flag means suspended rather than socially switched off.
+       */
+      alreadyHidden: await isModerationHidden(db, "pour", subjectId),
     };
   }
 
@@ -226,6 +235,26 @@ export async function hideSubject(
     await tx.execute(
       sql`select pg_advisory_xact_lock(hashtext(${moderationLockKey(subjectType, subjectId)}))`,
     );
+
+    /**
+     * A hide over a hide records nothing.
+     *
+     * Two open reports on one comment, or two stale tabs, would otherwise
+     * append a second `hide` with a newer timestamp while `deletedAt` still
+     * holds the first one's. Lifting then compares the two, matches nothing,
+     * restores nothing — and clears the notice anyway, leaving an anonymous
+     * tombstone its author cannot see a reason for or get back. The first
+     * hide's timestamp is the one that means something, so it is the one kept.
+     *
+     * The second operator's report is still resolved: their report genuinely
+     * is handled, by the action already in force.
+     */
+    if (await isModerationHidden(tx, subjectType, subjectId)) {
+      if (!(await exists(tx, subjectType, subjectId))) throw new UnknownSubjectError();
+      if (options.reportId) await resolveOpenReport(tx, options.reportId);
+      return;
+    }
+
     const changed = await applyHide(tx, subjectType, subjectId, now);
     if (!changed) throw new UnknownSubjectError();
     await record(tx, actorId, "hide", subjectType, subjectId, options, now);

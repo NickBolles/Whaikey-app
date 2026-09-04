@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { getDb } from "@/db";
 import { getSessionUser } from "@/lib/session";
 import { isOperator } from "@/lib/operator";
-import { listFeedback } from "@/lib/feedback";
+import { countOutstandingFeedback, listFeedback } from "@/lib/feedback";
 import { FeedbackList } from "./feedback-list";
 
 export const dynamic = "force-dynamic";
@@ -20,18 +20,19 @@ export default async function AdminFeedbackPage() {
   const viewer = await getSessionUser();
   if (!isOperator(viewer)) notFound();
 
-  const rows = await listFeedback(getDb());
-
-  const outstanding = rows.filter((r) => r.handledAt == null).length;
+  const db = getDb();
+  // The page is bounded, so the backlog is counted in SQL rather than read off
+  // the rows that fit on it.
+  const [rows, outstanding] = await Promise.all([listFeedback(db), countOutstandingFeedback(db)]);
+  const shownOutstanding = rows.filter((r) => r.handledAt == null).length;
 
   return (
     <div className="px-4 py-8 max-w-3xl mx-auto w-full flex flex-col gap-6">
       <header className="flex flex-col gap-1">
         <h1 className="font-display text-2xl font-semibold">Feedback</h1>
         <p className="text-sm text-muted">
-          {rows.length === 0
-            ? "Nothing yet."
-            : `${outstanding} outstanding · ${rows.length} most recent`}
+          {rows.length === 0 ? "Nothing yet." : `${outstanding} outstanding`}
+          {outstanding > shownOutstanding && ` · showing the ${shownOutstanding} oldest`}
         </p>
         <nav className="flex gap-3 text-sm">
           <Link href="/admin/reports" className="text-accent hover:underline">

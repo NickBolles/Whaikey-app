@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
 import { createTestUser, setupTestDb, uid } from "@/test/helpers";
-import { listFeedback } from "./feedback";
+import { countOutstandingFeedback, listFeedback } from "./feedback";
 
 let db: DB;
 
@@ -44,5 +44,20 @@ describe("listFeedback", () => {
     const rows = await listFeedback(db);
     expect(rows[0]).toMatchObject({ body: "from nobody in particular", senderName: null });
     expect(rows[1]).toMatchObject({ body: "from an account", senderName: "Robin" });
+  });
+});
+
+describe("countOutstandingFeedback", () => {
+  /**
+   * The page is bounded, so counting the rows it returned would report the
+   * page size once a real backlog existed — the one moment the number matters.
+   */
+  it("counts what is unhandled, not what fits on the page", async () => {
+    await add("one", "2026-09-01T00:00:00Z", null);
+    await add("two", "2026-09-02T00:00:00Z", null);
+    await add("done", "2026-08-01T00:00:00Z", "2026-09-01T00:00:00Z");
+
+    expect(await countOutstandingFeedback(db)).toBe(2);
+    expect(await listFeedback(db, 1)).toHaveLength(1);
   });
 });

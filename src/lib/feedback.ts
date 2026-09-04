@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { eq, isNull, sql } from "drizzle-orm";
 import type { DB } from "@/db";
 import { feedback, user as userTable } from "@/db/schema";
 
@@ -22,7 +22,13 @@ export interface FeedbackRow {
   senderEmail: string | null;
 }
 
-export async function listFeedback(db: DB, limit = 100): Promise<FeedbackRow[]> {
+/** One page of the inbox — see `countOutstandingFeedback` for the real backlog. */
+export const FEEDBACK_PAGE_SIZE = 100;
+
+export async function listFeedback(
+  db: DB,
+  limit = FEEDBACK_PAGE_SIZE,
+): Promise<FeedbackRow[]> {
   return db
     .select({
       id: feedback.id,
@@ -47,4 +53,20 @@ export async function listFeedback(db: DB, limit = 100): Promise<FeedbackRow[]> 
       sql`${feedback.createdAt} desc`,
     )
     .limit(limit);
+}
+
+/**
+ * How many messages are still unhandled, counted in SQL.
+ *
+ * The page is bounded, so counting the rows it returned would report exactly
+ * the page size once a real backlog existed — and call the oldest outstanding
+ * messages "most recent" while doing it. Same mistake the submissions header
+ * made; same fix.
+ */
+export async function countOutstandingFeedback(db: DB): Promise<number> {
+  const [row] = await db
+    .select({ n: sql<number>`count(*)` })
+    .from(feedback)
+    .where(isNull(feedback.handledAt));
+  return Number(row?.n ?? 0);
 }
