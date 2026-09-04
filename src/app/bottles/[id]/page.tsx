@@ -6,6 +6,7 @@ import { getDb, schema } from "@/db";
 import type { Pairing } from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
 import { getBottleDetail } from "@/lib/search";
+import { getSubmissionForBottle } from "@/lib/catalog";
 import { getUserPalate } from "@/lib/palate-store";
 import { tasteMatchPercent } from "@/lib/palate";
 import { hasPublishedProducerFlavorNotes } from "@/lib/bar";
@@ -16,6 +17,7 @@ import { CategoryChip } from "@/components/category-chip";
 import { FlavorRadar } from "@/components/flavor-radar";
 import { SameDram, type SameDramFriendNote, type SameDramProducer } from "@/components/same-dram";
 import { SourceBackedResources } from "@/components/source-backed-resources";
+import { SubmissionStatus } from "@/components/submission-status";
 import { SmallStars } from "@/components/small-stars";
 import { ShelfActions } from "./shelf-actions";
 import { ShelfDetails } from "./shelf-details";
@@ -61,6 +63,14 @@ export default async function BottleDetailPage({
   if (!detail) notFound();
 
   const { bottle, distillery, communityStats, userBottle, pairings, resources, media } = detail;
+
+  // Only the submitter of a bottle still outside the shared catalog sees where
+  // its review got to; `catalogVisibleTo` already guarantees nobody else can
+  // reach this page for it.
+  const submission =
+    user && bottle.status === "user_submitted"
+      ? await getSubmissionForBottle(getDb(), bottle.id, user.id)
+      : null;
 
   // Personal taste-match: cosine similarity of the signed palate vs this
   // bottle's flavor profile. Null (hidden) for signed-out users, users with no
@@ -169,6 +179,14 @@ export default async function BottleDetailPage({
           className="mt-3.5 gap-2"
         />
       </header>
+
+      {submission && (
+        <SubmissionStatus
+          state={submission.state}
+          reviewNote={submission.reviewNote}
+          duplicateOfBottleId={submission.duplicateOfBottleId}
+        />
+      )}
 
       <SourceBackedResources bottleName={bottle.name} resources={resources} media={media} />
 

@@ -12,6 +12,7 @@ import {
   profileCreateSchema,
   profileUpdateSchema,
   setSocialEnabled,
+  AccountSuspendedError,
   SocialDisabledError,
   updateProfile,
 } from "@/lib/social";
@@ -96,7 +97,16 @@ export async function PATCH(req: Request) {
     // Re-enable first so "turn social back on and go public" works in one
     // PATCH; the exposure gate in updateProfile then sees the new state.
     if (socialEnabled === true) {
-      await setSocialEnabled(db, user.id, true);
+      try {
+        await setSocialEnabled(db, user.id, true);
+      } catch (err) {
+        if (err instanceof AccountSuspendedError) {
+          // A suspension is not the account's to lift (PLAN.md §9.4), and this
+          // is the toggle it would reach for.
+          return NextResponse.json({ error: "account_suspended" }, { status: 403 });
+        }
+        throw err;
+      }
     }
     let updated;
     try {

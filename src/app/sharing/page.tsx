@@ -89,6 +89,18 @@ export default async function SharingPage() {
           Drinking responsibly
         </Link>{" "}
         — what this app will and won&apos;t do, and where to find help.
+        <br />
+        <Link href="/terms" className="text-accent">
+          Terms
+        </Link>{" "}
+        ·{" "}
+        <Link href="/privacy" className="text-accent">
+          Privacy
+        </Link>{" "}
+        ·{" "}
+        <Link href="/support" className="text-accent">
+          Support
+        </Link>
       </p>
     </div>
   );

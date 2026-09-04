@@ -198,10 +198,15 @@ describe("eligibleOn", () => {
 });
 
 describe("isUngatedPath", () => {
-  it("exempts the gate, sign-in, the resources page and public share links", () => {
+  it("exempts the gate, sign-in, the policies, support and public share links", () => {
     expect(isUngatedPath("/age")).toBe(true);
     expect(isUngatedPath("/sign-in")).toBe(true);
     expect(isUngatedPath("/responsible")).toBe(true);
+    // A store listing links to these, and the person who most needs support is
+    // often the one who cannot get past the gate.
+    expect(isUngatedPath("/terms")).toBe(true);
+    expect(isUngatedPath("/privacy")).toBe(true);
+    expect(isUngatedPath("/support")).toBe(true);
     expect(isUngatedPath("/s/abc123")).toBe(true);
     expect(isUngatedPath("/api/age")).toBe(true);
   });

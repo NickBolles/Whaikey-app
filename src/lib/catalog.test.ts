@@ -12,6 +12,12 @@ import {
   looksLikeDuplicate,
   publishSubmissionUpc,
   submitBottle,
+  UnknownSubmissionError,
+  approveSubmission,
+  countPendingSubmissions,
+  listPendingSubmissions,
+  markSubmissionDuplicate,
+  rejectSubmission,
 } from "./catalog";
 import { canViewBottle } from "./catalog-visibility";
 import { searchBottles, getBottleDetail } from "./search";
@@ -352,5 +358,130 @@ describe("listOwnSubmissions", () => {
     const mine = await listOwnSubmissions(db, alice.id);
     expect(mine.map((s) => s.name)).toEqual(["Alice One"]);
     expect(mine[0].state).toBe("pending");
+  });
+});
+
+/**
+ * WP-16 left the far end of the submission path open: rows piled up and
+ * nothing could promote one, so a submitted bottle was private forever and the
+ * "once someone has checked it over" copy promised a review nobody could do.
+ */
+describe("catalog review", () => {
+  it("lists what is waiting, oldest first, with the typed distillery kept apart", async () => {
+    await submitBottle(db, alice.id, {
+      name: "Older One",
+      category: "bourbon",
+      distillery: "A Distillery Nobody Has",
+    });
+    await submitBottle(db, bob.id, { name: "Newer One", category: "rye" });
+    // Age the first so the ordering assertion is about createdAt, not insert order.
+    await db
+      .update(schema.bottleSubmissions)
+      .set({ createdAt: new Date(Date.now() - 5 * 3_600_000) })
+      .where(eq(schema.bottleSubmissions.submittedBy, alice.id));
+
+    const pending = await listPendingSubmissions(db);
+    expect(pending.map((s) => s.name)).toEqual(["Older One", "Newer One"]);
+    expect(pending[0].ageHours).toBeGreaterThanOrEqual(5);
+    expect(pending[0].distilleryText).toBe("A Distillery Nobody Has");
+    expect(pending[0].distilleryName).toBeNull();
+    expect(await countPendingSubmissions(db)).toBe(2);
+  });
+
+  it("approving makes the bottle everyone's and publishes its barcode", async () => {
+    const { bottle, submissionId } = await submitBottle(db, alice.id, {
+      name: "Approve Me",
+      category: "bourbon",
+      upc: "012345678912",
+    });
+    // Held back until a human looked: bottle_upcs is what every other scan
+    // resolves against.
+    expect(await db.select().from(schema.bottleUpcs)).toHaveLength(0);
+    expect(canViewBottle(bottle, bob.id)).toBe(false);
+
+    await approveSubmission(db, bob.id, submissionId, "looks real");
+
+    const after = await db.query.bottles.findFirst({ where: eq(schema.bottles.id, bottle.id) });
+    expect(after?.status).toBe("verified");
+    expect(canViewBottle(after!, bob.id)).toBe(true);
+    const upcs = await db.select().from(schema.bottleUpcs);
+    expect(upcs).toHaveLength(1);
+    expect(upcs[0]).toMatchObject({ upc: "012345678912", bottleId: bottle.id, source: "user" });
+
+    const row = await db.query.bottleSubmissions.findFirst({
+      where: eq(schema.bottleSubmissions.id, submissionId),
+    });
+    expect(row).toMatchObject({ state: "approved", reviewedBy: bob.id, reviewNote: "looks real" });
+    expect(row?.reviewedAt).toBeInstanceOf(Date);
+  });
+
+  it("approving does not raise the visibility of a pour logged while it was pending", async () => {
+    const { bottle, submissionId } = await submitBottle(db, alice.id, {
+      name: "Clamped",
+      category: "bourbon",
+    });
+    const { logPour } = await import("@/lib/pours");
+    const { pour } = await logPour(db, alice.id, { bottleId: bottle.id, visibility: "public" });
+    expect(pour.visibility).toBe("private");
+
+    await approveSubmission(db, bob.id, submissionId);
+
+    const after = await db.query.pours.findFirst({ where: eq(schema.pours.id, pour.id) });
+    // The system never raises a visibility. Its owner can publish it now.
+    expect(after?.visibility).toBe("private");
+  });
+
+  it("a second operator on the same row changes nothing and is told so", async () => {
+    const { submissionId } = await submitBottle(db, alice.id, {
+      name: "Race Me",
+      category: "bourbon",
+    });
+    await approveSubmission(db, bob.id, submissionId);
+    await expect(approveSubmission(db, bob.id, submissionId)).rejects.toBeInstanceOf(
+      UnknownSubmissionError,
+    );
+    await expect(rejectSubmission(db, bob.id, submissionId, "no")).rejects.toBeInstanceOf(
+      UnknownSubmissionError,
+    );
+  });
+
+  it("declining keeps the bottle working for the person who added it", async () => {
+    const { bottle, submissionId } = await submitBottle(db, alice.id, {
+      name: "Decline Me",
+      category: "bourbon",
+    });
+    await rejectSubmission(db, bob.id, submissionId, "already listed under another name");
+
+    const after = await db.query.bottles.findFirst({ where: eq(schema.bottles.id, bottle.id) });
+    // Not deleted, not taken away: their own records stay theirs.
+    expect(after?.status).toBe("user_submitted");
+    expect(canViewBottle(after!, alice.id)).toBe(true);
+    expect(canViewBottle(after!, bob.id)).toBe(false);
+    const row = await db.query.bottleSubmissions.findFirst({
+      where: eq(schema.bottleSubmissions.id, submissionId),
+    });
+    expect(row).toMatchObject({
+      state: "rejected",
+      reviewNote: "already listed under another name",
+    });
+  });
+
+  it("refuses to record a duplicate of a bottle nobody can see", async () => {
+    const other = await submitBottle(db, bob.id, { name: "Also Pending", category: "rye" });
+    const { submissionId } = await submitBottle(db, alice.id, {
+      name: "Dupe Me",
+      category: "bourbon",
+    });
+
+    await expect(
+      markSubmissionDuplicate(db, bob.id, submissionId, other.bottle.id, undefined),
+    ).rejects.toBeInstanceOf(UnknownSubmissionError);
+
+    const canonical = await createTestBottle(db, { name: "The Real One", category: "bourbon" });
+    await markSubmissionDuplicate(db, bob.id, submissionId, canonical.id, "same bottle");
+    const row = await db.query.bottleSubmissions.findFirst({
+      where: eq(schema.bottleSubmissions.id, submissionId),
+    });
+    expect(row).toMatchObject({ state: "duplicate", duplicateOfBottleId: canonical.id });
   });
 });

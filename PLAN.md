@@ -57,6 +57,8 @@ An AI-native whiskey tracking app, inspired by wine apps like **Vivino** (social
 - **Adding a bottle the catalog lacks:** `POST /api/bottles` with a dedupe prompt, reached from the search empty state, the scan decision sheet and an unmatched import row (`/bottles/new`). See §2.2 for what "added" means before review.
 - **Age gate:** date of birth + market at first authenticated use, per-market minimum, answered once (§9.1); `/responsible` is the resources page it links to.
 - **Native version floor:** `/api/native/manifest` serves `minShellVersion`; the shell shows "Update Whaikey" below it, and raising it is the kill switch for a bad deploy (WP-20, docs/NATIVE_APP.md §2.2).
+- **Moderation and review (WP-18):** an env-allowlisted operator role, `/admin/reports` for reported comments, pours and profiles (hide / suspend / reinstate / dismiss, every action with a reason and an append-only trail, a 72-hour target the queue counts breaches against), and `/admin/submissions` — the far end of the WP-16 submission path, where a bottle is promoted into the shared catalog, declined with a reason its submitter can read, or marked a duplicate.
+- **Policy and support surfaces (WP-18):** `/terms`, `/privacy` and `/support` with an in-app feedback box that works signed out. All three are ungated. The legal entity, jurisdiction and contact address come from the environment, and until they are set both policy pages say in the open that they are not finished (§9.3).
 
 ### 2.2 Live but weaker than it reads
 
@@ -65,13 +67,14 @@ An AI-native whiskey tracking app, inspired by wine apps like **Vivino** (social
 - **Voice notes** are browser dictation (Web Speech), unreliable in an iOS WebView; there is no audio upload.
 - **Passport** counts 3 of 6 dimensions and is reachable only from a claimed social profile; no counters on My Bar.
 - **Learn progress** lives in localStorage.
-- **Reports** are written and never read; no moderation surface exists.
-- **User-submitted bottles** are added instantly and usable instantly, but stay private to their submitter: `bottle_submissions` holds the review queue and **nothing promotes a row yet** (that is the moderation surface above). A submission is excluded from passport badges and never teaches the barcode scanner until it is promoted.
+- **User-submitted bottles** are added instantly and usable instantly, but stay private to their submitter until an operator promotes them at `/admin/submissions`. A submission is excluded from passport badges and never teaches the barcode scanner until it is promoted — and with one operator, the queue's throughput is one person's attention, which is the real limit now rather than the missing screen.
+- **Moderation is one operator and one deploy.** `WHAIKEY_OPERATOR_IDS` is an env allowlist, so granting access is a deploy and there is no second pair of eyes on a decision. Appeals have a record to be answered from and no route to arrive on except `/support`.
+- **The policy pages are shells until the owner fills them in.** The text is written; the entity, jurisdiction and contact are not, and the pages say so rather than looking finished.
 - **Community consensus** is live at `/bottles/[id]/compare` ahead of the jurisdiction review SOCIAL.md §14 makes its precondition.
 
 ### 2.3 Not built, and load-bearing
 
-- **No data export, no account deletion, no Terms, no Privacy Policy, no billing or entitlements, no analytics, no error monitoring, no settings page, no sign-out control, no moderation queue.**
+- **No data export, no account deletion, no billing or entitlements, no analytics, no error monitoring, no settings page, no sign-out control.** Terms, Privacy and a moderation queue landed in WP-18; export and deletion did not, which is why the Privacy Policy describes deletion as a support request rather than a button.
 - No clubs, blind flights, samples, distillery visits, passport diffing, palate share card, flights/blind mode, 100-point rating mode, similar-bottles rail, chat tools `log_pour_draft` / `recommend_bottles` / `get_price_info`.
 - No reviewer demo account (the app is social-login-only).
 
@@ -81,7 +84,7 @@ Screens are individually well crafted but the four highest-traffic ones (Home, M
 
 ### 2.5 Do not trust until rewritten
 
-- `docs/APP_STORE_SETUP.md` §6.2 says to answer "no UGC"; the app ships profiles, feeds and comments today. §1/§6.4 demand a password demo account the app forbids.
+- `docs/APP_STORE_SETUP.md`: ✅ rewritten in WP-18. §6.2 now answers **yes** to UGC and names the queue behind that answer; §1 and §6.4 no longer demand a password demo account and instead record reviewer access as an open owner decision that blocks opening a store record.
 - `docs/SOCIAL.md` §6.1's nav list contradicts its own §6.3 amendment, and both predate STORYBOARD.md §1.1.
 - `docs/FEATURES.md` §2.1 (fuzzy search), §4.2 (100-point storage), §11.3 (counters on My Bar): promised, not shipped.
 - `docs/SOURCING_AT_SCALE.md`'s "~25,000 bottles" describes a production database no repo artifact can confirm (the committed seed is 269 bottles).
@@ -110,9 +113,9 @@ v1 ships to a store when every box is ticked. Nothing on this list is optional a
 
 **Legal to operate**
 - [x] Age gate at signup (WP-17); store availability still to be aligned to the markets in `MINIMUM_AGE_BY_MARKET`.
-- [ ] Privacy Policy and Terms live, covering AI processing (and the provider), photos, the user-photo licence grant, community opt-in.
-- [ ] Moderation queue an operator can work; report and block flows (shipped) documented for store review.
-- [ ] Support URL and an in-app feedback path.
+- [ ] Privacy Policy and Terms live, covering AI processing (and the provider), photos, the user-photo licence grant, community opt-in. **Written in WP-18; unticked because the entity, jurisdiction and contact are the owner's to supply (§9.3) and the pages say so until they are.**
+- [x] Moderation queue an operator can work; report and block flows (shipped) documented for store review (WP-18: `/admin/reports`, `/admin/submissions`, `docs/APP_STORE_SETUP.md` §6.2).
+- [x] Support URL and an in-app feedback path (WP-18: `/support`, `POST /api/feedback`, working signed out).
 
 **Observable**
 - [ ] Error monitoring in production.
@@ -120,7 +123,7 @@ v1 ships to a store when every box is ticked. Nothing on this list is optional a
 - [ ] Search p95 and scan-to-shelved p95 measured (CI or RUM), with NATIVE_APP.md §1.4's tripwires wired to real numbers.
 
 **Shippable**
-- [ ] Reviewer access solved; App Store UGC answers corrected; `minShellVersion` kill switch live.
+- [ ] Reviewer access solved (**still open — §12, and the one thing blocking a store record**); App Store UGC answers corrected (✅ WP-18); `minShellVersion` kill switch live (✅ WP-20).
 - [ ] The three High security findings and the P0 closed (review §2, §3).
 
 **Explicitly not in v1:** billing. Ship free, instrument willingness-to-pay (§6.5), then price.
@@ -253,7 +256,7 @@ Tracks run in parallel and are named so that "Phase 2" is never ambiguous: **C**
 | 2026-Q2 | Next.js scaffold, PGlite/Postgres parity, Better Auth social login, seed catalog, search, bottle detail, My Bar with spend, pour log with wheel and half-stars, journal, flavor wheel input/viz/heat map, AI chat + extraction + pairings + recommendations, label and UPC scan, CSV import |
 | 2026-07 | Native shell (N0–N2): capability layer, device-code auth, offline queue, push-token registration, CI compiles; fonts pinned after a CI outage; Whiskey School |
 | 2026-08 | Social S1 (share revocation, comparison on the link), S2 (profiles, follows, visibility, friends module, Same Dram, cheers, blocks, privacy reset), most of S3 (comments, reports, taste twins, phone/QR discovery); onboarding wizard and Home/My Bar/Friends redesign; source-backed catalog pipeline, verification queue, origin model; passport tiers and crests; scan sharpening |
-| 2026-09 | This review: STORYBOARD.md, refreshed plan |
+| 2026-09 | This review: STORYBOARD.md, refreshed plan. Then Lane A (WP-1…5: offline flush, native-auth binding, security headers, aggregate/body/AI guards) and Lane C (WP-16 submissions, WP-17 age gate, WP-18 moderation + policies + support, WP-20 version floor) |
 
 ### 5.2 Now — two lanes, in parallel
 
@@ -261,7 +264,7 @@ Tracks run in parallel and are named so that "Phase 2" is never ambiguous: **C**
 
 **Lane B (C): the focus and polish pass**, in STORYBOARD.md §5 order. WP-6 back/nav/toast/loading · WP-7 pour sheet · WP-8 bottle action bar · WP-9 My Bar shelf-first · WP-10 journal edit/delete + one Share sheet · WP-11 settings, export, delete · WP-12 the new nav (Home · Bar · ＋ · Explore · You), `/passport` with six dimensions and counters on Bar, Home cut to three modules · WP-13 first run · WP-14 shared search/row components · WP-15 share-page CTA.
 
-**Lane C (L): launch blockers.** WP-16 user-submitted bottles · WP-17 age gate · WP-18 moderation queue, store answers, reviewer access, ToS/Privacy, support · WP-19 monitoring + the guardrail metric + publish S1/S2 overlap numbers · WP-20 kill switch, push-token rule, Android backup flag.
+**Lane C (L): launch blockers.** ✅ WP-16 user-submitted bottles · ✅ WP-17 age gate · ✅ WP-18 moderation queue, catalog review, corrected store answers, ToS/Privacy, support — **reviewer access is the one part it could not close**, because it is an owner decision (§12) · WP-19 monitoring + the guardrail metric + publish S1/S2 overlap numbers · ✅ WP-20 kill switch, push-token rule, Android backup flag.
 
 **Lane D (C/K): scale before the catalog grows.** WP-21 bounded discovery + indexes + cached totals · WP-22 trigram search + evaluation set · WP-23 bounded palate reads · WP-24 batched ingest and atomic finalize · WP-25 money/timezones/dates/budgets/TTLs · WP-26 Postgres CI lane and route tests.
 
@@ -401,10 +404,24 @@ Still owed: under-age *existing* accounts (social off, export offered, deletion 
 - Private by default everywhere; visibility never raised by the system; money never crosses a social boundary; palate provenance decided in §12.
 
 ### 9.3 Terms & Privacy Policy
-Required before any store submission. Must cover: AI processing and the provider (OpenRouter or Anthropic) that sees notes and shelf data; the user-photo licence grant (DATA_SOURCES §6); community-contribution opt-in; age requirement; responsible-drinking stance; data retention and deletion; contact.
+Required before any store submission. Must cover: AI processing and the provider (OpenRouter or Anthropic) that sees notes and shelf data; the user-photo licence grant (DATA_SOURCES §6); community-contribution opt-in; age requirement; responsible-drinking stance; data retention and deletion; contact. **Written — WP-18** (`/terms`, `/privacy`), and both are ungated: a gate that hides the privacy policy from the person deciding whether to answer it is the gate arguing against itself.
+
+The three facts a policy cannot be written without — a legal entity, a jurisdiction and a contact address — are **the owner's, not the code's**. They come from `NEXT_PUBLIC_LEGAL_ENTITY`, `NEXT_PUBLIC_LEGAL_JURISDICTION` and `NEXT_PUBLIC_SUPPORT_EMAIL` (plus an optional `NEXT_PUBLIC_POLICY_EFFECTIVE_DATE`), because inventing plausible ones would be worse than leaving them blank: a policy that names the *wrong* entity is not a smaller problem than one that names none. Until all three are set, both pages render a visible "this document is not finished" banner — that banner **is** the store-readiness check, and it is what `isComplete()` in `src/lib/legal.ts` asserts.
+
+Two things the current text says because they are true today and should stop being: deletion is described as a support request rather than a one-tap action, and export as one too (§9.2 is unbuilt — review SEC-M5). Both lines change when the buttons exist, and the effective date moves with them.
 
 ### 9.4 Moderation
-Reports exist (`/api/social/reports`); nothing reads them. Required: an operator role (env-allowlisted user ids at first), a `/admin/reports` queue with hide/warn/ban actions, a 72-hour SLA, an appeals note in the ToS, and audit logging. Store review will ask.
+**Built — WP-18.** Two queues, one role.
+
+- **The role** is `WHAIKEY_OPERATOR_IDS`, an env allowlist of user ids. Ids rather than emails, because an email is a claim the identity provider can change and every other table keys on the id. An **empty or unset value grants nobody** — a deploy that forgets the variable gets a queue no one can open, which is the failure worth having. It becomes a real role when there is a second operator and a reason to grant access without a deploy.
+- **Non-operators get 404**, on both `/admin/*` and `/api/admin/*`. A 403 confirms the surface exists and that there is a list to get onto.
+- **`/admin/reports`** works the reports `/api/social/reports` has been writing since social shipped and nothing read. Hide (a comment soft-deletes, a pour goes private, a profile has social switched off — each subject's existing mechanism rather than a parallel flag every read path would have to learn), suspend, reinstate, dismiss. Oldest first; `REPORT_SLA_HOURS = 72` and `countBreachedReports` make the target a number rather than a sentence.
+- **Suspension is not `socialEnabled`.** Reusing that flag would let a suspended account lift its own suspension from its own settings. `suspendedAt`/`suspendedReason` are separate, only an operator writes them, and `setSocialEnabled` refuses to turn social back **on** while one stands. Reinstating leaves the flag off: coming back is the user's choice to make again. An operator cannot suspend themselves — that is a one-keystroke outage with no recovery short of a deploy.
+- **Every action is append-only.** `moderation_actions` records actor, action, subject, report and reason. The report row moves; the history does not. An audit trail you can edit is a log, and what store review asks for is that action was *evidenced*.
+- **`/admin/submissions`** is catalog review — WP-16's other end. Promote (the bottle becomes `verified` and its parked barcode becomes a `bottle_upcs` mapping, in one transaction), decline with a required reason, or mark a duplicate of a bottle that is already public. A decline does **not** delete anything: the bottle stays `user_submitted`, which means it keeps working on its submitter's shelf and in their journal — their records are theirs; what is withheld is the shared catalog and the passport. Promotion never raises a pour's visibility. The outcome, and the reason for a decline, are readable by the submitter on the bottle's own page.
+- Catalog decisions are recorded on the submission row (`reviewedBy`, `reviewedAt`, `reviewNote`, `duplicateOfBottleId`), not in `moderation_actions`: that table's subjects are the social ones, and widening it would make both harder to read.
+
+Still owed: an appeals note in the ToS pointing at `/support` (the route exists; the sentence is in the written text and moves with the entity fields), a second operator, and **merging** a duplicate — re-pointing a submitter's shelf rows and pours at the canonical bottle is a data migration, not a moderation action, and today a duplicate is recorded rather than merged.
 
 ### 9.5 Data licensing checklist (single list; owners and dates to be filled)
 - [ ] TTB COLA image posture documented
@@ -416,13 +433,17 @@ Reports exist (`/api/social/reports`); nothing reads them. Required: an operator
 - [ ] User-photo licence in the ToS before any upload path ships
 
 ### 9.6 Store submission facts
-UGC: **yes** (profiles, feeds, comments) — moderation, report and block flows documented. Age rating per alcohol content. Reviewer access: decision in §12. Support URL and privacy URL live. Native kill switch (`minShellVersion`) **live (WP-20)** — set `WHAIKEY_MIN_SHELL_VERSION` before the first store build so the lever exists when it is needed.
+UGC: **yes** (profiles, feeds, comments) — moderation, report and block flows documented **and shipped (WP-18)**; `docs/APP_STORE_SETUP.md` §6.2 says so now. Age rating per alcohol content. Reviewer access: **still open**, decision in §12 — no store record should be opened until it is answered. Support URL (`/support`) and privacy URL (`/privacy`) live, pending the §9.3 identity fields. Native kill switch (`minShellVersion`) **live (WP-20)** — set `WHAIKEY_MIN_SHELL_VERSION` before the first store build so the lever exists when it is needed.
 
 ### 9.7 Support & feedback
-An in-app feedback sheet (mails a support address; attaches app version and platform) and a public support URL. The GitHub issue form remains for catalog corrections only.
+**Built — WP-18.** `/support` is the public URL, and its form posts to `POST /api/feedback` with the app version and platform attached.
+
+It **works signed out**, and that is the point rather than a convenience: the people best placed to tell you the app is broken are the ones who could not get into it, so a support channel that requires a session cannot hear about a sign-in bug. Signed-out submissions carry an optional contact address and are throttled per instance. Feedback lands at `/admin/feedback` for the operator. The GitHub issue form remains for catalog corrections only.
+
+Not built: anything that *sends* — no mail goes out, so a reply happens because an operator read the queue. That changes when there is a mail path (§8).
 
 ### 9.8 Responsible-drinking stance
-Enforced as mechanic bans in review (SOCIAL §3.1; §1's never-build list), verified by the cohort-adjusted pours-per-active-user metric (§10), and visible in copy: no volume headlines, no finish-this prompts, resources page linked from Settings.
+Enforced as mechanic bans in review (SOCIAL §3.1; §1's never-build list), verified by the cohort-adjusted pours-per-active-user metric (§10), and visible in copy: no volume headlines, no finish-this prompts, resources page linked from `/sharing`, `/responsible`, `/sign-in` and the policy pages (there is no Settings screen yet — Lane B).
 
 ---
 
@@ -461,7 +482,7 @@ Supersedes the old open-questions list; SOCIAL.md §14's decision table is incor
 | Embeddings / semantic search | **Deferred** behind a search evaluation | Unfreezes per §5.4 |
 | App name and bundle id (`com.whaikey.app`) | **Open — decide before any store record exists** (irreversible on both stores). Also blocks the verified App/Universal Link auth callback, which needs association files naming a real team id and bundle id — and without it a malicious app can initiate native sign-in and harvest the session (NATIVE_APP.md §2.3, review SEC-H1). **Blocks native store submission.** | Owner |
 | Production domain (`app.whaikey.com` assumed) | **Open** | Owner; blocks deep links, OAuth redirect, `.well-known`, shell URL |
-| Reviewer/demo access under social-login-only | **Open** | Options: env-flagged review-only credential provider bound to one fixed account; a signed long-lived reviewer link; a guest mode. Conflicts with AGENTS.md's password rule, so it needs an explicit owner call |
+| Reviewer/demo access under social-login-only | **Open — blocks opening a store record** (WP-18 removed the false demand for a password demo account from APP_STORE_SETUP §1/§6.4 but cannot answer this) | Options: (1) an env-flagged review-only credential provider bound to one fixed, pre-seeded account, off by default and off in production once review passes; (2) a signed, long-lived reviewer link that mints a session for a fixed demo account; (3) a guest mode that shows the app on seeded data with writes disabled. (1) conflicts with AGENTS.md's password rule and needs an explicit owner call to override; (3) is the most work and the only one that adds no credential. Whichever is chosen, the reviewer account's data must be seeded — a reviewer landing on an empty app rejects it |
 | Palate card provenance (review SEC-M7) | **Open** | Preferred: social projections exclude "Only me" pours; else state the aggregation in SOCIAL §7.1 and the UI |
 | Community segment on `/bottles/[id]/compare` before the jurisdiction review | **Open** | Keep behind a flag, or roll back until reviewed |
 | Whiskey School progress server-side | **Recommended: yes** | One day of work; needed for any gating or passport tie-in |

@@ -283,6 +283,25 @@ The screen a bad deploy still renders, and the one an operator sees after raisin
 - It is **above everything**, the nav's own quick-actions sheet included, and the splash holds until the check settles — revealing a UI the binary cannot run, even for a moment, is the failure this screen exists to prevent.
 - It **lifts again** if the floor is lowered: an operator rolling back a mistaken raise should not need the user to kill the app.
 - **Not here**: a retry button (there is nothing to retry — the binary is the problem), a way past it, or anything about the deploy that caused it.
+
+### 3.16 Policy and support (`/terms`, `/privacy`, `/support`; WP-18)
+
+Three ordinary content pages, reachable **signed out and un-gated** — a gate that hides the privacy policy from the person deciding whether to answer it is the gate arguing against itself, and a support form that needs a session cannot hear about a sign-in bug.
+
+- **`/terms` and `/privacy`** are one shared composition (`policy-page.tsx`): a title, an effective date when there is one, prose sections, and a footer linking the other two. They are long by nature, so they are the one place in the app where a wall of text is the right answer.
+- **The unfinished banner** is the only unusual element: while the legal entity, jurisdiction or contact address are unset, the page opens with a visible notice saying so. It is not a soft "coming soon" — the point is that a policy which *looks* finished and names nobody is worse than one that admits it. It disappears when the environment supplies all three.
+- **`/support`** is a form and three lines of orientation: what to write about here, what the GitHub issue form is for (catalog corrections), and the responsible-drinking link. One textarea, one optional contact field, one button; app version and platform are attached silently.
+- **Not here**: an account or a sign-in requirement, a ticket number, a promised response time the product cannot keep, chat, or an FAQ nobody has written.
+
+### 3.17 Operator screens (`/admin/reports`, `/admin/submissions`; WP-18)
+
+**Deliberately outside the design system, and outside the nav.** They are internal tools for one person: no bottom nav, no header, no brand, nothing that needs a visual baseline. The only visual work is making a breached SLA impossible to skim past and the destructive action hard to mis-tap. They are **404 for everyone who is not an operator** — not 403, which would confirm they exist.
+
+- **`/admin/reports`**: open reports oldest first, each with enough of the subject to judge it without leaving the page, its age in hours (red past 72), who reported it, and whether it is already handled. One free-text reason per row — required for a suspension, offered for everything else — then Hide / Suspend author / Reinstate / Dismiss. Recent actions are listed underneath, because the audit trail is what an appeal is answered from.
+- **`/admin/submissions`**: bottles waiting to enter the shared catalog, oldest first, each showing the facts a reviewer needs (category, distillery — matched or typed-and-unmatched, origin, ABV, barcode, where it came from) and a link to the bottle itself. Add to catalog / Decline (reason required) / Mark duplicate (needs the id of a bottle that is already public). A submission the reviewer made themselves is labelled, not blocked — with one operator, blocking it means their own bottles never get in.
+- **Not here**: bulk actions, editing a submitted bottle's fields, merging a duplicate's shelf rows and pours (that is a data migration, not a moderation action), user search, or any view of a user's private journal. An operator can hide a thing and suspend an account; they cannot read what was never shared.
+- **What the submitter sees instead**: the outcome, on the bottle's own page (`submission-status.tsx`) — waiting, declined with the reason as written, or pointed at the bottle it duplicates. Approved says nothing, because being in the catalog *is* the outcome.
+
 ---
 
 ## 4. Guardrail-sensitive UI

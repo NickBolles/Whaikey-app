@@ -47,7 +47,7 @@ Fill these in. Several are irreversible once an app record exists.
 | Primary category | `Food & Drink` | Secondary: `Lifestyle`. |
 | Copyright | `© 2026 <legal entity>` | |
 | Contact for review | name / phone / email | Apple contacts this on rejection. |
-| Demo account | email + password, pre-stocked bar | **Critical** — see §6.4. Social-login-only apps get rejected under 2.1 when reviewers can't sign in. |
+| Reviewer access | **undecided** — see §6.4 and PLAN.md §12 | **Critical.** Social-login-only apps get rejected under 2.1 when reviewers can't sign in, and the email+password account this row used to demand is forbidden by AGENTS.md. Owner decision, not a task. |
 
 ---
 
@@ -167,8 +167,12 @@ Also relevant on the current questionnaire:
   shared to followers/public, cheers and threaded comments today (SOCIAL.md S1–S3).
   Apple's UGC path forces a 13+ minimum and requires a published moderation policy, a
   report flow (shipped: `/api/social/reports`), a block flow (shipped), **and a way for
-  the operator to act on reports — not shipped; no moderation queue exists (PLAN.md §9.4).**
-  Do not submit until the queue exists. Answering "no" here is a false declaration.
+  the operator to act on reports — shipped in WP-18: `/admin/reports`, an env-allowlisted
+  operator role, hide/suspend/dismiss with a recorded reason, a 72-hour target, and an
+  append-only audit trail (PLAN.md §9.4).** Answering "no" to the UGC question is a false
+  declaration; answer yes and point the reviewer at the published policy.
+- Published moderation policy: `/terms` ("What you post, and what we may do about it"
+  and "Appeals"). Support URL: `/support`. Privacy URL: `/privacy`.
 
 Set the **App Store availability age gate** consistently, and check whether any target
 country restricts alcohol-related apps outright.
@@ -194,9 +198,9 @@ unless there's a reason.
 Paste something close to this into "Notes for Review":
 
 > Whaikey is a whiskey collection tracker. Sign-in is social-login only, so please use
-> the demo account below — it has a stocked bar and tasting history.
+> the reviewer access below — it has a stocked bar and tasting history.
 >
-> Demo account: `<email>` / `<password>`
+> Reviewer access: `<pending — see the decision below>`
 >
 > Native functionality to try:
 > • Scan tab — native MLKit barcode scanning (camera permission), rapid batch scanning
@@ -208,8 +212,24 @@ Paste something close to this into "Notes for Review":
 > The app does not encourage alcohol consumption; it has no features that reward
 > drinking frequency, and it surfaces no consumption prompts.
 
-Include the demo account **and verify it works right before submitting**. An expired
-demo account is the most common avoidable rejection.
+Include reviewer access **and verify it works right before submitting**. Expired reviewer
+access is the most common avoidable rejection.
+
+> [!IMPORTANT]
+> **There is no reviewer access yet, and this document cannot invent one** (review
+> PLAN-C10). The app is social-login only by an explicit product rule — AGENTS.md:
+> *"never add password auth"* — so the email-and-password demo account this section used
+> to demand is not a gap to fill, it is a rule to overturn or work around. It is an
+> **owner decision**, recorded in PLAN.md §12, between:
+>
+> 1. a review-only credential provider behind an env flag, bound to one fixed account and
+>    off in production by default;
+> 2. a signed, long-lived reviewer link that mints a session for that same fixed account;
+> 3. a guest mode that needs no account at all.
+>
+> All three are buildable; which one ships is not a call this repo should make on its own.
+> **Do not open a store record until it is answered** — the notes above have nowhere to
+> point until then.
 
 ---
 

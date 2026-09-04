@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 import {
   GATE_MINOR_SESSION_TOKEN,
   GATE_SESSION_TOKEN,
+  OPERATOR_SESSION_TOKEN,
   SCAN_SESSION_TOKEN,
   signIn,
 } from "./fixtures";
@@ -478,5 +479,93 @@ test.describe("age gate", () => {
       "href",
       "https://www.samhsa.gov/find-help/national-helpline",
     );
+  });
+});
+
+/**
+ * The policy, support and operator surfaces (PLAN.md §9.3/§9.4/§9.7, review
+ * PLAN-C9). Three properties worth walking end to end: the policy pages are
+ * reachable with no session and no age answer, the support form works for
+ * somebody who cannot get past sign-in, and the queue is a 404 for everyone
+ * who is not on the allowlist.
+ */
+test.describe("policies, support and the queue", () => {
+  test("the policy pages are reachable signed out, and admit they are unfinished", async ({
+    page,
+  }) => {
+    for (const path of ["/terms", "/privacy"]) {
+      await page.goto(path);
+      // Not the age gate, not sign-in.
+      await expect(page).toHaveURL(new RegExp(`${path}$`));
+      // The legal entity, jurisdiction and contact are the owner's to supply
+      // and are unset here, so the page has to say so rather than look done.
+      await expect(page.getByRole("note")).toContainText(/not finished/i);
+    }
+    // And they reach each other and the support page without a session.
+    await expect(page.getByRole("link", { name: /^terms$/i }).first()).toBeVisible();
+    await expect(page.getByRole("link", { name: /support/i }).first()).toBeVisible();
+  });
+
+  test("support takes a message from someone who is not signed in", async ({ page }) => {
+    await page.goto("/support");
+    await expect(page).toHaveURL(/\/support$/);
+
+    // Too short to act on is refused in the form, before the network.
+    await page.getByLabel(/what happened/i).fill("broken");
+    await page.getByRole("button", { name: /^send$/i }).click();
+    await expect(page.getByText(/a sentence or two, so there/i)).toBeVisible();
+
+    await page.getByLabel(/what happened/i).fill(
+      "Signing in with Google bounces me back to the sign-in page every time.",
+    );
+    await page.getByLabel(/how to reach you/i).fill("someone@example.com");
+    await page.getByRole("button", { name: /^send$/i }).click();
+    await expect(page.getByRole("status")).toContainText(/got it/i);
+  });
+
+  test("the moderation queue does not exist for anyone but an operator", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    // A signed-in account that is not on the allowlist — 404, not 403: a 403
+    // would confirm the surface exists and that there is a list to get onto.
+    await signIn(context, baseURL!, SCAN_SESSION_TOKEN);
+    for (const path of ["/admin/reports", "/admin/submissions"]) {
+      const res = await page.goto(path);
+      expect(res?.status()).toBe(404);
+    }
+  });
+
+  test("an operator can promote a submitted bottle, and its submitter is told", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    // Sam adds a bottle the catalog lacks; it is theirs immediately and
+    // nobody else's until somebody looks at it (WP-16).
+    await signIn(context, baseURL!, SCAN_SESSION_TOKEN);
+    await page.goto("/bottles/new?name=Ardnamurchan+AD+Test");
+    await expect(page.getByLabel(/bottle name/i)).toHaveValue("Ardnamurchan AD Test");
+    await page.getByRole("button", { name: /add this bottle/i }).click();
+    await page.waitForURL(/\/bottles\/[^/]+$/);
+    const bottleUrl = page.url();
+    await expect(page.getByRole("region", { name: /submission status/i })).toContainText(
+      /yours to use right now/i,
+    );
+
+    // The operator sees it waiting and adds it to the catalog.
+    await signIn(context, baseURL!, OPERATOR_SESSION_TOKEN);
+    await page.goto("/admin/submissions");
+    const row = page.getByRole("listitem").filter({ hasText: "Ardnamurchan AD Test" });
+    await expect(row).toBeVisible();
+    await row.getByRole("button", { name: /add to catalog/i }).click();
+    await expect(row).toHaveCount(0);
+
+    // And the banner is gone from the bottle for its submitter: being in the
+    // catalog is the outcome, so there is nothing left to announce.
+    await signIn(context, baseURL!, SCAN_SESSION_TOKEN);
+    await page.goto(bottleUrl);
+    await expect(page.getByRole("region", { name: /submission status/i })).toHaveCount(0);
   });
 });

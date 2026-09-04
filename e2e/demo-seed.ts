@@ -10,6 +10,8 @@ import {
   GATE_MINOR_USER_ID,
   GATE_SESSION_TOKEN,
   GATE_USER_ID,
+  OPERATOR_SESSION_TOKEN,
+  OPERATOR_USER_ID,
   SCAN_SESSION_TOKEN,
   SCAN_USER_ID,
 } from "./fixtures";
@@ -112,7 +114,27 @@ export async function seedDemoUser(db: DB): Promise<void> {
    * which is exactly what the gate is supposed to do, and exactly why the
    * fixture has to say so out loud rather than the gate being off in tests.
    */
-  for (const userId of [DEMO_USER_ID, SCAN_USER_ID]) {
+  // The operator (PLAN.md §9.4). `WHAIKEY_OPERATOR_IDS` names this id, so the
+  // same page is a queue for them and a 404 for everybody else — which is the
+  // property worth asserting end to end.
+  await db.insert(schema.user).values({
+    id: OPERATOR_USER_ID,
+    name: "Casey Operator",
+    email: "operator@whaikey.app",
+    emailVerified: true,
+    createdAt: D("2026-01-15T12:00:00Z"),
+    updatedAt: D("2026-01-15T12:00:00Z"),
+  });
+  await db.insert(schema.session).values({
+    id: "operator-session",
+    token: OPERATOR_SESSION_TOKEN,
+    userId: OPERATOR_USER_ID,
+    expiresAt: D("2030-01-01T00:00:00Z"),
+    createdAt: D("2026-07-01T12:00:00Z"),
+    updatedAt: D("2026-07-01T12:00:00Z"),
+  });
+
+  for (const userId of [DEMO_USER_ID, SCAN_USER_ID, OPERATOR_USER_ID]) {
     await db.insert(schema.ageVerifications).values({
       userId,
       birthDate: "1988-04-12",

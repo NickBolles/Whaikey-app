@@ -110,6 +110,19 @@ export default function ResponsiblePage() {
           </Link>{" "}
           is where every share link lives, and where you can turn all of it off.
         </p>
+        <p className="text-xs text-muted/70">
+          <Link href="/privacy" className="text-accent">
+            Privacy
+          </Link>{" "}
+          ·{" "}
+          <Link href="/terms" className="text-accent">
+            Terms
+          </Link>{" "}
+          ·{" "}
+          <Link href="/support" className="text-accent">
+            Support
+          </Link>
+        </p>
       </section>
     </div>
   );

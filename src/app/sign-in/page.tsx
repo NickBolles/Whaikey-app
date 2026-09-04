@@ -130,6 +130,18 @@ function SignInForm() {
           What that means
         </Link>
         .
+        <br />
+        <Link href="/terms" className="underline underline-offset-2">
+          Terms
+        </Link>{" "}
+        ·{" "}
+        <Link href="/privacy" className="underline underline-offset-2">
+          Privacy
+        </Link>{" "}
+        ·{" "}
+        <Link href="/support" className="underline underline-offset-2">
+          Support
+        </Link>
       </p>
     </div>
   );

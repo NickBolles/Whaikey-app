@@ -485,6 +485,19 @@ export const userProfiles = pgTable("user_profiles", {
    */
   socialEnabled: boolean("social_enabled").notNull().default(true),
   /**
+   * Set by an operator, never by the user (PLAN.md §9.4).
+   *
+   * Distinct from `socialEnabled`, which is the owner's own step-back switch:
+   * a suspension is not theirs to reverse, and collapsing the two would let
+   * anyone lift their own with one tap of a toggle they already have. Social
+   * reads and writes are refused while it is set; the journal, the shelf and
+   * the export are untouched, because a suspension is from the social surfaces
+   * and not from someone's own records.
+   */
+  suspendedAt: timestamp("suspended_at", { withTimezone: true, mode: "date" }),
+  /** Shown to the suspended account, so an appeal has something to answer. */
+  suspendedReason: text("suspended_reason"),
+  /**
    * Phone discovery (docs/SOCIAL.md §7.2, D8 as amended): the raw number is
    * NEVER stored — only an HMAC (keyed by a server secret) for exact-match
    * lookup, plus the last two digits so the owner can recognize which number
@@ -662,6 +675,66 @@ export const reports = pgTable(
     createdAt: createdAt(),
   },
   (t) => [index("reports_state_idx").on(t.state)],
+);
+
+/**
+ * What an operator did, and why (PLAN.md §9.4).
+ *
+ * Reports were written and never read; the queue that reads them has to leave
+ * its own record or the same hole reopens one level up. Append-only: rows are
+ * never edited or removed, so "who hid this and when" survives the thing being
+ * hidden, and an appeal has something to answer.
+ */
+export const MODERATION_ACTIONS = ["hide", "suspend", "reinstate", "dismiss"] as const;
+export type ModerationActionKind = (typeof MODERATION_ACTIONS)[number];
+
+export const moderationActions = pgTable(
+  "moderation_actions",
+  {
+    id: id(),
+    /** The operator. Never null — an action nobody took is not an action. */
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    action: text("action").$type<ModerationActionKind>().notNull(),
+    subjectType: text("subject_type").$type<ReportSubjectType>().notNull(),
+    subjectId: text("subject_id").notNull(),
+    /** The report this answered, when it came from the queue. */
+    reportId: text("report_id").references(() => reports.id, { onDelete: "set null" }),
+    /** The operator's reasoning, in their own words. */
+    note: text("note"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("moderation_actions_subject_idx").on(t.subjectType, t.subjectId),
+    index("moderation_actions_created_idx").on(t.createdAt),
+  ],
+);
+
+/**
+ * In-app feedback (PLAN.md §9.7).
+ *
+ * A store submission needs a support route that is not a GitHub issue form,
+ * and the app has none. Stored rather than mailed because there is no mailer:
+ * a row an operator reads is a support channel, an email to an address nobody
+ * configured is not. The app version and platform ride along because the first
+ * question about any report is "which build".
+ */
+export const feedback = pgTable(
+  "feedback",
+  {
+    id: id(),
+    /** Null for a signed-out sender; the support page works either way. */
+    userId: text("user_id").references(() => user.id, { onDelete: "set null" }),
+    body: text("body").notNull(),
+    /** Optional reply address, for a signed-out sender or a different inbox. */
+    contact: text("contact"),
+    platform: text("platform"),
+    appVersion: text("app_version"),
+    handledAt: timestamp("handled_at", { withTimezone: true, mode: "date" }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("feedback_created_idx").on(t.createdAt)],
 );
 
 export const pairings = pgTable(
@@ -1221,6 +1294,8 @@ export type Distillery = typeof distilleries.$inferSelect;
 export type Bottle = typeof bottles.$inferSelect;
 export type BottleSubmission = typeof bottleSubmissions.$inferSelect;
 export type AgeVerification = typeof ageVerifications.$inferSelect;
+export type ModerationAction = typeof moderationActions.$inferSelect;
+export type Feedback = typeof feedback.$inferSelect;
 export type NewBottle = typeof bottles.$inferInsert;
 export type UserBottle = typeof userBottles.$inferSelect;
 export type PassportTierRow = typeof passportTiers.$inferSelect;

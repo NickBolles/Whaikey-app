@@ -61,6 +61,18 @@ export function isReservedHandle(handle: string): boolean {
   return RESERVED_HANDLES.has(normalizeHandle(handle));
 }
 
+/**
+ * Raised when a suspended account tries to undo its suspension (PLAN.md §9.4).
+ * Distinct from `SocialDisabledError`, which is the owner's own step-back
+ * switch and theirs to reverse whenever they like.
+ */
+export class AccountSuspendedError extends Error {
+  constructor() {
+    super("This account is suspended");
+    this.name = "AccountSuspendedError";
+  }
+}
+
 /** Thrown when a write would raise social exposure while the owner is stepped back (US-11). */
 export class SocialDisabledError extends Error {
   constructor() {
@@ -825,6 +837,22 @@ export async function setSocialEnabled(db: DB, userId: string, enabled: boolean)
     // Serialized with makeEverythingPrivate so a stale "turn social back on"
     // can't commit immediately after a reset and undo it.
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`social-reset:${userId}`}))`);
+    /**
+     * A suspension is not the user's to lift (PLAN.md §9.4). Suspending sets
+     * `socialEnabled = false`, and this control is the one the account already
+     * has for turning it back on — so without this check a suspension would
+     * last exactly as long as it took someone to find the toggle.
+     *
+     * Turning social *off* stays available: nothing here should stop somebody
+     * withdrawing further.
+     */
+    if (enabled) {
+      const current = await tx.query.userProfiles.findFirst({
+        columns: { suspendedAt: true },
+        where: eq(schema.userProfiles.userId, userId),
+      });
+      if (current?.suspendedAt) throw new AccountSuspendedError();
+    }
     const rows = await tx
       .update(schema.userProfiles)
       .set({ socialEnabled: enabled, updatedAt: new Date() })
