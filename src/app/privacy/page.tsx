@@ -54,6 +54,14 @@ export default function PrivacyPage() {
             <strong className="text-foreground">Device push tokens</strong>, if you turn
             notifications on, so we can send to that device and stop when you sign out.
           </li>
+          <li>
+            <strong className="text-foreground">Anything you send us through support</strong> — the
+            message itself, the contact address you offer with it, and which platform and app
+            version you were on. It is kept so a person can act on it, which means anything you put
+            in a message — including an appeal or a deletion request — is stored with it. Send only
+            what you need us to know. If you were signed in, your account is attached; if you were
+            not, only what you typed is.
+          </li>
         </ul>
       </Section>
 
@@ -99,6 +107,16 @@ export default function PrivacyPage() {
           Your journal is kept until you delete it or the account. Short-lived things are swept:
           native sign-in codes are deleted the moment they are used and swept when they expire,
           rate-limit counters are dropped after a couple of days, and phone lookups are pruned.
+        </p>
+        <p>
+          Support messages and moderation records are the exception, and we would rather say so
+          than imply otherwise: they are kept indefinitely today. A moderation record is what an
+          appeal gets answered from, so it outlives the decision on purpose. A support message has
+          no such reason — it is kept only because nothing prunes it yet. Ask through{" "}
+          <Link href="/support" className="text-accent">
+            support
+          </Link>{" "}
+          and we will delete yours.
         </p>
       </Section>
 

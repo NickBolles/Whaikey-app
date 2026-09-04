@@ -40,16 +40,26 @@ interface AuditView {
   actorName: string;
 }
 
+interface SuspendedView {
+  userId: string;
+  handle: string | null;
+  displayName: string | null;
+  reason: string | null;
+  suspendedAt: string;
+}
+
 export function ModerationQueue({
   reports,
   breached,
   slaHours,
   audit,
+  suspended,
 }: {
   reports: QueuedReportView[];
   breached: number;
   slaHours: number;
   audit: AuditView[];
+  suspended: SuspendedView[];
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
@@ -118,6 +128,25 @@ export function ModerationQueue({
           />
         ))}
       </ul>
+
+      {suspended.length > 0 && (
+        <section className="flex flex-col gap-2">
+          {/* Suspending resolves the report, which takes the row — and with it
+              the only Reinstate button — out of the queue. An appeal arriving
+              through /support later has to land somewhere. */}
+          <h2 className="section-label">Suspended accounts</h2>
+          <ul className="flex flex-col gap-2">
+            {suspended.map((account) => (
+              <SuspendedRow
+                key={account.userId}
+                account={account}
+                busy={busy === account.userId}
+                onAct={(body) => void act(account.userId, body)}
+              />
+            ))}
+          </ul>
+        </section>
+      )}
 
       <section className="flex flex-col gap-2">
         <h2 className="section-label">Recent actions</h2>
@@ -246,6 +275,56 @@ function ReportRow({
           Dismiss
         </button>
       </div>
+    </li>
+  );
+}
+
+function SuspendedRow({
+  account,
+  busy,
+  onAct,
+}: {
+  account: SuspendedView;
+  busy: boolean;
+  onAct: (body: Record<string, unknown>) => void;
+}) {
+  const [note, setNote] = useState("");
+
+  return (
+    <li className="card p-4 flex flex-col gap-2">
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="font-medium">
+          {account.handle ? `@${account.handle}` : account.displayName || account.userId}
+        </span>
+        <span className="text-xs text-muted">
+          since {new Date(account.suspendedAt).toLocaleDateString()}
+        </span>
+      </div>
+      {account.reason && <p className="text-sm text-muted italic">{account.reason}</p>}
+
+      <label className="sr-only" htmlFor={`reinstate-${account.userId}`}>
+        Reason for reinstating
+      </label>
+      <input
+        id={`reinstate-${account.userId}`}
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+        placeholder="Why — recorded in the audit trail"
+        className="w-full rounded-xl border border-border-subtle bg-surface py-2.5 px-3 text-sm text-foreground placeholder:text-muted focus:outline-none focus:border-accent/70"
+      />
+
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => onAct({ action: "reinstate", userId: account.userId, note })}
+        className="btn-secondary self-start px-4 py-2 text-sm font-medium disabled:opacity-50"
+      >
+        Reinstate
+      </button>
+      {/* Reinstating leaves social off: coming back is theirs to choose again. */}
+      <p className="text-xs text-muted">
+        They come back with their social surfaces still switched off, to turn on again themselves.
+      </p>
     </li>
   );
 }

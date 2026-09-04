@@ -119,6 +119,29 @@ function toProfileSummary(row: {
   return { userId: row.userId, handle: row.handle, displayName: row.displayName, avatarUrl: row.avatarUrl };
 }
 
+export interface OwnSuspension {
+  reason: string | null;
+  suspendedAt: Date;
+}
+
+/**
+ * This account's own suspension, if it has one (PLAN.md §9.4).
+ *
+ * Deliberately not on `SocialProfile`: that shape is projected to other people
+ * in places, and a suspension reason is between the account and the operator.
+ * It is read only for the signed-in owner, so they can see what they are being
+ * asked to appeal — the Terms and `/support` both promise they were told, and
+ * a reason stored where nobody can read it does not keep that promise.
+ */
+export async function getOwnSuspension(db: DB, userId: string): Promise<OwnSuspension | null> {
+  const row = await db.query.userProfiles.findFirst({
+    columns: { suspendedAt: true, suspendedReason: true },
+    where: eq(schema.userProfiles.userId, userId),
+  });
+  if (!row?.suspendedAt) return null;
+  return { reason: row.suspendedReason, suspendedAt: row.suspendedAt };
+}
+
 export async function getOwnProfile(db: DB, userId: string): Promise<SocialProfile | null> {
   const row = await db.query.userProfiles.findFirst({ where: eq(schema.userProfiles.userId, userId) });
   return row ? toSocialProfile(row) : null;

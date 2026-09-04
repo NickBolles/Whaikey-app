@@ -83,6 +83,24 @@ describe("POST /api/feedback", () => {
     expect(other.status).toBe(201);
   });
 
+  /**
+   * Counting outside the write lets several concurrent requests all read
+   * four-of-five and all insert. The count and the insert share one
+   * transaction behind a per-user advisory lock, the same shape as the report
+   * and submission limiters.
+   */
+  it("holds the account bound when requests arrive together", async () => {
+    const user = await createTestUser(db);
+    setSessionUser(user);
+    const results = await Promise.all(
+      Array.from({ length: 8 }, (_, i) =>
+        feedbackPOST(post({ body: `All at once, message number ${i}.` })),
+      ),
+    );
+    expect(results.filter((r) => r.status === 201)).toHaveLength(5);
+    expect(await db.select().from(schema.feedback)).toHaveLength(5);
+  });
+
   it("bounds how much one account can send", async () => {
     const user = await createTestUser(db);
     setSessionUser(user);

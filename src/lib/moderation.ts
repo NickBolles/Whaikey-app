@@ -1,8 +1,9 @@
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import type { DB } from "@/db";
 import {
   comments,
   moderationActions,
+  pourShares,
   pours,
   reports,
   user,
@@ -202,9 +203,13 @@ export async function hideSubject(
   now = new Date(),
 ): Promise<void> {
   if (subjectType === "profile") throw new CannotHideProfileError();
-  const changed = await applyHide(db, subjectType, subjectId, now);
-  if (!changed) throw new UnknownSubjectError();
-  await record(db, actorId, "hide", subjectType, subjectId, options, now);
+  // One transaction: content hidden with no audit row is a decision nobody can
+  // answer an appeal from, and an audit row with nothing hidden is worse.
+  await db.transaction(async (tx) => {
+    const changed = await applyHide(tx, subjectType, subjectId, now);
+    if (!changed) throw new UnknownSubjectError();
+    await record(tx, actorId, "hide", subjectType, subjectId, options, now);
+  });
 }
 
 async function applyHide(
@@ -228,7 +233,21 @@ async function applyHide(
     .set({ visibility: "private" })
     .where(eq(pours.id, subjectId))
     .returning({ id: pours.id });
-  return rows.length > 0;
+  if (rows.length === 0) return false;
+
+  /**
+   * A `/s/<code>` link is a separate door and `getPublicPourShare` opens it on
+   * `revokedAt` alone — it never looks at the pour's visibility. Making the
+   * pour private without this leaves the exact content the operator hid still
+   * readable by anyone holding the URL, which is the failure mode the whole
+   * action exists to prevent. `makeEverythingPrivate` revokes for the same
+   * reason; a moderation hide has to do at least as much.
+   */
+  await db
+    .update(pourShares)
+    .set({ revokedAt: now })
+    .where(and(eq(pourShares.pourId, subjectId), isNull(pourShares.revokedAt)));
+  return true;
 }
 
 /** Only the hideable subjects reach this; a profile is suspended, not hidden. */
@@ -264,20 +283,28 @@ export async function suspendAccount(
     // themselves locks the queue with nobody able to reopen it.
     throw new UnknownSubjectError();
   }
-  const rows = await db
-    .update(userProfiles)
-    .set({
-      suspendedAt: now,
-      suspendedReason: reason.trim() || null,
-      socialEnabled: false,
-      isPublic: false,
-      discoverable: false,
-      updatedAt: now,
-    })
-    .where(eq(userProfiles.userId, userId))
-    .returning({ userId: userProfiles.userId });
-  if (rows.length === 0) throw new UnknownSubjectError();
-  await record(db, actorId, "suspend", "profile", userId, { ...options, note: reason }, now);
+  await db.transaction(async (tx) => {
+    const rows = await tx
+      .update(userProfiles)
+      .set({
+        suspendedAt: now,
+        suspendedReason: reason.trim() || null,
+        socialEnabled: false,
+        isPublic: false,
+        discoverable: false,
+        // Cleared for the same reason `makeEverythingPrivate` clears it: the
+        // account's own "turn social back on" would otherwise make the stored
+        // number findable again after reinstatement, with no fresh opt-in.
+        // Every other flag here is one they can set again deliberately; this
+        // one they would never be asked about.
+        phoneDiscoverable: false,
+        updatedAt: now,
+      })
+      .where(eq(userProfiles.userId, userId))
+      .returning({ userId: userProfiles.userId });
+    if (rows.length === 0) throw new UnknownSubjectError();
+    await record(tx, actorId, "suspend", "profile", userId, { ...options, note: reason }, now);
+  });
 }
 
 /**
@@ -293,13 +320,15 @@ export async function reinstateAccount(
   note: string | undefined,
   now = new Date(),
 ): Promise<void> {
-  const rows = await db
-    .update(userProfiles)
-    .set({ suspendedAt: null, suspendedReason: null, updatedAt: now })
-    .where(eq(userProfiles.userId, userId))
-    .returning({ userId: userProfiles.userId });
-  if (rows.length === 0) throw new UnknownSubjectError();
-  await record(db, actorId, "reinstate", "profile", userId, { note }, now);
+  await db.transaction(async (tx) => {
+    const rows = await tx
+      .update(userProfiles)
+      .set({ suspendedAt: null, suspendedReason: null, updatedAt: now })
+      .where(eq(userProfiles.userId, userId))
+      .returning({ userId: userProfiles.userId });
+    if (rows.length === 0) throw new UnknownSubjectError();
+    await record(tx, actorId, "reinstate", "profile", userId, { note }, now);
+  });
 }
 
 /** Close a report without acting on it — with a reason, always. */
@@ -310,13 +339,15 @@ export async function dismissReport(
   note: string | undefined,
   now = new Date(),
 ): Promise<void> {
-  const [row] = await db
-    .update(reports)
-    .set({ state: "dismissed" })
-    .where(and(eq(reports.id, reportId), eq(reports.state, "open")))
-    .returning({ subjectType: reports.subjectType, subjectId: reports.subjectId });
-  if (!row) throw new UnknownSubjectError();
-  await record(db, actorId, "dismiss", row.subjectType, row.subjectId, { reportId, note }, now);
+  await db.transaction(async (tx) => {
+    const [row] = await tx
+      .update(reports)
+      .set({ state: "dismissed" })
+      .where(and(eq(reports.id, reportId), eq(reports.state, "open")))
+      .returning({ subjectType: reports.subjectType, subjectId: reports.subjectId });
+    if (!row) throw new UnknownSubjectError();
+    await record(tx, actorId, "dismiss", row.subjectType, row.subjectId, { reportId, note }, now);
+  });
 }
 
 /** Mark a report handled. Called after an action that changed something. */
@@ -374,6 +405,37 @@ export async function listModerationActions(db: DB, limit = 100): Promise<AuditE
     .innerJoin(user, eq(user.id, moderationActions.actorId))
     .orderBy(desc(moderationActions.createdAt))
     .limit(limit);
+}
+
+export interface SuspendedAccount {
+  userId: string;
+  handle: string | null;
+  displayName: string | null;
+  reason: string | null;
+  suspendedAt: Date;
+}
+
+/**
+ * Who is currently suspended.
+ *
+ * Not a nicety: suspending resolves the report, and a resolved report leaves
+ * the queue — so the Reinstate button next to it goes with it, and an appeal
+ * arriving later through `/support` would find no control anywhere. A
+ * suspension you cannot lift is a ban, and the Terms promise otherwise.
+ */
+export async function listSuspendedAccounts(db: DB): Promise<SuspendedAccount[]> {
+  const rows = await db
+    .select({
+      userId: userProfiles.userId,
+      handle: userProfiles.handle,
+      displayName: userProfiles.displayName,
+      reason: userProfiles.suspendedReason,
+      suspendedAt: userProfiles.suspendedAt,
+    })
+    .from(userProfiles)
+    .where(isNotNull(userProfiles.suspendedAt))
+    .orderBy(desc(userProfiles.suspendedAt));
+  return rows.map((row) => ({ ...row, suspendedAt: row.suspendedAt as Date }));
 }
 
 /** How many open reports are past the SLA, for the queue's own header. */

@@ -114,18 +114,9 @@ export async function POST(request: Request): Promise<NextResponse> {
       { status: 429 },
     );
 
-    if (!user) {
-      if (anonThrottled(request, now.getTime())) return tooMany;
-    } else {
-      const hourAgo = new Date(now.getTime() - WINDOW_MS);
-      const [row] = await db
-        .select({ n: sql<number>`count(*)` })
-        .from(feedback)
-        .where(and(eq(feedback.userId, user.id), gt(feedback.createdAt, hourAgo)));
-      if (Number(row?.n ?? 0) >= PER_USER_LIMIT) return tooMany;
-    }
+    if (!user && anonThrottled(request, now.getTime())) return tooMany;
 
-    await db.insert(feedback).values({
+    const row = {
       id: crypto.randomUUID(),
       userId: user?.id ?? null,
       body: parsed.data.body,
@@ -133,7 +124,32 @@ export async function POST(request: Request): Promise<NextResponse> {
       platform: parsed.data.platform || null,
       appVersion: parsed.data.appVersion || null,
       createdAt: now,
+    };
+
+    if (!user) {
+      await db.insert(feedback).values(row);
+      return NextResponse.json({ received: true }, { status: 201 });
+    }
+
+    /**
+     * Count and insert in one transaction behind a per-user advisory lock, the
+     * same shape as the report and submission limiters. Counting outside the
+     * write lets several concurrent requests all read four-of-five and all
+     * insert, which is the difference between a durable bound and a bound that
+     * holds only when nobody tries.
+     */
+    const accepted = await db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`feedback-rl:${user.id}`}))`);
+      const hourAgo = new Date(now.getTime() - WINDOW_MS);
+      const [counted] = await tx
+        .select({ n: sql<number>`count(*)` })
+        .from(feedback)
+        .where(and(eq(feedback.userId, user.id), gt(feedback.createdAt, hourAgo)));
+      if (Number(counted?.n ?? 0) >= PER_USER_LIMIT) return false;
+      await tx.insert(feedback).values(row);
+      return true;
     });
+    if (!accepted) return tooMany;
 
     return NextResponse.json({ received: true }, { status: 201 });
   }) as Promise<NextResponse>;

@@ -12,6 +12,7 @@ import {
   hideSubject,
   listModerationActions,
   listOpenReports,
+  listSuspendedAccounts,
   reinstateAccount,
   resolveReport,
   suspendAccount,
@@ -160,6 +161,32 @@ describe("hiding", () => {
     expect(row.visibility).toBe("private");
   });
 
+  /**
+   * A `/s/<code>` link is a second door, and `getPublicPourShare` opens it on
+   * `revokedAt` alone — it never looks at the pour's visibility. Making the
+   * pour private without revoking leaves exactly the content the operator hid
+   * readable by anyone holding the URL.
+   */
+  it("revokes the share links that would still serve a hidden pour", async () => {
+    const { createPourShare, getPublicPourShare } = await import("./pour-sharing");
+    const bottle = await createTestBottle(db);
+    const pourId = uid("pour");
+    await db.insert(schema.pours).values({
+      id: pourId,
+      userId: author.id,
+      bottleId: bottle.id,
+      visibility: "public",
+    });
+    const share = await createPourShare(db, author.id, pourId);
+    expect(share).not.toBeNull();
+    const code = share!.code;
+    expect(await getPublicPourShare(db, code)).not.toBeNull();
+
+    await hideSubject(db, operator.id, "pour", pourId, { note: "abusive" });
+
+    expect(await getPublicPourShare(db, code)).toBeNull();
+  });
+
   it("is idempotent, so two operators on one report don't collide", async () => {
     const bottle = await createTestBottle(db);
     const pourId = uid("pour");
@@ -257,11 +284,85 @@ describe("the audit trail", () => {
     expect(await listOpenReports(db)).toHaveLength(0);
   });
 
+  /**
+   * Every state change and its audit row in one transaction. Content hidden
+   * with no record is a decision nobody can answer an appeal from.
+   */
+  it("writes no audit row when the action itself did not happen", async () => {
+    await expect(hideSubject(db, operator.id, "pour", "no-such-pour", {})).rejects.toBeInstanceOf(
+      UnknownSubjectError,
+    );
+    await expect(
+      suspendAccount(db, operator.id, "no-such-user", "abuse"),
+    ).rejects.toBeInstanceOf(UnknownSubjectError);
+    await expect(
+      reinstateAccount(db, operator.id, "no-such-user", undefined),
+    ).rejects.toBeInstanceOf(UnknownSubjectError);
+    expect(await db.select().from(schema.moderationActions)).toHaveLength(0);
+  });
+
   it("will not dismiss the same report twice", async () => {
     const reportId = await report("profile", author.id);
     await dismissReport(db, operator.id, reportId, undefined);
     await expect(dismissReport(db, operator.id, reportId, undefined)).rejects.toBeInstanceOf(
       UnknownSubjectError,
     );
+  });
+});
+
+describe("suspension", () => {
+  /**
+   * `makeEverythingPrivate` clears `phoneDiscoverable` because re-enabling
+   * social must not silently make a stored number findable again. A suspension
+   * that skipped it would hand the account back that exposure on reinstatement
+   * without ever asking — every other flag it clears is one the account sets
+   * again deliberately.
+   */
+  it("clears phone discovery, so coming back needs a fresh opt-in", async () => {
+    await db
+      .update(schema.userProfiles)
+      .set({ phoneDiscoverable: true })
+      .where(eq(schema.userProfiles.userId, author.id));
+
+    await suspendAccount(db, operator.id, author.id, "repeated abuse");
+
+    const [profile] = await db
+      .select()
+      .from(schema.userProfiles)
+      .where(eq(schema.userProfiles.userId, author.id));
+    expect(profile.phoneDiscoverable).toBe(false);
+  });
+
+  /**
+   * Suspending resolves the report, and a resolved report leaves the queue —
+   * taking the only Reinstate control with it. Without a standing list, an
+   * appeal arriving later through /support has nowhere to be acted on.
+   */
+  it("stays findable after its report is gone, so an appeal can be acted on", async () => {
+    const reportId = await report("profile", author.id);
+    await suspendAccount(db, operator.id, author.id, "repeated abuse", { reportId });
+    await resolveReport(db, reportId);
+    expect(await listOpenReports(db)).toHaveLength(0);
+
+    const suspended = await listSuspendedAccounts(db);
+    expect(suspended).toHaveLength(1);
+    expect(suspended[0]).toMatchObject({ userId: author.id, reason: "repeated abuse" });
+
+    await reinstateAccount(db, operator.id, author.id, "appeal upheld");
+    expect(await listSuspendedAccounts(db)).toHaveLength(0);
+  });
+
+  /** A reason the account cannot read does not tell them what to appeal. */
+  it("is readable by the account it is about, and by nobody through the shared shape", async () => {
+    const { getOwnSuspension, getOwnProfile } = await import("./social");
+    expect(await getOwnSuspension(db, author.id)).toBeNull();
+
+    await suspendAccount(db, operator.id, author.id, "repeated abuse");
+
+    expect(await getOwnSuspension(db, author.id)).toMatchObject({ reason: "repeated abuse" });
+    expect(await getOwnSuspension(db, reporter.id)).toBeNull();
+    // Not on the projection that reaches other people.
+    const profile = await getOwnProfile(db, author.id);
+    expect(profile && "suspendedReason" in profile).toBe(false);
   });
 });

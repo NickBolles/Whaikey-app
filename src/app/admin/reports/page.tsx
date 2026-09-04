@@ -7,6 +7,7 @@ import {
   countBreachedReports,
   listModerationActions,
   listOpenReports,
+  listSuspendedAccounts,
 } from "@/lib/moderation";
 import { ModerationQueue } from "./moderation-queue";
 
@@ -28,10 +29,14 @@ export default async function AdminReportsPage() {
   if (!isOperator(user)) notFound();
 
   const db = getDb();
-  const [reports, breached, audit] = await Promise.all([
+  const [reports, breached, audit, suspended] = await Promise.all([
     listOpenReports(db),
     countBreachedReports(db),
     listModerationActions(db, 50),
+    // Suspending resolves the report, so the reinstate control next to it goes
+    // away with the row. An appeal arriving later needs somewhere to be acted
+    // on, and this is it.
+    listSuspendedAccounts(db),
   ]);
 
   return (
@@ -40,6 +45,7 @@ export default async function AdminReportsPage() {
       breached={breached}
       slaHours={REPORT_SLA_HOURS}
       audit={audit.map((a) => ({ ...a, createdAt: a.createdAt.toISOString() }))}
+      suspended={suspended.map((a) => ({ ...a, suspendedAt: a.suspendedAt.toISOString() }))}
     />
   );
 }

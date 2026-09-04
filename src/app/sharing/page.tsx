@@ -3,7 +3,7 @@ import { Link2 } from "lucide-react";
 import { getDb } from "@/db";
 import { getSessionUser } from "@/lib/session";
 import { listPourShares } from "@/lib/pour-sharing";
-import { getOwnProfile, getSocialPrefs } from "@/lib/social";
+import { getOwnProfile, getOwnSuspension, getSocialPrefs } from "@/lib/social";
 import { SharedLinksList } from "./shared-links-list";
 import { PrivacyControls } from "./privacy-controls";
 
@@ -29,14 +29,41 @@ export default async function SharingPage() {
   }
 
   const db = getDb();
-  const [shares, profile, prefs] = await Promise.all([
+  const [shares, profile, prefs, suspension] = await Promise.all([
     listPourShares(db, user.id),
     getOwnProfile(db, user.id),
     getSocialPrefs(db, user.id),
+    // A suspension reason stored where its subject cannot read it does not
+    // keep the promise the Terms and /support both make (PLAN.md §9.4).
+    getOwnSuspension(db, user.id),
   ]);
 
   return (
     <div className="mx-auto flex max-w-lg flex-col gap-8 px-4 pb-24 pt-8">
+      {suspension && (
+        <section
+          role="note"
+          className="card border-danger/50 p-4 flex flex-col gap-2 text-sm leading-relaxed"
+        >
+          <p className="font-medium text-foreground">
+            Your social surfaces are suspended.
+          </p>
+          <p className="text-muted">
+            Your journal, your shelf and everything you have written are untouched and still
+            yours — what is switched off is your profile, comments and anything shared with other
+            people. Turning social back on is not something you can do while this stands.
+          </p>
+          {suspension.reason && <p className="italic text-muted">“{suspension.reason}”</p>}
+          <p className="text-muted">
+            If you think this is wrong,{" "}
+            <Link href="/support" className="text-accent">
+              send it back to us
+            </Link>{" "}
+            and a person will look again.
+          </p>
+        </section>
+      )}
+
       <header>
         <h1 className="font-display text-[2rem] font-semibold leading-tight">Sharing</h1>
         <p className="mt-1 text-sm text-muted">
