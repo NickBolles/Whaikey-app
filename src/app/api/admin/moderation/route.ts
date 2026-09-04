@@ -7,6 +7,7 @@ import { isOperator } from "@/lib/operator";
 import {
   CannotHideProfileError,
   ReportAlreadyHandledError,
+  StaleModerationViewError,
   UnknownSubjectError,
   dismissReport,
   hideSubject,
@@ -42,6 +43,9 @@ const bodySchema = z.discriminatedUnion("action", [
     subjectType: z.enum(HIDEABLE_SUBJECT_TYPES),
     subjectId: z.string().min(1),
     note: z.string().max(1000).optional(),
+    // Which hide the operator was looking at. A page is a snapshot, and a
+    // reversal of a decision nobody reviewed is worse than a refused click.
+    expectedActionId: z.string().min(1).optional(),
   }),
   z.object({
     action: z.literal("suspend"),
@@ -55,6 +59,8 @@ const bodySchema = z.discriminatedUnion("action", [
     action: z.literal("reinstate"),
     userId: z.string().min(1),
     note: z.string().max(1000).optional(),
+    /** Which suspension the operator was looking at, for the same reason. */
+    expectedSuspendedAt: z.string().datetime().optional(),
   }),
   z.object({
     action: z.literal("dismiss"),
@@ -100,19 +106,40 @@ export async function POST(request: Request): Promise<NextResponse> {
           note: input.note,
         });
       } else if (input.action === "unhide") {
-        await unhideSubject(db, user.id, input.subjectType, input.subjectId, input.note);
+        await unhideSubject(
+          db,
+          user.id,
+          input.subjectType,
+          input.subjectId,
+          input.note,
+          input.expectedActionId,
+        );
       } else if (input.action === "suspend") {
         await suspendAccount(db, user.id, input.userId, input.reason, {
           reportId: input.reportId,
         });
       } else if (input.action === "reinstate") {
-        await reinstateAccount(db, user.id, input.userId, input.note);
+        await reinstateAccount(
+          db,
+          user.id,
+          input.userId,
+          input.note,
+          input.expectedSuspendedAt,
+        );
       } else {
         await dismissReport(db, user.id, input.reportId, input.note);
       }
     } catch (err) {
       if (err instanceof UnknownSubjectError) {
         return NextResponse.json({ error: "Nothing to act on" }, { status: 404 });
+      }
+      if (err instanceof StaleModerationViewError) {
+        // The page is out of date, not wrong to ask. 409 and a refresh shows
+        // what is actually in force.
+        return NextResponse.json(
+          { error: "That decision has changed — reload the queue." },
+          { status: 409 },
+        );
       }
       if (err instanceof ReportAlreadyHandledError) {
         // Somebody else got there first, and the whole action rolled back with

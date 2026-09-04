@@ -182,6 +182,9 @@ export function ModerationQueue({
                         action: "unhide",
                         subjectType: entry.subjectType,
                         subjectId: entry.subjectId,
+                        // Which hide this row is: the server refuses if a
+                        // different one is in force by the time it arrives.
+                        expectedActionId: entry.id,
                       })
                     }
                     className="mt-2 block text-accent hover:underline disabled:opacity-50"
@@ -290,7 +293,9 @@ function ReportRow({
           <button
             type="button"
             disabled={busy}
-            onClick={() => onAct({ action: "reinstate", userId: report.subjectOwnerId, note })}
+            onClick={() =>
+              onAct({ action: "reinstate", userId: report.subjectOwnerId, note })
+            }
             className="btn-secondary px-4 py-2 text-sm font-medium disabled:opacity-50"
           >
             Reinstate author
@@ -346,7 +351,15 @@ function SuspendedRow({
       <button
         type="button"
         disabled={busy}
-        onClick={() => onAct({ action: "reinstate", userId: account.userId, note })}
+        onClick={() =>
+          onAct({
+            action: "reinstate",
+            userId: account.userId,
+            note,
+            // Which suspension this row is; a newer one is not ours to lift.
+            expectedSuspendedAt: account.suspendedAt,
+          })
+        }
         className="btn-secondary self-start px-4 py-2 text-sm font-medium disabled:opacity-50"
       >
         Reinstate

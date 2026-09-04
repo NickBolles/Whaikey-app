@@ -19,6 +19,8 @@ import {
   countOpenReports,
   commentNoticesForAuthor,
   ReportAlreadyHandledError,
+  StaleModerationViewError,
+  listOwnModerationHolds,
   reinstateAccount,
   suspendAccount,
 } from "./moderation";
@@ -631,7 +633,7 @@ describe("the audit trail's lift control", () => {
     await db.insert(schema.pours).values({ id: pourId, userId: author.id, bottleId: bottle.id });
 
     await hideSubject(db, operator.id, "pour", pourId, { note: "first" }, new Date(1_000));
-    await unhideSubject(db, operator.id, "pour", pourId, "lifted", new Date(2_000));
+    await unhideSubject(db, operator.id, "pour", pourId, "lifted", undefined, new Date(2_000));
     await hideSubject(db, operator.id, "pour", pourId, { note: "again" }, new Date(3_000));
 
     const entries = await listModerationActions(db);
@@ -645,7 +647,7 @@ describe("the audit trail's lift control", () => {
     const pourId = uid("pour");
     await db.insert(schema.pours).values({ id: pourId, userId: author.id, bottleId: bottle.id });
     await hideSubject(db, operator.id, "pour", pourId, { note: "first" }, new Date(1_000));
-    await unhideSubject(db, operator.id, "pour", pourId, "lifted", new Date(2_000));
+    await unhideSubject(db, operator.id, "pour", pourId, "lifted", undefined, new Date(2_000));
 
     expect((await listModerationActions(db)).filter((e) => e.standing)).toHaveLength(0);
   });
@@ -705,5 +707,96 @@ describe("what \"already handled\" means", () => {
     await unhideSubject(db, operator.id, "comment", commentId, "appeal upheld");
     const [row] = await db.select().from(schema.comments).where(eq(schema.comments.id, commentId));
     expect(row.deletedAt).toBeNull();
+  });
+});
+
+describe("acting on a stale view", () => {
+  async function hiddenPour() {
+    const bottle = await createTestBottle(db);
+    const pourId = uid("pour");
+    await db.insert(schema.pours).values({ id: pourId, userId: author.id, bottleId: bottle.id });
+    await hideSubject(db, operator.id, "pour", pourId, { note: "first" }, new Date(1_000));
+    const [first] = await db.select().from(schema.moderationActions);
+    return { pourId, firstActionId: first.id };
+  }
+
+  /**
+   * A queue page is a snapshot. Between render and click another operator can
+   * lift one hide and apply the next, and an unbound reversal would then
+   * overturn a decision nobody reviewed.
+   */
+  it("refuses a lift aimed at a hide that is no longer the one in force", async () => {
+    const { pourId, firstActionId } = await hiddenPour();
+    await unhideSubject(db, operator.id, "pour", pourId, "lifted", undefined, new Date(2_000));
+    await hideSubject(db, operator.id, "pour", pourId, { note: "again" }, new Date(3_000));
+
+    await expect(
+      unhideSubject(db, operator.id, "pour", pourId, "stale tab", firstActionId, new Date(4_000)),
+    ).rejects.toBeInstanceOf(StaleModerationViewError);
+    expect(await isModerationHidden(db, "pour", pourId)).toBe(true);
+  });
+
+  it("allows the lift when it names the hide that stands", async () => {
+    const { pourId, firstActionId } = await hiddenPour();
+    await unhideSubject(db, operator.id, "pour", pourId, "upheld", firstActionId, new Date(2_000));
+    expect(await isModerationHidden(db, "pour", pourId)).toBe(false);
+  });
+
+  it("refuses a reinstatement aimed at a suspension that has been replaced", async () => {
+    await suspendAccount(db, operator.id, author.id, "first", {}, new Date(1_000));
+    const stale = new Date(1_000).toISOString();
+    await reinstateAccount(db, operator.id, author.id, "lifted", undefined, new Date(2_000));
+    await suspendAccount(db, operator.id, author.id, "again", {}, new Date(3_000));
+
+    await expect(
+      reinstateAccount(db, operator.id, author.id, "stale tab", stale, new Date(4_000)),
+    ).rejects.toBeInstanceOf(StaleModerationViewError);
+    const [profile] = await db
+      .select()
+      .from(schema.userProfiles)
+      .where(eq(schema.userProfiles.userId, author.id));
+    expect(profile.suspendedAt).not.toBeNull();
+  });
+});
+
+describe("what moderation is holding, on a page its owner always has", () => {
+  /**
+   * The per-object notice lives on the pour a comment was left under, and that
+   * pour can go private or its author can switch social off — after which the
+   * only place the reason existed is unreachable by the person it is for.
+   */
+  it("lists this user's held pours and comments, and nobody else's", async () => {
+    const bottle = await createTestBottle(db);
+    const myPour = uid("pour");
+    await db.insert(schema.pours).values({ id: myPour, userId: author.id, bottleId: bottle.id });
+    const theirPour = uid("pour");
+    await db.insert(schema.pours).values({ id: theirPour, userId: reporter.id, bottleId: bottle.id });
+    const myComment = uid("comment");
+    await db
+      .insert(schema.comments)
+      .values({ id: myComment, pourId: theirPour, userId: author.id, body: "no" });
+
+    await hideSubject(db, operator.id, "pour", myPour, { note: "note reason" });
+    await hideSubject(db, operator.id, "comment", myComment, { note: "comment reason" });
+    await hideSubject(db, operator.id, "pour", theirPour, { note: "not mine" });
+
+    const mine = await listOwnModerationHolds(db, author.id);
+    expect(mine.map((h) => h.reason).sort()).toEqual(["comment reason", "note reason"]);
+    expect(mine.find((h) => h.subjectType === "comment")?.preview).toBe("no");
+
+    const theirs = await listOwnModerationHolds(db, reporter.id);
+    expect(theirs.map((h) => h.reason)).toEqual(["not mine"]);
+  });
+
+  it("drops a hold once it is lifted", async () => {
+    const bottle = await createTestBottle(db);
+    const pourId = uid("pour");
+    await db.insert(schema.pours).values({ id: pourId, userId: author.id, bottleId: bottle.id });
+    await hideSubject(db, operator.id, "pour", pourId, { note: "reason" }, new Date(1_000));
+    expect(await listOwnModerationHolds(db, author.id)).toHaveLength(1);
+
+    const [action] = await db.select().from(schema.moderationActions);
+    await unhideSubject(db, operator.id, "pour", pourId, "upheld", action.id, new Date(2_000));
+    expect(await listOwnModerationHolds(db, author.id)).toHaveLength(0);
   });
 });

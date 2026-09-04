@@ -196,6 +196,21 @@ export class UnknownSubjectError extends Error {
   }
 }
 
+/**
+ * Raised when an operator acts on a decision that is no longer the current one.
+ *
+ * Every queue screen is a snapshot, and a second operator can move the world
+ * between the render and the click. Silently applying the stale action would
+ * overturn a decision nobody reviewed, so the write refuses and the page
+ * reloads to show what is actually in force.
+ */
+export class StaleModerationViewError extends Error {
+  constructor() {
+    super("That decision has changed since this page was loaded");
+    this.name = "StaleModerationViewError";
+  }
+}
+
 export class CannotHideProfileError extends Error {
   constructor() {
     super("A profile is suspended, not hidden");
@@ -404,15 +419,43 @@ export async function reinstateAccount(
   actorId: string,
   userId: string,
   note: string | undefined,
+  /**
+   * The suspension the operator was looking at, as an ISO timestamp.
+   *
+   * Same reason `unhideSubject` takes an action id: a tab loaded against one
+   * suspension would otherwise clear whatever suspension exists when the
+   * button is finally pressed, silently overturning a newer decision.
+   */
+  expectedSuspendedAt?: string,
   now = new Date(),
 ): Promise<void> {
   await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${moderationLockKey("profile", userId)}))`,
+    );
     const rows = await tx
       .update(userProfiles)
       .set({ suspendedAt: null, suspendedReason: null, updatedAt: now })
-      .where(eq(userProfiles.userId, userId))
+      .where(
+        and(
+          eq(userProfiles.userId, userId),
+          isNotNull(userProfiles.suspendedAt),
+          ...(expectedSuspendedAt
+            ? [eq(userProfiles.suspendedAt, new Date(expectedSuspendedAt))]
+            : []),
+        ),
+      )
       .returning({ userId: userProfiles.userId });
-    if (rows.length === 0) throw new UnknownSubjectError();
+    if (rows.length === 0) {
+      // Either the account was never suspended, or it is suspended by a
+      // decision this page never showed. Both are "not yours to lift".
+      const exists = await tx.query.userProfiles.findFirst({
+        columns: { suspendedAt: true },
+        where: eq(userProfiles.userId, userId),
+      });
+      if (!exists) throw new UnknownSubjectError();
+      throw new StaleModerationViewError();
+    }
     await record(tx, actorId, "reinstate", "profile", userId, { note }, now);
   });
 }
@@ -540,6 +583,54 @@ export async function listModerationActions(db: DB, limit = 100): Promise<AuditE
     }
     return { ...row, standing };
   });
+}
+
+export interface OwnModerationNotice extends ModerationNotice {
+  subjectType: "pour" | "comment";
+  subjectId: string;
+  /** Enough of the thing to recognise which one it was. */
+  preview: string | null;
+}
+
+/**
+ * Everything moderation currently holds down that belongs to this user.
+ *
+ * On a surface the account always owns, because the per-object notices are
+ * not: a hidden comment's notice lives on the pour it was left under, and that
+ * pour can go private, its author can switch social off, or either party can
+ * block — after which the only place the reason existed is unreachable by the
+ * person it is addressed to. A moderation decision they cannot read is one
+ * they cannot appeal, and the Terms promise otherwise.
+ */
+export async function listOwnModerationHolds(
+  db: DB,
+  userId: string,
+): Promise<OwnModerationNotice[]> {
+  const [ownPours, ownComments] = await Promise.all([
+    db.select({ id: pours.id }).from(pours).where(eq(pours.userId, userId)),
+    db
+      .select({ id: comments.id, body: comments.body })
+      .from(comments)
+      .where(and(eq(comments.userId, userId), isNotNull(comments.deletedAt))),
+  ]);
+
+  const held: OwnModerationNotice[] = [];
+  for (const row of ownPours) {
+    const notice = await moderationNoticeFor(db, "pour", row.id);
+    if (notice) held.push({ ...notice, subjectType: "pour", subjectId: row.id, preview: null });
+  }
+  for (const row of ownComments) {
+    const notice = await moderationNoticeFor(db, "comment", row.id);
+    if (notice) {
+      held.push({
+        ...notice,
+        subjectType: "comment",
+        subjectId: row.id,
+        preview: row.body.slice(0, 140),
+      });
+    }
+  }
+  return held.sort((a, b) => b.at.getTime() - a.at.getTime());
 }
 
 /**
@@ -717,6 +808,16 @@ export async function unhideSubject(
   subjectType: ReportSubjectType,
   subjectId: string,
   note: string | undefined,
+  /**
+   * The hide the operator was actually looking at.
+   *
+   * `standing` is computed when the page renders, so a tab left open while
+   * another operator lifts one hide and applies the next would submit a
+   * reversal of a decision nobody reviewed. The check has to happen under the
+   * lock, against the hide in force at that moment — which means the request
+   * has to say which one it meant.
+   */
+  expectedActionId?: string,
   now = new Date(),
 ): Promise<void> {
   if (subjectType === "profile") throw new CannotHideProfileError();
@@ -724,6 +825,21 @@ export async function unhideSubject(
     await tx.execute(
       sql`select pg_advisory_xact_lock(hashtext(${moderationLockKey(subjectType, subjectId)}))`,
     );
+
+    const [current] = await tx
+      .select({ id: moderationActions.id, action: moderationActions.action })
+      .from(moderationActions)
+      .where(
+        and(
+          eq(moderationActions.subjectType, subjectType),
+          eq(moderationActions.subjectId, subjectId),
+          sql`${moderationActions.action} in ('hide', 'unhide')`,
+        ),
+      )
+      .orderBy(desc(moderationActions.createdAt), desc(moderationActions.id))
+      .limit(1);
+    if (current?.action !== "hide") throw new StaleModerationViewError();
+    if (expectedActionId && current.id !== expectedActionId) throw new StaleModerationViewError();
     if (subjectType === "comment") {
       /**
        * Restore only what the hide actually removed.

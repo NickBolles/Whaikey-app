@@ -4,6 +4,7 @@ import { getDb } from "@/db";
 import { getSessionUser } from "@/lib/session";
 import { listPourShares } from "@/lib/pour-sharing";
 import { getOwnProfile, getOwnSuspension, getSocialPrefs } from "@/lib/social";
+import { listOwnModerationHolds } from "@/lib/moderation";
 import { SharedLinksList } from "./shared-links-list";
 import { PrivacyControls } from "./privacy-controls";
 
@@ -29,13 +30,17 @@ export default async function SharingPage() {
   }
 
   const db = getDb();
-  const [shares, profile, prefs, suspension] = await Promise.all([
+  const [shares, profile, prefs, suspension, holds] = await Promise.all([
     listPourShares(db, user.id),
     getOwnProfile(db, user.id),
     getSocialPrefs(db, user.id),
     // A suspension reason stored where its subject cannot read it does not
     // keep the promise the Terms and /support both make (PLAN.md §9.4).
     getOwnSuspension(db, user.id),
+    // And the same for anything moderation is holding down. The per-object
+    // notices live on the pour concerned, which can become unreachable to the
+    // very person the reason is addressed to; this page is theirs always.
+    listOwnModerationHolds(db, user.id),
   ]);
 
   return (
@@ -60,6 +65,46 @@ export default async function SharingPage() {
               send it back to us
             </Link>{" "}
             and a person will look again.
+          </p>
+        </section>
+      )}
+
+      {holds.length > 0 && (
+        <section
+          role="note"
+          className="card border-danger/50 p-4 flex flex-col gap-3 text-sm leading-relaxed"
+        >
+          <p className="font-medium text-foreground">
+            {holds.length === 1
+              ? "A moderator hid something of yours."
+              : `A moderator hid ${holds.length} things of yours.`}
+          </p>
+          <ul className="flex flex-col gap-2">
+            {holds.map((hold) => (
+              <li key={`${hold.subjectType}:${hold.subjectId}`} className="flex flex-col gap-0.5">
+                <span className="text-muted">
+                  {hold.subjectType === "pour" ? (
+                    <>
+                      A tasting note —{" "}
+                      <Link href={`/notes/${hold.subjectId}`} className="text-accent">
+                        see it
+                      </Link>
+                    </>
+                  ) : (
+                    <>A comment{hold.preview ? `: “${hold.preview}”` : ""}</>
+                  )}
+                </span>
+                {hold.reason && <span className="italic text-muted">“{hold.reason}”</span>}
+              </li>
+            ))}
+          </ul>
+          <p className="text-muted">
+            It is still yours and still here; what changed is that other people cannot see it, and
+            you cannot put it back yourself. If you think that was wrong,{" "}
+            <Link href="/support" className="text-accent">
+              tell us
+            </Link>
+            .
           </p>
         </section>
       )}
