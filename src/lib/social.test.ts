@@ -603,6 +603,10 @@ describe("comments", () => {
     const rows = await db.select().from(schema.reports);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ subjectType: "comment", subjectId: c1!.id, reporterId: owner.id, reason: "spam" });
+    // The complaint has to carry what it is about. An operator opening this
+    // report days later must see what the reporter saw, not whatever the
+    // author has since rewritten it to.
+    expect(rows[0].subjectSnapshot).toBe("spam-ish");
     // A fabricated subject never reaches the queue.
     await expect(
       createReport(db, owner.id, { subjectType: "pour", subjectId: "no-such-pour", reason: "spam" }),

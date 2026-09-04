@@ -17,6 +17,7 @@ import { z } from "zod";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
 import { REPORT_SUBJECT_TYPES, type FollowState, type PourVisibility, type ReportSubjectType } from "@/db/schema";
+import { subjectPreview } from "@/lib/moderation";
 import { getUserPalate } from "@/lib/palate-store";
 import { palateWheelHeat } from "@/lib/palate";
 import { hashPhone, normalizePhone, phoneLast2 } from "@/lib/phone";
@@ -1878,6 +1879,10 @@ export async function createReport(
       subjectId: input.subjectId,
       reporterId,
       reason: input.reason.trim(),
+      // What the reporter is complaining about, captured now. Read inside the
+      // transaction so the snapshot and the report are one write: a subject
+      // edited between the two would otherwise be recorded as the original.
+      subjectSnapshot: await subjectPreview(tx, input.subjectType, input.subjectId),
     });
   });
   return true;

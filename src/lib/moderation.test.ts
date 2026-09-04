@@ -12,6 +12,7 @@ import {
   hideSubject,
   listModerationActions,
   listOpenReports,
+  subjectPreview,
   listSuspendedAccounts,
   isModerationHidden,
   moderationNoticeFor,
@@ -126,6 +127,67 @@ describe("the queue", () => {
     expect(row.preview).toContain("something awful");
     expect(row.subjectOwnerId).toBe(author.id);
     expect(row.alreadyHidden).toBe(false);
+  });
+
+  /**
+   * The whole point of a snapshot: editing the abuse away must not also edit
+   * away the complaint. Without this the queue showed the current text, so a
+   * reported user who rewrote their comment left the operator judging content
+   * nobody had objected to.
+   */
+  it("keeps what was reported when the subject is edited afterwards", async () => {
+    const bottle = await createTestBottle(db);
+    const pourId = uid("pour");
+    await db.insert(schema.pours).values({ id: pourId, userId: author.id, bottleId: bottle.id, visibility: "public" });
+    const commentId = uid("comment");
+    await db.insert(schema.comments).values({ id: commentId, pourId, userId: author.id, body: "something awful" });
+
+    await db.insert(schema.reports).values({
+      id: uid("report"),
+      subjectType: "comment",
+      subjectId: commentId,
+      reporterId: reporter.id,
+      reason: "abuse",
+      subjectSnapshot: await subjectPreview(db, "comment", commentId),
+    });
+
+    await db.update(schema.comments).set({ body: "lovely dram" }).where(eq(schema.comments.id, commentId));
+
+    const [row] = await listOpenReports(db);
+    expect(row.reportedPreview).toBe("something awful");
+    expect(row.preview).toBe("lovely dram");
+    expect(row.editedSinceReport).toBe(true);
+  });
+
+  it("does not call an unedited subject edited", async () => {
+    const bottle = await createTestBottle(db);
+    const pourId = uid("pour");
+    await db.insert(schema.pours).values({ id: pourId, userId: author.id, bottleId: bottle.id, visibility: "public" });
+    const commentId = uid("comment");
+    await db.insert(schema.comments).values({ id: commentId, pourId, userId: author.id, body: "still awful" });
+    await db.insert(schema.reports).values({
+      id: uid("report"),
+      subjectType: "comment",
+      subjectId: commentId,
+      reporterId: reporter.id,
+      reason: "abuse",
+      subjectSnapshot: await subjectPreview(db, "comment", commentId),
+    });
+
+    const [row] = await listOpenReports(db);
+    expect(row.editedSinceReport).toBe(false);
+  });
+
+  /**
+   * Reports filed before snapshots existed have none, and an unknown is not a
+   * difference — flagging every one of them "edited" would train the operator
+   * to ignore the flag that matters.
+   */
+  it("does not flag a pre-snapshot report as edited", async () => {
+    await report("profile", author.id);
+    const [row] = await listOpenReports(db);
+    expect(row.reportedPreview).toBeNull();
+    expect(row.editedSinceReport).toBe(false);
   });
 
   /**
@@ -1117,5 +1179,37 @@ describe("decision order, not clock order", () => {
     );
 
     expect(await isModerationHidden(db, "pour", pourId)).toBe(false);
+  });
+});
+
+/**
+ * A schema that refuses to delete an operator is a schema that revokes their
+ * deletion right, and the two obvious escapes — erase the history, or reassign
+ * its actor to somebody who did not decide it — both destroy the trail. So the
+ * actor goes and the decision stays.
+ */
+describe("an operator can be deleted without taking the trail with them", () => {
+  it("keeps the decision, its reason and its standing hide", async () => {
+    const bottle = await createTestBottle(db);
+    const pourId = uid("pour");
+    await db
+      .insert(schema.pours)
+      .values({ id: pourId, userId: author.id, bottleId: bottle.id, visibility: "public" });
+    await hideSubject(db, operator.id, "pour", pourId, { note: "graphic" });
+
+    await db.delete(schema.user).where(eq(schema.user.id, operator.id));
+
+    const actions = await listModerationActions(db, 10);
+    expect(actions).toHaveLength(1);
+    expect(actions[0].action).toBe("hide");
+    expect(actions[0].note).toBe("graphic");
+    // Null means "the operator's account is gone", not "nobody acted".
+    expect(actions[0].actorName).toBeNull();
+
+    // And the hide is still liftable: this list carries the only control that
+    // lifts one, so losing the row would strand the pour hidden forever.
+    const { hides } = await listStandingHides(db);
+    expect(hides.map((h) => h.subjectId)).toEqual([pourId]);
+    expect(await isModerationHidden(db, "pour", pourId)).toBe(true);
   });
 });

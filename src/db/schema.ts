@@ -162,7 +162,16 @@ export const bottles = pgTable(
       .$type<"verified" | "user_submitted" | "imported">()
       .notNull()
       .default("verified"),
-    submittedBy: text("submitted_by").references(() => user.id),
+    /**
+     * Who first added this bottle, when a user did.
+     *
+     * `set null` rather than the default `no action`: a verified bottle is
+     * catalog data everybody's shelf points at, so it must outlive its
+     * submitter's account — and with `no action` a single submission made an
+     * account permanently undeletable, which is a deletion right the schema
+     * quietly revokes.
+     */
+    submittedBy: text("submitted_by").references(() => user.id, { onDelete: "set null" }),
     createdAt: createdAt(),
   },
   (t) => [index("bottles_category_idx").on(t.category), index("bottles_name_idx").on(t.name)],
@@ -203,7 +212,13 @@ export const bottleSubmissions = pgTable(
     upc: text("upc"),
     /** Where the submission came from, for triage: scan, search, import, direct. */
     source: text("source"),
-    reviewedBy: text("reviewed_by").references(() => user.id),
+    /**
+     * The reviewer. `set null` for the same reason as `bottles.submittedBy`,
+     * and safe because `state` — not this column — is what says whether a
+     * submission is still pending; clearing it cannot put a decided row back
+     * in the queue.
+     */
+    reviewedBy: text("reviewed_by").references(() => user.id, { onDelete: "set null" }),
     reviewedAt: timestamp("reviewed_at", { withTimezone: true, mode: "date" }),
     /** Set when a reviewer marks this a duplicate of an existing catalog bottle. */
     duplicateOfBottleId: text("duplicate_of_bottle_id").references(() => bottles.id),
@@ -672,6 +687,19 @@ export const reports = pgTable(
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
     reason: text("reason").notNull(),
+    /**
+     * What the reported thing said **when it was reported**.
+     *
+     * The queue used to render the subject's current text, which let a
+     * reported user edit the abuse away before an operator opened the report:
+     * the complaint then described content that no longer existed, so it could
+     * neither be judged nor evidenced. Captured at report time so the operator
+     * sees what the reporter saw, and the trail keeps it after the fact.
+     *
+     * Null on rows filed before snapshots existed; the queue says so rather
+     * than showing the current text in the slot where the original belongs.
+     */
+    subjectSnapshot: text("subject_snapshot"),
     state: text("state").$type<ReportState>().notNull().default("open"),
     createdAt: createdAt(),
   },
@@ -698,10 +726,19 @@ export const moderationActions = pgTable(
   "moderation_actions",
   {
     id: id(),
-    /** The operator. Never null — an action nobody took is not an action. */
-    actorId: text("actor_id")
-      .notNull()
-      .references(() => user.id),
+    /**
+     * The operator.
+     *
+     * Nullable only because the account can be deleted, and null means exactly
+     * that: the operator's account is gone, not that nobody acted. The write
+     * path always has an actor. The alternative was `no action`, which made an
+     * operator undeletable the moment they touched the queue — so the only
+     * ways to honour a deletion request were to erase the audit history or to
+     * reassign its actor to somebody who did not decide it, and an append-only
+     * trail cannot survive either. What an appeal is answered from is the
+     * decision, its reason and its order; those all keep.
+     */
+    actorId: text("actor_id").references(() => user.id, { onDelete: "set null" }),
     action: text("action").$type<ModerationActionKind>().notNull(),
     subjectType: text("subject_type").$type<ReportSubjectType>().notNull(),
     subjectId: text("subject_id").notNull(),

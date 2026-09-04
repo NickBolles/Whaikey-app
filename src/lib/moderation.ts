@@ -39,8 +39,24 @@ export interface QueuedReport {
   reporterHandle: string | null;
   /** Hours since it arrived; over `REPORT_SLA_HOURS` is a breach. */
   ageHours: number;
-  /** Enough of the subject to judge it without leaving the queue. */
+  /** The subject as it reads **now** — which is not necessarily what was reported. */
   preview: string | null;
+  /**
+   * The subject as it read when the report was filed.
+   *
+   * Null on reports filed before snapshots existed, which the queue states
+   * rather than papering over with the current text.
+   */
+  reportedPreview: string | null;
+  /**
+   * The subject has changed since it was reported.
+   *
+   * The operator has to be told, because otherwise editing the abuse away is a
+   * complete defence: the complaint would describe something the queue no
+   * longer shows. False when there is no snapshot to compare against — an
+   * unknown is not a difference.
+   */
+  editedSinceReport: boolean;
   /** The account that owns the reported thing, when there is one. */
   subjectOwnerId: string | null;
   subjectOwnerSuspended: boolean;
@@ -79,6 +95,7 @@ export async function listOpenReports(
       subjectType: reports.subjectType,
       subjectId: reports.subjectId,
       reason: reports.reason,
+      subjectSnapshot: reports.subjectSnapshot,
       createdAt: reports.createdAt,
       reporterHandle: userProfiles.handle,
     })
@@ -89,12 +106,17 @@ export async function listOpenReports(
     .limit(limit);
 
   return Promise.all(
-    rows.map(async (row) => {
+    rows.map(async ({ subjectSnapshot, ...row }) => {
       const subject = await describeSubject(db, row.subjectType, row.subjectId);
       return {
         ...row,
         ageHours: Math.floor((now.getTime() - row.createdAt.getTime()) / 3_600_000),
         ...subject,
+        reportedPreview: subjectSnapshot,
+        // A subject that has since been deleted reads as `preview: null`, and
+        // that is a change worth flagging too: the operator is looking at a
+        // report whose target is gone.
+        editedSinceReport: subjectSnapshot != null && subjectSnapshot !== subject.preview,
       };
     }),
   );
@@ -108,7 +130,52 @@ interface SubjectDescription {
   alreadyHidden: boolean;
 }
 
-/** Enough of the reported thing to judge it, and nothing more. */
+/**
+ * Enough of the reported thing to judge it, and nothing more.
+ *
+ * Exported because a report stores this at the moment it is filed
+ * (`createReport`) and the queue renders it again at review time. One function
+ * for both, so "what was reported" and "what it says now" are the same
+ * projection of two different moments rather than two projections that drift.
+ */
+export async function subjectPreview(
+  db: DB,
+  subjectType: ReportSubjectType,
+  subjectId: string,
+): Promise<string | null> {
+  if (subjectType === "comment") {
+    const row = await db.query.comments.findFirst({
+      columns: { body: true },
+      where: eq(comments.id, subjectId),
+    });
+    return row ? row.body.slice(0, PREVIEW_MAX) : null;
+  }
+  if (subjectType === "pour") {
+    const pour = await db.query.pours.findFirst({
+      columns: { id: true },
+      where: eq(pours.id, subjectId),
+    });
+    if (!pour) return null;
+    const note = await db.query.tastingNotes.findFirst({
+      columns: { nose: true, palate: true, finish: true, freeform: true },
+      where: (t, { eq: is }) => is(t.pourId, subjectId),
+    });
+    const text = [note?.nose, note?.palate, note?.finish, note?.freeform]
+      .filter(Boolean)
+      .join(" · ");
+    return text ? text.slice(0, PREVIEW_MAX) : "(no written note)";
+  }
+  const row = await db.query.userProfiles.findFirst({
+    columns: { handle: true, displayName: true, bio: true },
+    where: eq(userProfiles.userId, subjectId),
+  });
+  if (!row) return null;
+  return [`@${row.handle}`, row.displayName, row.bio].filter(Boolean).join(" · ").slice(0, PREVIEW_MAX);
+}
+
+/** How much of the reported thing an operator needs to judge it. */
+export const PREVIEW_MAX = 500;
+
 async function describeSubject(
   db: DB,
   subjectType: ReportSubjectType,
@@ -129,7 +196,7 @@ async function describeSubject(
     });
     if (!row) return empty;
     return {
-      preview: row.body.slice(0, 500),
+      preview: await subjectPreview(db, "comment", subjectId),
       subjectOwnerId: row.userId,
       ...(await suspensionOf(db, row.userId)),
       alreadyHidden: await isModerationHidden(db, "comment", subjectId),
@@ -142,15 +209,8 @@ async function describeSubject(
       where: eq(pours.id, subjectId),
     });
     if (!row) return empty;
-    const note = await db.query.tastingNotes.findFirst({
-      columns: { nose: true, palate: true, finish: true, freeform: true },
-      where: (t, { eq: is }) => is(t.pourId, subjectId),
-    });
-    const text = [note?.nose, note?.palate, note?.finish, note?.freeform]
-      .filter(Boolean)
-      .join(" · ");
     return {
-      preview: text ? text.slice(0, 500) : "(no written note)",
+      preview: await subjectPreview(db, "pour", subjectId),
       subjectOwnerId: row.userId,
       ...(await suspensionOf(db, row.userId)),
       /**
@@ -169,12 +229,12 @@ async function describeSubject(
   }
 
   const row = await db.query.userProfiles.findFirst({
-    columns: { handle: true, displayName: true, bio: true, socialEnabled: true, suspendedAt: true },
+    columns: { socialEnabled: true, suspendedAt: true },
     where: eq(userProfiles.userId, subjectId),
   });
   if (!row) return empty;
   return {
-    preview: [`@${row.handle}`, row.displayName, row.bio].filter(Boolean).join(" · ").slice(0, 500),
+    preview: await subjectPreview(db, "profile", subjectId),
     subjectOwnerId: subjectId,
     subjectOwnerSuspended: row.suspendedAt != null,
     subjectOwnerSuspendedAt: row.suspendedAt,
@@ -606,7 +666,8 @@ export interface AuditEntry {
   subjectId: string;
   note: string | null;
   createdAt: Date;
-  actorName: string;
+  /** Null when the operator's account has since been deleted. */
+  actorName: string | null;
   /**
    * True only for the hide that is currently in force over its subject.
    *
@@ -631,7 +692,11 @@ export async function listModerationActions(db: DB, limit = 100): Promise<AuditE
       actorName: user.name,
     })
     .from(moderationActions)
-    .innerJoin(user, eq(user.id, moderationActions.actorId))
+    // Left, not inner: `actorId` is null once the operator's account is
+    // deleted, and an inner join would drop the decision from the trail
+    // entirely — trading a delete the schema refused for history that
+    // disappears on its own, which is the worse of the two.
+    .leftJoin(user, eq(user.id, moderationActions.actorId))
     .orderBy(desc(moderationActions.seq))
     .limit(limit);
 
@@ -773,7 +838,8 @@ export interface StandingHide {
   subjectId: string;
   note: string | null;
   at: Date;
-  actorName: string;
+  /** Null when the operator's account has since been deleted. */
+  actorName: string | null;
 }
 
 /**
@@ -836,7 +902,10 @@ export async function listStandingHides(
       actorName: user.name,
     })
     .from(latest)
-    .innerJoin(user, eq(user.id, latest.actorId))
+    // Left, for the reason above and one more: this list carries the only
+    // control that lifts a standing hide, so dropping its row would leave the
+    // subject hidden with nothing able to unhide it.
+    .leftJoin(user, eq(user.id, latest.actorId))
     .where(
       options.before !== undefined
         ? and(eq(latest.action, "hide"), sql`${latest.seq} < ${options.before}`)

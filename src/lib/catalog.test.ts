@@ -485,3 +485,52 @@ describe("catalog review", () => {
     expect(row).toMatchObject({ state: "duplicate", duplicateOfBottleId: canonical.id });
   });
 });
+
+/**
+ * The strongest version of the same defect: `bottles.submittedBy` had no
+ * delete policy either, so submitting a single bottle made an ordinary account
+ * permanently undeletable — a deletion right revoked by a foreign key. The
+ * bottle is catalog data other people's shelves point at, so it stays; the
+ * attribution is what goes.
+ */
+describe("a submitter can be deleted", () => {
+  it("keeps the bottle and its review record, and drops only the attribution", async () => {
+    const db = await setupTestDb();
+    const submitter = await createTestUser(db);
+    const reviewer = await createTestUser(db);
+    const bottle = await createTestBottle(db, { status: "user_submitted", submittedBy: submitter.id });
+    const submissionId = crypto.randomUUID();
+    await db.insert(schema.bottleSubmissions).values({
+      id: submissionId,
+      bottleId: bottle.id,
+      submittedBy: submitter.id,
+      source: "search",
+    });
+    await approveSubmission(db, reviewer.id, submissionId, "checked against the distillery site");
+
+    // The reviewer goes first: their decision is not theirs to take away.
+    await db.delete(schema.user).where(eq(schema.user.id, reviewer.id));
+    const reviewed = await db.query.bottleSubmissions.findFirst({
+      where: eq(schema.bottleSubmissions.id, submissionId),
+    });
+    // `state`, not `reviewedBy`, is what says a submission is still pending —
+    // so clearing the reviewer cannot put a decided row back in the queue.
+    expect(reviewed?.state).toBe("approved");
+    expect(reviewed?.reviewedBy).toBeNull();
+    expect(reviewed?.reviewNote).toBe("checked against the distillery site");
+    expect(await countPendingSubmissions(db)).toBe(0);
+
+    // The submitter goes second. Their submission is a request they made, so it
+    // cascades away with them — but the bottle it produced is now catalog data
+    // other people's shelves point at, and only the attribution goes.
+    await db.delete(schema.user).where(eq(schema.user.id, submitter.id));
+    const kept = await db.query.bottles.findFirst({ where: eq(schema.bottles.id, bottle.id) });
+    expect(kept?.status).toBe("verified");
+    expect(kept?.submittedBy).toBeNull();
+    expect(
+      await db.query.bottleSubmissions.findFirst({
+        where: eq(schema.bottleSubmissions.id, submissionId),
+      }),
+    ).toBeUndefined();
+  });
+});

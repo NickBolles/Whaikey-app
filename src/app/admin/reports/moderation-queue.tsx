@@ -12,9 +12,9 @@ import type { ModerationActionKind, ReportSubjectType } from "@/db/schema";
  * fast to read and hard to mis-tap, not designed — the only visual work here
  * is making a breached SLA impossible to skim past.
  *
- * Every action carries a note. It is required for a suspension and offered for
- * everything else, because the audit trail is what an appeal gets answered
- * from and "hidden by an operator, no reason recorded" answers nothing.
+ * Every action carries a note, and every one of them requires it: the audit
+ * trail is what an appeal gets answered from, and "hidden by an operator, no
+ * reason recorded" answers nothing.
  */
 interface QueuedReportView {
   id: string;
@@ -25,6 +25,8 @@ interface QueuedReportView {
   reporterHandle: string | null;
   ageHours: number;
   preview: string | null;
+  reportedPreview: string | null;
+  editedSinceReport: boolean;
   subjectOwnerId: string | null;
   subjectOwnerSuspended: boolean;
   subjectOwnerSuspendedAt: string | null;
@@ -38,7 +40,8 @@ interface AuditView {
   subjectId: string;
   note: string | null;
   createdAt: string;
-  actorName: string;
+  /** Null once the operator's account has been deleted; the decision stays. */
+  actorName: string | null;
   /** Only the hide currently in force over its subject can be lifted. */
   standing: boolean;
 }
@@ -49,7 +52,8 @@ interface StandingHideView {
   subjectId: string;
   note: string | null;
   at: string;
-  actorName: string;
+  /** Null once the operator's account has been deleted; the hide stays. */
+  actorName: string | null;
 }
 
 interface SuspendedView {
@@ -213,7 +217,7 @@ export function ModerationQueue({
             {audit.map((entry) => (
               <li key={entry.id} className="card-flat p-3 text-xs text-muted">
                 <span className="text-foreground font-medium">{entry.action}</span>{" "}
-                {entry.subjectType} <code>{entry.subjectId.slice(0, 8)}</code> · {entry.actorName} ·{" "}
+                {entry.subjectType} <code>{entry.subjectId.slice(0, 8)}</code> · {entry.actorName ?? "a deleted operator"} ·{" "}
                 {new Date(entry.createdAt).toLocaleString()}
                 {entry.note && <div className="mt-1 italic">{entry.note}</div>}
                 {/* Lifting lives in "Hidden right now" above, which is not
@@ -255,9 +259,34 @@ function ReportRow({
         </span>
       </div>
 
-      <p className="text-sm text-muted leading-relaxed whitespace-pre-wrap">
-        {report.preview ?? "(the reported thing no longer exists)"}
-      </p>
+      {/*
+        What was reported comes first and what it says now comes second, and
+        the second is only shown when they differ. An operator judging an edited
+        comment against its current text is judging the wrong thing — the
+        edit is often the response to being reported.
+      */}
+      <div className="flex flex-col gap-2">
+        {report.editedSinceReport ? (
+          <p className="text-xs font-semibold text-danger">Edited since it was reported</p>
+        ) : null}
+        <p className="text-sm text-muted leading-relaxed whitespace-pre-wrap">
+          {report.reportedPreview ??
+            report.preview ??
+            "(the reported thing no longer exists)"}
+        </p>
+        {report.editedSinceReport ? (
+          <p className="text-xs text-muted leading-relaxed whitespace-pre-wrap border-l-2 border-border pl-3">
+            <span className="font-semibold">Now: </span>
+            {report.preview ?? "(deleted)"}
+          </p>
+        ) : null}
+        {report.reportedPreview == null && report.preview != null ? (
+          <p className="text-xs text-muted/70">
+            Filed before reports kept a copy — this is the current text, not
+            what was reported.
+          </p>
+        ) : null}
+      </div>
 
       <p className="text-xs text-muted">
         reported by {report.reporterHandle ? `@${report.reporterHandle}` : "a deleted account"}
@@ -424,7 +453,7 @@ function StandingHideRow({
   return (
     <li className="card-flat p-3 text-xs text-muted flex flex-col gap-2">
       <div>
-        {hide.subjectType} <code>{hide.subjectId.slice(0, 8)}</code> · {hide.actorName} ·{" "}
+        {hide.subjectType} <code>{hide.subjectId.slice(0, 8)}</code> · {hide.actorName ?? "a deleted operator"} ·{" "}
         {new Date(hide.at).toLocaleString()}
         {hide.note && <div className="mt-1 italic">{hide.note}</div>}
       </div>
