@@ -14,6 +14,7 @@ import {
   issueNativeAuthCode,
   redeemNativeAuthCode,
   startNativeAuthRequest,
+  sweepNativeAuth,
 } from "@/lib/native-auth";
 
 /**
@@ -338,5 +339,37 @@ describe("safeReturnPath", () => {
     expect(safeReturnPath("whaikey://auth/callback")).toBeNull();
     expect(safeReturnPath(null)).toBeNull();
     expect(safeReturnPath("")).toBeNull();
+  });
+});
+
+
+/**
+ * `consumeNativeAuthRequest` keeps an expired row on purpose so the callback
+ * can hand back its `state` and a clean `expired` error. A sweep deleting at
+ * the instant of expiry took that away: the callback got `no_request` and no
+ * state, which the shell rejects as unmatched and sits on "Connecting…".
+ */
+describe("sweeping pending sign-in requests", () => {
+  it("keeps a just-expired request so the callback can still fail cleanly", async () => {
+    const id = await startNativeAuthRequest({ codeChallenge: CHALLENGE, state: "state-nonce" });
+    const justExpired = new Date(Date.now() + REQUEST_TTL_MS + 1_000);
+
+    await sweepNativeAuth(db, justExpired);
+
+    const consumed = await consumeNativeAuthRequest(id, justExpired);
+    expect(consumed).not.toBeNull();
+    // The state is what the shell matches its callback against; `expired` is
+    // the error it can actually show.
+    expect(consumed?.state).toBe("state-nonce");
+    expect(consumed?.expired).toBe(true);
+  });
+
+  it("deletes it a full TTL after expiry", async () => {
+    const id = await startNativeAuthRequest({ codeChallenge: CHALLENGE, state: "state-nonce" });
+    const wellPast = new Date(Date.now() + REQUEST_TTL_MS * 2 + 1_000);
+
+    await sweepNativeAuth(db, wellPast);
+
+    expect(await consumeNativeAuthRequest(id, wellPast)).toBeNull();
   });
 });

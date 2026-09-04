@@ -2736,6 +2736,10 @@ describe("a suspended account cannot keep reading", () => {
     // Their own records are untouched — a suspension is not a ban.
     expect(await getOwnProfile(db, viewer.id)).not.toBeNull();
     expect(await listBlocked(db, viewer.id)).toEqual([]);
+    // Including their own profile *page*, which is where the editor and their
+    // palate live. The gate belongs after the self check, not before the row
+    // is even loaded.
+    expect(await getProfileView(db, viewer.id, "viewer_all")).not.toBeNull();
   });
 
   it("reads again once reinstated", async () => {

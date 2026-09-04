@@ -1713,13 +1713,23 @@ async function listRecentVisibleNotes(
  * identity-only shape, even for a public profile.
  */
 export async function getProfileView(db: DB, viewerId: string | null, handle: string): Promise<ProfileView | null> {
-  // Their own profile stays reachable: `getOwnProfile` is not gated.
-  if (await suspendedViewer(db, viewerId)) return null;
   const row = await db.query.userProfiles.findFirst({ where: eq(schema.userProfiles.handle, normalizeHandle(handle)) });
   if (!row) return null;
 
   const isSelf = viewerId != null && viewerId === row.userId;
   if (!isSelf) {
+    /**
+     * The suspension gate belongs **after** `isSelf`, not before it.
+     *
+     * Placed at the top it ran before the profile was even loaded, so a
+     * suspended account following the app's own "View profile" link to its
+     * own handle got a 404 — losing the profile editor and its own palate.
+     * That is not a smaller version of the sanction, it is a different one:
+     * the whole point of this gate is that a suspension takes the account off
+     * *other people's* surfaces while leaving its own records alone, and I
+     * wrote that sentence while placing the check where it could not be true.
+     */
+    if (await suspendedViewer(db, viewerId)) return null;
     if (!row.socialEnabled) return null;
     if (viewerId != null && (await isBlockedEither(db, viewerId, row.userId))) return null;
   }

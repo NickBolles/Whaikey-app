@@ -209,15 +209,23 @@ function CommentRow(props: CommentRowProps) {
             {deletingId === comment.id ? (
               <span className="inline-flex items-center gap-2">
                 Delete this for good?
+                {/* `tap-target` on both: DESIGN.md's 44px minimum, and one of
+                    these deletes the comment for good. Bare text in a text-xs
+                    line is the smallest possible hit area for the most
+                    destructive control on the screen. */}
                 <button
                   type="button"
                   onClick={() => onDeleteConfirm(comment.id)}
                   disabled={busy}
-                  className="font-medium text-danger"
+                  className="tap-target inline-flex items-center font-medium text-danger"
                 >
                   {busy ? "…" : "Confirm"}
                 </button>
-                <button type="button" onClick={() => onDeleteToggle(comment.id)} className="text-muted">
+                <button
+                  type="button"
+                  onClick={() => onDeleteToggle(comment.id)}
+                  className="tap-target inline-flex items-center text-muted"
+                >
                   Cancel
                 </button>
               </span>

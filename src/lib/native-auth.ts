@@ -40,6 +40,23 @@ export const CODE_TTL_MS = 60_000;
 export const REQUEST_TTL_MS = 10 * 60_000;
 
 /**
+ * Requests are deleted a further TTL **after** they expire, not at expiry.
+ *
+ * `consumeNativeAuthRequest` deliberately keeps an expired row so the callback
+ * can hand back its `state` and a clean `expired` error — "an expired row is
+ * still this app's row, and telling it so is what lets it fail cleanly", as
+ * that function says. Deleting at the instant of expiry took that away: a
+ * sweep landing between expiry and the system browser returning left
+ * `/api/auth/native/complete` with `no_request` and no state, which the shell
+ * rejects as an unmatched callback and sits on "Connecting…" forever. The
+ * cleanup existed to bound the table, and bounding it a TTL later costs
+ * nothing and keeps the failure legible. Codes already work this way.
+ */
+export function requestSweepCutoff(now: Date): Date {
+  return new Date(now.getTime() - REQUEST_TTL_MS);
+}
+
+/**
  * Ceiling on live pending sign-ins.
  *
  * `/api/auth/native/start` takes no credentials — it cannot, it is what a
@@ -164,7 +181,7 @@ export async function startNativeAuthRequest(params: NativeAuthRequestInit): Pro
 
   await db
     .delete(schema.nativeAuthRequests)
-    .where(lt(schema.nativeAuthRequests.expiresAt, now));
+    .where(lt(schema.nativeAuthRequests.expiresAt, requestSweepCutoff(now)));
 
   // Expiry alone bounds nothing inside the TTL window, and this endpoint is
   // unauthenticated. Keep the newest MAX_LIVE_AUTH_REQUESTS and drop the rest,
@@ -247,7 +264,9 @@ export async function sweepNativeAuth(db: DB, now = new Date()): Promise<void> {
   await db
     .delete(schema.nativeAuthCodes)
     .where(lt(schema.nativeAuthCodes.expiresAt, new Date(now.getTime() - CODE_TTL_MS)));
-  await db.delete(schema.nativeAuthRequests).where(lt(schema.nativeAuthRequests.expiresAt, now));
+  await db
+    .delete(schema.nativeAuthRequests)
+    .where(lt(schema.nativeAuthRequests.expiresAt, requestSweepCutoff(now)));
 }
 
 /**
