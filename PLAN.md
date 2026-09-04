@@ -58,7 +58,7 @@ An AI-native whiskey tracking app, inspired by wine apps like **Vivino** (social
 - **Age gate:** date of birth + market at first authenticated use, per-market minimum, answered once (§9.1); `/responsible` is the resources page it links to.
 - **Native version floor:** `/api/native/manifest` serves `minShellVersion`; the shell shows "Update Whaikey" below it, and raising it is the kill switch for a bad deploy (WP-20, docs/NATIVE_APP.md §2.2).
 - **Moderation and review (WP-18):** an env-allowlisted operator role, `/admin/reports` for reported comments, pours and profiles (hide / suspend / reinstate / dismiss, every action with a reason and an append-only trail, a 72-hour target the queue counts breaches against), and `/admin/submissions` — the far end of the WP-16 submission path, where a bottle is promoted into the shared catalog, declined with a reason its submitter can read, or marked a duplicate.
-- **Policy and support surfaces (WP-18):** `/terms`, `/privacy` and `/support` with an in-app feedback box that works signed out. All three are ungated. The legal entity, jurisdiction and contact address come from the environment, and until they are set both policy pages say in the open that they are not finished (§9.3).
+- **Policy and support surfaces (WP-18):** `/terms`, `/privacy` and `/support` with an in-app feedback box that works signed out. All three are ungated. The legal entity, jurisdiction, contact address and effective date come from the environment, and until all four are set both policy pages say in the open that they are not finished, naming only the ones actually missing (§9.3).
 
 ### 2.2 Live but weaker than it reads
 
