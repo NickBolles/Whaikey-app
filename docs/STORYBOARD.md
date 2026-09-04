@@ -280,6 +280,8 @@ The screen a bad deploy still renders, and the one an operator sees after raisin
 - One line saying what happened (overridable per outage by `WHAIKEY_SHELL_NOTICE`), one button to the store when a store URL is configured, and the two version numbers in small text so a support reply has something to go on.
 - It must promise nothing about data: "nothing you've logged is lost" is the only reassurance offered, and it is true — the queue is local and survives an update.
 - The native shell renders the component inline; `/app-update` renders the same one, which is what gives an outage-critical screen a visual baseline and a link a store listing can use.
+- It is **above everything**, the nav's own quick-actions sheet included, and the splash holds until the check settles — revealing a UI the binary cannot run, even for a moment, is the failure this screen exists to prevent.
+- It **lifts again** if the floor is lowered: an operator rolling back a mistaken raise should not need the user to kill the app.
 - **Not here**: a retry button (there is nothing to retry — the binary is the problem), a way past it, or anything about the deploy that caused it.
 ---
 

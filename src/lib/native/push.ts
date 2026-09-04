@@ -49,20 +49,7 @@ export async function enablePush(): Promise<PushPermission> {
       return status.receive === "denied" ? "denied" : "prompt";
     }
 
-    const token = await new Promise<string | null>((resolve) => {
-      // Don't leave the caller waiting on a push service that never answers.
-      const timer = setTimeout(() => resolve(null), 10_000);
-      void PushNotifications.addListener("registration", ({ value }) => {
-        clearTimeout(timer);
-        resolve(value);
-      });
-      void PushNotifications.addListener("registrationError", () => {
-        clearTimeout(timer);
-        resolve(null);
-      });
-      void PushNotifications.register();
-    });
-
+    const token = await resolveToken();
     if (token) await storeToken(token);
     return "granted";
   } catch (err) {
@@ -87,27 +74,48 @@ export async function enablePush(): Promise<PushPermission> {
  */
 export async function refreshPushRegistration(): Promise<void> {
   if ((await pushPermissionState()) !== "granted") return;
-  const plugin = await loadPlugin(() => import("@capacitor/push-notifications"));
-  if (!plugin) return;
+  const token = await resolveToken();
+  if (token) await storeToken(token);
+}
 
+/**
+ * Ask the OS for this install's token.
+ *
+ * The listeners are removed on every exit, win or lose. This runs on launch
+ * *and* on every resume, and Capacitor listeners live until you remove them —
+ * so keeping the handles is the difference between one pair and a pair per
+ * foreground for the life of the app, with every registration event fanning
+ * out through all of them.
+ */
+async function resolveToken(): Promise<string | null> {
+  const plugin = await loadPlugin(() => import("@capacitor/push-notifications"));
+  if (!plugin) return null;
   const { PushNotifications } = plugin;
+
   try {
-    const token = await new Promise<string | null>((resolve) => {
-      const timer = setTimeout(() => resolve(null), 10_000);
-      void PushNotifications.addListener("registration", ({ value }) => {
+    return await new Promise<string | null>((resolve) => {
+      let done = false;
+      const handles: Array<{ remove: () => void | Promise<void> }> = [];
+      const finish = (value: string | null) => {
+        if (done) return;
+        done = true;
         clearTimeout(timer);
+        for (const handle of handles) void handle.remove();
         resolve(value);
-      });
-      void PushNotifications.addListener("registrationError", () => {
-        clearTimeout(timer);
-        resolve(null);
-      });
+      };
+      // Don't leave the caller waiting on a push service that never answers.
+      const timer = setTimeout(() => finish(null), 10_000);
+
+      void PushNotifications.addListener("registration", ({ value }) => finish(value)).then(
+        (handle) => (done ? void handle.remove() : handles.push(handle)),
+      );
+      void PushNotifications.addListener("registrationError", () => finish(null)).then(
+        (handle) => (done ? void handle.remove() : handles.push(handle)),
+      );
       void PushNotifications.register();
     });
-    if (token) await storeToken(token);
   } catch {
-    // A refresh that fails changes nothing: the row keeps its previous
-    // timestamp and the next launch tries again.
+    return null;
   }
 }
 
@@ -178,17 +186,32 @@ export async function disablePush(): Promise<boolean> {
   const plugin = await loadPlugin(() => import("@capacitor/push-notifications"));
   if (!plugin) return true;
 
-  const token = rememberedToken();
   try {
     await plugin.PushNotifications.removeAllListeners();
   } catch {
     // Listener teardown is local tidying; the row is what matters.
   }
 
-  // No token means this device never registered one, so there is nothing of
-  // ours to release — and the tokenless DELETE would take somebody's other
-  // phones with it.
-  if (!token) return true;
+  /**
+   * Which token is ours.
+   *
+   * The remembered one first, then the OS. The cache can be missing for two
+   * very different reasons — this device never registered, or local storage
+   * was cleared or refused — and treating the second as the first would report
+   * a release that never happened and leave the row live on a shared device.
+   * Only a device that has not been granted permission has genuinely nothing
+   * to release.
+   */
+  let token = rememberedToken();
+  if (!token) {
+    // A device that was never granted permission has nothing registered, which
+    // is the one case where "no token" really is "nothing to release".
+    if ((await pushPermissionState()) !== "granted") return true;
+    token = await resolveToken();
+  }
+  // Granted, but we could not find out which token is ours — that is a failure
+  // to release, not a successful no-op.
+  if (!token) return false;
 
   try {
     const res = await fetch(`/api/native/push-token?token=${encodeURIComponent(token)}`, {

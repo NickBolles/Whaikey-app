@@ -20,11 +20,12 @@ export const metadata: Metadata = { title: "Update Whaikey" };
 export default function AppUpdatePage() {
   return (
     <ShellUpdateRequired
-      storeUrl={
-        process.env.NEXT_PUBLIC_IOS_STORE_URL?.trim() ||
-        process.env.NEXT_PUBLIC_ANDROID_STORE_URL?.trim() ||
-        null
-      }
+      // Both, when both are configured. This page can be opened from anywhere
+      // — a support reply, a store listing — and it has no platform to infer
+      // one from, so picking the first would send every Android visitor to the
+      // App Store. The shell, which does know, passes a single one.
+      storeUrl={process.env.NEXT_PUBLIC_IOS_STORE_URL?.trim() || null}
+      androidStoreUrl={process.env.NEXT_PUBLIC_ANDROID_STORE_URL?.trim() || null}
     />
   );
 }

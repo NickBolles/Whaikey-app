@@ -26,9 +26,25 @@ import { flushPourQueue, isOnline } from "@/lib/native/offline-queue";
  * web; the offline pour flush does not, because web and PWA users queue pours
  * too and something has to send them.
  */
+/**
+ * How long the splash waits on the version check before showing the app
+ * anyway. Long enough for a manifest on a slow connection, short enough that a
+ * hanging one is not its own outage.
+ */
+const SPLASH_CHECK_TIMEOUT_MS = 3_000;
+
 export function NativeShell({ userId }: { userId?: string | null }) {
   const router = useRouter();
   const [outdated, setOutdated] = useState<ShellVersionCheck | null>(null);
+
+  /**
+   * Both directions. A floor raised by mistake and then lowered again — which
+   * is the likely shape of an operator recovering from an outage — has to lift
+   * the gate too, or the app stays behind it until somebody kills the process.
+   */
+  const applyShellCheck = useCallback((check: ShellVersionCheck) => {
+    setOutdated(check.status === "update_required" ? check : null);
+  }, []);
 
   /**
    * Drain any pours logged while offline. Refreshing afterwards is what makes
@@ -90,9 +106,31 @@ export function NativeShell({ userId }: { userId?: string | null }) {
 
     void applyStatusBarStyle();
     void configureKeyboard();
-    // The app has painted by the time this effect runs — that's the cue to drop
-    // the splash, rather than the config's blunt timeout.
-    void hideSplash();
+
+    /**
+     * Is this binary new enough for the site it just loaded
+     * (docs/NATIVE_APP.md §2.2)? The shell renders whatever the deploy sends,
+     * so the web half can move ahead of the app in someone's pocket with
+     * nothing to stop it — and a raised floor is the only kill switch there is
+     * for a deploy gone wrong, since this is not a store binary you can roll
+     * back. Fails open: an unreachable manifest leaves the app running.
+     *
+     * The splash stays up until this settles. Dropping it first would reveal
+     * the newly deployed UI — and run its effects — before we know the binary
+     * can render it, which is the failure the gate exists to prevent. Bounded,
+     * because a splash that waits forever on a slow manifest is its own
+     * outage.
+     */
+    void Promise.race([
+      checkShellVersion(),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), SPLASH_CHECK_TIMEOUT_MS)),
+    ])
+      .then((check) => {
+        if (check) applyShellCheck(check);
+      })
+      .finally(() => {
+        void hideSplash();
+      });
 
     const unsubscribeBack = onBackButton((canGoBack) => {
       // At the root of the history stack, backing out of the app is what Android
@@ -159,18 +197,6 @@ export function NativeShell({ userId }: { userId?: string | null }) {
     }
 
     /**
-     * Is this binary new enough for the site it just loaded
-     * (docs/NATIVE_APP.md §2.2)? The shell renders whatever the deploy sends,
-     * so the web half can move ahead of the app in someone's pocket with
-     * nothing to stop it — and a raised floor is the only kill switch there is
-     * for a deploy gone wrong, since this is not a store binary you can roll
-     * back. Fails open: an unreachable manifest leaves the app running.
-     */
-    void checkShellVersion().then((check) => {
-      if (check.status === "update_required") setOutdated(check);
-    });
-
-    /**
      * Tell the server this device is still here (review SEC-M6). A push token
      * stays with its account until that account releases it or stops
      * refreshing it, and nothing was refreshing it — every registration aged
@@ -181,22 +207,30 @@ export function NativeShell({ userId }: { userId?: string | null }) {
     void refreshPushRegistration();
 
     const unsubscribeResume = onResume(() => {
-      // Server-rendered pages (My Bar totals, pour history) go stale while the
-      // app is backgrounded; refresh re-runs them without losing client state.
-      router.refresh();
-      // Coming back to the app is the most reliable moment to catch a network
-      // that returned while we weren't looking. A backgrounded WebView doesn't
-      // reliably fire `visibilitychange`, so this is its own hook rather than
-      // a duplicate of the web one above.
-      void syncQueue();
-      void refreshPushRegistration();
-      // And re-ask whether this binary is still allowed to render what it is
-      // about to refresh. The shell can outlive a deploy — the WebView stays
-      // alive across backgrounding — so a floor raised while the app was away
-      // would otherwise not be seen until it was killed and relaunched, which
-      // is exactly the case a kill switch exists for.
+      /**
+       * The floor first, and only then the refresh.
+       *
+       * The WebView survives backgrounding, so the app most likely to be awake
+       * across a bad deploy is exactly this one — and refreshing before
+       * asking would fetch and render the newly deployed payload, effects and
+       * all, which is the failure the gate exists to prevent. A floor raised
+       * while the app was away therefore takes effect on the next foreground,
+       * not the next cold launch.
+       */
       void checkShellVersion().then((check) => {
-        if (check.status === "update_required") setOutdated(check);
+        applyShellCheck(check);
+        if (check.status === "update_required") return;
+
+        // Server-rendered pages (My Bar totals, pour history) go stale while
+        // the app is backgrounded; refresh re-runs them without losing client
+        // state.
+        router.refresh();
+        // Coming back to the app is the most reliable moment to catch a
+        // network that returned while we weren't looking. A backgrounded
+        // WebView doesn't reliably fire `visibilitychange`, so this is its own
+        // hook rather than a duplicate of the web one above.
+        void syncQueue();
+        void refreshPushRegistration();
       });
     });
 
@@ -206,7 +240,7 @@ export function NativeShell({ userId }: { userId?: string | null }) {
       unsubscribeResume();
       document.documentElement.classList.remove("native-app");
     };
-  }, [router, syncQueue]);
+  }, [applyShellCheck, router, syncQueue]);
 
   if (!outdated) return null;
 

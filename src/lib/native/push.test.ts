@@ -104,8 +104,25 @@ describe("disablePush", () => {
     expect(calls[0].url).toContain("token=tok-refreshed");
   });
 
-  it("does nothing when this device never registered one", async () => {
+  /**
+   * A cleared or unavailable local cache is not the same fact as "this device
+   * never registered". Treating it as one reports a release that never
+   * happened and leaves the row live on a shared device, so the token is
+   * recovered from the OS instead.
+   */
+  it("recovers the token from the OS when the cache is gone", async () => {
     window.localStorage.clear();
+    const { disablePush } = await import("./push");
+    await expect(disablePush()).resolves.toBe(true);
+
+    const deletes = calls.filter((c) => c.method === "DELETE");
+    expect(deletes).toHaveLength(1);
+    expect(deletes[0].url).toContain("token=tok-refreshed");
+  });
+
+  it("does nothing, and says so honestly, when push was never granted", async () => {
+    window.localStorage.clear();
+    permissions.receive = "prompt";
     const { disablePush } = await import("./push");
     await expect(disablePush()).resolves.toBe(true);
     // Not a tokenless DELETE: there is nothing of ours to release, and asking
