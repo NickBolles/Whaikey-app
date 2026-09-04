@@ -49,21 +49,23 @@ export function ShellUpdateRequired({
         {notice ??
           "This version of the app is too old for what's on the shelf. Updating takes a moment, and nothing you've logged is lost."}
       </p>
-      <div className="flex flex-wrap items-center justify-center gap-2">
-        {storeUrl && (
-          <a href={storeUrl} className="btn-primary px-8 py-3">
-            {both ? "App Store" : "Get the update"}
-          </a>
-        )}
-        {androidStoreUrl && (
-          <a
-            href={androidStoreUrl}
-            className={both ? "btn-secondary px-8 py-3" : "btn-primary px-8 py-3"}
-          >
-            {both ? "Google Play" : "Get the update"}
-          </a>
-        )}
-      </div>
+      {(storeUrl || androidStoreUrl) && (
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          {storeUrl && (
+            <a href={storeUrl} className="btn-primary px-8 py-3">
+              {both ? "App Store" : "Get the update"}
+            </a>
+          )}
+          {androidStoreUrl && (
+            <a
+              href={androidStoreUrl}
+              className={both ? "btn-secondary px-8 py-3" : "btn-primary px-8 py-3"}
+            >
+              {both ? "Google Play" : "Get the update"}
+            </a>
+          )}
+        </div>
+      )}
       {installed && required && (
         <p className="text-xs text-muted/70">
           Installed {installed} · needs {required}
