@@ -47,6 +47,14 @@ export default function PrivacyPage() {
             notes, flavour tags, the bottles on your shelf, and what you paid.
           </li>
           <li>
+            <strong className="text-foreground">Your concierge conversations</strong> — every
+            question you ask the AI and every answer it gives, kept so a conversation can be
+            reopened where you left it. Stored with each answer is what the concierge looked up in
+            your own data to write it, so a message log can contain slices of your journal as well
+            as what you typed. There is no way to delete a single conversation yet; they go with
+            the account.
+          </li>
+          <li>
             <strong className="text-foreground">Your age answer</strong> — the date of birth and
             market you gave the gate, once, and whether it met the minimum.
           </li>
@@ -116,6 +124,11 @@ export default function PrivacyPage() {
           Your journal is kept until you delete it or the account. Short-lived things are swept:
           native sign-in codes are deleted the moment they are used and swept when they expire,
           rate-limit counters are dropped after a couple of days, and phone lookups are pruned.
+        </p>
+        <p>
+          Concierge conversations are kept for the life of the account. Nothing prunes them and
+          there is no per-conversation delete, so treat what you type there the way you would treat
+          a note you are keeping: it stays until the account goes.
         </p>
         <p>
           Support messages and moderation records are the exception, and we would rather say so

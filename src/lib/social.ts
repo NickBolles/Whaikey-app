@@ -615,8 +615,21 @@ export async function listBlocked(db: DB, userId: string): Promise<ProfileSummar
  * a suspension explicitly does not touch, and `listBlocked` in particular is a
  * safety control that must never be taken away. A suspension is not a ban from
  * the product.
+ *
+ * **Enumerating this function's callers is not an audit.** Doing exactly that
+ * found seven correct placements inside `social.ts` and still missed
+ * `taste-twins.ts`, which reads followees' palates and pours through
+ * `social.ts`'s SQL helpers without ever calling this one — a caller list only
+ * ever contains the places that already call. The question to ask instead is
+ * which modules READ another account's social data, whatever route they take
+ * to it; today that is this file, `taste-twins.ts` (gated at
+ * `visibleFolloweeIds` and `getTwinEndorsements`) and `bottle-compare.ts`
+ * (deliberately not gated: its community segment is an anonymised aggregate
+ * behind a contributor floor, catalog-class data rather than a projection of
+ * anyone's social graph). Anything new that joins to `follows`, `pours` or
+ * `user_profiles` for somebody else belongs on that list before it ships.
  */
-async function suspendedViewer(db: DB, viewerId: string | null): Promise<boolean> {
+export async function suspendedViewer(db: DB, viewerId: string | null): Promise<boolean> {
   if (!viewerId) return false;
   return isSuspended(db, viewerId);
 }
