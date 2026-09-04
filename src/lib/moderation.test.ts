@@ -2276,3 +2276,65 @@ describe("the hide a suspension performs", () => {
     expect(profile?.suspendedAt).not.toBeNull();
   });
 });
+
+
+/**
+ * The queue had `socialEnabled === true` written out by hand where
+ * `commentWithdrawnByAuthor` belonged, so it went stale the moment that
+ * predicate learned about comments written before their author had a profile.
+ * A legacy comment withdrawn from every reader was still live-readable *to an
+ * operator* — a snapshot-less report showed its current hidden body, and a
+ * revision made inside the edit window appeared under "Now" where nobody else
+ * could see it. STORYBOARD §3.17: an operator can act on a thing without being
+ * able to read what was never shared.
+ */
+describe("a legacy comment whose author has since claimed a handle", () => {
+  it("is not live-readable in the queue", async () => {
+    const bottle = await createTestBottle(db);
+    const pourId = uid("pour");
+    await db
+      .insert(schema.pours)
+      .values({ id: pourId, userId: reporter.id, bottleId: bottle.id, visibility: "public" });
+
+    // Written when nothing required a profile, by an account that claims one
+    // afterwards — `author` already has a profile from the outer fixture, so
+    // the comment simply predates it.
+    const commentId = uid("comment");
+    await db.insert(schema.comments).values({
+      id: commentId,
+      pourId,
+      userId: author.id,
+      body: "written before the handle",
+      createdAt: new Date(Date.now() - 365 * 24 * 3_600_000),
+    });
+    await report("comment", commentId);
+
+    const [row] = await listOpenReports(db);
+    expect(row.subjectExists).toBe(true);
+    expect(row.liveReadable).toBe(false);
+    // Withheld, not passed off as the reported text.
+    expect(row.preview).toBeNull();
+    expect(row.editedSinceReport).toBe(false);
+  });
+
+  it("is live-readable once written after the handle", async () => {
+    const bottle = await createTestBottle(db);
+    const pourId = uid("pour");
+    await db
+      .insert(schema.pours)
+      .values({ id: pourId, userId: reporter.id, bottleId: bottle.id, visibility: "public" });
+
+    const commentId = uid("comment");
+    await db.insert(schema.comments).values({
+      id: commentId,
+      pourId,
+      userId: author.id,
+      body: "written with a handle",
+    });
+    await report("comment", commentId);
+
+    const [row] = await listOpenReports(db);
+    expect(row.liveReadable).toBe(true);
+    expect(row.preview).toBe("written with a handle");
+  });
+});

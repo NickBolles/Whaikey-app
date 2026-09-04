@@ -27,6 +27,7 @@ import {
   type ModerationActionKind,
   type ReportSubjectType,
 } from "@/db/schema";
+import { commentWithdrawnByAuthor } from "@/lib/comment-visibility";
 
 /** The reciprocal edge, for the mutual-follow (friends) test. */
 const mutual = alias(follows, "mutual_follows");
@@ -194,6 +195,7 @@ async function listOpenReportsIn(
             body: comments.body,
             userId: comments.userId,
             pourId: comments.pourId,
+            createdAt: comments.createdAt,
             deletedAt: comments.deletedAt,
           })
           .from(comments)
@@ -429,6 +431,7 @@ async function listOpenReportsIn(
             bio: userProfiles.bio,
             socialEnabled: userProfiles.socialEnabled,
             suspendedAt: userProfiles.suspendedAt,
+            profileCreatedAt: userProfiles.createdAt,
           })
           .from(userProfiles)
           .where(inArray(userProfiles.userId, ownerIds))
@@ -497,10 +500,33 @@ async function listOpenReportsIn(
       if ((tier === "friends" || tier === "followers") && !readableComments.has(comment.id)) {
         return false;
       }
-      // The comment's own author too: strictly stricter than the pour's rule,
-      // and a comment by someone who has stepped back should not resurface in
-      // an operator's view either.
-      return profileById.get(comment.userId)?.socialEnabled === true;
+      /**
+       * The comment's own author too: strictly stricter than the pour's rule,
+       * and a comment by someone who has stepped back should not resurface in
+       * an operator's view either.
+       *
+       * `commentWithdrawnByAuthor` rather than a fourth hand-written copy of
+       * it. Reading `socialEnabled === true` here was the same rule written
+       * again, and it went stale the moment that predicate learned about
+       * comments written before their author had a profile: a legacy comment
+       * withdrawn from every reader was still live-readable *to an operator*,
+       * so a snapshot-less report showed its current hidden body, and an
+       * author revising it inside the edit window put a replacement nobody
+       * could see under "Now". STORYBOARD §3.17 is binding — an operator can
+       * act on a thing without being able to read what was never shared.
+       *
+       * Viewer `null`: an operator is not the author, and it is precisely the
+       * author's exemption that must not apply to them.
+       */
+      const authorProfile = profileById.get(comment.userId);
+      return !commentWithdrawnByAuthor(
+        {
+          socialEnabled: authorProfile?.socialEnabled,
+          profileCreatedAt: authorProfile?.profileCreatedAt,
+        },
+        comment,
+        null,
+      );
     }
     return sharedWithAnyone(row.subjectId);
   };
