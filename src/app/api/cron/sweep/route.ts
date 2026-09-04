@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/db";
 import { sweepExpiredCounters } from "@/lib/ai/rate-limit";
-import { sweepExpiredSessions } from "@/lib/auth";
+import { sweepExpiredSessions, sweepProviderTokens } from "@/lib/auth";
 import { sweepOrphanedSubmissions } from "@/lib/catalog";
 import { sweepNativeAuth } from "@/lib/native-auth";
 import { sweepExpiredPhoneLookups } from "@/lib/social";
@@ -61,5 +61,14 @@ export async function GET(request: Request): Promise<NextResponse> {
    * user agent behind for good — which `/privacy` says does not happen.
    */
   await sweepExpiredSessions(db, now);
+  /**
+   * And the provider tokens, unconditionally. Migration 0032 clears the ones
+   * that predate encryption, but migrations run *before* the build that
+   * activates it — so a sign-in served by the old deployment during that
+   * window writes plaintext the migration will never see again. Nothing reads
+   * these columns, so clearing them on every run closes that window instead of
+   * leaving it open forever.
+   */
+  await sweepProviderTokens(db);
   return NextResponse.json({ ok: true });
 }

@@ -1,4 +1,4 @@
-import { lt } from "drizzle-orm";
+import { isNotNull, lt, or } from "drizzle-orm";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { getDb, schema } from "@/db";
@@ -103,4 +103,41 @@ export type Session = typeof auth.$Infer.Session;
  */
 export async function sweepExpiredSessions(db: DB, now = new Date()): Promise<void> {
   await db.delete(schema.session).where(lt(schema.session.expiresAt, now));
+}
+
+/**
+ * Clear provider tokens, every run, for everybody.
+ *
+ * Migration 0032 empties the ones written before `encryptOAuthTokens` — but
+ * `scripts/build.mjs` applies migrations **before** the build that activates
+ * the new code, so the previous deployment is still serving during that
+ * window and any sign-in in it writes fresh plaintext *after* the one-time
+ * `UPDATE` has run. A migration does not run twice, so those would have stayed
+ * plaintext forever while `/privacy` says the tokens are encrypted at rest.
+ *
+ * Rather than detect plaintext — Better Auth's own test for it is a heuristic
+ * over hex strings, and guessing wrong about a credential is not a thing to
+ * build on — this clears the columns unconditionally. Nothing reads them:
+ * Whaikey never calls Google or Apple on a user's behalf, which is the same
+ * fact `/privacy` gives as the reason they exist at all. So the strongest
+ * true statement is that they do not persist, and the rollout window closes
+ * within a day instead of never.
+ */
+export async function sweepProviderTokens(db: DB): Promise<void> {
+  await db
+    .update(schema.account)
+    .set({
+      accessToken: null,
+      refreshToken: null,
+      idToken: null,
+      accessTokenExpiresAt: null,
+      refreshTokenExpiresAt: null,
+    })
+    .where(
+      or(
+        isNotNull(schema.account.accessToken),
+        isNotNull(schema.account.refreshToken),
+        isNotNull(schema.account.idToken),
+      ),
+    );
 }

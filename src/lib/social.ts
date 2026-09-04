@@ -2186,12 +2186,34 @@ export async function createReport(
       subjectSnapshot = comment?.body ?? null;
     } else {
       const profile = await tx.query.userProfiles.findFirst({
-        columns: { userId: true, socialEnabled: true },
+        columns: { userId: true, socialEnabled: true, isPublic: true },
         where: eq(schema.userProfiles.userId, input.subjectId),
       });
-      subjectVisible =
-        profile != null && profile.socialEnabled && !(await isBlockedEither(tx, reporterId, profile.userId));
       subjectOwnerId = profile?.userId ?? null;
+      /**
+       * A **private** profile is only visible to an accepted follower.
+       *
+       * `socialEnabled` alone was the whole test, so anyone holding the user's
+       * id — a former follower who was removed, most obviously — could file a
+       * profile report and have `subjectPreview` capture that profile's
+       * display name and bio into the queue as evidence. `getProfileView`
+       * withholds exactly that content from the same viewer, and STORYBOARD
+       * §3.17 is binding that an operator cannot read what was never shared.
+       * A report is not a way to make something shared.
+       */
+      subjectVisible =
+        profile != null &&
+        profile.socialEnabled &&
+        !(await isBlockedEither(tx, reporterId, profile.userId)) &&
+        (profile.isPublic ||
+          profile.userId === reporterId ||
+          (await tx.query.follows.findFirst({
+            where: and(
+              eq(schema.follows.followerId, reporterId),
+              eq(schema.follows.followeeId, profile.userId),
+              eq(schema.follows.state, "accepted"),
+            ),
+          })) != null);
     }
     if (!subjectVisible) return null;
     if (subjectSnapshot == null) {

@@ -145,6 +145,28 @@ describe("GET /api/cron/sweep", () => {
     expect(rows.map((r) => r.id)).toEqual([live]);
   });
 
+  it("clears provider tokens written after the one-time migration ran", async () => {
+    // scripts/build.mjs applies migrations before the build that activates
+    // encryptOAuthTokens, so a sign-in served by the old deployment during
+    // that window writes plaintext the migration will never see again.
+    await db.insert(schema.account).values({
+      id: uid("account"),
+      accountId: "google-1",
+      providerId: "google",
+      userId: user.id,
+      accessToken: "written-during-rollout",
+      idToken: "written-during-rollout",
+    });
+
+    expect((await GET(get("Bearer test-secret"))).status).toBe(200);
+
+    const [row] = await db.select().from(schema.account);
+    expect(row.accessToken).toBeNull();
+    expect(row.idToken).toBeNull();
+    // The link that signs the user in survives; only the tokens go.
+    expect(row.accountId).toBe("google-1");
+  });
+
   it("is 404 without the secret, and 404 when none is configured", async () => {
     await seedStaleCounter();
     expect((await GET(get())).status).toBe(404);

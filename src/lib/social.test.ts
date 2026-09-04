@@ -1008,6 +1008,57 @@ describe("review-pass hardening", () => {
     expect(note!.commentCount).toBe(1);
   });
 
+  it("refuses a profile report from someone the profile is not visible to", async () => {
+    const reporter = await createTestUser(db);
+    const target = await createTestUser(db);
+    await claim(db, reporter, "reporter_pv", { isPublic: true });
+    // Private: visible to accepted followers only, which is what
+    // `getProfileView` enforces on the read path.
+    await claim(db, target, "target_pv", { isPublic: false });
+
+    expect(
+      await createReport(db, reporter.id, {
+        subjectType: "profile",
+        subjectId: target.id,
+        reason: "abuse",
+      }),
+    ).toBe(false);
+    expect(await db.select().from(schema.reports)).toHaveLength(0);
+
+    // An accepted follower sees it, so they can report it — and the snapshot
+    // is theirs to have captured.
+    await db.insert(schema.follows).values({
+      id: uid("f"),
+      followerId: reporter.id,
+      followeeId: target.id,
+      state: "accepted",
+    });
+    expect(
+      await createReport(db, reporter.id, {
+        subjectType: "profile",
+        subjectId: target.id,
+        reason: "abuse",
+      }),
+    ).toBe(true);
+    const [row] = await db.select().from(schema.reports);
+    expect(row.subjectSnapshot).toContain("target_pv");
+  });
+
+  it("still takes a report against a public profile from anyone", async () => {
+    const reporter = await createTestUser(db);
+    const target = await createTestUser(db);
+    await claim(db, reporter, "reporter_pub", { isPublic: true });
+    await claim(db, target, "target_pub", { isPublic: true });
+
+    expect(
+      await createReport(db, reporter.id, {
+        subjectType: "profile",
+        subjectId: target.id,
+        reason: "abuse",
+      }),
+    ).toBe(true);
+  });
+
   it("counts a legacy profile-less contributor exactly as the thread does, signed in or out", async () => {
     const owner = await createTestUser(db);
     const viewer = await createTestUser(db);
