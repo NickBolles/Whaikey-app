@@ -278,11 +278,20 @@ async function listOpenReportsIn(
    * directions (`blockUser`), so a blocked pair is not an audience here either.
    */
   const tierOwnerIds = Array.from(
-    new Set(
-      [...pourRows, ...parentPourRows]
+    new Set([
+      ...[...pourRows, ...parentPourRows]
         .filter((p) => p.visibility === "friends" || p.visibility === "followers")
         .map((p) => p.userId),
-    ),
+      /**
+       * And every reported **profile**, which asks the same question of itself:
+       * a private profile with no accepted follower is shared with nobody, so
+       * its current display name and bio are not the operator's to read.
+       * Included unconditionally rather than only for private ones — a small
+       * superset in a query that already runs, and one fewer place where the
+       * set and the test it feeds can disagree.
+       */
+      ...profileIds,
+    ]),
   );
   const [followerOf, friendOf] = await Promise.all([
     tierOwnerIds.length
@@ -433,6 +442,7 @@ async function listOpenReportsIn(
             socialEnabled: userProfiles.socialEnabled,
             suspendedAt: userProfiles.suspendedAt,
             profileCreatedAt: userProfiles.createdAt,
+            isPublic: userProfiles.isPublic,
           })
           .from(userProfiles)
           .where(inArray(userProfiles.userId, ownerIds))
@@ -489,7 +499,20 @@ async function listOpenReportsIn(
 
   const stillReadable = (row: (typeof rows)[number]): boolean => {
     if (row.subjectType === "profile") {
-      return profileById.get(row.subjectId)?.socialEnabled === true;
+      /**
+       * A profile is still shared if it is public, or private with an audience.
+       *
+       * `socialEnabled` alone was the whole test, so a profile reported while
+       * public, then made **private** and edited, had its new display name and
+       * bio rendered to the operator under "Now" — content no reporter could
+       * ever have seen. Exactly the failure `sharedWithAnyone` exists to stop
+       * for pours, on the one subject type that did not use it: private with
+       * no accepted follower is shared with nobody, and "is it still shared
+       * with anyone at all" is the question this asks.
+       */
+      const profile = profileById.get(row.subjectId);
+      if (profile?.socialEnabled !== true) return false;
+      return profile.isPublic || hasFollower.has(row.subjectId);
     }
     if (row.subjectType === "comment") {
       const comment = commentById.get(row.subjectId);

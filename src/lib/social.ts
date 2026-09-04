@@ -2204,6 +2204,17 @@ export async function createReport(
       subjectVisible =
         profile != null &&
         profile.socialEnabled &&
+        /**
+         * And the reporter must not be suspended.
+         *
+         * The pour and comment branches get this free from
+         * `canViewPourContext`; this one builds its own predicate and so had
+         * to be told separately — which is how the previous fix put the
+         * private/follower rule here and left the suspension rule out, at the
+         * same lines. A suspended account cannot read a private profile, and
+         * a report is not a way to read one.
+         */
+        !(await suspendedViewer(tx, reporterId)) &&
         !(await isBlockedEither(tx, reporterId, profile.userId)) &&
         (profile.isPublic ||
           profile.userId === reporterId ||

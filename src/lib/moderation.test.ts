@@ -2233,6 +2233,44 @@ describe("telling a deleted subject from a withheld one", () => {
     expect(row.preview).toBeNull();
   });
 
+  it("withholds a profile made private after it was reported", async () => {
+    // Reported while public, then made private and edited: the replacement is
+    // content no reporter could ever have seen.
+    await report("profile", author.id);
+    expect((await listOpenReports(db))[0].liveReadable).toBe(true);
+
+    await db
+      .update(schema.userProfiles)
+      .set({ isPublic: false, displayName: "a private new name" })
+      .where(eq(schema.userProfiles.userId, author.id));
+
+    const [row] = await listOpenReports(db);
+    expect(row.liveReadable).toBe(false);
+    expect(row.preview).toBeNull();
+    // An unknown is not a difference.
+    expect(row.editedSinceReport).toBe(false);
+  });
+
+  it("still shows a private profile that has an audience", async () => {
+    const follower = await createTestUser(db);
+    await profileFor(follower, "follower_pv");
+    await db
+      .update(schema.userProfiles)
+      .set({ isPublic: false })
+      .where(eq(schema.userProfiles.userId, author.id));
+    await db.insert(schema.follows).values({
+      id: uid("f"),
+      followerId: follower.id,
+      followeeId: author.id,
+      state: "accepted",
+    });
+    await report("profile", author.id);
+
+    // Private with an accepted follower is still shared with somebody, which
+    // is the question this asks — not "may the operator see it".
+    expect((await listOpenReports(db))[0].liveReadable).toBe(true);
+  });
+
   it("reports a deleted subject as gone", async () => {
     const bottle = await createTestBottle(db);
     const pourId = uid("pour");

@@ -1044,6 +1044,35 @@ describe("review-pass hardening", () => {
     expect(row.subjectSnapshot).toContain("target_pv");
   });
 
+  it("refuses a profile report from a suspended reporter", async () => {
+    const reporter = await createTestUser(db);
+    const target = await createTestUser(db);
+    await claim(db, reporter, "reporter_sus", { isPublic: true });
+    await claim(db, target, "target_sus", { isPublic: false });
+    await db.insert(schema.follows).values({
+      id: uid("f"),
+      followerId: reporter.id,
+      followeeId: target.id,
+      state: "accepted",
+    });
+
+    // Suspension preserves the follow edge, so the private/follower rule alone
+    // would still let this through and snapshot the private profile.
+    await db
+      .update(schema.userProfiles)
+      .set({ suspendedAt: new Date() })
+      .where(eq(schema.userProfiles.userId, reporter.id));
+
+    expect(
+      await createReport(db, reporter.id, {
+        subjectType: "profile",
+        subjectId: target.id,
+        reason: "abuse",
+      }),
+    ).toBe(false);
+    expect(await db.select().from(schema.reports)).toHaveLength(0);
+  });
+
   it("still takes a report against a public profile from anyone", async () => {
     const reporter = await createTestUser(db);
     const target = await createTestUser(db);
