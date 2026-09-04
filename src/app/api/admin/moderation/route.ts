@@ -7,6 +7,7 @@ import { isOperator } from "@/lib/operator";
 import {
   CannotHideProfileError,
   ReportAlreadyHandledError,
+  ReportSubjectMismatchError,
   StaleModerationViewError,
   UnknownSubjectError,
   dismissReport,
@@ -43,9 +44,11 @@ const bodySchema = z.discriminatedUnion("action", [
     subjectType: z.enum(HIDEABLE_SUBJECT_TYPES),
     subjectId: z.string().min(1),
     note: z.string().max(1000).optional(),
-    // Which hide the operator was looking at. A page is a snapshot, and a
-    // reversal of a decision nobody reviewed is worse than a refused click.
-    expectedActionId: z.string().min(1).optional(),
+    // Which hide the operator was looking at. Required, not optional: a page
+    // is a snapshot, a reversal of a decision nobody reviewed is worse than a
+    // refused click, and a guard that can be omitted is one a stale client
+    // bundle or a replayed request omits.
+    expectedActionId: z.string().min(1),
   }),
   z.object({
     action: z.literal("suspend"),
@@ -59,8 +62,8 @@ const bodySchema = z.discriminatedUnion("action", [
     action: z.literal("reinstate"),
     userId: z.string().min(1),
     note: z.string().max(1000).optional(),
-    /** Which suspension the operator was looking at, for the same reason. */
-    expectedSuspendedAt: z.string().datetime().optional(),
+    /** Which suspension the operator was looking at. Required, same reason. */
+    expectedSuspendedAt: z.string().datetime(),
   }),
   z.object({
     action: z.literal("dismiss"),
@@ -141,6 +144,12 @@ export async function POST(request: Request): Promise<NextResponse> {
         return NextResponse.json(
           { error: "That decision has changed — reload the queue." },
           { status: 409 },
+        );
+      }
+      if (err instanceof ReportSubjectMismatchError) {
+        return NextResponse.json(
+          { error: "That report is not about the thing being acted on" },
+          { status: 400 },
         );
       }
       if (err instanceof ReportAlreadyHandledError) {

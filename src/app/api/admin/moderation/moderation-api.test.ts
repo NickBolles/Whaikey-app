@@ -104,8 +104,22 @@ describe("POST /api/admin/moderation", () => {
       .where(eq(schema.userProfiles.userId, author.id));
     expect(profile.suspendedAt).not.toBeNull();
 
+    // Naming the suspension is required, not optional: a guard that can be
+    // omitted is one a stale client bundle omits.
     expect(
       (await moderationPOST(post({ action: "reinstate", userId: author.id }))).status,
+    ).toBe(400);
+
+    expect(
+      (
+        await moderationPOST(
+          post({
+            action: "reinstate",
+            userId: author.id,
+            expectedSuspendedAt: profile.suspendedAt!.toISOString(),
+          }),
+        )
+      ).status,
     ).toBe(200);
     [profile] = await db
       .select()

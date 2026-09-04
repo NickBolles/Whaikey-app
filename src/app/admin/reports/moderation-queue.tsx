@@ -69,6 +69,7 @@ export function ModerationQueue({
   audit,
   suspended,
   standingHides,
+  olderHidesCursor,
 }: {
   reports: QueuedReportView[];
   open: number;
@@ -78,6 +79,7 @@ export function ModerationQueue({
   audit: AuditView[];
   suspended: SuspendedView[];
   standingHides: StandingHideView[];
+  olderHidesCursor: string | null;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
@@ -195,6 +197,14 @@ export function ModerationQueue({
               </li>
             ))}
           </ul>
+          {olderHidesCursor && (
+            <Link
+              href={`/admin/reports?hidesBefore=${encodeURIComponent(olderHidesCursor)}`}
+              className="text-sm text-accent hover:underline w-fit"
+            >
+              Older hides →
+            </Link>
+          )}
         </section>
       )}
 

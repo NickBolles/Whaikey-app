@@ -27,7 +27,14 @@ export const dynamic = "force-dynamic";
  * `notFound()` rather than a 403 for a non-operator: the queue's existence is
  * not something a signed-in stranger needs confirmed.
  */
-export default async function AdminReportsPage() {
+export default async function AdminReportsPage({
+  searchParams,
+}: {
+  // A cursor rather than a cap: past a cap, the oldest takedowns lose the only
+  // control that lifts them, which is the audit-window bug one level out.
+  searchParams: Promise<{ hidesBefore?: string }>;
+}) {
+  const { hidesBefore } = await searchParams;
   const user = await getSessionUser();
   if (!isOperator(user)) notFound();
 
@@ -46,7 +53,7 @@ export default async function AdminReportsPage() {
     // Its own query, not a filter over the audit list: that list is bounded
     // history, so a hide older than fifty actions would lose the only control
     // that lifts it — and an appeal about it would have no answer in the app.
-    listStandingHides(db),
+    listStandingHides(db, { before: hidesBefore ? new Date(hidesBefore) : undefined }),
   ]);
 
   return (
@@ -62,7 +69,8 @@ export default async function AdminReportsPage() {
       slaHours={REPORT_SLA_HOURS}
       audit={audit.map((a) => ({ ...a, createdAt: a.createdAt.toISOString() }))}
       suspended={suspended.map((a) => ({ ...a, suspendedAt: a.suspendedAt.toISOString() }))}
-      standingHides={standingHides.map((h) => ({ ...h, at: h.at.toISOString() }))}
+      standingHides={standingHides.hides.map((h) => ({ ...h, at: h.at.toISOString() }))}
+      olderHidesCursor={standingHides.nextCursor}
     />
   );
 }

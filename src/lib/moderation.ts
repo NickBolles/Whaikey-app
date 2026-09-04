@@ -278,14 +278,18 @@ export async function hideSubject(
      */
     if (await isModerationHidden(tx, subjectType, subjectId)) {
       if (!(await exists(tx, subjectType, subjectId))) throw new UnknownSubjectError();
-      if (options.reportId) await resolveOpenReport(tx, options.reportId);
+      if (options.reportId) {
+        await resolveOpenReport(tx, options.reportId, { subjectType, subjectId });
+      }
       return;
     }
 
     const changed = await applyHide(tx, subjectType, subjectId, now);
     if (!changed) throw new UnknownSubjectError();
     await record(tx, actorId, "hide", subjectType, subjectId, options, now);
-    if (options.reportId) await resolveOpenReport(tx, options.reportId);
+    if (options.reportId) {
+      await resolveOpenReport(tx, options.reportId, { subjectType, subjectId });
+    }
   });
 }
 
@@ -416,7 +420,9 @@ export async function suspendAccount(
       });
 
     await record(tx, actorId, "suspend", "profile", userId, { ...options, note: reason }, now);
-    if (options.reportId) await resolveOpenReport(tx, options.reportId);
+    // A suspension's report has to be about something this account owns —
+    // their profile, or a pour or comment of theirs.
+    if (options.reportId) await resolveOpenReport(tx, options.reportId, { ownerId: userId });
   });
 }
 
@@ -433,12 +439,10 @@ export async function reinstateAccount(
   note: string | undefined,
   /**
    * The suspension the operator was looking at, as an ISO timestamp.
-   *
-   * Same reason `unhideSubject` takes an action id: a tab loaded against one
-   * suspension would otherwise clear whatever suspension exists when the
-   * button is finally pressed, silently overturning a newer decision.
+   * **Required**, for the same reason `unhideSubject`'s action id is: a guard
+   * that can be left out is one a stale client leaves out.
    */
-  expectedSuspendedAt?: string,
+  expectedSuspendedAt: string,
   now = new Date(),
 ): Promise<void> {
   await db.transaction(async (tx) => {
@@ -451,10 +455,7 @@ export async function reinstateAccount(
       .where(
         and(
           eq(userProfiles.userId, userId),
-          isNotNull(userProfiles.suspendedAt),
-          ...(expectedSuspendedAt
-            ? [eq(userProfiles.suspendedAt, new Date(expectedSuspendedAt))]
-            : []),
+          eq(userProfiles.suspendedAt, new Date(expectedSuspendedAt)),
         ),
       )
       .returning({ userId: userProfiles.userId });
@@ -499,7 +500,31 @@ export async function dismissReport(
  * retry recorded the action twice, and two operators on the same report both
  * acted. Predicated on `state = 'open'` so the transition happens once.
  */
-async function resolveOpenReport(tx: DB, reportId: string): Promise<void> {
+async function resolveOpenReport(
+  tx: DB,
+  reportId: string,
+  /**
+   * What the action is about.
+   *
+   * Claiming a report by id alone let a malformed request hide subject B while
+   * closing a report about subject A — and file an audit row tying B's
+   * takedown to A's report, which is the trail lying about why something
+   * happened. A report is a claim on *this* decision or it is not a claim.
+   */
+  about: { subjectType: ReportSubjectType; subjectId: string } | { ownerId: string },
+): Promise<void> {
+  const report = await tx.query.reports.findFirst({
+    columns: { subjectType: true, subjectId: true },
+    where: and(eq(reports.id, reportId), eq(reports.state, "open")),
+  });
+  if (!report) throw new ReportAlreadyHandledError();
+
+  const matches =
+    "subjectId" in about
+      ? report.subjectType === about.subjectType && report.subjectId === about.subjectId
+      : (await reportSubjectOwner(tx, report.subjectType, report.subjectId)) === about.ownerId;
+  if (!matches) throw new ReportSubjectMismatchError();
+
   const rows = await tx
     .update(reports)
     .set({ state: "resolved" })
@@ -514,6 +539,35 @@ async function resolveOpenReport(tx: DB, reportId: string): Promise<void> {
    * audit rows behind it. Losing the race has to mean losing the action.
    */
   if (rows.length === 0) throw new ReportAlreadyHandledError();
+}
+
+/** Who a reported thing belongs to, for matching a suspension to its report. */
+async function reportSubjectOwner(
+  tx: DB,
+  subjectType: ReportSubjectType,
+  subjectId: string,
+): Promise<string | null> {
+  if (subjectType === "profile") return subjectId;
+  if (subjectType === "pour") {
+    const row = await tx.query.pours.findFirst({
+      columns: { userId: true },
+      where: eq(pours.id, subjectId),
+    });
+    return row?.userId ?? null;
+  }
+  const row = await tx.query.comments.findFirst({
+    columns: { userId: true },
+    where: eq(comments.id, subjectId),
+  });
+  return row?.userId ?? null;
+}
+
+/** Raised when a report is offered as the claim for an action it isn't about. */
+export class ReportSubjectMismatchError extends Error {
+  constructor() {
+    super("That report is not about the thing being acted on");
+    this.name = "ReportSubjectMismatchError";
+  }
 }
 
 export class ReportAlreadyHandledError extends Error {
@@ -704,6 +758,15 @@ export async function listOwnModerationHolds(
   return held.sort((a, b) => b.at.getTime() - a.at.getTime());
 }
 
+/**
+ * How many standing hides one page shows.
+ *
+ * Paged rather than capped: a cap is the audit-window bug again one level out —
+ * past it the oldest takedowns lose the only control that lifts them, and an
+ * appeal about one has no answer in the product.
+ */
+export const STANDING_HIDE_PAGE_SIZE = 100;
+
 export interface StandingHide {
   actionId: string;
   subjectType: "pour" | "comment";
@@ -726,7 +789,11 @@ export interface StandingHide {
  * so the bound is on standing hides rather than on how much history has to be
  * read to find them.
  */
-export async function listStandingHides(db: DB, limit = 200): Promise<StandingHide[]> {
+export async function listStandingHides(
+  db: DB,
+  options: { limit?: number; before?: Date } = {},
+): Promise<{ hides: StandingHide[]; nextCursor: string | null }> {
+  const limit = options.limit ?? STANDING_HIDE_PAGE_SIZE;
   // `distinct on` picks the latest hide/unhide per subject inside the
   // database, so the work is bounded by how many subjects moderation has
   // touched rather than by how much history has to be read to find them.
@@ -761,14 +828,20 @@ export async function listStandingHides(db: DB, limit = 200): Promise<StandingHi
     })
     .from(latest)
     .innerJoin(user, eq(user.id, latest.actorId))
-    .where(eq(latest.action, "hide"))
+    .where(
+      options.before
+        ? and(eq(latest.action, "hide"), sql`${latest.createdAt} < ${options.before}`)
+        : eq(latest.action, "hide"),
+    )
     .orderBy(desc(latest.createdAt))
-    .limit(limit);
+    // One extra row is how the page knows there is another one.
+    .limit(limit + 1);
 
-  return rows.map((row) => ({
-    ...row,
-    subjectType: row.subjectType as "pour" | "comment",
-  }));
+  const page = rows.slice(0, limit);
+  return {
+    hides: page.map((row) => ({ ...row, subjectType: row.subjectType as "pour" | "comment" })),
+    nextCursor: rows.length > limit ? page[page.length - 1].at.toISOString() : null,
+  };
 }
 
 /**
@@ -947,15 +1020,16 @@ export async function unhideSubject(
   subjectId: string,
   note: string | undefined,
   /**
-   * The hide the operator was actually looking at.
+   * The hide the operator was actually looking at. **Required.**
    *
    * `standing` is computed when the page renders, so a tab left open while
    * another operator lifts one hide and applies the next would submit a
    * reversal of a decision nobody reviewed. The check has to happen under the
    * lock, against the hide in force at that moment — which means the request
-   * has to say which one it meant.
+   * has to say which one it meant, and an optional guard is one a stale client
+   * or a replayed request simply omits.
    */
-  expectedActionId?: string,
+  expectedActionId: string,
   now = new Date(),
 ): Promise<void> {
   if (subjectType === "profile") throw new CannotHideProfileError();
@@ -976,8 +1050,9 @@ export async function unhideSubject(
       )
       .orderBy(desc(moderationActions.createdAt), desc(moderationActions.id))
       .limit(1);
-    if (current?.action !== "hide") throw new StaleModerationViewError();
-    if (expectedActionId && current.id !== expectedActionId) throw new StaleModerationViewError();
+    if (current?.action !== "hide" || current.id !== expectedActionId) {
+      throw new StaleModerationViewError();
+    }
     if (subjectType === "comment") {
       /**
        * Restore only what the hide actually removed.
