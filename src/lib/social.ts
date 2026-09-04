@@ -1043,16 +1043,41 @@ export interface SocialNote {
 
 /**
  * SQL predicate: the contribution's author (`userCol`) is visible to the
- * viewer — not blocked in either direction, and not stepped back
- * (userProfiles.socialEnabled=false hides a user's cheers, comments, and
- * graph rows from everyone but themself; US-11). Every count rendered next
- * to a thread or card must use this so counts agree with the visible thread —
- * a mismatched count would reveal hidden activity.
+ * viewer — not blocked in either direction, and socially present (US-11).
+ * Every count rendered next to a thread or card must use this so counts agree
+ * with the visible thread — a mismatched count would reveal hidden activity.
+ *
+ * Two things this got wrong, both of which broke that agreement on the counts
+ * that join nothing (`countCheers`, `countComments`, and the feed's two
+ * grouped counts; the follow lists and the feed's pour query already
+ * `innerJoin` an enabled profile, so neither reached them).
+ *
+ * **A missing profile is not an enabled one.** The test was `not exists (…
+ * social_enabled = false)`, which is true when there is no profile row at
+ * all — the same "not false means yes" reading `commentWithdrawnByAuthor`
+ * exists to refuse. So a legacy comment from an account that never opted into
+ * social counted here while the thread omitted it, and the difference is
+ * exactly the withdrawn activity the count is meant not to disclose. Written
+ * as `exists (… social_enabled = true)` the SQL asks the question the
+ * TypeScript predicate asks, which is the point: one rule, not two.
+ *
+ * **And "no viewer" meant "no filter".** Both counts applied this only
+ * `if (viewerId)`, so a null viewer — which their signatures accept — got an
+ * unfiltered count while `listComments` filters a null viewer like any other.
+ * Not reachable today (`canViewPourContext` refuses a signed-out reader
+ * outright, and both callers pass a session), so this is a latent gap rather
+ * than a live leak — but "the privacy filter is skipped when the argument is
+ * absent" is the wrong default to leave sitting behind a nullable parameter.
+ * There is no viewer to be blocked by, but there is still an author who has
+ * stepped back, so the presence test stands on its own and only the block
+ * clause and the see-your-own-work exemption need a viewer.
  */
-export function contributorVisibleSql(userCol: AnyColumn, viewerId: string) {
+export function contributorVisibleSql(userCol: AnyColumn, viewerId: string | null) {
+  const present = sql`exists (select 1 from user_profiles sp where sp.user_id = ${userCol} and sp.social_enabled = true)`;
+  if (!viewerId) return present;
   return sql`(${userCol} = ${viewerId} or (
     not exists (select 1 from blocks b where (b.blocker_id = ${viewerId} and b.blocked_id = ${userCol}) or (b.blocker_id = ${userCol} and b.blocked_id = ${viewerId}))
-    and not exists (select 1 from user_profiles sp where sp.user_id = ${userCol} and sp.social_enabled = false)
+    and ${present}
   ))`;
 }
 
@@ -1071,8 +1096,13 @@ export function acceptedFollowSql(follower: AnyColumn | string, followee: AnyCol
 }
 
 async function countCheers(db: DB, pourId: string, viewerId: string | null): Promise<number> {
-  const conditions = [eq(schema.reactions.pourId, pourId), eq(schema.reactions.kind, "cheers")];
-  if (viewerId) conditions.push(contributorVisibleSql(schema.reactions.userId, viewerId));
+  const conditions = [
+    eq(schema.reactions.pourId, pourId),
+    eq(schema.reactions.kind, "cheers"),
+    // Unconditional: a stepped-back author's cheer is hidden from a signed-out
+    // reader too, and the count has to say the same thing the card does.
+    contributorVisibleSql(schema.reactions.userId, viewerId),
+  ];
   const rows = await db
     .select({ n: sql<number>`count(*)` })
     .from(schema.reactions)
@@ -1081,8 +1111,13 @@ async function countCheers(db: DB, pourId: string, viewerId: string | null): Pro
 }
 
 async function countComments(db: DB, pourId: string, viewerId: string | null): Promise<number> {
-  const conditions = [eq(schema.comments.pourId, pourId), isNull(schema.comments.deletedAt)];
-  if (viewerId) conditions.push(contributorVisibleSql(schema.comments.userId, viewerId));
+  const conditions = [
+    eq(schema.comments.pourId, pourId),
+    isNull(schema.comments.deletedAt),
+    // Same rule `listComments` applies per row, in the same shape: the count
+    // beside a thread and the thread itself are one claim.
+    contributorVisibleSql(schema.comments.userId, viewerId),
+  ];
   const rows = await db
     .select({ n: sql<number>`count(*)` })
     .from(schema.comments)

@@ -1025,6 +1025,22 @@ export async function reinstateAccount(
    * unique by construction and names the decision rather than the moment.
    */
   expectedActionId: string,
+  /**
+   * When present, the open report the operator lifted this suspension from,
+   * resolved in the same transaction — the same claim `suspendAccount` makes,
+   * for the same reason.
+   *
+   * Without it the queue's "Reinstate author" lifted the suspension, recorded
+   * the decision, and left the complaint open — and because the row's control
+   * is conditioned on the author still being suspended, the next render of
+   * that report offered no reinstatement at all: closing it needed a second,
+   * unrelated Dismiss or Suspend. A decision and the report it answers commit
+   * together or the queue is telling two stories about the same complaint.
+   *
+   * Optional because the standalone Suspended-accounts list is not working a
+   * report and must not have to invent one.
+   */
+  options: { reportId?: string } = {},
   now = new Date(),
 ): Promise<void> {
   await db.transaction(async (tx) => {
@@ -1061,7 +1077,10 @@ export async function reinstateAccount(
       .where(and(eq(userProfiles.userId, userId), isNotNull(userProfiles.suspendedAt)))
       .returning({ userId: userProfiles.userId });
     if (rows.length === 0) throw new StaleModerationViewError();
-    await record(tx, actorId, "reinstate", "profile", userId, { note }, now);
+    await record(tx, actorId, "reinstate", "profile", userId, { reportId: options.reportId, note }, now);
+    // Claimed by owner, not by subject: the report may be about a comment or a
+    // pour, and what this decision answers for is the account behind it.
+    if (options.reportId) await resolveOpenReport(tx, options.reportId, { ownerId: userId });
   });
 }
 

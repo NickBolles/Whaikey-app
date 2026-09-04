@@ -5,10 +5,17 @@ import { legalIdentity, missingLegalFacts, type LegalIdentity } from "@/lib/lega
  * The shared frame for `/terms` and `/privacy` (PLAN.md §9.3).
  *
  * Its one non-obvious job is the banner: when the operator has not supplied a
- * legal entity, jurisdiction and contact address, the page says so at the top
- * instead of quietly rendering a document that reads as finished. A policy
- * missing the party it binds is not a draft detail, and a reader deserves to
- * know which they are looking at.
+ * legal entity, jurisdiction, contact address and effective date, the page
+ * says so at the top — naming only the ones actually absent — instead of
+ * quietly rendering a document that reads as finished. A policy missing the
+ * party it binds is not a draft detail, and a reader deserves to know which
+ * they are looking at.
+ *
+ * Everything below the banner has to agree with it, which is the other half of
+ * the same job: a notice that says the company is unnamed on a page that names
+ * it, or prose that calls a configured jurisdiction unpublished, teaches the
+ * reader to stop believing the notice — and this notice is the store-readiness
+ * check.
  */
 /** "a, b and c" — an operator reads this, not a machine. */
 function readableList(items: string[]): string {
@@ -83,10 +90,29 @@ function Identity({ identity }: { identity: LegalIdentity }) {
     <section className="flex flex-col gap-2">
       <h2 className="font-display text-lg font-semibold">Who this is</h2>
       <p className="text-sm text-muted leading-relaxed">
-        {identity.entity ? (
+        {/* Each fact stands or falls on its own.
+            The company used to gate both: with a jurisdiction configured and
+            an entity still missing, this said the governing law was unpublished
+            and threw away the value the environment supplied — while the banner
+            three lines up correctly named only the company as absent. Partial
+            configuration is the expected unfinished state, so a page that
+            contradicts its own notice about it teaches the reader to stop
+            believing the notice, which is the one thing the notice cannot
+            afford. */}
+        {identity.entity && identity.jurisdiction ? (
           <>
-            Whaikey is operated by <strong className="text-foreground">{identity.entity}</strong>
-            {identity.jurisdiction && <> under the laws of {identity.jurisdiction}</>}.
+            Whaikey is operated by <strong className="text-foreground">{identity.entity}</strong>{" "}
+            under the laws of {identity.jurisdiction}.
+          </>
+        ) : identity.entity ? (
+          <>
+            Whaikey is operated by <strong className="text-foreground">{identity.entity}</strong>.
+            The governing law is not yet published here.
+          </>
+        ) : identity.jurisdiction ? (
+          <>
+            This document is governed by the laws of {identity.jurisdiction}. The operating company
+            is not yet published here.
           </>
         ) : (
           <>The operating company and governing law are not yet published here.</>

@@ -1,10 +1,11 @@
 /**
  * The facts a policy document needs and code cannot invent (PLAN.md §9.3).
  *
- * A Terms and a Privacy Policy have to name a legal entity, a jurisdiction and
- * a contact address. Those are the operator's to supply, and writing plausible
- * ones would be worse than leaving them blank: a policy that names the wrong
- * entity is not a smaller problem than one that names none.
+ * A Terms and a Privacy Policy have to name a legal entity, a jurisdiction, a
+ * contact address and the date they take effect. Those are the operator's to
+ * supply, and writing plausible ones would be worse than leaving them blank: a
+ * policy that names the wrong entity is not a smaller problem than one that
+ * names none.
  *
  * So they come from the environment, and the pages say plainly when they are
  * missing rather than rendering a document that looks finished. `isComplete`

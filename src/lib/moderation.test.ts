@@ -873,11 +873,11 @@ describe("acting on a stale view", () => {
   it("refuses a reinstatement aimed at a suspension that has been replaced", async () => {
     await suspendAccount(db, operator.id, author.id, "first", {}, new Date(1_000));
     const stale = await standingSuspensionId(author.id);
-    await reinstateAccount(db, operator.id, author.id, "lifted", stale, new Date(2_000));
+    await reinstateAccount(db, operator.id, author.id, "lifted", stale, {}, new Date(2_000));
     await suspendAccount(db, operator.id, author.id, "again", {}, new Date(3_000));
 
     await expect(
-      reinstateAccount(db, operator.id, author.id, "stale tab", stale, new Date(4_000)),
+      reinstateAccount(db, operator.id, author.id, "stale tab", stale, {}, new Date(4_000)),
     ).rejects.toBeInstanceOf(StaleModerationViewError);
     const [profile] = await db
       .select()
@@ -1349,7 +1349,7 @@ describe("reinstatement names a decision, not a moment", () => {
     const sameMoment = new Date("2026-09-04T12:00:00.000Z");
     await suspendAccount(db, operator.id, author.id, "first reason", {}, sameMoment);
     const stale = await standingSuspensionId(author.id);
-    await reinstateAccount(db, operator.id, author.id, "lifted", stale, sameMoment);
+    await reinstateAccount(db, operator.id, author.id, "lifted", stale, {}, sameMoment);
     await suspendAccount(db, operator.id, author.id, "second reason", {}, sameMoment);
 
     const current = await standingSuspensionId(author.id);
@@ -1414,11 +1414,11 @@ describe("a second report about an already-suspended account", () => {
     // could validate one suspension and clear the next.
     await suspendAccount(db, operator.id, author.id, "first", {}, new Date(1_000));
     const stale = await standingSuspensionId(author.id);
-    await reinstateAccount(db, operator.id, author.id, "lifted", stale, new Date(2_000));
+    await reinstateAccount(db, operator.id, author.id, "lifted", stale, {}, new Date(2_000));
     await suspendAccount(db, operator.id, author.id, "second", {}, new Date(3_000));
 
     await expect(
-      reinstateAccount(db, operator.id, author.id, "stale tab", stale, new Date(4_000)),
+      reinstateAccount(db, operator.id, author.id, "stale tab", stale, {}, new Date(4_000)),
     ).rejects.toBeInstanceOf(StaleModerationViewError);
     const profile = await db.query.userProfiles.findFirst({
       where: eq(schema.userProfiles.userId, author.id),
@@ -1708,6 +1708,84 @@ describe("suspending takes the reported content down with the account", () => {
     expect(await isModerationHidden(db, "comment", commentId)).toBe(true);
     const row = await db.query.comments.findFirst({ where: eq(schema.comments.id, commentId) });
     expect(row?.deletedAt).not.toBeNull();
+  });
+
+  /**
+   * The queue's "Reinstate author" is offered on any open report whose subject
+   * owner is suspended — which is normally a *second* report, the first having
+   * been resolved by the suspension itself. Sent without the report id it lifted
+   * the suspension and left that complaint open, and the row then rendered with
+   * no Reinstate control at all (the author is no longer suspended), so closing
+   * it needed a second, unrelated Dismiss or Suspend.
+   */
+  it("reinstating from an open report resolves that report and names it in the trail", async () => {
+    const first = await reportedComment();
+    const second = await reportedComment();
+
+    await suspendAccount(db, operator.id, author.id, "abuse", { reportId: first.reportId });
+    // The second is about a different comment, so the suspension leaves it open.
+    expect(await countOpenReports(db)).toBe(1);
+
+    await reinstateAccount(
+      db,
+      operator.id,
+      author.id,
+      "appeal upheld",
+      await standingSuspensionId(author.id),
+      { reportId: second.reportId },
+    );
+
+    const row = await db.query.reports.findFirst({
+      where: eq(schema.reports.id, second.reportId),
+    });
+    expect(row?.state).toBe("resolved");
+    expect(await countOpenReports(db)).toBe(0);
+
+    const profile = await db.query.userProfiles.findFirst({
+      where: eq(schema.userProfiles.userId, author.id),
+    });
+    expect(profile?.suspendedAt).toBeNull();
+
+    // And the trail says which complaint the lift answered.
+    const lifts = await db
+      .select()
+      .from(schema.moderationActions)
+      .where(eq(schema.moderationActions.action, "reinstate"));
+    expect(lifts).toHaveLength(1);
+    expect(lifts[0].reportId).toBe(second.reportId);
+  });
+
+  it("refuses to close a report about somebody else's content with this lift", async () => {
+    const mine = await reportedComment();
+    // A report whose subject belongs to a different account entirely.
+    const otherPourId = uid("pour");
+    const bottle = await createTestBottle(db);
+    await db
+      .insert(schema.pours)
+      .values({ id: otherPourId, userId: reporter.id, bottleId: bottle.id, visibility: "public" });
+    const foreign = await report("pour", otherPourId);
+
+    await suspendAccount(db, operator.id, author.id, "abuse", { reportId: mine.reportId });
+
+    await expect(
+      reinstateAccount(
+        db,
+        operator.id,
+        author.id,
+        "appeal upheld",
+        await standingSuspensionId(author.id),
+        { reportId: foreign },
+      ),
+    ).rejects.toBeInstanceOf(ReportSubjectMismatchError);
+
+    // And the whole thing rolls back: the report stays open AND the account
+    // stays suspended. A lift that could not claim its report is not a lift.
+    const row = await db.query.reports.findFirst({ where: eq(schema.reports.id, foreign) });
+    expect(row?.state).toBe("open");
+    const profile = await db.query.userProfiles.findFirst({
+      where: eq(schema.userProfiles.userId, author.id),
+    });
+    expect(profile?.suspendedAt).not.toBeNull();
   });
 
   it("records one hide and one suspend, both linked to the report", async () => {

@@ -956,6 +956,47 @@ describe("review-pass hardening", () => {
     expect(own!.some((c) => c.author?.userId === stepped.id)).toBe(true);
   });
 
+  it("counts a legacy profile-less contributor exactly as the thread does, signed in or out", async () => {
+    const owner = await createTestUser(db);
+    const viewer = await createTestUser(db);
+    // Never opted into social at all — `addComment` refuses this account now,
+    // but rows written before that guard existed are still in the table.
+    const legacy = await createTestUser(db);
+    const bottle = await createTestBottle(db);
+    await claim(db, owner, "owner_lg", { isPublic: true });
+    await claim(db, viewer, "viewer_lg", { isPublic: true });
+
+    const pour = await insertPour(db, owner.id, bottle.id, { visibility: "public", rating: 4 });
+    await insertNote(db, pour.id, { freeform: "mine" });
+    await db.insert(schema.comments).values({
+      id: uid("comment"),
+      pourId: pour.id,
+      userId: legacy.id,
+      body: "written before the commenter needed a profile",
+    });
+    await db.insert(schema.reactions).values({
+      id: uid("reaction"),
+      pourId: pour.id,
+      userId: legacy.id,
+      kind: "cheers",
+    });
+
+    // The thread has always hidden it — `commentWithdrawnByAuthor` reads a
+    // missing profile as withdrawn. The counts read `not exists (… = false)`,
+    // which a missing row satisfies, so they disagreed by exactly the row the
+    // reader is not allowed to know about.
+    const comments = await listComments(db, viewer.id, pour.id);
+    expect(comments!.some((c) => c.author?.userId === legacy.id)).toBe(false);
+    const note = await getSocialNote(db, viewer.id, pour.id);
+    expect(note!.commentCount).toBe(0);
+    expect(note!.cheersCount).toBe(0);
+
+    // And the author of the row still sees their own, as a stepped-back
+    // author does — nothing was deleted.
+    const own = await listComments(db, legacy.id, pour.id);
+    expect(own!.some((c) => c.author?.userId === legacy.id)).toBe(true);
+  });
+
   it("Same Dram picks a friend's latest NOTED pour, not a newer note-less one", async () => {
     const viewer = await createTestUser(db);
     const friend = await createTestUser(db);

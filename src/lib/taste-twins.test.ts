@@ -273,6 +273,12 @@ describe("getTwinEndorsements", () => {
    * A twin is by definition someone the viewer follows, and the endorsement
    * query re-checks that live rather than trusting the passed-in list — so the
    * follow has to exist for any of these fixtures to be visible.
+   *
+   * And the profile with it: `followUser` refuses a target that has none, so a
+   * followee without one is a state the app cannot produce. These fixtures
+   * skipped it only because nothing had ever required it — until
+   * `contributorVisibleSql` started asking for a socially present author
+   * rather than merely one not switched off.
    */
   async function followedTwin(
     viewerId: string,
@@ -280,6 +286,13 @@ describe("getTwinEndorsements", () => {
     handle: string,
     matchPercent: number,
   ) {
+    await db.insert(schema.userProfiles).values({
+      userId,
+      handle,
+      displayName: handle,
+      isPublic: true,
+      socialEnabled: true,
+    });
     await db.insert(schema.follows).values({
       id: uid("f"),
       followerId: viewerId,

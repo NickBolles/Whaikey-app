@@ -74,6 +74,12 @@ const bodySchema = z.discriminatedUnion("action", [
     note: z.string().trim().min(1).max(1000),
     /** Which suspension the operator was looking at. Required, same reason. */
     expectedActionId: z.string().min(1),
+    /**
+     * When present, the open report this lift answers, resolved in the same
+     * transaction. Optional so the standalone Suspended-accounts list, which
+     * is not working a report, does not have to invent one.
+     */
+    reportId: z.string().min(1).optional(),
   }),
   z.object({
     action: z.literal("dismiss"),
@@ -136,13 +142,9 @@ export async function POST(request: Request): Promise<NextResponse> {
           reportId: input.reportId,
         });
       } else if (input.action === "reinstate") {
-        await reinstateAccount(
-          db,
-          user.id,
-          input.userId,
-          input.note,
-          input.expectedActionId,
-        );
+        await reinstateAccount(db, user.id, input.userId, input.note, input.expectedActionId, {
+          reportId: input.reportId,
+        });
       } else {
         await dismissReport(db, user.id, input.reportId, input.note);
       }

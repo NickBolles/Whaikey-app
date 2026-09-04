@@ -404,6 +404,12 @@ function ReportRow({
                 note,
                 // Which suspension this row showed — a newer one is not ours.
                 expectedActionId: report.subjectOwnerSuspensionId,
+                // And which complaint this answers, so the lift and the
+                // report's transition commit together. Without it the row
+                // came back with its Reinstate control gone — the author is
+                // no longer suspended — and the report still open, needing a
+                // second, unrelated action to close.
+                reportId: report.id,
               })
             }
             className="btn-secondary px-4 py-2 text-sm font-medium disabled:opacity-50"
