@@ -19,12 +19,35 @@ export interface LegalIdentity {
   effectiveDate: string | null;
 }
 
+/**
+ * An ISO calendar date the environment actually supplied, or null.
+ *
+ * Validated here rather than at the point of use so every consumer gets the
+ * same answer from the same rule — the banner, the header and `isComplete`
+ * were otherwise three readings of one value, which is how a page ends up
+ * contradicting its own notice.
+ *
+ * A presence check alone let `2026-13-40` through, and the header then
+ * announced "In effect since 2026-13-40" with no banner under it, because a
+ * non-empty string was taken as a date. The round-trip is what rejects a real
+ * shape with impossible numbers: `Date.parse` accepts `2026-02-30` and rolls
+ * it forward to March, so the test is whether the date formats back to exactly
+ * what was given.
+ */
+function isoDateOrNull(raw: string | undefined): string | null {
+  const value = raw?.trim();
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const parsed = new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toISOString().slice(0, 10) === value ? value : null;
+}
+
 export function legalIdentity(): LegalIdentity {
   return {
     entity: process.env.NEXT_PUBLIC_LEGAL_ENTITY?.trim() || null,
     jurisdiction: process.env.NEXT_PUBLIC_LEGAL_JURISDICTION?.trim() || null,
     contactEmail: process.env.NEXT_PUBLIC_SUPPORT_EMAIL?.trim() || null,
-    effectiveDate: process.env.NEXT_PUBLIC_POLICY_EFFECTIVE_DATE?.trim() || null,
+    effectiveDate: isoDateOrNull(process.env.NEXT_PUBLIC_POLICY_EFFECTIVE_DATE),
   };
 }
 
@@ -43,6 +66,9 @@ export function missingLegalFacts(identity: LegalIdentity): string[] {
    * from which it binds is not launch-ready, and this banner is the
    * store-readiness check, so it says so.
    */
+  // Absent covers malformed: `legalIdentity` nulls a value that is not a real
+  // calendar date, so a typo reads as "not set yet" rather than being
+  // published as the date the document binds from.
   if (!identity.effectiveDate) missing.push("the date it takes effect");
   return missing;
 }

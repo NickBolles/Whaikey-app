@@ -71,6 +71,26 @@ describe("PolicyPage legal identity", () => {
     expect(screen.getByText("In effect since 2026-09-04.")).toBeInTheDocument();
   });
 
+  it("treats a malformed effective date as not set", () => {
+    // A presence check alone published "In effect since 2026-13-40" with no
+    // banner under it. The banner is the store-readiness check, so a typo has
+    // to read as unfinished rather than as a date the document binds from.
+    for (const bad of ["2026-13-40", "2026-02-30", "not a date", "2026-9-4"]) {
+      setEnv({
+        NEXT_PUBLIC_LEGAL_ENTITY: "Whaikey, LLC",
+        NEXT_PUBLIC_LEGAL_JURISDICTION: "the State of Delaware, USA",
+        NEXT_PUBLIC_SUPPORT_EMAIL: "support@whaikey.test",
+        NEXT_PUBLIC_POLICY_EFFECTIVE_DATE: bad,
+      });
+      render(<PolicyPage title="Terms">{body}</PolicyPage>);
+
+      expect(screen.getByRole("note")).toHaveTextContent("the date it takes effect");
+      expect(screen.getByText("Not yet in effect — see the note below.")).toBeInTheDocument();
+      expect(screen.queryByText(new RegExp(`In effect since ${bad}`))).toBeNull();
+      cleanup();
+    }
+  });
+
   /**
    * Each identity fact stands on its own. The company used to gate both, so a
    * configured jurisdiction was thrown away and called unpublished while the
