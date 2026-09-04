@@ -8,6 +8,7 @@ import {
   SocialDisabledError,
   deletePour,
   getPour,
+  ModeratedError,
   updatePourVisibility,
 } from "@/lib/pours";
 
@@ -53,6 +54,16 @@ export async function PATCH(req: Request, ctx: Ctx) {
     } catch (err) {
       if (err instanceof SocialDisabledError) {
         return NextResponse.json({ error: "social_disabled" }, { status: 409 });
+      }
+      if (err instanceof ModeratedError) {
+        return NextResponse.json(
+          {
+            error: "moderated",
+            message:
+              "A moderator hid this note. It stays in your journal; ask through support if you think that was wrong.",
+          },
+          { status: 409 },
+        );
       }
       if (err instanceof PendingBottleError) {
         return NextResponse.json(

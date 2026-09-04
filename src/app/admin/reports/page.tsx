@@ -4,7 +4,9 @@ import { getSessionUser } from "@/lib/session";
 import { isOperator } from "@/lib/operator";
 import {
   REPORT_SLA_HOURS,
+  REPORT_PAGE_SIZE,
   countBreachedReports,
+  countOpenReports,
   listModerationActions,
   listOpenReports,
   listSuspendedAccounts,
@@ -29,8 +31,11 @@ export default async function AdminReportsPage() {
   if (!isOperator(user)) notFound();
 
   const db = getDb();
-  const [reports, breached, audit, suspended] = await Promise.all([
+  const [reports, open, breached, audit, suspended] = await Promise.all([
+    // One bounded page. The header carries the true open count, so a backlog
+    // is visible without the page trying to render all of it.
     listOpenReports(db),
+    countOpenReports(db),
     countBreachedReports(db),
     listModerationActions(db, 50),
     // Suspending resolves the report, so the reinstate control next to it goes
@@ -42,6 +47,8 @@ export default async function AdminReportsPage() {
   return (
     <ModerationQueue
       reports={reports.map((r) => ({ ...r, createdAt: r.createdAt.toISOString() }))}
+      open={open}
+      pageSize={REPORT_PAGE_SIZE}
       breached={breached}
       slaHours={REPORT_SLA_HOURS}
       audit={audit.map((a) => ({ ...a, createdAt: a.createdAt.toISOString() }))}

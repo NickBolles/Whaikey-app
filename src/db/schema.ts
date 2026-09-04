@@ -685,7 +685,12 @@ export const reports = pgTable(
  * never edited or removed, so "who hid this and when" survives the thing being
  * hidden, and an appeal has something to answer.
  */
-export const MODERATION_ACTIONS = ["hide", "suspend", "reinstate", "dismiss"] as const;
+/**
+ * `unhide` is the reversal of a hide, and it exists because the hide sticks:
+ * a hidden pour cannot be re-published by its owner, so an appeal upheld has
+ * to be actionable by an operator rather than by asking the owner to try again.
+ */
+export const MODERATION_ACTIONS = ["hide", "unhide", "suspend", "reinstate", "dismiss"] as const;
 export type ModerationActionKind = (typeof MODERATION_ACTIONS)[number];
 
 export const moderationActions = pgTable(

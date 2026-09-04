@@ -10,8 +10,8 @@ import {
   dismissReport,
   hideSubject,
   reinstateAccount,
-  resolveReport,
   suspendAccount,
+  unhideSubject,
 } from "@/lib/moderation";
 
 export const runtime = "nodejs";
@@ -31,6 +31,15 @@ const bodySchema = z.discriminatedUnion("action", [
     subjectType: z.enum(HIDEABLE_SUBJECT_TYPES),
     subjectId: z.string().min(1),
     reportId: z.string().min(1).optional(),
+    // Required, like a suspension's: a hide is not reversible by its owner, so
+    // the note is the only thing they have to appeal against, and the Terms
+    // say they get one.
+    note: z.string().trim().min(1).max(1000),
+  }),
+  z.object({
+    action: z.literal("unhide"),
+    subjectType: z.enum(HIDEABLE_SUBJECT_TYPES),
+    subjectId: z.string().min(1),
     note: z.string().max(1000).optional(),
   }),
   z.object({
@@ -82,16 +91,19 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     try {
       if (input.action === "hide") {
+        // The action, its audit row and the report's transition are one
+        // transaction inside hideSubject — resolving afterwards left the
+        // content hidden and the report open whenever the second write failed.
         await hideSubject(db, user.id, input.subjectType, input.subjectId, {
           reportId: input.reportId,
           note: input.note,
         });
-        if (input.reportId) await resolveReport(db, input.reportId);
+      } else if (input.action === "unhide") {
+        await unhideSubject(db, user.id, input.subjectType, input.subjectId, input.note);
       } else if (input.action === "suspend") {
         await suspendAccount(db, user.id, input.userId, input.reason, {
           reportId: input.reportId,
         });
-        if (input.reportId) await resolveReport(db, input.reportId);
       } else if (input.action === "reinstate") {
         await reinstateAccount(db, user.id, input.userId, input.note);
       } else {

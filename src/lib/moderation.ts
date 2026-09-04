@@ -8,6 +8,7 @@ import {
   reports,
   user,
   userProfiles,
+  userSocialPrefs,
   type ModerationActionKind,
   type ReportSubjectType,
 } from "@/db/schema";
@@ -48,13 +49,28 @@ export interface QueuedReport {
 }
 
 /**
+ * How many reports one page of the queue holds.
+ *
+ * Bounded because the thing this queue is for is abuse, and abuse arrives in
+ * volume: the per-reporter limiter says nothing about the size of the global
+ * backlog, and each row costs one or two more queries to describe. An
+ * unbounded read makes the page fall over exactly when it is needed. Oldest
+ * first, so a page is always the work most overdue.
+ */
+export const REPORT_PAGE_SIZE = 100;
+
+/**
  * Open reports, oldest first.
  *
  * Oldest first on purpose: a queue sorted newest-first is a queue where the
  * thing that has been waiting longest is the thing you never see, which is how
  * an SLA becomes decorative.
  */
-export async function listOpenReports(db: DB, now = new Date()): Promise<QueuedReport[]> {
+export async function listOpenReports(
+  db: DB,
+  now = new Date(),
+  limit = REPORT_PAGE_SIZE,
+): Promise<QueuedReport[]> {
   const rows = await db
     .select({
       id: reports.id,
@@ -67,7 +83,8 @@ export async function listOpenReports(db: DB, now = new Date()): Promise<QueuedR
     .from(reports)
     .leftJoin(userProfiles, eq(userProfiles.userId, reports.reporterId))
     .where(eq(reports.state, "open"))
-    .orderBy(reports.createdAt);
+    .orderBy(reports.createdAt)
+    .limit(limit);
 
   return Promise.all(
     rows.map(async (row) => {
@@ -209,6 +226,7 @@ export async function hideSubject(
     const changed = await applyHide(tx, subjectType, subjectId, now);
     if (!changed) throw new UnknownSubjectError();
     await record(tx, actorId, "hide", subjectType, subjectId, options, now);
+    if (options.reportId) await resolveOpenReport(tx, options.reportId);
   });
 }
 
@@ -284,6 +302,14 @@ export async function suspendAccount(
     throw new UnknownSubjectError();
   }
   await db.transaction(async (tx) => {
+    /**
+     * The same lock `makeEverythingPrivate` and `createPourShare` contend on.
+     * Without it a share request already in flight can mint a live bearer link
+     * immediately after the suspension commits — the account is off every
+     * social surface and still handing out URLs.
+     */
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`social-reset:${userId}`}))`);
+
     const rows = await tx
       .update(userProfiles)
       .set({
@@ -303,7 +329,35 @@ export async function suspendAccount(
       .where(eq(userProfiles.userId, userId))
       .returning({ userId: userProfiles.userId });
     if (rows.length === 0) throw new UnknownSubjectError();
+
+    /**
+     * Turning the profile flags off is not enough, because a `/s/<code>` link
+     * does not consult them: `getPublicPourShare` authorises on `revokedAt`
+     * alone. A suspended account with live links is suspended from the parts
+     * of the product nobody was reading and not from the one URL somebody
+     * already has. So the suspension applies the same account-wide reset the
+     * owner's own step-back does — pours private, links revoked, default
+     * visibility private.
+     *
+     * None of it is restored by reinstating. That is deliberate and it is the
+     * same rule everywhere here: the system never raises a visibility, so
+     * coming back means choosing again.
+     */
+    await tx.update(pours).set({ visibility: "private" }).where(eq(pours.userId, userId));
+    await tx
+      .update(pourShares)
+      .set({ revokedAt: now })
+      .where(and(eq(pourShares.userId, userId), isNull(pourShares.revokedAt)));
+    await tx
+      .insert(userSocialPrefs)
+      .values({ userId, defaultPourVisibility: "private" })
+      .onConflictDoUpdate({
+        target: userSocialPrefs.userId,
+        set: { defaultPourVisibility: "private", updatedAt: now },
+      });
+
     await record(tx, actorId, "suspend", "profile", userId, { ...options, note: reason }, now);
+    if (options.reportId) await resolveOpenReport(tx, options.reportId);
   });
 }
 
@@ -350,12 +404,24 @@ export async function dismissReport(
   });
 }
 
-/** Mark a report handled. Called after an action that changed something. */
-export async function resolveReport(db: DB, reportId: string): Promise<void> {
-  await db
+/**
+ * Mark a report handled, in the same transaction as the action that handled it.
+ *
+ * Split from the action it belongs to, this was the third write in a
+ * two-write story: the content could be hidden and the report left open, so a
+ * retry recorded the action twice, and two operators on the same report both
+ * acted. Predicated on `state = 'open'` so the transition happens once.
+ */
+async function resolveOpenReport(tx: DB, reportId: string): Promise<void> {
+  await tx
     .update(reports)
     .set({ state: "resolved" })
     .where(and(eq(reports.id, reportId), eq(reports.state, "open")));
+}
+
+/** Mark a report handled on its own. Used by tests and by nothing in the app. */
+export async function resolveReport(db: DB, reportId: string): Promise<void> {
+  await resolveOpenReport(db, reportId);
 }
 
 async function record(
@@ -438,6 +504,15 @@ export async function listSuspendedAccounts(db: DB): Promise<SuspendedAccount[]>
   return rows.map((row) => ({ ...row, suspendedAt: row.suspendedAt as Date }));
 }
 
+/** Every open report, counted in SQL — the page shows at most one page of them. */
+export async function countOpenReports(db: DB): Promise<number> {
+  const [row] = await db
+    .select({ n: sql<number>`count(*)` })
+    .from(reports)
+    .where(eq(reports.state, "open"));
+  return Number(row?.n ?? 0);
+}
+
 /** How many open reports are past the SLA, for the queue's own header. */
 export async function countBreachedReports(db: DB, now = new Date()): Promise<number> {
   const cutoff = new Date(now.getTime() - REPORT_SLA_HOURS * 3_600_000);
@@ -446,4 +521,98 @@ export async function countBreachedReports(db: DB, now = new Date()): Promise<nu
     .from(reports)
     .where(and(eq(reports.state, "open"), sql`${reports.createdAt} < ${cutoff}`));
   return Number(row?.n ?? 0);
+}
+
+/**
+ * Whether a moderation hide currently stands over this subject.
+ *
+ * The audit trail is the record, so it is also the authority — no second
+ * "moderated" column to drift out of step with it. The latest hide/unhide for
+ * the subject wins, which is why `unhide` exists at all: without a reversal a
+ * hide would be permanent, and an upheld appeal would have nothing to act on.
+ *
+ * `moderation_actions_subject_idx` covers this lookup.
+ */
+export async function isModerationHidden(
+  db: DB,
+  subjectType: ReportSubjectType,
+  subjectId: string,
+): Promise<boolean> {
+  const [row] = await db
+    .select({ action: moderationActions.action })
+    .from(moderationActions)
+    .where(
+      and(
+        eq(moderationActions.subjectType, subjectType),
+        eq(moderationActions.subjectId, subjectId),
+        sql`${moderationActions.action} in ('hide', 'unhide')`,
+      ),
+    )
+    .orderBy(desc(moderationActions.createdAt), desc(moderationActions.id))
+    .limit(1);
+  return row?.action === "hide";
+}
+
+export interface ModerationNotice {
+  action: "hide";
+  reason: string | null;
+  at: Date;
+}
+
+/**
+ * What the owner of a hidden thing is told (PLAN.md §9.4).
+ *
+ * The Terms say a moderation action comes with a reason and can be appealed.
+ * A reason recorded only where operators can read it does not keep that
+ * promise, and the hide is deliberately not reversible by its owner — so if
+ * they are not told, they are left with a control that silently refuses.
+ */
+export async function moderationNoticeFor(
+  db: DB,
+  subjectType: ReportSubjectType,
+  subjectId: string,
+): Promise<ModerationNotice | null> {
+  const [row] = await db
+    .select({
+      action: moderationActions.action,
+      note: moderationActions.note,
+      createdAt: moderationActions.createdAt,
+    })
+    .from(moderationActions)
+    .where(
+      and(
+        eq(moderationActions.subjectType, subjectType),
+        eq(moderationActions.subjectId, subjectId),
+        sql`${moderationActions.action} in ('hide', 'unhide')`,
+      ),
+    )
+    .orderBy(desc(moderationActions.createdAt), desc(moderationActions.id))
+    .limit(1);
+  if (row?.action !== "hide") return null;
+  return { action: "hide", reason: row.note, at: row.createdAt };
+}
+
+/**
+ * Lift a hide.
+ *
+ * Restores nothing by itself — the pour stays private and the comment stays
+ * removed. What it returns is control: the owner can publish the note again if
+ * they choose. The system never raises a visibility, an upheld appeal least of
+ * all.
+ */
+export async function unhideSubject(
+  db: DB,
+  actorId: string,
+  subjectType: ReportSubjectType,
+  subjectId: string,
+  note: string | undefined,
+  now = new Date(),
+): Promise<void> {
+  if (subjectType === "profile") throw new CannotHideProfileError();
+  await db.transaction(async (tx) => {
+    if (subjectType === "comment") {
+      await tx.update(comments).set({ deletedAt: null }).where(eq(comments.id, subjectId));
+    }
+    await record(tx, actorId, "unhide", subjectType, subjectId, { note }, now);
+  });
 }

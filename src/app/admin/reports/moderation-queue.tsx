@@ -50,12 +50,16 @@ interface SuspendedView {
 
 export function ModerationQueue({
   reports,
+  open,
+  pageSize,
   breached,
   slaHours,
   audit,
   suspended,
 }: {
   reports: QueuedReportView[];
+  open: number;
+  pageSize: number;
   breached: number;
   slaHours: number;
   audit: AuditView[];
@@ -91,9 +95,8 @@ export function ModerationQueue({
       <header className="flex flex-col gap-1">
         <h1 className="font-display text-2xl font-semibold">Reports</h1>
         <p className="text-sm text-muted">
-          {reports.length === 0
-            ? "Nothing open."
-            : `${reports.length} open · target is ${slaHours} hours`}
+          {open === 0 ? "Nothing open." : `${open} open · target is ${slaHours} hours`}
+          {open > pageSize && ` · showing the ${pageSize} oldest`}
           {breached > 0 && (
             <strong className="text-danger">
               {" "}
@@ -160,6 +163,25 @@ export function ModerationQueue({
                 {entry.subjectType} <code>{entry.subjectId.slice(0, 8)}</code> · {entry.actorName} ·{" "}
                 {new Date(entry.createdAt).toLocaleString()}
                 {entry.note && <div className="mt-1 italic">{entry.note}</div>}
+                {/* A hide sticks — its author cannot undo it — so an upheld
+                    appeal has to be actionable here. The report it came from
+                    is resolved and gone from the queue above by then. */}
+                {entry.action === "hide" && entry.subjectType !== "profile" && (
+                  <button
+                    type="button"
+                    disabled={busy === entry.id}
+                    onClick={() =>
+                      void act(entry.id, {
+                        action: "unhide",
+                        subjectType: entry.subjectType,
+                        subjectId: entry.subjectId,
+                      })
+                    }
+                    className="mt-2 block text-accent hover:underline disabled:opacity-50"
+                  >
+                    Lift this hide
+                  </button>
+                )}
               </li>
             ))}
           </ul>
@@ -223,7 +245,8 @@ function ReportRow({
         {report.subjectType !== "profile" && (
           <button
             type="button"
-            disabled={busy || report.alreadyHidden}
+            disabled={busy || report.alreadyHidden || note.trim().length === 0}
+            title={note.trim() ? undefined : "A hide needs a reason its author can appeal"}
             onClick={() =>
               onAct({
                 action: "hide",

@@ -124,7 +124,7 @@ describe("POST /api/admin/moderation", () => {
    */
   it("will not hide a profile — that action is suspend", async () => {
     const res = await moderationPOST(
-      post({ action: "hide", subjectType: "profile", subjectId: author.id }),
+      post({ action: "hide", subjectType: "profile", subjectId: author.id, note: "abusive" }),
     );
     expect(res.status).toBe(400);
     const [profile] = await db
@@ -135,9 +135,21 @@ describe("POST /api/admin/moderation", () => {
     expect(await db.select().from(schema.moderationActions)).toHaveLength(0);
   });
 
+  /**
+   * A hide is not reversible by its author, so the note is the only thing
+   * there is to appeal against — and the Terms say they get one.
+   */
+  it("will not hide without a reason the author can appeal", async () => {
+    const res = await moderationPOST(
+      post({ action: "hide", subjectType: "pour", subjectId: "anything", note: "   " }),
+    );
+    expect(res.status).toBe(400);
+    expect(await db.select().from(schema.moderationActions)).toHaveLength(0);
+  });
+
   it("404s an action against something that isn't there", async () => {
     const res = await moderationPOST(
-      post({ action: "hide", subjectType: "pour", subjectId: "nope" }),
+      post({ action: "hide", subjectType: "pour", subjectId: "nope", note: "abusive" }),
     );
     expect(res.status).toBe(404);
   });

@@ -13,6 +13,10 @@ import {
   listModerationActions,
   listOpenReports,
   listSuspendedAccounts,
+  isModerationHidden,
+  moderationNoticeFor,
+  unhideSubject,
+  countOpenReports,
   reinstateAccount,
   resolveReport,
   suspendAccount,
@@ -364,5 +368,139 @@ describe("suspension", () => {
     // Not on the projection that reaches other people.
     const profile = await getOwnProfile(db, author.id);
     expect(profile && "suspendedReason" in profile).toBe(false);
+  });
+});
+
+describe("a hide that sticks", () => {
+  /**
+   * Hiding a pour uses the visibility field, which is the owner's own control.
+   * Without a hold, the operator hides it, the report closes, and the owner
+   * puts it straight back — the same hole a profile "hide" had, answered here
+   * by closing the door rather than removing the action.
+   */
+  it("cannot be undone by the pour's owner", async () => {
+    const { updatePourVisibility, ModeratedError } = await import("./pours");
+    const bottle = await createTestBottle(db);
+    const pourId = uid("pour");
+    await db.insert(schema.pours).values({
+      id: pourId,
+      userId: author.id,
+      bottleId: bottle.id,
+      visibility: "public",
+    });
+
+    await hideSubject(db, operator.id, "pour", pourId, { note: "abusive" });
+    expect(await isModerationHidden(db, "pour", pourId)).toBe(true);
+
+    await expect(
+      updatePourVisibility(db, author.id, pourId, "public"),
+    ).rejects.toBeInstanceOf(ModeratedError);
+    // Making it private is still theirs to do — nothing here traps a note.
+    await expect(updatePourVisibility(db, author.id, pourId, "private")).resolves.toBeTruthy();
+  });
+
+  it("is lifted by an operator, and then the owner decides again", async () => {
+    const { updatePourVisibility } = await import("./pours");
+    const bottle = await createTestBottle(db);
+    const pourId = uid("pour");
+    await db.insert(schema.pours).values({
+      id: pourId,
+      userId: author.id,
+      bottleId: bottle.id,
+      visibility: "public",
+    });
+    await hideSubject(db, operator.id, "pour", pourId, { note: "abusive" });
+
+    await unhideSubject(db, operator.id, "pour", pourId, "appeal upheld");
+
+    expect(await isModerationHidden(db, "pour", pourId)).toBe(false);
+    // Lifting restores control, not visibility: the system never raises one.
+    const [row] = await db.select().from(schema.pours).where(eq(schema.pours.id, pourId));
+    expect(row.visibility).toBe("private");
+    await expect(updatePourVisibility(db, author.id, pourId, "public")).resolves.toMatchObject({
+      visibility: "public",
+    });
+  });
+
+  /** A reason recorded only where operators can read it isn't a reason given. */
+  it("tells the author what happened and why", async () => {
+    const bottle = await createTestBottle(db);
+    const pourId = uid("pour");
+    await db.insert(schema.pours).values({ id: pourId, userId: author.id, bottleId: bottle.id });
+
+    expect(await moderationNoticeFor(db, "pour", pourId)).toBeNull();
+    await hideSubject(db, operator.id, "pour", pourId, { note: "targets a named person" });
+    expect(await moderationNoticeFor(db, "pour", pourId)).toMatchObject({
+      action: "hide",
+      reason: "targets a named person",
+    });
+
+    await unhideSubject(db, operator.id, "pour", pourId, undefined);
+    expect(await moderationNoticeFor(db, "pour", pourId)).toBeNull();
+  });
+});
+
+describe("suspension is an account-wide reset", () => {
+  /**
+   * Turning the profile flags off does not reach a `/s/<code>` link:
+   * `getPublicPourShare` authorises on `revokedAt` alone. A suspended account
+   * with live links is suspended from the surfaces nobody was reading and not
+   * from the URL somebody already has.
+   */
+  it("takes the account's pours private and revokes its bearer links", async () => {
+    const { createPourShare, getPublicPourShare } = await import("./pour-sharing");
+    const bottle = await createTestBottle(db);
+    const pourId = uid("pour");
+    await db.insert(schema.pours).values({
+      id: pourId,
+      userId: author.id,
+      bottleId: bottle.id,
+      visibility: "public",
+    });
+    const share = await createPourShare(db, author.id, pourId);
+    expect(share).not.toBeNull();
+
+    await suspendAccount(db, operator.id, author.id, "repeated abuse");
+
+    expect(await getPublicPourShare(db, share!.code)).toBeNull();
+    const [row] = await db.select().from(schema.pours).where(eq(schema.pours.id, pourId));
+    expect(row.visibility).toBe("private");
+    const [prefs] = await db
+      .select()
+      .from(schema.userSocialPrefs)
+      .where(eq(schema.userSocialPrefs.userId, author.id));
+    expect(prefs.defaultPourVisibility).toBe("private");
+  });
+
+  /**
+   * The report transition belongs in the same transaction as the action.
+   * Resolved afterwards, a failed second write left content hidden and the
+   * report open, and the retry recorded the action twice.
+   */
+  it("closes its report in the same transaction as the action", async () => {
+    const reportId = await report("profile", author.id);
+    await suspendAccount(db, operator.id, author.id, "repeated abuse", { reportId });
+
+    const [row] = await db.select().from(schema.reports).where(eq(schema.reports.id, reportId));
+    expect(row.state).toBe("resolved");
+    expect(await listOpenReports(db)).toHaveLength(0);
+    expect(await db.select().from(schema.moderationActions)).toHaveLength(1);
+  });
+});
+
+describe("the queue is bounded", () => {
+  /**
+   * Abuse arrives in volume and each row costs another query or two to
+   * describe. An unbounded read makes the page fail exactly when it is needed.
+   */
+  it("returns one page and counts the rest", async () => {
+    for (let i = 0; i < 5; i += 1) {
+      await report("profile", author.id, new Date(Date.UTC(2026, 8, 1, i)));
+    }
+    expect(await countOpenReports(db)).toBe(5);
+    const page = await listOpenReports(db, new Date(), 2);
+    expect(page).toHaveLength(2);
+    // Oldest first, so a page is always the work most overdue.
+    expect(page[0].createdAt.getTime()).toBeLessThan(page[1].createdAt.getTime());
   });
 });

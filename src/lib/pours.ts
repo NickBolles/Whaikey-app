@@ -5,6 +5,7 @@ import * as schema from "@/db/schema";
 import { POUR_VISIBILITIES, SERVING_STYLES, type Pour, type PourVisibility, type TastingNote } from "@/db/schema";
 import { canViewBottle } from "@/lib/catalog-visibility";
 import { isValidLeaf } from "@/lib/flavor-wheel";
+import { isModerationHidden } from "@/lib/moderation";
 import { refreshUserPalate } from "@/lib/palate-store";
 import { getSocialPrefs } from "@/lib/social";
 
@@ -349,6 +350,14 @@ export class PendingBottleError extends Error {
  * re-expose a pour that "make everything private" just hid, with the change
  * surfacing only when social is re-enabled (docs/SOCIAL.md US-11).
  */
+/** Raised when the owner tries to re-publish something moderation took down. */
+export class ModeratedError extends Error {
+  constructor() {
+    super("A moderator hid this note");
+    this.name = "ModeratedError";
+  }
+}
+
 export async function updatePourVisibility(
   db: DB,
   userId: string,
@@ -372,6 +381,18 @@ export async function updatePourVisibility(
       if (row?.status === "user_submitted") throw new PendingBottleError();
     }
     if (visibility !== "private") {
+      /**
+       * A moderation hide is not the owner's to undo (PLAN.md §9.4).
+       *
+       * Hiding a pour uses the visibility field, which is the owner's own
+       * control — so without this the operator hides it, the report closes,
+       * and the owner puts it straight back. That is the same hole a profile
+       * "hide" had, and the answer there was to refuse the action; here the
+       * action is right and it is this door that has to close. Only an
+       * operator's `unhide` reopens it.
+       */
+      if (await isModerationHidden(tx, "pour", pourId)) throw new ModeratedError();
+
       // Same lock as makeEverythingPrivate: the check and the write are
       // atomic w.r.t. a concurrent US-11 reset.
       await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`social-reset:${userId}`}))`);
