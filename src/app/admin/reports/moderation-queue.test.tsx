@@ -41,8 +41,8 @@ function queue(overrides: ReportOverrides = {}) {
       audit={[]}
       suspended={[]}
       standingHides={[]}
-      olderHidesCursor={null}
-      olderSuspendedCursor={null}
+      newerHidesCursor={null}
+      newerSuspendedCursor={null}
     />
   );
 }

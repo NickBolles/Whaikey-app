@@ -58,9 +58,9 @@ export default async function AdminReportsPage({
 }: {
   // A cursor rather than a cap: past a cap, the oldest takedowns lose the only
   // control that lifts them, which is the audit-window bug one level out.
-  searchParams: Promise<{ hidesBefore?: string; suspendedBefore?: string }>;
+  searchParams: Promise<{ hidesAfter?: string; suspendedAfter?: string }>;
 }) {
-  const { hidesBefore, suspendedBefore } = await searchParams;
+  const { hidesAfter, suspendedAfter } = await searchParams;
   const user = await getSessionUser();
   if (!isOperator(user)) notFound();
 
@@ -75,11 +75,11 @@ export default async function AdminReportsPage({
     // Suspending resolves the report, so the reinstate control next to it goes
     // away with the row. An appeal arriving later needs somewhere to be acted
     // on, and this is it.
-    listSuspendedAccounts(db, { before: parseSuspendedCursor(suspendedBefore) }),
+    listSuspendedAccounts(db, { after: parseSuspendedCursor(suspendedAfter) }),
     // Its own query, not a filter over the audit list: that list is bounded
     // history, so a hide older than fifty actions would lose the only control
     // that lifts it — and an appeal about it would have no answer in the app.
-    listStandingHides(db, { before: parseHidesCursor(hidesBefore) }),
+    listStandingHides(db, { after: parseHidesCursor(hidesAfter) }),
   ]);
 
   return (
@@ -94,9 +94,9 @@ export default async function AdminReportsPage({
         ...a,
         suspendedAt: a.suspendedAt.toISOString(),
       }))}
-      olderSuspendedCursor={suspended.nextCursor}
+      newerSuspendedCursor={suspended.nextCursor}
       standingHides={standingHides.hides.map((h) => ({ ...h, at: h.at.toISOString() }))}
-      olderHidesCursor={standingHides.nextCursor}
+      newerHidesCursor={standingHides.nextCursor}
     />
   );
 }

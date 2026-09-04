@@ -78,8 +78,8 @@ export function ModerationQueue({
   audit,
   suspended,
   standingHides,
-  olderHidesCursor,
-  olderSuspendedCursor,
+  newerHidesCursor,
+  newerSuspendedCursor,
 }: {
   reports: QueuedReportView[];
   open: number;
@@ -89,8 +89,8 @@ export function ModerationQueue({
   audit: AuditView[];
   suspended: SuspendedView[];
   standingHides: StandingHideView[];
-  olderHidesCursor: string | null;
-  olderSuspendedCursor: string | null;
+  newerHidesCursor: string | null;
+  newerSuspendedCursor: string | null;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
@@ -175,12 +175,12 @@ export function ModerationQueue({
               />
             ))}
           </ul>
-          {olderSuspendedCursor && (
+          {newerSuspendedCursor && (
             <Link
-              href={`/admin/reports?suspendedBefore=${encodeURIComponent(olderSuspendedCursor)}`}
+              href={`/admin/reports?suspendedAfter=${encodeURIComponent(newerSuspendedCursor)}`}
               className="text-sm text-accent hover:underline w-fit"
             >
-              Older suspensions →
+              Newer suspensions →
             </Link>
           )}
         </section>
@@ -202,12 +202,12 @@ export function ModerationQueue({
               />
             ))}
           </ul>
-          {olderHidesCursor && (
+          {newerHidesCursor && (
             <Link
-              href={`/admin/reports?hidesBefore=${encodeURIComponent(olderHidesCursor)}`}
+              href={`/admin/reports?hidesAfter=${encodeURIComponent(newerHidesCursor)}`}
               className="text-sm text-accent hover:underline w-fit"
             >
-              Older hides →
+              Newer hides →
             </Link>
           )}
         </section>

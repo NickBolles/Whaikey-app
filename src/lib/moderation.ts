@@ -1,5 +1,6 @@
 import {
   and,
+  asc,
   desc,
   eq,
   exists as sqlExists,
@@ -1546,7 +1547,7 @@ export async function listStandingHides(
    * sharing the boundary instant, and those rows are neither on the page that
    * ended nor on the one that follows.
    */
-  options: { limit?: number; before?: number } = {},
+  options: { limit?: number; after?: number } = {},
 ): Promise<{ hides: StandingHide[]; nextCursor: string | null }> {
   const limit = options.limit ?? STANDING_HIDE_PAGE_SIZE;
   // `distinct on` picks the latest hide/unhide per subject inside the
@@ -1605,10 +1606,13 @@ export async function listStandingHides(
           (${latest.subjectType} = 'pour' and exists (select 1 from pours p where p.id = ${latest.subjectId}))
           or (${latest.subjectType} = 'comment' and exists (select 1 from comments c where c.id = ${latest.subjectId}))
         )`,
-        options.before !== undefined ? sql`${latest.seq} < ${options.before}` : undefined,
+        // `>`, oldest-first, for the reason `listSuspendedAccountsIn` gives:
+        // the lift control lives here and only here, so the decision nobody
+        // has looked at in months is the one that must not be page five.
+        options.after !== undefined ? sql`${latest.seq} > ${options.after}` : undefined,
       ),
     )
-    .orderBy(desc(latest.seq))
+    .orderBy(asc(latest.seq))
     // One extra row is how the page knows there is another one.
     .limit(limit + 1);
 
@@ -1692,7 +1696,7 @@ export interface SuspendedAccount {
  */
 export async function listSuspendedAccounts(
   db: DB,
-  options: { limit?: number; before?: { at: Date; userId: string } } = {},
+  options: { limit?: number; after?: { at: Date; userId: string } } = {},
 ): Promise<{ accounts: SuspendedAccount[]; nextCursor: string | null }> {
   const limit = options.limit ?? SUSPENDED_PAGE_SIZE;
   /**
@@ -1708,16 +1712,16 @@ export async function listSuspendedAccounts(
    */
   return db.transaction(async (tx) => {
     await tx.execute(sql`set transaction isolation level repeatable read`);
-    return listSuspendedAccountsIn(tx, limit, options.before);
+    return listSuspendedAccountsIn(tx, limit, options.after);
   });
 }
 
 async function listSuspendedAccountsIn(
   db: DB,
   limit: number,
-  before: { at: Date; userId: string } | undefined,
+  after: { at: Date; userId: string } | undefined,
 ): Promise<{ accounts: SuspendedAccount[]; nextCursor: string | null }> {
-  const options = { before };
+  const options = { after };
   const rows = await db
     .select({
       userId: userProfiles.userId,
@@ -1728,14 +1732,25 @@ async function listSuspendedAccountsIn(
     })
     .from(userProfiles)
     .where(
-      options.before
+      options.after
         ? and(
             isNotNull(userProfiles.suspendedAt),
-            sql`(${userProfiles.suspendedAt}, ${userProfiles.userId}) < (${options.before.at}, ${options.before.userId})`,
+            /**
+             * `>`, because the page runs oldest-first.
+             *
+             * Binding `docs/STORYBOARD.md` §3.17: both standing lists are
+             * "paged oldest-cursor-first". Newest-first put the oldest
+             * standing suspension — the one most likely to have been forgotten
+             * — behind however many pages of recent decisions, on the only
+             * screen carrying the control that lifts it. Reachable is not the
+             * same as seen, which is the argument the report queue above makes
+             * about its own ordering.
+             */
+            sql`(${userProfiles.suspendedAt}, ${userProfiles.userId}) > (${options.after.at}, ${options.after.userId})`,
           )
         : isNotNull(userProfiles.suspendedAt),
     )
-    .orderBy(desc(userProfiles.suspendedAt), desc(userProfiles.userId))
+    .orderBy(asc(userProfiles.suspendedAt), asc(userProfiles.userId))
     .limit(limit + 1);
 
   const window = rows.slice(0, limit);

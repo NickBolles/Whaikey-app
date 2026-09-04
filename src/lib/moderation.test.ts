@@ -1043,7 +1043,7 @@ describe("standing hides are paged, not capped", () => {
    * A cap is the audit-window bug one level out: past it, the oldest takedowns
    * lose the only control that lifts them.
    */
-  it("hands back a cursor and the older page follows it", async () => {
+  it("hands back a cursor and the newer page follows it, oldest first", async () => {
     const bottle = await createTestBottle(db);
     for (let i = 0; i < 3; i += 1) {
       const pourId = uid("pour");
@@ -1051,12 +1051,15 @@ describe("standing hides are paged, not capped", () => {
       await hideSubject(db, operator.id, "pour", pourId, { note: `hide ${i}` }, new Date(1_000 + i));
     }
 
+    // Oldest first: binding STORYBOARD §3.17 pages both standing lists
+    // oldest-cursor-first, because the decision nobody has looked at in months
+    // is the one that must not be page five on the only screen that lifts it.
     const first = await listStandingHides(db, { limit: 2 });
-    expect(first.hides.map((h) => h.note)).toEqual(["hide 2", "hide 1"]);
+    expect(first.hides.map((h) => h.note)).toEqual(["hide 0", "hide 1"]);
     expect(first.nextCursor).not.toBeNull();
 
-    const next = await listStandingHides(db, { limit: 2, before: Number(first.nextCursor) });
-    expect(next.hides.map((h) => h.note)).toEqual(["hide 0"]);
+    const next = await listStandingHides(db, { limit: 2, after: Number(first.nextCursor) });
+    expect(next.hides.map((h) => h.note)).toEqual(["hide 2"]);
     expect(next.nextCursor).toBeNull();
   });
 
@@ -1076,12 +1079,12 @@ describe("standing hides are paged, not capped", () => {
     }
 
     const seen: string[] = [];
-    let before: number | undefined;
+    let after: number | undefined;
     for (let page = 0; page < 4; page += 1) {
-      const result = await listStandingHides(db, { limit: 2, before });
+      const result = await listStandingHides(db, { limit: 2, after });
       seen.push(...result.hides.map((h) => h.note!));
       if (!result.nextCursor) break;
-      before = Number(result.nextCursor);
+      after = Number(result.nextCursor);
     }
     expect(seen.sort()).toEqual(["tied 0", "tied 1", "tied 2", "tied 3"]);
   });
@@ -1104,13 +1107,13 @@ describe("suspended accounts are paged too", () => {
     }
 
     const seen: string[] = [];
-    let before: { at: Date; userId: string } | undefined;
+    let after: { at: Date; userId: string } | undefined;
     for (let page = 0; page < 4; page += 1) {
-      const result = await listSuspendedAccounts(db, { limit: 2, before });
+      const result = await listSuspendedAccounts(db, { limit: 2, after });
       seen.push(...result.accounts.map((a) => a.userId));
       if (!result.nextCursor) break;
       const cut = result.nextCursor.lastIndexOf("|");
-      before = {
+      after = {
         at: new Date(result.nextCursor.slice(0, cut)),
         userId: result.nextCursor.slice(cut + 1),
       };
@@ -2336,5 +2339,40 @@ describe("a legacy comment whose author has since claimed a handle", () => {
     const [row] = await listOpenReports(db);
     expect(row.liveReadable).toBe(true);
     expect(row.preview).toBe("written with a handle");
+  });
+});
+
+
+/**
+ * Binding `docs/STORYBOARD.md` §3.17 pages both standing lists
+ * oldest-cursor-first. They were newest-first, which put the decision nobody
+ * has looked at in months behind however many pages of recent ones — on the
+ * only screen carrying the control that lifts it. Reachable is not the same as
+ * seen; it is the argument the report queue above already makes about itself.
+ */
+describe("standing lists run oldest first", () => {
+  it("orders suspended accounts oldest first and pages forward in time", async () => {
+    const suspended: string[] = [];
+    for (let i = 0; i < 3; i += 1) {
+      const account = await createTestUser(db);
+      await profileFor(account, `susp_${i}`);
+      await suspendAccount(db, operator.id, account.id, `reason ${i}`, {}, new Date(1_000 + i));
+      suspended.push(account.id);
+    }
+
+    const first = await listSuspendedAccounts(db, { limit: 2 });
+    expect(first.accounts.map((a) => a.userId)).toEqual([suspended[0], suspended[1]]);
+    expect(first.nextCursor).not.toBeNull();
+
+    const cut = first.nextCursor!.lastIndexOf("|");
+    const next = await listSuspendedAccounts(db, {
+      limit: 2,
+      after: {
+        at: new Date(first.nextCursor!.slice(0, cut)),
+        userId: first.nextCursor!.slice(cut + 1),
+      },
+    });
+    expect(next.accounts.map((a) => a.userId)).toEqual([suspended[2]]);
+    expect(next.nextCursor).toBeNull();
   });
 });
