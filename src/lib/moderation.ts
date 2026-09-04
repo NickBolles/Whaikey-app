@@ -791,7 +791,16 @@ export interface StandingHide {
  */
 export async function listStandingHides(
   db: DB,
-  options: { limit?: number; before?: Date } = {},
+  /**
+   * `before` is a compound cursor — the previous page's last `(at, actionId)`.
+   *
+   * A timestamp alone drops every row that shares the boundary instant: they
+   * are neither on the page that ended nor on the one that follows, and a
+   * standing hide that falls in that gap loses the only control that lifts it.
+   * Two hides in the same millisecond is not exotic — a script, or one
+   * operator working quickly.
+   */
+  options: { limit?: number; before?: { at: Date; actionId: string } } = {},
 ): Promise<{ hides: StandingHide[]; nextCursor: string | null }> {
   const limit = options.limit ?? STANDING_HIDE_PAGE_SIZE;
   // `distinct on` picks the latest hide/unhide per subject inside the
@@ -830,17 +839,22 @@ export async function listStandingHides(
     .innerJoin(user, eq(user.id, latest.actorId))
     .where(
       options.before
-        ? and(eq(latest.action, "hide"), sql`${latest.createdAt} < ${options.before}`)
+        ? and(
+            eq(latest.action, "hide"),
+            sql`(${latest.createdAt}, ${latest.id}) < (${options.before.at}, ${options.before.actionId})`,
+          )
         : eq(latest.action, "hide"),
     )
-    .orderBy(desc(latest.createdAt))
+    .orderBy(desc(latest.createdAt), desc(latest.id))
     // One extra row is how the page knows there is another one.
     .limit(limit + 1);
 
   const page = rows.slice(0, limit);
+  const last = page[page.length - 1];
   return {
     hides: page.map((row) => ({ ...row, subjectType: row.subjectType as "pour" | "comment" })),
-    nextCursor: rows.length > limit ? page[page.length - 1].at.toISOString() : null,
+    nextCursor:
+      rows.length > limit && last ? `${last.at.toISOString()}|${last.actionId}` : null,
   };
 }
 

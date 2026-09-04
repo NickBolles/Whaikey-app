@@ -27,6 +27,17 @@ export const dynamic = "force-dynamic";
  * `notFound()` rather than a 403 for a non-operator: the queue's existence is
  * not something a signed-in stranger needs confirmed.
  */
+/** `<iso>|<actionId>`; anything else is treated as no cursor rather than an error. */
+function parseHidesCursor(raw?: string): { at: Date; actionId: string } | undefined {
+  if (!raw) return undefined;
+  const cut = raw.lastIndexOf("|");
+  if (cut < 1) return undefined;
+  const at = new Date(raw.slice(0, cut));
+  const actionId = raw.slice(cut + 1);
+  if (Number.isNaN(at.getTime()) || !actionId) return undefined;
+  return { at, actionId };
+}
+
 export default async function AdminReportsPage({
   searchParams,
 }: {
@@ -53,7 +64,7 @@ export default async function AdminReportsPage({
     // Its own query, not a filter over the audit list: that list is bounded
     // history, so a hide older than fifty actions would lose the only control
     // that lifts it — and an appeal about it would have no answer in the app.
-    listStandingHides(db, { before: hidesBefore ? new Date(hidesBefore) : undefined }),
+    listStandingHides(db, { before: parseHidesCursor(hidesBefore) }),
   ]);
 
   return (

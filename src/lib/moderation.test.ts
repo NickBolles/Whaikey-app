@@ -982,6 +982,11 @@ describe("standing hides are paged, not capped", () => {
    * A cap is the audit-window bug one level out: past it, the oldest takedowns
    * lose the only control that lifts them.
    */
+  function cursor(raw: string): { at: Date; actionId: string } {
+    const cut = raw.lastIndexOf("|");
+    return { at: new Date(raw.slice(0, cut)), actionId: raw.slice(cut + 1) };
+  }
+
   it("hands back a cursor and the older page follows it", async () => {
     const bottle = await createTestBottle(db);
     for (let i = 0; i < 3; i += 1) {
@@ -994,8 +999,34 @@ describe("standing hides are paged, not capped", () => {
     expect(first.hides.map((h) => h.note)).toEqual(["hide 2", "hide 1"]);
     expect(first.nextCursor).not.toBeNull();
 
-    const next = await listStandingHides(db, { limit: 2, before: new Date(first.nextCursor!) });
+    const next = await listStandingHides(db, { limit: 2, before: cursor(first.nextCursor!) });
     expect(next.hides.map((h) => h.note)).toEqual(["hide 0"]);
     expect(next.nextCursor).toBeNull();
+  });
+
+  /**
+   * A timestamp-only cursor drops every row sharing the boundary instant: they
+   * are on neither page, and a hide lost in that gap loses the only control
+   * that lifts it. Two hides in one millisecond is a script, or one operator
+   * working quickly.
+   */
+  it("does not lose hides that share the boundary timestamp", async () => {
+    const bottle = await createTestBottle(db);
+    const sameInstant = new Date(5_000);
+    for (let i = 0; i < 4; i += 1) {
+      const pourId = uid("pour");
+      await db.insert(schema.pours).values({ id: pourId, userId: author.id, bottleId: bottle.id });
+      await hideSubject(db, operator.id, "pour", pourId, { note: `tied ${i}` }, sameInstant);
+    }
+
+    const seen: string[] = [];
+    let before: { at: Date; actionId: string } | undefined;
+    for (let page = 0; page < 4; page += 1) {
+      const result = await listStandingHides(db, { limit: 2, before });
+      seen.push(...result.hides.map((h) => h.note!));
+      if (!result.nextCursor) break;
+      before = cursor(result.nextCursor);
+    }
+    expect(seen.sort()).toEqual(["tied 0", "tied 1", "tied 2", "tied 3"]);
   });
 });
