@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const permissions = { receive: "granted" as string };
 const listeners: Record<string, (payload: { value: string }) => void> = {};
 
-const checkPermissions = vi.fn(async () => permissions);
+const checkPermissions = vi.fn(async (): Promise<{ receive: string }> => permissions);
 const requestPermissions = vi.fn(async () => permissions);
 const register = vi.fn(async () => {
   listeners.registration?.({ value: "tok-refreshed" });
@@ -127,6 +127,19 @@ describe("disablePush", () => {
     await expect(disablePush()).resolves.toBe(true);
     // Not a tokenless DELETE: there is nothing of ours to release, and asking
     // for one would take the account's other devices with it.
+    expect(calls.filter((c) => c.method === "DELETE")).toHaveLength(0);
+  });
+
+  /**
+   * "Unavailable" is what `pushPermissionState` says when `checkPermissions`
+   * throws — a question we could not answer, not an answer. Reading it as
+   * "never registered" would report a release that never happened.
+   */
+  it("reports failure when it cannot find out whether anything is registered", async () => {
+    window.localStorage.clear();
+    checkPermissions.mockRejectedValueOnce(new Error("plugin unavailable"));
+    const { disablePush } = await import("./push");
+    await expect(disablePush()).resolves.toBe(false);
     expect(calls.filter((c) => c.method === "DELETE")).toHaveLength(0);
   });
 

@@ -153,6 +153,17 @@ Two consequences to be deliberate about:
   is a worse outage than the one it prevents. Set the variable before the first
   store build; unset, there is no floor and nobody is locked out.
 
+  **What the floor does not cover, and cannot from here.** The check runs in the
+  React tree the deploy just sent, so it necessarily runs *after* that tree has
+  mounted: the splash is held until it settles and the gate paints above
+  everything, but a sibling client effect calling a plugin the installed binary
+  lacks has already run by then. Closing that needs the check to happen in the
+  **native launcher**, before the WebView is pointed at `server.url` — the
+  bundled shell deciding whether to load the remote app at all. That is an
+  architecture change to §2.2's option C rather than a patch, and it is the
+  right shape for it; recorded here so the next person to touch the shell knows
+  the gate is a UI gate today, not a boot gate.
+
 Option B stays documented as the Phase 5 escape hatch if offline-first becomes the
 product priority — see §4, Phase 5.
 

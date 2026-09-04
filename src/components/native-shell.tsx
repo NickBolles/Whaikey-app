@@ -36,6 +36,17 @@ const SPLASH_CHECK_TIMEOUT_MS = 3_000;
 export function NativeShell({ userId }: { userId?: string | null }) {
   const router = useRouter();
   const [outdated, setOutdated] = useState<ShellVersionCheck | null>(null);
+  /**
+   * True while a resume-time version check is in flight.
+   *
+   * Delaying `router.refresh()` was only half of it: the header, the nav and
+   * the deep-link handler stay live in the meantime, so a tap or an inbound
+   * link during the check would navigate into the new deploy before anyone
+   * knew whether this binary could render it. This holds an inert surface over
+   * the app until the answer arrives — the same job the splash does on a cold
+   * start.
+   */
+  const [checking, setChecking] = useState(false);
 
   /**
    * Both directions. A floor raised by mistake and then lowered again — which
@@ -217,7 +228,9 @@ export function NativeShell({ userId }: { userId?: string | null }) {
        * while the app was away therefore takes effect on the next foreground,
        * not the next cold launch.
        */
+      setChecking(true);
       void checkShellVersion().then((check) => {
+        setChecking(false);
         applyShellCheck(check);
         if (check.status === "update_required") return;
 
@@ -241,6 +254,20 @@ export function NativeShell({ userId }: { userId?: string | null }) {
       document.documentElement.classList.remove("native-app");
     };
   }, [applyShellCheck, router, syncQueue]);
+
+  if (checking && !outdated) {
+    return (
+      <div
+        role="status"
+        aria-label="Checking for an update"
+        className="fixed inset-0 z-[100] flex items-center justify-center bg-background"
+      >
+        <span aria-hidden className="text-5xl drop-shadow-[0_0_24px_rgba(232,161,60,0.25)]">
+          🥃
+        </span>
+      </div>
+    );
+  }
 
   if (!outdated) return null;
 

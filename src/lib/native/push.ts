@@ -204,9 +204,15 @@ export async function disablePush(): Promise<boolean> {
    */
   let token = rememberedToken();
   if (!token) {
-    // A device that was never granted permission has nothing registered, which
-    // is the one case where "no token" really is "nothing to release".
-    if ((await pushPermissionState()) !== "granted") return true;
+    /**
+     * Only a *definite* never-registered state counts as nothing to release.
+     * `pushPermissionState` also answers "unavailable" when `checkPermissions`
+     * throws, and reading that as "never registered" would report a release
+     * that never happened — which on a shared device is the whole bug.
+     */
+    const permission = await pushPermissionState();
+    if (permission === "prompt" || permission === "denied") return true;
+    if (permission !== "granted") return false;
     token = await resolveToken();
   }
   // Granted, but we could not find out which token is ours — that is a failure
