@@ -1,7 +1,9 @@
 import { and, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import type { DB } from "@/db";
+import { alias } from "drizzle-orm/pg-core";
 import {
   comments,
+  follows,
   moderationActions,
   pourShares,
   pours,
@@ -13,6 +15,9 @@ import {
   type ModerationActionKind,
   type ReportSubjectType,
 } from "@/db/schema";
+
+/** The reciprocal edge, for the mutual-follow (friends) test. */
+const mutual = alias(follows, "mutual_follows");
 
 /**
  * The moderation queue (PLAN.md §9.4, review PLAN-C9).
@@ -230,6 +235,51 @@ async function listOpenReportsIn(
   // author's settings say.
   for (const p of parentPourRows) ownerIds.push(p.userId);
 
+  /**
+   * Which owners still have an audience for a friends- or followers-tier pour.
+   *
+   * `canViewPourContext` does not stop at the visibility string for those two
+   * tiers — it requires a mutual friendship or an accepted follow. So a
+   * friends-only pour whose owner's last friendship has gone is shared with
+   * nobody, even though `visibility` still reads "friends", and treating the
+   * string as the answer would put a private revision under "Now".
+   *
+   * Two set queries for the page rather than a count per row: `follows` rows
+   * are the same table both tiers read, and blocks already delete them in both
+   * directions (`blockUser`), so a blocked pair is not an audience here either.
+   */
+  const tierOwnerIds = Array.from(
+    new Set(
+      [...pourRows, ...parentPourRows]
+        .filter((p) => p.visibility === "friends" || p.visibility === "followers")
+        .map((p) => p.userId),
+    ),
+  );
+  const [followerOf, friendOf] = await Promise.all([
+    tierOwnerIds.length
+      ? db
+          .selectDistinct({ userId: follows.followeeId })
+          .from(follows)
+          .where(and(inArray(follows.followeeId, tierOwnerIds), eq(follows.state, "accepted")))
+      : [],
+    tierOwnerIds.length
+      ? db
+          .selectDistinct({ userId: follows.followeeId })
+          .from(follows)
+          .innerJoin(
+            mutual,
+            and(
+              eq(mutual.followerId, follows.followeeId),
+              eq(mutual.followeeId, follows.followerId),
+              eq(mutual.state, "accepted"),
+            ),
+          )
+          .where(and(inArray(follows.followeeId, tierOwnerIds), eq(follows.state, "accepted")))
+      : [],
+  ]);
+  const hasFollower = new Set(followerOf.map((r) => r.userId));
+  const hasFriend = new Set(friendOf.map((r) => r.userId));
+
   const [profileRows, hideActions, suspendActions] = await Promise.all([
     ownerIds.length
       ? db
@@ -282,6 +332,11 @@ async function listOpenReportsIn(
   const sharedWithAnyone = (pourId: string): boolean => {
     const pour = pourVisibility.get(pourId);
     if (!pour || pour.visibility === "private") return false;
+    // The tier has to have somebody in it. `canViewPourContext` asks the same
+    // question of a specific viewer; with no viewer to ask about, the honest
+    // form is whether the tier is empty.
+    if (pour.visibility === "friends" && !hasFriend.has(pour.userId)) return false;
+    if (pour.visibility === "followers" && !hasFollower.has(pour.userId)) return false;
     // The **pour owner's** switch, which is what `canViewPourContext` keys on
     // before it looks at the tier at all. Checking the comment author's and
     // not the pour owner's was the gap: a comment under a withdrawn pour is
@@ -628,7 +683,19 @@ export async function suspendAccount(
   actorId: string,
   userId: string,
   reason: string,
-  options: { reportId?: string } = {},
+  /**
+   * `subject` is the reported thing, when the report was about a comment or a
+   * pour rather than the profile.
+   *
+   * Suspending used to leave it alone, and the two actions were mutually
+   * exclusive per report: whichever the operator clicked resolved the report
+   * and took the row — with it, the only place the subject's id appeared. So
+   * "suspend the author" left the reported comment in place, hidden only by
+   * the author's own suspended `socialEnabled`; after a reinstatement and
+   * their own re-enable, `listComments` published it again. A suspension is
+   * not a takedown, and the queue has to be able to do both.
+   */
+  options: { reportId?: string; subject?: { subjectType: "comment" | "pour"; subjectId: string } } = {},
   now = new Date(),
 ): Promise<void> {
   if (actorId === userId) {
@@ -680,6 +747,10 @@ export async function suspendAccount(
     });
     if (!standing) throw new UnknownSubjectError();
     if (standing.suspendedAt != null) {
+      // The account is already answered for, but *this* report's subject may
+      // not be: a second report about the same account is usually about a
+      // different comment.
+      await hideReportedSubject(tx, actorId, options.subject, reason, now);
       if (options.reportId) await resolveOpenReport(tx, options.reportId, { ownerId: userId });
       return;
     }
@@ -730,11 +801,47 @@ export async function suspendAccount(
         set: { defaultPourVisibility: "private", updatedAt: now },
       });
 
-    await record(tx, actorId, "suspend", "profile", userId, { ...options, note: reason }, now);
+    await record(tx, actorId, "suspend", "profile", userId, { reportId: options.reportId, note: reason }, now);
+    await hideReportedSubject(tx, actorId, options.subject, reason, now);
     // A suspension's report has to be about something this account owns —
     // their profile, or a pour or comment of theirs.
     if (options.reportId) await resolveOpenReport(tx, options.reportId, { ownerId: userId });
   });
+}
+
+/**
+ * Take the reported content down as part of a suspension.
+ *
+ * Inside the caller's transaction, so the account action and the content
+ * action commit together or not at all — an operator who suspends must never
+ * end up with the account answered for and the comment still live.
+ *
+ * A hide over a standing hide records nothing, exactly as `hideSubject`'s own
+ * branch does, and a subject that has since been deleted is not an error here:
+ * the suspension is the point, and the content being gone is the outcome the
+ * hide wanted anyway.
+ */
+async function hideReportedSubject(
+  tx: DB,
+  actorId: string,
+  subject: { subjectType: "comment" | "pour"; subjectId: string } | undefined,
+  reason: string,
+  now: Date,
+): Promise<void> {
+  if (!subject) return;
+  const { subjectType, subjectId } = subject;
+  /**
+   * Third lock, after `social-reset` and `moderation:profile`. Deadlock-free
+   * because nothing else takes those two: `hideSubject` takes this key alone,
+   * so there is no cycle to close.
+   */
+  await tx.execute(
+    sql`select pg_advisory_xact_lock(hashtext(${moderationLockKey(subjectType, subjectId)}))`,
+  );
+  if (await isModerationHidden(tx, subjectType, subjectId)) return;
+  const changed = await applyHide(tx, subjectType, subjectId, now);
+  if (!changed) return;
+  await record(tx, actorId, "hide", subjectType, subjectId, { note: reason }, now);
 }
 
 /**

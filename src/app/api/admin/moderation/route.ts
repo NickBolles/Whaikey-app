@@ -60,6 +60,17 @@ const bodySchema = z.discriminatedUnion("action", [
     // reason for is one nobody can appeal.
     reason: z.string().trim().min(1).max(1000),
     reportId: z.string().min(1).optional(),
+    /**
+     * The reported comment or pour, when the report was about one.
+     *
+     * Suspending takes it down in the same transaction. Without this the two
+     * actions were mutually exclusive per report — whichever the operator
+     * clicked resolved it and took the row, and the row was the only place the
+     * subject's id appeared — so suspending left the reported content to
+     * return the moment the account was reinstated and re-enabled.
+     */
+    subjectType: z.enum(HIDEABLE_SUBJECT_TYPES).optional(),
+    subjectId: z.string().min(1).optional(),
   }),
   z.object({
     action: z.literal("reinstate"),
@@ -127,6 +138,10 @@ export async function POST(request: Request): Promise<NextResponse> {
       } else if (input.action === "suspend") {
         await suspendAccount(db, user.id, input.userId, input.reason, {
           reportId: input.reportId,
+          subject:
+            input.subjectType && input.subjectId
+              ? { subjectType: input.subjectType, subjectId: input.subjectId }
+              : undefined,
         });
       } else if (input.action === "reinstate") {
         await reinstateAccount(
