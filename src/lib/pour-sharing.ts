@@ -102,7 +102,8 @@ export async function createPourShare(
          * because `getPublicPourShare` never consults visibility. Revoking
          * what exists and leaving the mint open is not a takedown, it is a
          * pause. Under the subject's moderation lock so the check and the
-         * insert cannot straddle a hide.
+         * insert cannot straddle a hide — taken after `social-reset` above,
+         * the one order every path that needs both takes.
          */
         await tx.execute(
           sql`select pg_advisory_xact_lock(hashtext(${moderationLockKey("pour", pourId)}))`,

@@ -38,6 +38,8 @@ interface AuditView {
   note: string | null;
   createdAt: string;
   actorName: string;
+  /** Only the hide currently in force over its subject can be lifted. */
+  standing: boolean;
 }
 
 interface SuspendedView {
@@ -165,8 +167,13 @@ export function ModerationQueue({
                 {entry.note && <div className="mt-1 italic">{entry.note}</div>}
                 {/* A hide sticks — its author cannot undo it — so an upheld
                     appeal has to be actionable here. The report it came from
-                    is resolved and gone from the queue above by then. */}
-                {entry.action === "hide" && entry.subjectType !== "profile" && (
+                    is resolved and gone from the queue above by then.
+
+                    Only on the hide that is currently in force: `unhideSubject`
+                    acts on the subject, not on this row, so a button on a
+                    lifted or superseded entry would take down today's decision
+                    from months-old history. */}
+                {entry.standing && entry.subjectType !== "profile" && (
                   <button
                     type="button"
                     disabled={busy === entry.id}

@@ -17,8 +17,9 @@ import {
   moderationNoticeFor,
   unhideSubject,
   countOpenReports,
+  commentNoticesForAuthor,
+  ReportAlreadyHandledError,
   reinstateAccount,
-  resolveReport,
   suspendAccount,
 } from "./moderation";
 import { AccountSuspendedError, setSocialEnabled } from "./social";
@@ -127,7 +128,6 @@ describe("hiding", () => {
     const reportId = await report("comment", commentId);
 
     await hideSubject(db, operator.id, "comment", commentId, { reportId, note: "abusive" });
-    await resolveReport(db, reportId);
 
     const [row] = await db.select().from(schema.comments).where(eq(schema.comments.id, commentId));
     expect(row.deletedAt).not.toBeNull();
@@ -264,7 +264,6 @@ describe("the audit trail", () => {
   it("records every decision with its actor and reason", async () => {
     const reportId = await report("profile", author.id);
     await suspendAccount(db, operator.id, author.id, "repeated abuse", { reportId });
-    await resolveReport(db, reportId);
 
     const entries = await listModerationActions(db);
     expect(entries).toHaveLength(1);
@@ -345,7 +344,6 @@ describe("suspension", () => {
   it("stays findable after its report is gone, so an appeal can be acted on", async () => {
     const reportId = await report("profile", author.id);
     await suspendAccount(db, operator.id, author.id, "repeated abuse", { reportId });
-    await resolveReport(db, reportId);
     expect(await listOpenReports(db)).toHaveLength(0);
 
     const suspended = await listSuspendedAccounts(db);
@@ -529,5 +527,120 @@ describe("the queue is bounded", () => {
     expect(page).toHaveLength(2);
     // Oldest first, so a page is always the work most overdue.
     expect(page[0].createdAt.getTime()).toBeLessThan(page[1].createdAt.getTime());
+  });
+});
+
+describe("a report is the claim on the action", () => {
+  /**
+   * Two stale tabs: one dismisses, one suspends. Ignoring the affected-row
+   * count let the loser commit its suspension anyway, leaving a report shown
+   * as dismissed with a suspension and two conflicting audit rows behind it.
+   */
+  it("refuses an action against a report somebody else already handled", async () => {
+    const reportId = await report("profile", author.id);
+    await dismissReport(db, operator.id, reportId, "not a violation");
+
+    await expect(
+      suspendAccount(db, operator.id, author.id, "repeated abuse", { reportId }),
+    ).rejects.toBeInstanceOf(ReportAlreadyHandledError);
+
+    const [profile] = await db
+      .select()
+      .from(schema.userProfiles)
+      .where(eq(schema.userProfiles.userId, author.id));
+    expect(profile.suspendedAt).toBeNull();
+    // One decision, one record.
+    const actions = await db.select().from(schema.moderationActions);
+    expect(actions).toHaveLength(1);
+    expect(actions[0].action).toBe("dismiss");
+  });
+
+  it("still acts when no report is named", async () => {
+    await expect(
+      suspendAccount(db, operator.id, author.id, "found another way"),
+    ).resolves.toBeUndefined();
+  });
+});
+
+describe("lifting a comment hide", () => {
+  async function commentBy(userId: string, body: string) {
+    const bottle = await createTestBottle(db);
+    const pourId = uid("pour");
+    await db.insert(schema.pours).values({ id: pourId, userId: reporter.id, bottleId: bottle.id });
+    const commentId = uid("comment");
+    await db.insert(schema.comments).values({ id: commentId, pourId, userId, body });
+    return { pourId, commentId };
+  }
+
+  it("restores what the hide removed", async () => {
+    const { commentId } = await commentBy(author.id, "no");
+    await hideSubject(db, operator.id, "comment", commentId, { note: "abusive" });
+    await unhideSubject(db, operator.id, "comment", commentId, "appeal upheld");
+
+    const [row] = await db.select().from(schema.comments).where(eq(schema.comments.id, commentId));
+    expect(row.deletedAt).toBeNull();
+  });
+
+  /**
+   * `applyHide` treats an already-deleted comment as a successful hide, which
+   * it must so two operators on one report don't collide. That makes an
+   * unconditional restore able to republish something its author deleted.
+   */
+  it("does not republish a comment its author had already deleted", async () => {
+    const { commentId } = await commentBy(author.id, "changed my mind");
+    const deletedByOwner = new Date("2026-09-01T00:00:00Z");
+    await db
+      .update(schema.comments)
+      .set({ deletedAt: deletedByOwner })
+      .where(eq(schema.comments.id, commentId));
+
+    await hideSubject(db, operator.id, "comment", commentId, { note: "abusive" });
+    await unhideSubject(db, operator.id, "comment", commentId, "appeal upheld");
+
+    const [row] = await db.select().from(schema.comments).where(eq(schema.comments.id, commentId));
+    expect(row.deletedAt).toEqual(deletedByOwner);
+  });
+
+  /** A hidden comment is an anonymous tombstone; its author must still be told. */
+  it("tells the comment's author, and nobody else", async () => {
+    const { pourId, commentId } = await commentBy(author.id, "no");
+    await hideSubject(db, operator.id, "comment", commentId, { note: "targets a named person" });
+
+    const mine = await commentNoticesForAuthor(db, pourId, author.id);
+    expect(mine).toHaveLength(1);
+    expect(mine[0].reason).toBe("targets a named person");
+    expect(await commentNoticesForAuthor(db, pourId, reporter.id)).toHaveLength(0);
+  });
+});
+
+describe("the audit trail's lift control", () => {
+  /**
+   * The trail is history: it holds hides that were lifted and hides a later
+   * hide superseded. `unhideSubject` acts on the subject, so a lift offered on
+   * an old row would take down the current decision.
+   */
+  it("marks only the hide currently in force", async () => {
+    const bottle = await createTestBottle(db);
+    const pourId = uid("pour");
+    await db.insert(schema.pours).values({ id: pourId, userId: author.id, bottleId: bottle.id });
+
+    await hideSubject(db, operator.id, "pour", pourId, { note: "first" }, new Date(1_000));
+    await unhideSubject(db, operator.id, "pour", pourId, "lifted", new Date(2_000));
+    await hideSubject(db, operator.id, "pour", pourId, { note: "again" }, new Date(3_000));
+
+    const entries = await listModerationActions(db);
+    const standing = entries.filter((e) => e.standing);
+    expect(standing).toHaveLength(1);
+    expect(standing[0].note).toBe("again");
+  });
+
+  it("marks nothing standing once the hide is lifted", async () => {
+    const bottle = await createTestBottle(db);
+    const pourId = uid("pour");
+    await db.insert(schema.pours).values({ id: pourId, userId: author.id, bottleId: bottle.id });
+    await hideSubject(db, operator.id, "pour", pourId, { note: "first" }, new Date(1_000));
+    await unhideSubject(db, operator.id, "pour", pourId, "lifted", new Date(2_000));
+
+    expect((await listModerationActions(db)).filter((e) => e.standing)).toHaveLength(0);
   });
 });

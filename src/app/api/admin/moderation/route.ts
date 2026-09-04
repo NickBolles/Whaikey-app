@@ -6,6 +6,7 @@ import { readJsonWithinLimit } from "@/lib/body-limit";
 import { isOperator } from "@/lib/operator";
 import {
   CannotHideProfileError,
+  ReportAlreadyHandledError,
   UnknownSubjectError,
   dismissReport,
   hideSubject,
@@ -112,6 +113,12 @@ export async function POST(request: Request): Promise<NextResponse> {
     } catch (err) {
       if (err instanceof UnknownSubjectError) {
         return NextResponse.json({ error: "Nothing to act on" }, { status: 404 });
+      }
+      if (err instanceof ReportAlreadyHandledError) {
+        // Somebody else got there first, and the whole action rolled back with
+        // the claim. 409 rather than 404: the report exists, it is just no
+        // longer yours to act on.
+        return NextResponse.json({ error: "Already handled by someone else" }, { status: 409 });
       }
       if (err instanceof CannotHideProfileError) {
         return NextResponse.json(

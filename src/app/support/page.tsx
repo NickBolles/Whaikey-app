@@ -25,8 +25,8 @@ export default function SupportPage() {
       <header className="flex flex-col gap-2">
         <h1 className="font-display text-3xl font-semibold tracking-tight">Support</h1>
         <p className="text-muted leading-relaxed">
-          Something broken, something wrong in the catalog, or a moderation decision you want
-          looked at again — this reaches a person.
+          Something broken, or a moderation decision you want looked at again — this reaches a
+          person. A wrong detail on a bottle has its own form; see below.
         </p>
       </header>
 
@@ -44,8 +44,17 @@ export default function SupportPage() {
               if you would rather.{" "}
             </>
           ) : null}
-          Corrections to a bottle&apos;s details are best sent here too — say which bottle and what
-          is wrong, and it goes to whoever curates the catalog.
+          A wrong detail on a bottle goes somewhere else on purpose: the{" "}
+          <a
+            href="https://github.com/NickBolles/Whaikey-app/issues/new?template=whiskey-catalog-feedback.yml"
+            className="text-accent"
+            target="_blank"
+            rel="noreferrer noopener"
+          >
+            catalog feedback form
+          </a>{" "}
+          feeds a source-backed review that checks the claim against published sources before
+          anything changes. Sent here it would just be a message somebody has to re-file.
         </p>
       </section>
 

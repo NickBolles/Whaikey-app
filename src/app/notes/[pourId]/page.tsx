@@ -7,7 +7,7 @@ import { getDb } from "@/db";
 import * as schema from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
 import { getSocialNote, getSocialPrefs, listComments } from "@/lib/social";
-import { moderationNoticeFor } from "@/lib/moderation";
+import { commentNoticesForAuthor, moderationNoticeFor } from "@/lib/moderation";
 import { FLAVOR_WHEEL, leafLabel, wedgeForLeaf } from "@/lib/flavor-wheel";
 import { UserAvatar } from "@/components/user-avatar";
 import { ShareComparison } from "@/components/share-comparison";
@@ -91,13 +91,17 @@ export default async function NotePage({ params }: Props) {
     }
   }
 
-  const [authorPrefs, rawComments, moderation] = await Promise.all([
+  const [authorPrefs, rawComments, moderation, commentNotices] = await Promise.all([
     getSocialPrefs(db, note.author.userId),
     listComments(db, viewer.id, pourId),
     // Only its author, and only when there is one: a moderation hide is not
     // reversible from this side, so leaving them to discover it by finding the
     // visibility control silently refusing would be the worst version of this.
     isOwner ? moderationNoticeFor(db, "pour", pourId) : Promise.resolve(null),
+    // And the viewer's own hidden comments here. A hidden comment renders as
+    // an anonymous tombstone — body and author stripped — so its author is
+    // otherwise told nothing at all, and cannot even tell which one went.
+    commentNoticesForAuthor(db, pourId, viewer.id),
   ]);
   const comments: SerializedComment[] = (rawComments ?? []).map((comment) => ({
     id: comment.id,
@@ -135,6 +139,33 @@ export default async function NotePage({ params }: Props) {
             you cannot make it visible again yourself.
           </p>
           {moderation.reason && <p className="italic text-muted">“{moderation.reason}”</p>}
+          <p className="text-muted">
+            If you think that was wrong,{" "}
+            <Link href="/support" className="text-accent">
+              tell us
+            </Link>{" "}
+            and a person will look again.
+          </p>
+        </section>
+      )}
+
+      {commentNotices.length > 0 && (
+        <section
+          role="note"
+          className="card border-danger/50 p-4 flex flex-col gap-2 text-sm leading-relaxed"
+        >
+          <p className="font-medium text-foreground">
+            {commentNotices.length === 1
+              ? "A moderator hid a comment of yours here."
+              : `A moderator hid ${commentNotices.length} comments of yours here.`}
+          </p>
+          {commentNotices.map((notice) =>
+            notice.reason ? (
+              <p key={notice.at.toISOString()} className="italic text-muted">
+                “{notice.reason}”
+              </p>
+            ) : null,
+          )}
           <p className="text-muted">
             If you think that was wrong,{" "}
             <Link href="/support" className="text-accent">

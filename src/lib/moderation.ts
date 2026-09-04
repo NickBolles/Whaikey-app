@@ -416,16 +416,29 @@ export async function dismissReport(
  * acted. Predicated on `state = 'open'` so the transition happens once.
  */
 async function resolveOpenReport(tx: DB, reportId: string): Promise<void> {
-  await tx
+  const rows = await tx
     .update(reports)
     .set({ state: "resolved" })
-    .where(and(eq(reports.id, reportId), eq(reports.state, "open")));
+    .where(and(eq(reports.id, reportId), eq(reports.state, "open")))
+    .returning({ id: reports.id });
+  /**
+   * The report is the claim, so a miss rolls the whole action back.
+   *
+   * Ignoring the count meant two stale tabs could dismiss and suspend the same
+   * report: the loser updated nothing, committed its suspension anyway, and
+   * left a report displayed as dismissed with a suspension and two conflicting
+   * audit rows behind it. Losing the race has to mean losing the action.
+   */
+  if (rows.length === 0) throw new ReportAlreadyHandledError();
 }
 
-/** Mark a report handled on its own. Used by tests and by nothing in the app. */
-export async function resolveReport(db: DB, reportId: string): Promise<void> {
-  await resolveOpenReport(db, reportId);
+export class ReportAlreadyHandledError extends Error {
+  constructor() {
+    super("Somebody else already handled that report");
+    this.name = "ReportAlreadyHandledError";
+  }
 }
+
 
 async function record(
   db: DB,
@@ -456,11 +469,20 @@ export interface AuditEntry {
   note: string | null;
   createdAt: Date;
   actorName: string;
+  /**
+   * True only for the hide that is currently in force over its subject.
+   *
+   * The trail is history, so it holds hides that were lifted and hides that a
+   * later hide superseded. Offering "lift" on all of them would let a click on
+   * a months-old row take down today's decision, since `unhideSubject` acts on
+   * the subject rather than on the entry.
+   */
+  standing: boolean;
 }
 
 /** The audit trail, newest first — what an appeal is answered from. */
 export async function listModerationActions(db: DB, limit = 100): Promise<AuditEntry[]> {
-  return db
+  const rows = await db
     .select({
       id: moderationActions.id,
       action: moderationActions.action,
@@ -472,8 +494,53 @@ export async function listModerationActions(db: DB, limit = 100): Promise<AuditE
     })
     .from(moderationActions)
     .innerJoin(user, eq(user.id, moderationActions.actorId))
-    .orderBy(desc(moderationActions.createdAt))
+    .orderBy(desc(moderationActions.createdAt), desc(moderationActions.id))
     .limit(limit);
+
+  // Newest first, so the first hide/unhide seen for a subject is the current
+  // one — and it is standing only if it is a hide.
+  const decided = new Set<string>();
+  return rows.map((row) => {
+    const key = `${row.subjectType}:${row.subjectId}`;
+    let standing = false;
+    if (row.action === "hide" || row.action === "unhide") {
+      if (!decided.has(key)) {
+        decided.add(key);
+        standing = row.action === "hide";
+      }
+    }
+    return { ...row, standing };
+  });
+}
+
+/**
+ * The moderation notices over this user's own comments on one pour.
+ *
+ * A hidden comment renders as an anonymous tombstone — `listComments` strips
+ * the body and the author from a deleted row — so without this its author is
+ * told nothing at all, which is worse than the pour case: they cannot even see
+ * which of their comments went. Keyed to the signed-in author, so nobody reads
+ * anybody else's.
+ */
+export async function commentNoticesForAuthor(
+  db: DB,
+  pourId: string,
+  authorId: string,
+): Promise<ModerationNotice[]> {
+  const hidden = await db
+    .select({ id: comments.id })
+    .from(comments)
+    .where(
+      and(
+        eq(comments.pourId, pourId),
+        eq(comments.userId, authorId),
+        isNotNull(comments.deletedAt),
+      ),
+    );
+  const notices = await Promise.all(
+    hidden.map((row) => moderationNoticeFor(db, "comment", row.id)),
+  );
+  return notices.filter((notice): notice is ModerationNotice => notice != null);
 }
 
 export interface SuspendedAccount {
@@ -629,7 +696,36 @@ export async function unhideSubject(
       sql`select pg_advisory_xact_lock(hashtext(${moderationLockKey(subjectType, subjectId)}))`,
     );
     if (subjectType === "comment") {
-      await tx.update(comments).set({ deletedAt: null }).where(eq(comments.id, subjectId));
+      /**
+       * Restore only what the hide actually removed.
+       *
+       * `applyHide` treats an already-deleted comment as a successful hide —
+       * it has to, or two operators on one report produce an error for the
+       * second. But that means the row may have been deleted by its author
+       * moments earlier, and clearing `deletedAt` unconditionally would
+       * republish something somebody deliberately removed. The hide stamps
+       * `deletedAt` with the same instant it records, so the two match only
+       * when the hide is what set it.
+       */
+      const standing = await tx
+        .select({ createdAt: moderationActions.createdAt })
+        .from(moderationActions)
+        .where(
+          and(
+            eq(moderationActions.subjectType, "comment"),
+            eq(moderationActions.subjectId, subjectId),
+            eq(moderationActions.action, "hide"),
+          ),
+        )
+        .orderBy(desc(moderationActions.createdAt), desc(moderationActions.id))
+        .limit(1);
+      const hiddenAt = standing[0]?.createdAt;
+      if (hiddenAt) {
+        await tx
+          .update(comments)
+          .set({ deletedAt: null })
+          .where(and(eq(comments.id, subjectId), eq(comments.deletedAt, hiddenAt)));
+      }
     }
     await record(tx, actorId, "unhide", subjectType, subjectId, { note }, now);
   });

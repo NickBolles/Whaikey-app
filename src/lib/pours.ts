@@ -381,6 +381,16 @@ export async function updatePourVisibility(
       if (row?.status === "user_submitted") throw new PendingBottleError();
     }
     if (visibility !== "private") {
+      // Same lock as makeEverythingPrivate: the check and the write are
+      // atomic w.r.t. a concurrent US-11 reset.
+      //
+      // Taken FIRST, before the moderation lock. `createPourShare` needs both
+      // too, and two paths taking the same pair in opposite orders is a
+      // deadlock Postgres resolves by aborting one of them — an intermittent
+      // 500 on a race nobody can reproduce. One order everywhere: social-reset,
+      // then moderation.
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`social-reset:${userId}`}))`);
+
       /**
        * A moderation hide is not the owner's to undo (PLAN.md §9.4).
        *
@@ -401,10 +411,6 @@ export async function updatePourVisibility(
         sql`select pg_advisory_xact_lock(hashtext(${moderationLockKey("pour", pourId)}))`,
       );
       if (await isModerationHidden(tx, "pour", pourId)) throw new ModeratedError();
-
-      // Same lock as makeEverythingPrivate: the check and the write are
-      // atomic w.r.t. a concurrent US-11 reset.
-      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`social-reset:${userId}`}))`);
       const profile = await tx.query.userProfiles.findFirst({
         columns: { socialEnabled: true },
         where: eq(schema.userProfiles.userId, userId),
