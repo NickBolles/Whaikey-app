@@ -292,10 +292,22 @@ function CommentRow(props: CommentRowProps) {
                 (deletingId === comment.id ? (
                   <span className="inline-flex items-center gap-2">
                     Delete this comment?
-                    <button type="button" onClick={() => onDeleteConfirm(comment.id)} disabled={busy} className="font-medium text-danger">
+                    {/* Same 44px minimum as the tombstone's pair below: this is
+                        where that markup was copied from, and it had the same
+                        problem. */}
+                    <button
+                      type="button"
+                      onClick={() => onDeleteConfirm(comment.id)}
+                      disabled={busy}
+                      className="tap-target inline-flex items-center font-medium text-danger"
+                    >
                       {busy ? "…" : "Confirm"}
                     </button>
-                    <button type="button" onClick={() => onDeleteToggle(comment.id)} className="text-muted">
+                    <button
+                      type="button"
+                      onClick={() => onDeleteToggle(comment.id)}
+                      className="tap-target inline-flex items-center text-muted"
+                    >
                       Cancel
                     </button>
                   </span>
