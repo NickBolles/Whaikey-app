@@ -117,6 +117,42 @@ export async function recordShareConversion(
   }
 }
 
+/**
+ * Several events as ONE insert, so a partial failure cannot skew a ratio.
+ *
+ * `recordEvent` swallows its own failure, which is right on its own and wrong
+ * for a pair: writing a view and then a comparison as two calls means a
+ * transient error on the first can be followed by a success on the second,
+ * leaving the funnel holding a numerator without its denominator and
+ * `comparisonRate` free to exceed 100%. I described the two calls as "written
+ * together" in a review reply one round before this was found; together meant
+ * adjacent, not atomic, and adjacency is not the property the ratio needs.
+ *
+ * One multi-row insert: both rows land or neither does. Still best-effort as a
+ * whole, because this module must never break the page it measures.
+ */
+export async function recordEvents(
+  db: DB,
+  events: Array<{ name: AnalyticsEventName; userId?: string | null; shareId?: string | null }>,
+): Promise<void> {
+  if (events.length === 0) return;
+  try {
+    await db.insert(schema.analyticsEvents).values(
+      events.map((e) => ({
+        id: crypto.randomUUID(),
+        name: e.name,
+        userId: e.userId ?? null,
+        shareId: e.shareId ?? null,
+      })),
+    );
+  } catch (err) {
+    console.error(
+      `[analytics] failed to record ${events.map((e) => e.name).join(" + ")}`,
+      err,
+    );
+  }
+}
+
 export async function recordEvent(
   db: DB,
   name: AnalyticsEventName,

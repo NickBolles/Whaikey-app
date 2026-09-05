@@ -13,7 +13,7 @@ import { getDb } from "@/db";
 import * as schema from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
 import { getPublicPourShare } from "@/lib/pour-sharing";
-import { isAutomatedFetch, recordEvent, shareIdForCode } from "@/lib/observability/analytics";
+import { isAutomatedFetch, recordEvents, shareIdForCode } from "@/lib/observability/analytics";
 import { getSocialNote, getSocialPrefs, listComments } from "@/lib/social";
 import { WishlistCta } from "./wishlist-cta";
 
@@ -243,12 +243,23 @@ export default async function SharedPourPage({ params }: Props) {
    * comparison without the view it is divided by — the asymmetry that let
    * `comparisonRate` exceed 100% two rounds ago.
    */
+  const funnelEvents: Array<{
+    name: "share_view" | "share_comparison_rendered";
+    userId: string | null;
+    shareId: string | null;
+  }> = [];
   if (shouldRecordView) {
-    await recordEvent(getDb(), "share_view", { userId: viewer?.id ?? null, shareId });
+    funnelEvents.push({ name: "share_view", userId: viewer?.id ?? null, shareId });
   }
   if (comparisonRendered && viewer) {
-    await recordEvent(getDb(), "share_comparison_rendered", { userId: viewer.id, shareId });
+    funnelEvents.push({ name: "share_comparison_rendered", userId: viewer.id, shareId });
   }
+  // ONE insert, not two calls. Two calls are adjacent, not atomic: a transient
+  // failure on the view followed by a success on the comparison leaves the
+  // funnel holding a numerator without its denominator. I called them "written
+  // together" a round ago, which was true of their position and not of their
+  // outcome — and position is not the property `comparisonRate` needs.
+  await recordEvents(getDb(), funnelEvents);
 
   return (
     <div className="mx-auto flex max-w-lg flex-col gap-6 px-4 py-12">

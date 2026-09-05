@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
 import { createTestBottle, createTestUser, setupTestDb, uid } from "@/test/helpers";
-import { isAutomatedFetch, recordEvent, recordShareConversion } from "./analytics";
+import { isAutomatedFetch, recordEvent, recordEvents, recordShareConversion } from "./analytics";
 
 /**
  * The contract this module states about itself: recording must not be able to
@@ -159,5 +159,49 @@ describe("telling a crawler from a reader", () => {
     // No headers at all is a reader, not a robot: refusing to count somebody
     // because their client is quiet is the error this must not make.
     expect(isAutomatedFetch(req({}))).toBe(false);
+  });
+});
+
+describe("writing a pair of funnel events", () => {
+  it("lands both rows or neither, so a ratio cannot be skewed by a partial write", async () => {
+    const owner = await createTestUser(db);
+    const viewer = await createTestUser(db);
+    const bottle = await createTestBottle(db);
+    const shareId = await shareOf(owner.id, bottle.id);
+
+    await recordEvents(db, [
+      { name: "share_view", userId: viewer.id, shareId },
+      { name: "share_comparison_rendered", userId: viewer.id, shareId },
+    ]);
+
+    const rows = await db.select().from(schema.analyticsEvents);
+    expect(rows).toHaveLength(2);
+    expect(rows.map((r) => r.name).sort()).toEqual([
+      "share_comparison_rendered",
+      "share_view",
+    ]);
+  });
+
+  it("swallows a failed write like every other function here", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const broken = {
+      insert: () => {
+        throw new Error("connection reset");
+      },
+    } as unknown as DB;
+
+    await expect(
+      recordEvents(broken, [
+        { name: "share_view", userId: null, shareId: null },
+        { name: "share_comparison_rendered", userId: null, shareId: null },
+      ]),
+    ).resolves.toBeUndefined();
+    expect(log).toHaveBeenCalled();
+    log.mockRestore();
+  });
+
+  it("writes nothing for an empty list", async () => {
+    await recordEvents(db, []);
+    expect(await db.select().from(schema.analyticsEvents)).toHaveLength(0);
   });
 });

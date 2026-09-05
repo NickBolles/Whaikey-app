@@ -7,6 +7,7 @@ import * as schema from "@/db/schema";
 import { catalogVisibleTo } from "@/lib/catalog-visibility";
 import { escapeLike, getCommunityRating } from "@/lib/search";
 import { getOrGeneratePairings } from "./pairings";
+import { reportInBackground } from "@/lib/observability/errors";
 
 /**
  * Concierge tool definitions (Anthropic tool-use format) plus a DB-backed
@@ -474,6 +475,23 @@ export async function executeTool(
     }
   } catch (err) {
     console.error(`Tool ${name} failed:`, err);
+    /**
+     * Reported here, because nothing above can see it.
+     *
+     * This catch answers the model with a tool-error value rather than
+     * rethrowing, so the chat stream continues normally: the stream's own
+     * catch never fires, `onRequestError` sees nothing escape, and a failing
+     * pairing generation or database read inside a tool was invisible while
+     * the concierge quietly told the user it could not do that thing.
+     *
+     * Fourth site for the same rule — after `/api/auth/native/start`,
+     * `/api/auth/native/complete` and the chat stream — which is enough
+     * repetitions to state it as a property of this codebase rather than a
+     * coincidence: **a catch that answers its caller instead of rethrowing is
+     * invisible to every wrapper above it, and has to report for itself.**
+     * The graceful fallback below is unchanged.
+     */
+    reportInBackground(err, { where: "ai/tools", userId, tags: { tool: name } });
     return toolError(`Tool "${name}" failed unexpectedly`);
   }
 }
