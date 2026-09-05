@@ -131,13 +131,23 @@ export async function POST(request: Request) {
          * the generator's own `finally` still records the tokens already
          * billed (see `runChatStream`) — verified, not assumed.
          *
-         * `.catch` rather than `void`: a floating promise that rejects is an
-         * unhandled rejection, which is the same escape route as throwing
-         * from the `catch` and `finally` above. Nothing here should reject —
-         * `recordAiUsage` swallows its own failures — but "should not" is what
-         * the rest of this file has spent ten review rounds disproving.
+         * **Returned**, not just caught. The Web Streams cancellation
+         * lifecycle awaits whatever `cancel()` returns; discarding the promise
+         * meant the response could finish — and a serverless invocation
+         * freeze — while the generator's `finally` was still writing the
+         * tokens already billed, so the aborted calls this was meant to
+         * capture could go missing from the totals anyway. The previous
+         * version added `.catch` to stop an unhandled rejection and stopped
+         * there: half of a floating promise is the rejection, the other half
+         * is that nobody waits for it, and only the first half got fixed.
+         *
+         * Rejections still swallowed, because a cleanup failure must not
+         * become the cancellation's problem.
          */
-        generator.return(undefined as never).catch(() => {});
+        return generator.return(undefined as never).then(
+          () => undefined,
+          () => undefined,
+        );
       },
     });
 

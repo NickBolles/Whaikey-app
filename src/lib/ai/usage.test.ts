@@ -48,6 +48,32 @@ describe("what a model call cost", () => {
     expect(await db.select().from(schema.aiUsage)).toHaveLength(0);
   });
 
+  it("records nothing for an all-zero reading, which means unknown and not free", async () => {
+    const user = await createTestUser(db);
+    /**
+     * `makeClaudeCodeClient` fabricates `{ input_tokens: 0, output_tokens: 0 }`
+     * because the CLI does not surface a meter on that path. Storing it made
+     * the operator report claim a paid AI surface was free — worse than a gap,
+     * because a blank invites the question and a zero answers it wrongly.
+     */
+    await recordAiUsage(db, {
+      userId: user.id,
+      feature: "enrich",
+      model: "claude-sonnet-5",
+      usage: { input_tokens: 0, output_tokens: 0 },
+    });
+    expect(await db.select().from(schema.aiUsage)).toHaveLength(0);
+
+    // A cache-only read is still a real, billable reading and must survive.
+    await recordAiUsage(db, {
+      userId: user.id,
+      feature: "chat",
+      model: "claude-sonnet-5",
+      usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 400 },
+    });
+    expect(await db.select().from(schema.aiUsage)).toHaveLength(1);
+  });
+
   it("accepts a system call with no user behind it", async () => {
     await recordAiUsage(db, {
       userId: null,

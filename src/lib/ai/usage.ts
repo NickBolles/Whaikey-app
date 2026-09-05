@@ -178,9 +178,31 @@ export function usdForTokens(
 /** Record one model call's token spend. Best-effort; never throws. */
 export async function recordAiUsage(db: DB, input: AiUsageInput): Promise<void> {
   const u = input.usage;
-  // A response with no usage block tells us nothing, and a row of zeroes would
-  // read as "this call was free" rather than "we did not learn what it cost".
+  /**
+   * A row of zeroes would read as "this call was free" rather than "we did not
+   * learn what it cost" — and until now that sentence was a comment describing
+   * a rule the code below did not enforce. It guarded a MISSING usage block
+   * and not an all-zero one, so `makeClaudeCodeClient`, which fabricates
+   * `{ input_tokens: 0, output_tokens: 0 }` because the CLI does not surface a
+   * meter on this path, wrote a $0 row for every enrichment call. The operator
+   * report then claimed a paid AI surface was free, which is worse than a gap:
+   * a blank invites the question, a zero answers it wrongly.
+   *
+   * Guarded at the seam rather than at that one client, because any future
+   * transport that cannot report a meter will produce the same shape, and the
+   * rule belongs where the sentence explaining it already lives.
+   *
+   * (Whether the Claude Code CLI's JSON result carries real usage we could
+   * plumb through instead is a separate question and not one I have verified;
+   * omitting the row is correct either way, and correct sooner.)
+   */
   if (!u) return;
+  const total =
+    (u.input_tokens ?? 0) +
+    (u.output_tokens ?? 0) +
+    (u.cache_read_input_tokens ?? 0) +
+    (u.cache_creation_input_tokens ?? 0);
+  if (total === 0) return;
   try {
     await db.insert(schema.aiUsage).values({
       id: crypto.randomUUID(),
