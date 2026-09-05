@@ -315,7 +315,7 @@ export async function enrichBottleProfiles(db: DB, opts: EnrichOptions = {}): Pr
   for (let i = 0; i < aiTargets.length; i += batchSize) {
     const batch = aiTargets.slice(i, i + batchSize);
     report.batches += 1;
-    const text = await runModelBatch(db, anthropic, model, batch, web);
+    const text = await runModelBatch(db, anthropic, model, batch, web, report.dryRun);
 
     const parsed = parseModelJson(text);
     // Accept a bare entry object too — defensive parsing can land on the
@@ -353,6 +353,17 @@ async function runModelBatch(
   model: string,
   batch: EnrichableBottle[],
   web: boolean,
+  /**
+   * `--dry-run` promises no database writes, and `writeProfile` already
+   * honours it — the meter reading did not, so a dry run inserted `ai_usage`
+   * rows while advertising that it wrote nothing. The model call is real and
+   * genuinely costs money either way, which is exactly the argument that made
+   * this look correct; but a flag that means "no writes" has to mean it, or
+   * the next person reaches for a dry run precisely when they must not write
+   * and gets a table they did not agree to. The cost of a dry run is a
+   * deliberate, documented blind spot rather than an oversight.
+   */
+  dryRun: boolean,
 ): Promise<string> {
   const prompt = buildEnrichPrompt(batch, web);
   const searchCandidates = batch.filter((bottle) =>
@@ -390,7 +401,9 @@ async function runModelBatch(
     // schedule and nobody asked for it, so attributing it to an account would
     // put a bill on somebody who never made a request. The row still records
     // the spend, which is what a total needs.
-    await recordAiUsage(db, { userId: null, feature: "enrich", model, usage: response.usage });
+    if (!dryRun) {
+      await recordAiUsage(db, { userId: null, feature: "enrich", model, usage: response.usage });
+    }
     texts.push(textFromContent(response.content as never));
     if (response.stop_reason !== "pause_turn") break;
     messages.push({ role: "assistant", content: response.content });

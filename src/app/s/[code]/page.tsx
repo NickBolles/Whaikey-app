@@ -132,13 +132,26 @@ export default async function SharedPourPage({ params }: Props) {
             viewerFlavorTags[leafId] = Math.max(viewerFlavorTags[leafId] ?? 0, intensity);
           }
         }
-        // The second step of the funnel: a signed-in viewer who has poured this
-        // bottle themselves, so there is something to compare. The gap between
-        // this and `share_view` IS the sparse-overlap risk S1 was meant to test.
-        await recordEvent(getDb(), "share_comparison_rendered", {
-          userId: viewer.id,
-          shareId,
-        });
+        /**
+         * The second step of the funnel: a signed-in viewer who has poured
+         * this bottle themselves, so there is something to compare. The gap
+         * between this and `share_view` IS the sparse-overlap risk S1 was
+         * meant to test.
+         *
+         * `!automated` for the same reason as the view above, and the omission
+         * was worse than a missed filter: `comparisonRate` divides this by
+         * signed-in views, so suppressing the denominator while recording the
+         * numerator let an authenticated prefetch push the rate ABOVE 100%.
+         * That is the identical defect as the earlier `blockRate` finding — a
+         * numerator drawn from a wider population than its denominator — and I
+         * reintroduced it one event later while fixing the first one.
+         */
+        if (!automated) {
+          await recordEvent(getDb(), "share_comparison_rendered", {
+            userId: viewer.id,
+            shareId,
+          });
+        }
         viewerBlock = (
           <div className="flex flex-col gap-2">
             <ShareComparison mine={viewerFlavorTags} theirs={share.note.flavorTags} />
