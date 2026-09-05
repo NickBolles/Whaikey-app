@@ -3,7 +3,8 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
 import { createTestBottle, createTestUser, setupTestDb, uid } from "@/test/helpers";
-import { recordEvent } from "./analytics";
+import { recordEvent, recordEvents } from "./analytics";
+import { aiCostSince } from "@/lib/ai/usage";
 import {
   SESSIONS_WITHOUT_A_POUR_STATUS,
   TELEMETRY_RETENTION_DAYS,
@@ -30,6 +31,18 @@ const DAY = 86_400_000;
  * effect nobody can see; in a test that inserts and then immediately reads it
  * is a reliable failure, and one that disappears the moment you add a
  * `console.log` — which is exactly how this was found.
+ */
+/**
+ * An `until` strictly after every insert this file makes.
+ *
+ * The metric windows are half-open, `[since, until)`, and every reader
+ * defaults `until` to `new Date()`. A row written in the same millisecond as
+ * that default falls OUTSIDE the window, so a test that seeds and reads back
+ * to back fails roughly whenever the two land on the same tick — which is a
+ * flake in the test, not in the metric. Every read here passes this instead of
+ * taking the default. It was already used for `shareFunnel` and not for
+ * `guardrailMetrics`, which is why the pour-count assertions were the ones
+ * that flickered.
  */
 const justAfterNow = () => new Date(Date.now() + 60_000);
 
@@ -78,7 +91,7 @@ describe("the guardrail metrics SOCIAL §12 committed to", () => {
     await pour(a.id, bottle.id);
     await pour(b.id, bottle.id);
 
-    const m = await guardrailMetrics(db);
+    const m = await guardrailMetrics(db, { until: justAfterNow() });
     expect(m.activeUsers).toBe(2);
     expect(m.pours).toBe(4);
     expect(m.poursPerActiveUserPerWeek).toBeCloseTo(2, 6);
@@ -90,7 +103,7 @@ describe("the guardrail metrics SOCIAL §12 committed to", () => {
     await pour(user.id, bottle.id);
     await pour(user.id, bottle.id, { at: new Date(Date.now() - 30 * DAY) });
 
-    const m = await guardrailMetrics(db);
+    const m = await guardrailMetrics(db, { until: justAfterNow() });
     expect(m.pours).toBe(1);
   });
 
@@ -126,7 +139,7 @@ describe("the guardrail metrics SOCIAL §12 committed to", () => {
     await pour(established.id, bottle.id);
     for (let i = 0; i < 10; i++) await pour(newcomer.id, bottle.id);
 
-    const m = await guardrailMetrics(db);
+    const m = await guardrailMetrics(db, { until: justAfterNow() });
     // Raw: 12 pours over 2 users = 6/week, which would read as a spike.
     expect(m.poursPerActiveUserPerWeek).toBeCloseTo(6, 6);
     // Adjusted: the established account alone, unchanged at 2/week.
@@ -139,7 +152,7 @@ describe("the guardrail metrics SOCIAL §12 committed to", () => {
     const bottle = await createTestBottle(db);
     const newcomer = await createTestUser(db, { createdAt: new Date(Date.now() - 1 * DAY) });
     await pour(newcomer.id, bottle.id);
-    const m = await guardrailMetrics(db);
+    const m = await guardrailMetrics(db, { until: justAfterNow() });
     // No established population to compare against: null, not zero. Zero would
     // read as "established users stopped drinking".
     expect(m.establishedPoursPerActiveUserPerWeek).toBeNull();
@@ -159,7 +172,7 @@ describe("the guardrail metrics SOCIAL §12 committed to", () => {
       relationship: "own",
     });
 
-    const m = await guardrailMetrics(db);
+    const m = await guardrailMetrics(db, { until: justAfterNow() });
     // One of each, despite the shelf now saying "own" for both.
     expect(m.triedPours).toBe(1);
     expect(m.ownedPours).toBe(1);
@@ -174,7 +187,7 @@ describe("the guardrail metrics SOCIAL §12 committed to", () => {
 
     // Falling back to the live shelf join for the null row IS the bug these
     // columns exist to fix, so an unknown stays out of both counts.
-    const m = await guardrailMetrics(db);
+    const m = await guardrailMetrics(db, { until: justAfterNow() });
     expect(m.triedPours + m.ownedPours).toBe(1);
     expect(m.ownedPours).toBe(1);
   });
@@ -183,7 +196,7 @@ describe("the guardrail metrics SOCIAL §12 committed to", () => {
     const bottle = await createTestBottle(db);
     const user = await createTestUser(db);
     await pour(user.id, bottle.id);
-    const m = await guardrailMetrics(db);
+    const m = await guardrailMetrics(db, { until: justAfterNow() });
     // No owned pours at all: a ratio would be a division by zero, and "we
     // cannot say yet" is the honest reading of a denominator of none.
     expect(m.triedToOwnedPourRatio).toBeNull();
@@ -205,7 +218,7 @@ describe("the guardrail metrics SOCIAL §12 committed to", () => {
 
     // A private pour is not a social action: including it would dilute the
     // rate and make a moderation problem look smaller as journalling grew.
-    const m = await guardrailMetrics(db);
+    const m = await guardrailMetrics(db, { until: justAfterNow() });
     expect(m.socialActions).toBe(1);
     expect(m.reportsPerThousandSocialActions).toBeCloseTo(1000, 6);
   });
@@ -230,7 +243,7 @@ describe("the guardrail metrics SOCIAL §12 committed to", () => {
       .set({ visibility: "private" })
       .where(eq(schema.pours.userId, author.id));
 
-    const m = await guardrailMetrics(db);
+    const m = await guardrailMetrics(db, { until: justAfterNow() });
     // The action still happened. Counting current visibility would drop the
     // denominator to zero and make reports-per-1,000 null — the safety metric
     // erased by the safety action, at exactly the moment it is being asked.
@@ -250,7 +263,7 @@ describe("the guardrail metrics SOCIAL §12 committed to", () => {
       sharedAt: new Date(),
     });
 
-    const m = await guardrailMetrics(db);
+    const m = await guardrailMetrics(db, { until: justAfterNow() });
     // The window is on when it became visible, not when it was poured: that
     // is the moment a reader could see it, which is the event being counted.
     expect(m.socialActions).toBe(1);
@@ -295,7 +308,7 @@ describe("the guardrail metrics SOCIAL §12 committed to", () => {
     // Stamped once and never moved. A metric somebody can inflate by toggling
     // a control is the defect the cheer retraction already had.
     expect(again.at?.getTime()).toBe(first.at?.getTime());
-    expect((await guardrailMetrics(db)).socialActions).toBe(1);
+    expect((await guardrailMetrics(db, { until: justAfterNow() })).socialActions).toBe(1);
   });
 
   it("counts a pour shared by bearer link, which never touches the visibility control", async () => {
@@ -325,7 +338,7 @@ describe("the guardrail metrics SOCIAL §12 committed to", () => {
     // visible to another person without ever changing `visibility`. Stamping
     // only on the visibility control left this flow out of the denominator
     // forever, which inflates reports per thousand.
-    const m = await guardrailMetrics(db);
+    const m = await guardrailMetrics(db, { until: justAfterNow() });
     expect(m.socialActions).toBe(1);
   });
 
@@ -362,7 +375,7 @@ describe("the guardrail metrics SOCIAL §12 committed to", () => {
     // action in this week's window. Null and excluded is the honest answer for
     // history the column did not exist for.
     expect(after.at).toBeNull();
-    expect((await guardrailMetrics(db)).socialActions).toBe(0);
+    expect((await guardrailMetrics(db, { until: justAfterNow() })).socialActions).toBe(0);
   });
 
   it("does not stamp a link on a pour that was already visible before the column existed", async () => {
@@ -401,7 +414,7 @@ describe("the guardrail metrics SOCIAL §12 committed to", () => {
      * publication as this week's social action.
      */
     expect(after.at).toBeNull();
-    expect((await guardrailMetrics(db)).socialActions).toBe(0);
+    expect((await guardrailMetrics(db, { until: justAfterNow() })).socialActions).toBe(0);
   });
 
   it("does not count an operator suspension as somebody choosing to leave", async () => {
@@ -434,7 +447,7 @@ describe("the guardrail metrics SOCIAL §12 committed to", () => {
       note: "abuse",
     });
 
-    const m = await guardrailMetrics(db);
+    const m = await guardrailMetrics(db, { until: justAfterNow() });
     // One profile counted, and it is the one who chose.
     expect(m.profiles).toBe(1);
     expect(m.socialOffRate).toBeCloseTo(1, 6);
@@ -471,7 +484,7 @@ describe("the guardrail metrics SOCIAL §12 committed to", () => {
         .values({ id: uid("block"), blockerId: b.id, blockedId: target.id });
     }
 
-    const m = await guardrailMetrics(db);
+    const m = await guardrailMetrics(db, { until: justAfterNow() });
     // Two profiles survive the suspension filter; one of them has blocked
     // somebody. The earlier version counted distinct blockers across the whole
     // table — including the suspended one, who is not in the denominator — so
@@ -496,7 +509,7 @@ describe("the guardrail metrics SOCIAL §12 committed to", () => {
       .insert(schema.blocks)
       .values({ id: uid("block"), blockerId: profileless.id, blockedId: target.id });
 
-    const m = await guardrailMetrics(db);
+    const m = await guardrailMetrics(db, { until: justAfterNow() });
     expect(m.blockRate).toBe(0);
   });
 
@@ -519,7 +532,7 @@ describe("the guardrail metrics SOCIAL §12 committed to", () => {
       reason: "other",
     });
 
-    const before = await guardrailMetrics(db);
+    const before = await guardrailMetrics(db, { until: justAfterNow() });
     expect(before.socialActions).toBe(1);
     expect(before.reportsPerThousandSocialActions).toBeCloseTo(1000, 6);
 
@@ -528,13 +541,13 @@ describe("the guardrail metrics SOCIAL §12 committed to", () => {
     const { uncheerPour } = await import("@/lib/social");
     await uncheerPour(db, reader.id, pourId);
 
-    const after = await guardrailMetrics(db);
+    const after = await guardrailMetrics(db, { until: justAfterNow() });
     expect(after.socialActions).toBe(1);
     expect(after.reportsPerThousandSocialActions).toBeCloseTo(1000, 6);
   });
 
   it("returns zeroes and nulls on an empty database rather than dividing by it", async () => {
-    const m = await guardrailMetrics(db);
+    const m = await guardrailMetrics(db, { until: justAfterNow() });
     expect(m.pours).toBe(0);
     expect(m.activeUsers).toBe(0);
     expect(m.poursPerActiveUserPerWeek).toBe(0);
@@ -714,5 +727,64 @@ describe("telemetry retention", () => {
     // The policy says 90 days. WP-18 found a policy claim (`ai_rate_limits`)
     // that nothing enforced; this is the assertion that stops a second one.
     expect(TELEMETRY_RETENTION_DAYS).toBe(90);
+  });
+});
+
+
+describe("deleting an account must not rewrite a past month", () => {
+  it("keeps the AI spend that was already billed, detached from the person", async () => {
+    const user = await createTestUser(db);
+    await db.insert(schema.aiUsage).values({
+      id: uid("usage"),
+      userId: user.id,
+      feature: "chat",
+      model: "claude-sonnet-5",
+      inputTokens: 0,
+      outputTokens: 1_000_000,
+    });
+
+    await db.delete(schema.user).where(eq(schema.user.id, user.id));
+
+    // The provider billed for that call and does not un-bill it. Cascading
+    // made aiCostSince understate global spend -- a cost alarm that FALLS
+    // because somebody left.
+    const rows = await aiCostSince(db, new Date(Date.now() - 60_000));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].estimatedUsd).toBeCloseTo(10, 9);
+    // What deletion owes the person is that the reading stops being theirs.
+    const [row] = await db.select().from(schema.aiUsage);
+    expect(row.userId).toBeNull();
+  });
+
+  it("keeps a share view, and keeps it counted as signed-in", async () => {
+    const user = await createTestUser(db);
+    await recordEvents(db, [
+      { name: "share_view", userId: user.id },
+      { name: "share_comparison_rendered", userId: user.id },
+    ]);
+
+    const before = await shareFunnel(db, { since: new Date(Date.now() - 60_000), until: justAfterNow() });
+    expect(before.viewsBySignedInUsers).toBe(1);
+    expect(before.comparisonRate).toBeCloseTo(1, 9);
+
+    await db.delete(schema.user).where(eq(schema.user.id, user.id));
+
+    const after = await shareFunnel(db, { since: new Date(Date.now() - 60_000), until: justAfterNow() });
+    // Cascading erased the view and the comparison both, so a past month's S1
+    // numbers changed because of an action taken today.
+    expect(after.views).toBe(1);
+    expect(after.comparisonsRendered).toBe(1);
+    // And reading `user_id is not null` for the classification would have kept
+    // the numerator while dropping the denominator -- the SAME defect, quieter:
+    // comparisonRate would read null (or above 1) instead of holding at 1.
+    expect(after.viewsBySignedInUsers).toBe(1);
+    expect(after.comparisonRate).toBeCloseTo(1, 9);
+  });
+
+  it("does not count an anonymous view as signed-in", async () => {
+    await recordEvents(db, [{ name: "share_view" }]);
+    const funnel = await shareFunnel(db, { since: new Date(Date.now() - 60_000), until: justAfterNow() });
+    expect(funnel.views).toBe(1);
+    expect(funnel.viewsBySignedInUsers).toBe(0);
   });
 });

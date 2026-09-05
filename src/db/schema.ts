@@ -1031,7 +1031,20 @@ export const aiUsage = pgTable(
   "ai_usage",
   {
     id: id(),
-    userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
+    /**
+     * Who asked, when anybody did. Null already means "nobody asked" —
+     * scheduled catalog enrichment — and a deleted account now resolves to the
+     * same thing.
+     *
+     * `set null`, not `cascade`. The provider billed for these calls and does
+     * not un-bill them when somebody closes their account, so cascading made
+     * `aiCostSince` understate what was actually spent, and could make a
+     * feature's cost alarm FALL because a user left. What deletion owes the
+     * person is that the reading stops being about them, which is exactly what
+     * detaching the id does; the reading itself expires on the same 90-day
+     * telemetry sweep as everything else here.
+     */
+    userId: text("user_id").references(() => user.id, { onDelete: "set null" }),
     feature: text("feature").$type<AiFeature>().notNull(),
     model: text("model").notNull(),
     inputTokens: integer("input_tokens").notNull().default(0),
@@ -1107,7 +1120,25 @@ export const analyticsEvents = pgTable(
   {
     id: id(),
     name: text("name").$type<AnalyticsEventName>().notNull(),
-    userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
+    /**
+     * `set null`, not `cascade` — for the same reason `shareId` below is, and
+     * this column is the one that was missed when that one was fixed. A
+     * recipient deleting their account erased every view, comparison and
+     * conversion they had ever contributed, rewriting a *past* month's S1
+     * numbers as a side effect of an action taken today.
+     */
+    userId: text("user_id").references(() => user.id, { onDelete: "set null" }),
+    /**
+     * Whether a signed-in person did this, recorded separately from WHO.
+     *
+     * `user_id` was carrying both facts, so detaching the identity would have
+     * silently reclassified a signed-in view as an anonymous one — moving
+     * `comparisonRate`'s denominator instead of the numerator, which is the
+     * same defect in a quieter form. The two facts have different lifetimes:
+     * the identity is the person's and goes when they go, the classification
+     * is a property of the event and belongs to the aggregate.
+     */
+    bySignedInUser: boolean("by_signed_in_user").notNull().default(false),
     /**
      * The share link this is about, so the funnel can be followed end to end.
      * Deliberately the pour_shares row id and never the share CODE, which is a

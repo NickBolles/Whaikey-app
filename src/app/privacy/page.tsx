@@ -190,6 +190,15 @@ export default function PrivacyPage() {
           prunes everything above does this too.
         </p>
         <p>
+          Deleting the account <strong className="text-foreground">unlinks</strong> those three
+          from you rather than erasing them on the spot, and they still go on the same 90 days.
+          The reason is that they are counts of things that happened — an AI call the provider
+          billed us for, a link that was opened — and removing them would change last month&rsquo;s
+          totals to say those things never happened. What deletion owes you is that the record
+          stops being about you, and that is what unlinking does: the row keeps a feature name, a
+          model name and a number, and no link back to an account.
+        </p>
+        <p>
           Concierge conversations are kept for the life of the account. Nothing prunes them and
           there is no per-conversation delete, so treat what you type there the way you would treat
           a note you are keeping: it stays until the account goes.

@@ -494,8 +494,10 @@ function deferReport(start: () => Promise<void>): void {
  * mattered most — it is unattended, so a failure there is invisible by
  * definition, and it is where the telemetry retention runs.
  *
- * **THREE of those seven are not covered by this wrapper, and saying so is the
- * point of this paragraph.** `/api/csp-report` reports directly. And the
+ * **TWO of those seven are not covered by this wrapper, and saying so is the
+ * point of this paragraph** — the other five are (`/api/auth/native/start`,
+ * `/complete`, `/exchange`, `/api/native/manifest` and `/api/cron/sweep`).
+ * `/api/csp-report` reports directly. And the
  * Better Auth catch-all cannot be covered from outside at all: it exports
  * `toNextJsHandler(auth)`, and Better Auth catches everything its handlers
  * throw and answers with its own response, so no exception ever reaches a

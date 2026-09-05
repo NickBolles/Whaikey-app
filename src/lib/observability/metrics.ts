@@ -323,7 +323,11 @@ export async function shareFunnel(
   const [row] = await db
     .select({
       views: sql<number>`count(*) filter (where ${schema.analyticsEvents.name} = 'share_view')`,
-      signedIn: sql<number>`count(*) filter (where ${schema.analyticsEvents.name} = 'share_view' and ${schema.analyticsEvents.userId} is not null)`,
+      // On the recorded classification, NOT on `user_id is not null`. The id
+      // is detached when an account is deleted, and reading it here would have
+      // moved this denominator retroactively -- turning a past month's
+      // comparisonRate into a different number because somebody left.
+      signedIn: sql<number>`count(*) filter (where ${schema.analyticsEvents.name} = 'share_view' and ${schema.analyticsEvents.bySignedInUser})`,
       comparisons: sql<number>`count(*) filter (where ${schema.analyticsEvents.name} = 'share_comparison_rendered')`,
       wishlist: sql<number>`count(*) filter (where ${schema.analyticsEvents.name} = 'share_wishlist_add')`,
       shelf: sql<number>`count(*) filter (where ${schema.analyticsEvents.name} = 'share_shelf_add')`,

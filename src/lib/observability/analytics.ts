@@ -149,6 +149,9 @@ export async function recordEvents(
         id: crypto.randomUUID(),
         name: e.name,
         userId: e.userId ?? null,
+        // Same reason as `recordEvent`: after deletion the id is gone and only
+        // this says whether a signed-in person was here.
+        bySignedInUser: Boolean(e.userId),
         shareId: e.shareId ?? null,
       })),
     );
@@ -174,6 +177,9 @@ export async function recordEvent(
       id: crypto.randomUUID(),
       name,
       userId: opts.userId ?? null,
+      // Recorded now, because after the account is deleted `user_id` is null
+      // and there is no way to tell an anonymous view from a departed one.
+      bySignedInUser: Boolean(opts.userId),
       shareId: opts.shareId ?? null,
     });
   } catch (err) {

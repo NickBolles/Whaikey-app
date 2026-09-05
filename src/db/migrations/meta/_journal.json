@@ -281,6 +281,13 @@
       "when": 1788593028125,
       "tag": "0039_brainy_mongu",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1788595795709,
+      "tag": "0040_nappy_patriot",
+      "breakpoints": true
     }
   ]
 }
