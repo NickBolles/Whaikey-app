@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { headers } from "next/headers";
 import Link from "next/link";
 import { and, eq } from "drizzle-orm";
 import { Star } from "lucide-react";
@@ -12,7 +13,7 @@ import { getDb } from "@/db";
 import * as schema from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
 import { getPublicPourShare } from "@/lib/pour-sharing";
-import { recordEvent, shareIdForCode } from "@/lib/observability/analytics";
+import { isAutomatedFetch, recordEvent, shareIdForCode } from "@/lib/observability/analytics";
 import { getSocialNote, getSocialPrefs, listComments } from "@/lib/social";
 import { WishlistCta } from "./wishlist-cta";
 
@@ -71,7 +72,18 @@ export default async function SharedPourPage({ params }: Props) {
    * links. The number is about recipients; the owner is not one.
    */
   const viewerIsOwner = Boolean(viewer && shareRow?.userId === viewer.id);
-  if (!viewerIsOwner) {
+  /**
+   * And a preview crawler is not a reader either (PLAN-A5).
+   *
+   * Posting a link into a chat app makes that app fetch this page for its
+   * Open Graph card, before any human has opened anything — so the shares
+   * that travel furthest inflated `views` the most, and the number would have
+   * grown with unfurls rather than with readers. `isAutomatedFetch` reads the
+   * request's own prefetch headers and user-agent; see its docstring for why
+   * the heuristic errs towards over-counting rather than dropping anyone real.
+   */
+  const automated = isAutomatedFetch(await headers());
+  if (!viewerIsOwner && !automated) {
     await recordEvent(getDb(), "share_view", { userId: viewer?.id ?? null, shareId });
   }
 

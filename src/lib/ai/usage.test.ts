@@ -131,6 +131,28 @@ describe("converting tokens to money at read time", () => {
     expect(normalizeModelId("claude-sonnet-4-6")).toBe("claude-sonnet-4-6");
   });
 
+  it("does not let an unpriced version inherit an older family's cheaper rate", () => {
+    // A prefix match answered `claude-sonnet-4-7` with `claude-sonnet-4`'s
+    // $3/$15. That is the one direction this table must never fail in: an
+    // unknown model is priced at the TOP of the range precisely so a cost
+    // alarm cries wolf rather than sleeping through a model that costs more
+    // than the last one. `-4-6` already having its own row is the proof that
+    // point releases really do get their own prices.
+    const dearest = rateFor("something-nobody-has-priced");
+    expect(rateFor("claude-sonnet-4-7")).toEqual(dearest);
+    expect(rateFor("anthropic/claude-sonnet-4.7")).toEqual(dearest);
+    expect(isKnownModel("claude-sonnet-4-7")).toBe(false);
+  });
+
+  it("still prices a dated snapshot as the family it pins", () => {
+    // A snapshot is the same model with a pin, not a new one.
+    expect(rateFor("claude-sonnet-4-20250514")).toEqual(rateFor("claude-sonnet-4"));
+    expect(isKnownModel("claude-sonnet-4-20250514")).toBe(true);
+    // And the exact ids keep working, including the OpenRouter spellings.
+    expect(rateFor("claude-sonnet-4-6")).toEqual({ input: 3, output: 15 });
+    expect(rateFor("anthropic/claude-haiku-4.5")).toEqual({ input: 1, output: 5 });
+  });
+
   it("prices an unknown model at the dearest rate, not at zero", () => {
     const unknown = usdForTokens("some-model-nobody-added", {
       inputTokens: 0,

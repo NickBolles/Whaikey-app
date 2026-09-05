@@ -62,6 +62,19 @@ export async function POST(request: Request) {
     }
 
     const encoder = new TextEncoder();
+    /**
+     * Set when the CONSUMER goes away — a closed tab, a navigation, a client
+     * abort — as opposed to the answer failing.
+     *
+     * Without this the two are indistinguishable from inside `start`: a
+     * cancelled stream closes the controller, so the next `enqueue` throws and
+     * lands in the same catch as a genuine Anthropic or database failure. The
+     * report added for those would then have filed every routine navigation as
+     * a chat error, which is how a monitoring signal becomes noise and then
+     * becomes ignored — the failure this work package exists to prevent,
+     * arriving through its own fix.
+     */
+    let cancelled = false;
     const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
         const send = (event: unknown) =>
@@ -70,6 +83,13 @@ export async function POST(request: Request) {
           if (!first.done) send(first.value);
           for await (const event of generator) send(event);
         } catch (err) {
+          if (cancelled) {
+            // Nobody is listening and nothing went wrong. Not reported, and
+            // not sent: enqueueing into a closed controller throws again, and
+            // a throw from this catch escapes `start` as an unhandled
+            // rejection.
+            return;
+          }
           console.error("chat stream failed", err instanceof Error ? err.name : "unknown error");
           /**
            * Reported here, because nothing else can see it.
@@ -84,14 +104,30 @@ export async function POST(request: Request) {
            *
            * Same shape as the native sign-in handlers: a catch that answers
            * the client instead of rethrowing is invisible to every wrapper
-           * above it, and has to report for itself. The SSE fallback below is
-           * unchanged.
+           * above it, and has to report for itself.
            */
           reportInBackground(err, { where: "api/chat/stream", userId: user.id });
-          send({ type: "error", message: "The concierge couldn't finish that response. Please try again." });
+          try {
+            send({ type: "error", message: "The concierge couldn't finish that response. Please try again." });
+          } catch {
+            // The client left between the failure and this line. The report
+            // above is the part that matters; there is nobody to tell.
+          }
         } finally {
-          controller.close();
+          try {
+            controller.close();
+          } catch {
+            // Already closed by a cancel. Closing twice is a TypeError, and
+            // one thrown here would escape `start` unhandled.
+          }
         }
+      },
+      cancel() {
+        cancelled = true;
+        // Stop the model call rather than letting it run on for a reader who
+        // has gone: the generator's `finally` still records the tokens already
+        // billed (see `runChatStream`).
+        void generator.return(undefined as never);
       },
     });
 

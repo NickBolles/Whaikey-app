@@ -113,15 +113,42 @@ function dearestRate(): ModelRate {
   return Object.values(RATES).reduce((a, b) => (b.output > a.output ? b : a));
 }
 
+/**
+ * Does `id` name the SAME family as `known`, rather than merely start with it?
+ *
+ * A bare `startsWith` answered `claude-sonnet-4-7` — a version nobody has
+ * priced — with `claude-sonnet-4`'s $3/$15, instead of falling through to the
+ * deliberately dearest unknown-model rate. That is the one direction this
+ * table must never fail in: the whole point of pricing an unknown model at the
+ * top of the range is that a cost alarm should cry wolf rather than sleep
+ * through a new model costing more than the last one. Silently inheriting an
+ * older, cheaper family's rate is exactly the sleeping case, and `-4-6`
+ * already existing as its own entry shows point releases really do get their
+ * own prices.
+ *
+ * So a match needs a version boundary: either the id IS the family, or what
+ * follows is a date snapshot (`claude-sonnet-4-20250514`), which is the same
+ * model with a pin rather than a new one. Anything else — another version
+ * segment, a suffix nobody here has seen — is unknown, and is priced as such
+ * until somebody adds a row.
+ */
+function isSameFamily(id: string, known: string): boolean {
+  if (id === known) return true;
+  if (!id.startsWith(`${known}-`)) return false;
+  // `normalizeModelId` already strips a trailing 8-digit snapshot, so anything
+  // left here is a further version segment rather than a pin.
+  return /^\d{8}$/.test(id.slice(known.length + 1));
+}
+
 export function rateFor(model: string): ModelRate {
   const id = normalizeModelId(model);
   const exact = RATES[id];
   if (exact) return exact;
-  // Longest prefix first: "claude-sonnet-4-6" must not be answered by
+  // Longest first: "claude-sonnet-4-6" must not be answered by
   // "claude-sonnet-4" simply because it was declared earlier.
   const keys = Object.keys(RATES).sort((a, b) => b.length - a.length);
   for (const known of keys) {
-    if (id.startsWith(known)) return RATES[known];
+    if (isSameFamily(id, known)) return RATES[known];
   }
   return dearestRate();
 }
@@ -129,7 +156,9 @@ export function rateFor(model: string): ModelRate {
 /** Whether this model was priced from the table or from the fallback. */
 export function isKnownModel(model: string): boolean {
   const id = normalizeModelId(model);
-  return Object.keys(RATES).some((known) => id === known || id.startsWith(known));
+  // Same boundary rule as `rateFor`, so the two cannot disagree about whether
+  // a model is known — which would be worse than either answer alone.
+  return Object.keys(RATES).some((known) => isSameFamily(id, known));
 }
 
 export function usdForTokens(

@@ -18,6 +18,44 @@ import type { AnalyticsEventName, Relationship } from "@/db/schema";
  * not write would be the measurement destroying the thing it measures.
  */
 
+/**
+ * Is this request a machine fetching the page rather than a person reading it?
+ *
+ * A share link posted into a chat app is fetched by that app's preview
+ * crawler before any human sees it, and a `/s/<code>` view is recorded by the
+ * Server Component — so the *most successful* shares, the ones posted into
+ * busy group chats, inflated `views` the most. The number PLAN-A5's phase gate
+ * reads would have grown with unfurls rather than with readers.
+ *
+ * Two signals, both from the request itself:
+ *
+ * - **Prefetch/preview headers**, which are the reliable half. A browser or
+ *   platform that is speculatively fetching says so.
+ * - **A user-agent that names itself a bot.** This is a heuristic and cannot
+ *   be complete — that is a property of user agents, not of this list — so it
+ *   is written to be *conservative in the honest direction*: a crawler that
+ *   slips through inflates the count, which is the error we already had, while
+ *   nothing here can discard a real reader. `HeadlessChrome` is deliberately
+ *   absent: Playwright sends it, and dropping it would make the e2e suite
+ *   silently stop exercising the path it is there to exercise.
+ *
+ * The residue is stated rather than hidden: `views` is an upper bound on
+ * readers. `viewsBySignedInUsers` — the denominator of the rate S1 actually
+ * turns on — is unaffected either way, because no crawler is signed in.
+ */
+const AUTOMATED_UA = /bot\b|crawler|spider|facebookexternalhit|slackbot|twitterbot|whatsapp|discordbot|telegrambot|linkedinbot|applebot|skypeuripreview|embedly|iframely|quora link preview|redditbot|pinterest|vkshare|w3c_validator|curl\/|wget\/|python-requests|go-http-client|node-fetch|axios\//i;
+
+export function isAutomatedFetch(headers: {
+  get(name: string): string | null;
+}): boolean {
+  // Chrome, then the older and Safari spellings.
+  const purpose =
+    headers.get("sec-purpose") ?? headers.get("purpose") ?? headers.get("x-purpose") ?? "";
+  if (/prefetch|prerender|preview/i.test(purpose)) return true;
+  if (headers.get("x-moz") === "prefetch") return true;
+  return AUTOMATED_UA.test(headers.get("user-agent") ?? "");
+}
+
 /** Resolve a share code to its row id. The id is safe to store; the code is not. */
 export async function shareIdForCode(db: DB, code: string): Promise<string | null> {
   try {

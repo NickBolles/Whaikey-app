@@ -134,6 +134,49 @@ describe("POST /api/chat", () => {
     expect(messagesBody.messages[1].toolCalls).toHaveLength(1);
   });
 
+  it("does not report a stream the reader walked away from", async () => {
+    setSessionUser(user);
+    process.env.ANTHROPIC_API_KEY = "test-key";
+    const reported: CapturedEvent[] = [];
+    setErrorReporterForTests((e) => reported.push(e));
+
+    // A long answer the user does not wait for. The gate is a promise the
+    // generator parks on, so the cancel lands while `start` is mid-stream.
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const create = async () => ({
+      async *[Symbol.asyncIterator]() {
+        yield {
+          type: "message_start",
+          message: { id: "m", model: "claude-sonnet-5", usage: { input_tokens: 5, output_tokens: 0 } },
+        };
+        yield { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } };
+        yield { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Thinking" } };
+        await gate;
+        yield { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: " more" } };
+      },
+    });
+    setAnthropicForTests({ messages: { create } } as never);
+
+    const res = await POST(jsonRequest("/api/chat", "POST", { message: "tell me a long story" }));
+    const reader = res.body!.getReader();
+    await reader.read(); // the first chunk, so `start` is mid-flight
+    await reader.cancel(); // tab closed, navigation, abort
+    release();
+    await new Promise((r) => setTimeout(r, 20));
+
+    /**
+     * Cancelling closes the controller, so the next `enqueue` throws and lands
+     * in the same catch as a real failure. Reporting from there filed every
+     * routine navigation as a chat error — noise that makes a monitoring
+     * signal worth ignoring, which is the failure this work package exists to
+     * prevent, arriving through its own fix.
+     */
+    expect(reported).toHaveLength(0);
+  });
+
   it("reports a mid-stream failure that the SSE fallback hides from the user", async () => {
     setSessionUser(user);
     process.env.ANTHROPIC_API_KEY = "test-key";

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
 import { createTestBottle, createTestUser, setupTestDb, uid } from "@/test/helpers";
-import { recordEvent, recordShareConversion } from "./analytics";
+import { isAutomatedFetch, recordEvent, recordShareConversion } from "./analytics";
 
 /**
  * The contract this module states about itself: recording must not be able to
@@ -110,5 +110,54 @@ describe("recording a share conversion", () => {
     await expect(recordEvent(broken, "share_view", { shareId: null })).resolves.toBeUndefined();
     expect(log).toHaveBeenCalled();
     log.mockRestore();
+  });
+});
+
+describe("telling a crawler from a reader", () => {
+  const req = (h: Record<string, string>) => ({
+    get: (name: string) => h[name.toLowerCase()] ?? null,
+  });
+
+  it("skips the preview crawlers that fetch a share link before anyone reads it", () => {
+    // The shares that travel furthest are unfurled the most, so this inflated
+    // `views` in proportion to a link's success — the opposite of measuring it.
+    for (const ua of [
+      "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
+      "Slackbot-LinkExpanding 1.0 (+https://api.slack.com/robots)",
+      "Twitterbot/1.0",
+      "WhatsApp/2.23.20.0 A",
+      "Mozilla/5.0 (compatible; Discordbot/2.0; +https://discordapp.com)",
+      "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+      "TelegramBot (like TwitterBot)",
+      "curl/8.4.0",
+      "python-requests/2.31.0",
+    ]) {
+      expect(isAutomatedFetch(req({ "user-agent": ua }))).toBe(true);
+    }
+  });
+
+  it("skips speculative fetches that announce themselves", () => {
+    expect(isAutomatedFetch(req({ "sec-purpose": "prefetch;prerender" }))).toBe(true);
+    expect(isAutomatedFetch(req({ purpose: "prefetch" }))).toBe(true);
+    expect(isAutomatedFetch(req({ "x-purpose": "preview" }))).toBe(true);
+    expect(isAutomatedFetch(req({ "x-moz": "prefetch" }))).toBe(true);
+  });
+
+  it("never discards a real reader, including the headless browser e2e uses", () => {
+    // The heuristic errs towards over-counting on purpose: a crawler that
+    // slips through inflates a number that was already inflated, while a
+    // dropped reader would silently understate the thing being measured.
+    for (const ua of [
+      "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      // Playwright. Filtering this would make the e2e suite stop exercising
+      // the very path it exists to exercise, and nobody would be told.
+      "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/120.0.0.0 Safari/537.36",
+    ]) {
+      expect(isAutomatedFetch(req({ "user-agent": ua }))).toBe(false);
+    }
+    // No headers at all is a reader, not a robot: refusing to count somebody
+    // because their client is quiet is the error this must not make.
+    expect(isAutomatedFetch(req({}))).toBe(false);
   });
 });
