@@ -73,8 +73,18 @@ export function redactSensitive(text: string): string {
     text
       // A share code is a bearer credential: holding it reads the note.
       .replace(/\/(s|add)\/[A-Za-z0-9_-]+/g, "/$1/[redacted]")
-      // Email addresses, wherever they were interpolated from.
-      .replace(/[\w.+-]+@[\w-]+\.[\w.-]+/g, "[email]")
+      /**
+       * Email addresses, wherever they were interpolated from.
+       *
+       * The local-part class is deliberately wide. `[\w.+-]+` missed every
+       * character RFC 5322 allows and people actually use — an apostrophe
+       * above all — so `sam.o'x+tag@example.co.uk` matched only from the `x`
+       * and left `sam.o'` in the payload: the identifying half of the address
+       * surviving a guarantee that it would not. A redaction that removes the
+       * common case and leaks the unusual one is worse than none, because it
+       * is trusted.
+       */
+      .replace(/[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[\w-]+(?:\.[\w-]+)+/g, "[email]")
       // The keyed phone hash is a stable identifier for a real phone number.
       .replace(/\b[a-f0-9]{64}\b/gi, "[hash]")
   );

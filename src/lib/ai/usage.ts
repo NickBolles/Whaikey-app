@@ -46,25 +46,90 @@ export interface AiUsageInput {
 export interface ModelRate {
   input: number;
   output: number;
-  cachedInput: number;
-  cacheWrite: number;
 }
 
-export const MODEL_RATES_USD_PER_MTOK: Record<string, ModelRate> = {
-  "claude-haiku-4-5-20251001": { input: 1, output: 5, cachedInput: 0.1, cacheWrite: 1.25 },
-  "claude-sonnet-5": { input: 3, output: 15, cachedInput: 0.3, cacheWrite: 3.75 },
-  "claude-opus-5": { input: 15, output: 75, cachedInput: 1.5, cacheWrite: 18.75 },
+/**
+ * Per-million-token INPUT/OUTPUT rates, applied at READ time.
+ *
+ * Deliberately not stored on the row. Prices change, and a dollar figure
+ * written into the database becomes a lie the day they do — with no way to
+ * correct history, because the tokens it was derived from would be gone. Same
+ * rule `docs/COMPETITORS.md` §2.7 sets for bottle valuations: show what is
+ * known, never a precision that isn't there.
+ *
+ * These are Anthropic's first-party rates. When `OPENROUTER_API_KEY` is set —
+ * which `activeAiProvider()` PREFERS — the bill is OpenRouter's and its
+ * margin is its own, so every figure derived from this table is an estimate of
+ * the right order rather than an invoice. `estimatedUsd` is named that way on
+ * purpose.
+ */
+const RATES: Record<string, ModelRate> = {
+  "claude-opus-5": { input: 5, output: 25 },
+  "claude-sonnet-5": { input: 2, output: 10 },
+  "claude-haiku-4-5": { input: 1, output: 5 },
+  // Previous generation, still reachable: `chatModel()` returns
+  // `anthropic/claude-sonnet-4` on the OpenRouter path, which normalises here.
+  "claude-sonnet-4-6": { input: 3, output: 15 },
+  "claude-sonnet-4": { input: 3, output: 15 },
 };
 
-function rateFor(model: string): ModelRate {
-  const exact = MODEL_RATES_USD_PER_MTOK[model];
+/** Cache reads bill at ~0.1x input; cache writes at ~1.25x. */
+const CACHE_READ_MULTIPLIER = 0.1;
+const CACHE_WRITE_MULTIPLIER = 1.25;
+
+/**
+ * Reduce a deployed model id to the family the rate table is keyed on.
+ *
+ * **This is the difference between a cost figure and a false alarm.** The
+ * repo's PREFERRED provider is OpenRouter (AGENTS.md), whose ids are
+ * `anthropic/claude-sonnet-4` and `anthropic/claude-haiku-4.5` — a provider
+ * prefix and a dot where the first-party id has a dash. Matched raw, neither
+ * hits any key, so ordinary traffic on the default configuration fell through
+ * to the deliberate unknown-model fallback and was priced at the most
+ * expensive rate in the table. A budget alarm that reads several times high on
+ * every deployment is not a conservative alarm, it is a broken one.
+ */
+export function normalizeModelId(model: string): string {
+  return model
+    .trim()
+    .toLowerCase()
+    // Provider route prefix: "anthropic/", "openrouter/anthropic/".
+    .replace(/^(?:[a-z0-9_-]+\/)+/, "")
+    // "claude-haiku-4.5" and "claude-haiku-4-5" are the same model.
+    .replace(/\./g, "-")
+    // Dated snapshots: "claude-haiku-4-5-20251001".
+    .replace(/-\d{8}$/, "")
+    .replace(/-latest$/, "");
+}
+
+/**
+ * The dearest rate in the table — what an unrecognised model is charged.
+ *
+ * Failing free is how a budget alarm goes silent exactly when a new model is
+ * rolled out, which is when it is most needed. Computed rather than hardcoded
+ * so it cannot drift out of step with the table above.
+ */
+function dearestRate(): ModelRate {
+  return Object.values(RATES).reduce((a, b) => (b.output > a.output ? b : a));
+}
+
+export function rateFor(model: string): ModelRate {
+  const id = normalizeModelId(model);
+  const exact = RATES[id];
   if (exact) return exact;
-  // Prefixes, because deployed ids carry date suffixes the table need not chase.
-  for (const [known, rate] of Object.entries(MODEL_RATES_USD_PER_MTOK)) {
-    if (model.startsWith(known)) return rate;
+  // Longest prefix first: "claude-sonnet-4-6" must not be answered by
+  // "claude-sonnet-4" simply because it was declared earlier.
+  const keys = Object.keys(RATES).sort((a, b) => b.length - a.length);
+  for (const known of keys) {
+    if (id.startsWith(known)) return RATES[known];
   }
-  // Fail expensive, not free. See the note above.
-  return Object.values(MODEL_RATES_USD_PER_MTOK).reduce((a, b) => (b.output > a.output ? b : a));
+  return dearestRate();
+}
+
+/** Whether this model was priced from the table or from the fallback. */
+export function isKnownModel(model: string): boolean {
+  const id = normalizeModelId(model);
+  return Object.keys(RATES).some((known) => id === known || id.startsWith(known));
 }
 
 export function usdForTokens(
@@ -75,8 +140,8 @@ export function usdForTokens(
   return (
     (tokens.inputTokens * rate.input +
       tokens.outputTokens * rate.output +
-      tokens.cachedInputTokens * rate.cachedInput +
-      tokens.cacheWriteTokens * rate.cacheWrite) /
+      tokens.cachedInputTokens * rate.input * CACHE_READ_MULTIPLIER +
+      tokens.cacheWriteTokens * rate.input * CACHE_WRITE_MULTIPLIER) /
     1_000_000
   );
 }

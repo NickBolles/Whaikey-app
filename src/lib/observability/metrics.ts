@@ -55,6 +55,23 @@ export interface GuardrailMetrics {
   reportsPerThousandSocialActions: number | null;
   socialActions: number;
   reports: number;
+  /**
+   * The same figure with accounts that JOINED during the window removed —
+   * the cohort adjustment `docs/SOCIAL.md` §12 actually asks for.
+   *
+   * A new account logs its backlog: the bottles it already owns, the pours it
+   * remembers. That is one person's history arriving in one week, and it lifts
+   * the raw average during any period of growth without anybody drinking more.
+   * §12 names that confounder and requires the metric be cohort-adjusted, and
+   * the first version of this module shipped the raw aggregate with the
+   * confounder merely *described* in a comment — which is not the same as
+   * removing it. Established accounts are the population comparable across
+   * releases; the raw figure stays beside it because the two diverging IS the
+   * signal that growth rather than behaviour moved the number.
+   */
+  establishedPoursPerActiveUserPerWeek: number | null;
+  establishedActiveUsers: number;
+  establishedPours: number;
   /** Share of accounts with a profile that currently have social switched off. */
   socialOffRate: number | null;
   /** Share of accounts with a profile that have blocked at least one person. */
@@ -108,6 +125,17 @@ export async function guardrailMetrics(
     )
     .where(inWindow);
 
+  // Cohort-adjusted: accounts that existed BEFORE the window opened, so a
+  // backlog logged by somebody who joined on Tuesday cannot move it.
+  const [establishedRow] = await db
+    .select({
+      pours: sql<number>`count(*)`,
+      users: sql<number>`count(distinct ${schema.pours.userId})`,
+    })
+    .from(schema.pours)
+    .innerJoin(schema.user, eq(schema.user.id, schema.pours.userId))
+    .where(and(inWindow, lt(schema.user.createdAt, since)));
+
   const [socialRow] = await db
     .select({ n: sql<number>`count(*)` })
     .from(schema.pours)
@@ -140,6 +168,8 @@ export async function guardrailMetrics(
 
   const pours = Number(pourRow?.pours ?? 0);
   const activeUsers = Number(pourRow?.users ?? 0);
+  const establishedPours = Number(establishedRow?.pours ?? 0);
+  const establishedActiveUsers = Number(establishedRow?.users ?? 0);
   const ownedPours = Number(ratioRow?.owned ?? 0);
   const triedPours = Number(ratioRow?.tried ?? 0);
   const socialActions =
@@ -154,6 +184,12 @@ export async function guardrailMetrics(
     activeUsers,
     poursPerActiveUserPerWeek:
       activeUsers === 0 ? 0 : (pours / activeUsers) * (7 / windowDays),
+    establishedPours,
+    establishedActiveUsers,
+    establishedPoursPerActiveUserPerWeek:
+      establishedActiveUsers === 0
+        ? null
+        : (establishedPours / establishedActiveUsers) * (7 / windowDays),
     ownedPours,
     triedPours,
     triedToOwnedPourRatio: ownedPours === 0 ? null : triedPours / ownedPours,

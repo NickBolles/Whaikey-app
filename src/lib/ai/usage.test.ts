@@ -3,9 +3,11 @@ import type { DB } from "@/db";
 import * as schema from "@/db/schema";
 import { createTestUser, setupTestDb } from "@/test/helpers";
 import {
-  MODEL_RATES_USD_PER_MTOK,
   aiCostSince,
+  isKnownModel,
   meanAiCostPerActiveUser,
+  normalizeModelId,
+  rateFor,
   recordAiUsage,
   usdForTokens,
 } from "./usage";
@@ -72,41 +74,82 @@ describe("what a model call cost", () => {
 });
 
 describe("converting tokens to money at read time", () => {
-  it("prices each token class at its own rate", () => {
-    const usd = usdForTokens("claude-sonnet-5", {
-      inputTokens: 1_000_000,
-      outputTokens: 0,
-      cachedInputTokens: 0,
-      cacheWriteTokens: 0,
-    });
-    expect(usd).toBeCloseTo(MODEL_RATES_USD_PER_MTOK["claude-sonnet-5"].input, 6);
-  });
-
-  it("matches a dated model id to its family by prefix", () => {
-    // Deployed ids carry date suffixes; the rate table should not have to
-    // chase every one of them.
+  it("prices each token class from the model's input rate", () => {
+    const rate = rateFor("claude-sonnet-5");
     expect(
-      usdForTokens("claude-sonnet-5-20991231", {
+      usdForTokens("claude-sonnet-5", {
         inputTokens: 1_000_000,
         outputTokens: 0,
         cachedInputTokens: 0,
         cacheWriteTokens: 0,
       }),
-    ).toBeCloseTo(MODEL_RATES_USD_PER_MTOK["claude-sonnet-5"].input, 6);
+    ).toBeCloseTo(rate.input, 6);
+    // Cache reads bill at a tenth of input, writes at 1.25x. Derived from the
+    // input rate rather than listed separately, so a price correction cannot
+    // update one and miss the others.
+    expect(
+      usdForTokens("claude-sonnet-5", {
+        inputTokens: 0,
+        outputTokens: 0,
+        cachedInputTokens: 1_000_000,
+        cacheWriteTokens: 0,
+      }),
+    ).toBeCloseTo(rate.input * 0.1, 6);
   });
 
-  it("prices an unknown model at the most expensive rate, not at zero", () => {
+  it("normalises the OpenRouter ids this repo actually defaults to", () => {
+    // AGENTS.md: OpenRouter is PREFERRED when its key is set, and
+    // `chatModel()` / `fastModel()` then return these exact strings. Matched
+    // raw, neither hits the table and ordinary traffic was priced at the
+    // unknown-model fallback — a budget alarm reading several times high on
+    // every default deployment.
+    expect(normalizeModelId("anthropic/claude-haiku-4.5")).toBe("claude-haiku-4-5");
+    expect(normalizeModelId("anthropic/claude-sonnet-4")).toBe("claude-sonnet-4");
+    expect(isKnownModel("anthropic/claude-haiku-4.5")).toBe(true);
+    expect(isKnownModel("anthropic/claude-sonnet-4")).toBe(true);
+    // And the first-party ids, which carry a date suffix.
+    expect(normalizeModelId("claude-haiku-4-5-20251001")).toBe("claude-haiku-4-5");
+    expect(isKnownModel("claude-haiku-4-5-20251001")).toBe(true);
+  });
+
+  it("prices the OpenRouter id the same as its first-party twin", () => {
+    const tokens = {
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+      cachedInputTokens: 0,
+      cacheWriteTokens: 0,
+    };
+    expect(usdForTokens("anthropic/claude-haiku-4.5", tokens)).toBeCloseTo(
+      usdForTokens("claude-haiku-4-5-20251001", tokens),
+      9,
+    );
+  });
+
+  it("does not let a shorter family name answer for a longer one", () => {
+    // "claude-sonnet-4" is a prefix of "claude-sonnet-4-6"; longest match wins.
+    expect(rateFor("claude-sonnet-4-6")).toEqual(rateFor("claude-sonnet-4-6"));
+    expect(normalizeModelId("claude-sonnet-4-6")).toBe("claude-sonnet-4-6");
+  });
+
+  it("prices an unknown model at the dearest rate, not at zero", () => {
     const unknown = usdForTokens("some-model-nobody-added", {
       inputTokens: 0,
       outputTokens: 1_000_000,
       cachedInputTokens: 0,
       cacheWriteTokens: 0,
     });
-    const dearest = Math.max(...Object.values(MODEL_RATES_USD_PER_MTOK).map((r) => r.output));
     // Failing free is how a budget alarm goes silent exactly when a new model
     // is rolled out, which is when it is most needed.
-    expect(unknown).toBeCloseTo(dearest, 6);
     expect(unknown).toBeGreaterThan(0);
+    expect(isKnownModel("some-model-nobody-added")).toBe(false);
+    expect(unknown).toBeGreaterThanOrEqual(
+      usdForTokens("claude-opus-5", {
+        inputTokens: 0,
+        outputTokens: 1_000_000,
+        cachedInputTokens: 0,
+        cacheWriteTokens: 0,
+      }),
+    );
   });
 });
 

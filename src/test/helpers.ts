@@ -77,6 +77,11 @@ export async function createTestUser(
       name: overrides.name ?? "Test Taster",
       email: overrides.email ?? `${id}@example.com`,
       emailVerified: true,
+      // Honoured rather than discarded: the signature accepts a
+      // `Partial<schema.User>`, so silently dropping `createdAt` was a trap —
+      // a cohort test could ask for an account from ninety days ago, get one
+      // created just now, and pass or fail for reasons it never stated.
+      ...(overrides.createdAt ? { createdAt: overrides.createdAt } : {}),
     })
     .returning();
   if (ageVerified) await verifyTestUserAge(db, row.id);

@@ -78,6 +78,38 @@ describe("the guardrail metrics SOCIAL §12 committed to", () => {
     expect(m.poursPerActiveUserPerWeek).toBeCloseTo(2, 6);
   });
 
+  it("excludes accounts that joined inside the window from the adjusted figure", async () => {
+    const bottle = await createTestBottle(db);
+    const established = await createTestUser(db, {
+      createdAt: new Date(Date.now() - 90 * DAY),
+    });
+    // Joined two days ago and logged a backlog of ten pours — one person's
+    // history arriving at once, which is exactly the confounder SOCIAL §12
+    // names and the reason it requires cohort adjustment.
+    const newcomer = await createTestUser(db, { createdAt: new Date(Date.now() - 2 * DAY) });
+    await pour(established.id, bottle.id);
+    await pour(established.id, bottle.id);
+    for (let i = 0; i < 10; i++) await pour(newcomer.id, bottle.id);
+
+    const m = await guardrailMetrics(db);
+    // Raw: 12 pours over 2 users = 6/week, which would read as a spike.
+    expect(m.poursPerActiveUserPerWeek).toBeCloseTo(6, 6);
+    // Adjusted: the established account alone, unchanged at 2/week.
+    expect(m.establishedActiveUsers).toBe(1);
+    expect(m.establishedPours).toBe(2);
+    expect(m.establishedPoursPerActiveUserPerWeek).toBeCloseTo(2, 6);
+  });
+
+  it("reports the adjusted figure as unknown when every account is new", async () => {
+    const bottle = await createTestBottle(db);
+    const newcomer = await createTestUser(db, { createdAt: new Date(Date.now() - 1 * DAY) });
+    await pour(newcomer.id, bottle.id);
+    const m = await guardrailMetrics(db);
+    // No established population to compare against: null, not zero. Zero would
+    // read as "established users stopped drinking".
+    expect(m.establishedPoursPerActiveUserPerWeek).toBeNull();
+  });
+
   it("counts a pour of an unshelved bottle as tried, not owned", async () => {
     const owned = await createTestBottle(db, { name: "Owned" });
     const sampled = await createTestBottle(db, { name: "Sampled" });

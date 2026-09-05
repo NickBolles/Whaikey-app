@@ -56,8 +56,24 @@ export default async function SharedPourPage({ params }: Props) {
    * CSP endpoint's redaction both exist to prevent.
    */
   const viewer = await getSessionUser();
-  const shareId = await shareIdForCode(getDb(), code);
-  await recordEvent(getDb(), "share_view", { userId: viewer?.id ?? null, shareId });
+  const shareRow = viewer
+    ? await getDb().query.pourShares.findFirst({ where: eq(schema.pourShares.code, code) })
+    : null;
+  const shareId = shareRow?.id ?? (await shareIdForCode(getDb(), code));
+  /**
+   * The sharer opening their own link is not a reader (PLAN-A5).
+   *
+   * `/sharing` has a "View" button beside every link, and the owner branch
+   * below deliberately renders no comparison — there is nothing to compare a
+   * note against its own author. Counting those as signed-in views put a guaranteed
+   * miss in the denominator of the overlap rate, so the metric would read as
+   * sparse overlap in exact proportion to how often people checked their own
+   * links. The number is about recipients; the owner is not one.
+   */
+  const viewerIsOwner = Boolean(viewer && shareRow?.userId === viewer.id);
+  if (!viewerIsOwner) {
+    await recordEvent(getDb(), "share_view", { userId: viewer?.id ?? null, shareId });
+  }
 
   const noteParts = [["Nose", share.note.nose], ["Palate", share.note.palate], ["Finish", share.note.finish]].filter((part): part is [string, string] => Boolean(part[1]));
   const leafHeat = Object.fromEntries(Object.entries(share.note.flavorTags ?? {}).map(([id, intensity]) => [id, intensity / 3]));
@@ -74,9 +90,8 @@ export default async function SharedPourPage({ params }: Props) {
   let discussionBlock: React.ReactNode = null;
   if (viewer) {
     const db = getDb();
-    const shareRow = await db.query.pourShares.findFirst({ where: eq(schema.pourShares.code, code) });
     const pourId = shareRow?.pourId ?? null;
-    const isOwner = shareRow?.userId === viewer.id;
+    const isOwner = viewerIsOwner;
 
     if (isOwner) {
       viewerBlock = (

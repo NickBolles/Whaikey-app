@@ -244,7 +244,7 @@ export async function runChat(
 
 /** Minimal structural view of the Anthropic raw streaming events we consume. */
 type RawStreamEvent =
-  | { type: "message_start"; message?: unknown }
+  | { type: "message_start"; message?: { usage?: unknown } }
   | {
       type: "content_block_start";
       index: number;
@@ -330,7 +330,21 @@ export async function* runChatStream(
 
     const blocks: AssembledBlock[] = [];
     let stopReason: string | null = null;
+    /**
+     * A streamed turn reports its tokens in TWO events, not one.
+     *
+     * `message_start.message.usage` carries `input_tokens` and both cache
+     * counts; `message_delta.usage` carries only `output_tokens`. Reading the
+     * delta alone recorded zero input and zero cache for every streamed chat
+     * turn — the highest-volume feature, and the one PLAN-A3 most needs a true
+     * number for. Merged rather than overwritten, because each event is
+     * authoritative for different fields.
+     */
     let streamUsage: Parameters<typeof recordAiUsage>[1]["usage"] = null;
+    const mergeUsage = (incoming: unknown) => {
+      if (!incoming || typeof incoming !== "object") return;
+      streamUsage = { ...(streamUsage ?? {}), ...(incoming as Record<string, number>) };
+    };
 
     for await (const event of stream) {
       switch (event.type) {
@@ -359,13 +373,15 @@ export async function* runChatStream(
           }
           break;
         }
+        case "message_start": {
+          mergeUsage(event.message?.usage);
+          break;
+        }
         case "message_delta": {
           stopReason = event.delta?.stop_reason ?? stopReason;
-          // The only place a streamed response reports what it cost. Shaped
-          // like the non-streaming `usage` block, and absent on older events,
-          // which `recordAiUsage` reads as "we did not learn" rather than as
-          // zero.
-          streamUsage = (event.usage ?? null) as Parameters<typeof recordAiUsage>[1]["usage"];
+          // Output tokens only; the input and cache counts arrived at
+          // `message_start`. See `mergeUsage` above.
+          mergeUsage(event.usage);
           break;
         }
         default:

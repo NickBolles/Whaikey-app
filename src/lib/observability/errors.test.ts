@@ -41,8 +41,31 @@ describe("what leaves this process", () => {
   });
 
   it("strips an email wherever it was interpolated from", () => {
-    expect(redactSensitive("no account for sam.o'x+tag@example.co.uk here")).toContain("[email]");
     expect(redactSensitive("user someone@example.com failed")).toBe("user [email] failed");
+  });
+
+  it("strips the WHOLE local part, including punctuation RFC 5322 allows", () => {
+    // The first version of this test asserted only that "[email]" appeared,
+    // which passed while `sam.o'` survived: the regex matched from the `x`
+    // onward because its local-part class had no apostrophe. Assert the
+    // absence of every fragment, not the presence of the marker.
+    const redacted = redactSensitive("no account for sam.o'x+tag@example.co.uk here");
+    expect(redacted).toBe("no account for [email] here");
+    for (const fragment of ["sam", "o'x", "+tag", "example.co.uk"]) {
+      expect(redacted).not.toContain(fragment);
+    }
+  });
+
+  it("handles the other local-part characters people really have", () => {
+    for (const address of [
+      "first.last@example.com",
+      "o'brien@example.ie",
+      "user+tag@sub.example.co.nz",
+      "a_b-c!d#e$f%g&h*i@example.org",
+    ]) {
+      const out = redactSensitive(`from ${address} at 03:00`);
+      expect(out).toBe("from [email] at 03:00");
+    }
   });
 
   it("strips the keyed phone hash", () => {
