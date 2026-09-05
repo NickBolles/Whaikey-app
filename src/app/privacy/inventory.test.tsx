@@ -225,6 +225,23 @@ describe("the privacy policy against the schema", () => {
     expect(screen.getByText(/A block is kept until you lift it/)).toBeInTheDocument();
   });
 
+  it("does not promise that a withdrawn cheer survives account deletion", () => {
+    render(<PrivacyPage />);
+    /**
+     * `ai_usage.user_id` and `analytics_events.user_id` are `set null`, so those
+     * rows outlive the account unattributed. `reactions.user_id` is NOT NULL and
+     * cascades, so a withdrawn cheer is erased outright — and a first draft of
+     * the paragraph above swept all three into one sentence about unlinking,
+     * which made the retention disclosure false for a third of what it named.
+     *
+     * A page that oversells what it keeps is the failure this file exists for;
+     * a page that oversells what it DELETES is the same failure pointing the
+     * other way, and it is the more tempting one to write.
+     */
+    expect(screen.getByText(/A cheer you took back is different, and goes with the account/)).toBeInTheDocument();
+    expect(screen.getByText(/It is deleted outright/)).toBeInTheDocument();
+  });
+
   it("says which account a share event names, not just that somebody was signed in", () => {
     render(<PrivacyPage />);
     /**
