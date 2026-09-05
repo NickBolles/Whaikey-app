@@ -123,10 +123,12 @@ describe("a database error, which carries the user's own words", () => {
     /**
      * And explicitly over the STACK, which is the surface this test could not
      * see when it was first written. `CapturedEvent` had no `stack` field, so
-     * the loop above stringified an object the note was never on and passed
-     * while `err.stack` — whose first line in Node is `<Name>: <message>` —
-     * carried the whole thing to Sentry. An assertion is only as good as the
-     * surface it can reach.
+     * the loop above stringified an object the note was never on, while
+     * `err.stack` — whose first line in Node is `<Name>: <message>` — still
+     * carried it. Sentry turned out to parse the stack into frames and never
+     * transmit that line, so nothing escaped; the test could not have
+     * established that either way, which is the reason it is asserted here
+     * now. An assertion is only as good as the surface it can reach.
      */
     expect(events[0].stack).toBeTruthy();
     for (const fragment of ["grandfather", "cellar", "cried", note]) {

@@ -14,11 +14,24 @@ import { meanAiCostPerActiveUser, aiCostSince, type AiCostRow } from "@/lib/ai/u
  * queries. That is a smaller failure than "we cannot know" and a worse one,
  * because it was always answerable and the answer was never asked for.
  *
- * So this module adds almost no new data collection: one table for the S1
- * share funnel, which genuinely has no home because reads leave no trace, and
- * SQL for the rest. An event pipeline that re-recorded pour timestamps into a
- * second table would be collecting a drinker's consumption history twice to
- * answer a question the first copy already answers.
+ * So this module adds as little new collection as the questions allow, and it
+ * is worth listing exactly rather than waving at, because an earlier version
+ * of this paragraph said "one table" and stayed that way while the list grew:
+ * `analytics_events` for the S1 funnel (reads leave no trace, so it genuinely
+ * has no home), `ai_usage` for the cost meter, and four columns that snapshot
+ * a fact at the moment it was true — `pours.shelf_relationship_at_pour`,
+ * `pours.visibility_at_creation`, `pours.first_shared_at` and
+ * `reactions.retracted_at`. Everything else is SQL over tables that already
+ * existed.
+ *
+ * The columns are the interesting part of that list: each exists because
+ * reading CURRENT state to describe a PAST event gave an answer that changed
+ * depending on when it was asked. None of them records anything the row did
+ * not already imply; they record WHEN, so the answer stops moving. An event
+ * pipeline that re-recorded pour timestamps into a second table would instead
+ * be collecting a drinker's consumption history twice to answer a question
+ * the first copy already answers — which is why the one remaining gap
+ * (§7's deleted-pour note) is still open rather than quietly built.
  *
  * **These are operator numbers and may never be rendered to a user.** AGENTS.md
  * and SOCIAL §3.1 ban a displayed count of how much or how often somebody
@@ -51,7 +64,18 @@ export interface GuardrailMetrics {
   triedToOwnedPourRatio: number | null;
   triedPours: number;
   ownedPours: number;
-  /** Reports per 1,000 social actions (pours visible to others, comments, cheers). */
+  /**
+   * Reports per 1,000 social actions — a pour becoming visible to others, a
+   * comment, a cheer.
+   *
+   * The denominator counts what HAPPENED, not what still stands: a comment
+   * that was since deleted, a cheer since retracted, and a pour since made
+   * private all remain in it. That is deliberate and is most of the work in
+   * this file. Counting only surviving rows meant the denominator shrank
+   * exactly when somebody stepped back or was suspended — which is when the
+   * numerator is highest — so the safety metric spiked because of the safety
+   * action.
+   */
   reportsPerThousandSocialActions: number | null;
   socialActions: number;
   reports: number;

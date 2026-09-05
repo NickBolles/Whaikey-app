@@ -12,8 +12,14 @@ import type { NodeClient } from "@sentry/node";
  * of error as omitting one we do.
  *
  * **Server-only, deliberately.** `@sentry/node` rather than `@sentry/nextjs`,
- * because the seam this attaches to is `withErrorHandling` and the CSP
- * endpoint — both server. `@sentry/nextjs` would add build-time
+ * because every seam this attaches to is server-side: `withErrorHandling`,
+ * the `reportingErrors` wrapper on the seven routes that own their own
+ * responses, `/api/csp-report`, and `onRequestError` in
+ * `src/instrumentation.ts` for page renders. (An earlier version of this
+ * sentence named two of those four and was written when that was true; it
+ * stayed while the list grew, which is the failure this file has now made
+ * three times. If you add a seam, this list is part of the change.)
+ * `@sentry/nextjs` would add build-time
  * instrumentation and ship its client bundle to every visitor whether or not a
  * DSN is set, which on an app the native shell loads over the network is real
  * bytes for a feature that is off. The cost of this choice is honest and worth
@@ -22,11 +28,24 @@ import type { NodeClient } from "@sentry/node";
  * module is still the seam — `captureError` does not change.
  *
  * **What leaves this process is a decision, not a default.** Sentry's SDK is
- * built to collect; this codebase has three things that must never reach a
- * third party — a `/s/` share code (a bearer credential), the keyed phone
- * hash, and the user's email — so `beforeSend` strips them on the way out
- * rather than trusting each call site to have been careful. `sendDefaultPii`
- * stays false, which already withholds cookies, headers and IP.
+ * built to collect, and what must never reach a third party falls into two
+ * kinds that need two different mechanisms — a distinction this file learned
+ * the hard way, having shipped a version that named only the first.
+ *
+ * *Recognisable* values: a `/s/` share code (a bearer credential), the keyed
+ * phone hash, an email address. These have shapes, so `redactSensitive` finds
+ * them and `beforeSend` applies it to every string in the payload rather than
+ * trusting each call site to have been careful.
+ *
+ * *Unrecognisable* values: the user's own prose — a tasting note, a comment, a
+ * feedback message — which arrives bound into a failed query's message and
+ * matches no pattern at all. **No regex was ever going to find it**, so
+ * `sanitizeForReport` removes it by construction instead: a database error is
+ * rebuilt with its parameters replaced by a count and its cause dropped, and
+ * the stack is rebuilt from frames under a sanitised header.
+ *
+ * `sendDefaultPii` stays false on top of both, which already withholds
+ * cookies, headers and IP.
  */
 
 let client: NodeClient | null = null;
@@ -34,17 +53,31 @@ let client: NodeClient | null = null;
 let clientPromise: Promise<NodeClient | null> | null = null;
 let testHook: ((event: CapturedEvent) => void) | null = null;
 
-/** What a test observes: the payload, after redaction, that would be sent. */
+/**
+ * What a test observes: what would be sent, with `redactSensitive` already
+ * applied to the message and the stack.
+ *
+ * `context` is passed through **unredacted**, deliberately. The real payload
+ * has `beforeSend` over it and `applyScope` redacts tag values, so production
+ * strips more than this hook does — which means a test asserting a secret is
+ * absent here is asserting something strictly stronger than production needs,
+ * and cannot pass because a redactor happened to run. Getting that backwards
+ * is how the stack leak survived: the assertion was strong and the surface
+ * was wrong.
+ */
 export interface CapturedEvent {
   kind: "error" | "message";
   message: string;
   /**
-   * What would actually be transmitted alongside the message.
+   * The sanitised stack, so a test can assert over it.
    *
-   * Added because its absence hid a leak: a redaction test asserted that no
-   * fragment of a tasting note appeared in this object, and passed, while the
-   * note sat in the stack's first line — a surface the object did not have.
-   * An assertion is only as good as the thing it can see.
+   * Added because its absence hid a real blind spot: a redaction test asserted
+   * that no fragment of a tasting note appeared in this object and passed,
+   * while the note sat in `err.stack`'s first line — a field the observed
+   * object did not have. As it turns out Sentry never transmitted that field
+   * (it parses the stack into frames), so nothing escaped; but the test could
+   * not have told anyone that either way, which is the part worth fixing. An
+   * assertion is only as good as the surface it can see.
    */
   stack?: string;
   level: "error" | "warning";
@@ -217,20 +250,26 @@ function isDrizzleQueryError(err: unknown): err is Error & DrizzleQueryShape {
 const SAFE_DB_FIELDS = ["code", "constraint", "table", "column", "schema"] as const;
 
 /**
- * A stack whose header is the SANITISED message.
+ * A stack whose header is the SANITISED message. Defence in depth, not a
+ * plugged leak — and the difference is worth recording precisely, because the
+ * first version of this comment got it wrong in the confident direction.
  *
- * `err.stack` in Node is `"<Name>: <message>\n    at …"` — the message is the
- * first line of it. So copying the original stack onto the sanitised error put
- * the parameters straight back into the payload, one field over from where
- * they had just been removed. The redaction was real and the leak was total:
- * Sentry sends the stack.
+ * `err.stack` in Node begins `"<Name>: <message>\n    at …"`, so copying the
+ * original stack onto the sanitised error did carry the bound parameters on
+ * the object. It did **not** reach Sentry: `captureException` takes
+ * `exception.values[0].value` from `err.message` — the sanitised one — and
+ * runs the stack through `stackParser`, which emits frames (filename, module,
+ * function, lineno, colno) and discards every non-frame line. Verified
+ * empirically against `@sentry/node` with this exact scenario: the serialised
+ * event does not contain the parameter text.
  *
- * Two things made it survive review. The comment on the copied line said
- * "frames only; no data rides on a stack", which was simply wrong and said
- * confidently. And the tests asserted the absence of every fragment over
- * `CapturedEvent`, which had no `stack` field — so the assertion was correct
- * and inspected a surface the secret was never on. `CapturedEvent` carries the
- * stack now, so that class of test covers what is actually transmitted.
+ * So why rebuild it at all? Because the old arrangement made a privacy
+ * guarantee depend on a third party's parser quietly dropping a line, which is
+ * not a guarantee, it is a coincidence that currently holds. An SDK upgrade, a
+ * different transport, or an integration that attaches raw error data would
+ * end it silently. Rebuilding makes the invariant local: the sanitised error
+ * carries the values in no field at all, so nothing downstream has to be
+ * careful on our behalf.
  *
  * Frames are kept because they are the diagnostic value and carry no data: a
  * frame is a file, a function and a position. Anything before the first frame
