@@ -223,6 +223,22 @@ describe("the privacy policy against the schema", () => {
     expect(screen.getByText(/A block is kept until you lift it/)).toBeInTheDocument();
   });
 
+  it("says which account a share event names, not just that somebody was signed in", () => {
+    render(<PrivacyPage />);
+    /**
+     * `analytics_events.user_id` is a foreign key to the account, not a
+     * boolean. The disclosure used to describe it as "whether you were signed
+     * in", which understates the identifiability of the row it is describing —
+     * and a privacy page that undersells what it holds is the one failure mode
+     * this whole file exists to catch.
+     */
+    expect(screen.getByText(/which account/)).toBeInTheDocument();
+    expect(screen.getByText(/your user id, not/)).toBeInTheDocument();
+    // And all four events, not the three that existed before `share_shelf_add`.
+    expect(screen.getByText(/Four things about share links/)).toBeInTheDocument();
+    expect(screen.getByText(/straight onto your shelf/)).toBeInTheDocument();
+  });
+
   it("still tells the reader what the concierge keeps and for how long", () => {
     render(<PrivacyPage />);
     // The specific omission this file was written for, asserted in its own

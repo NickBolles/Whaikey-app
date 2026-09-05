@@ -88,11 +88,13 @@ export default function PrivacyPage() {
             it exists so we can tell whether the AI is affordable before it becomes your problem.
           </li>
           <li>
-            <strong className="text-foreground">Three things about share links</strong> — that a
-            share page was opened, whether a comparison appeared on it, and whether it led to a
-            wishlist add. Enough to tell whether sharing works at all, and deliberately not a
-            record of what you read: which link, and whether you were signed in. Nothing about
-            pages you visit anywhere else in the app is recorded.
+            <strong className="text-foreground">Four things about share links</strong> — that a
+            share page was opened, whether a comparison appeared on it, and whether it led to the
+            bottle going on your wishlist or straight onto your shelf. Each one records which
+            link it was and, if you were signed in, <em>which account</em> — your user id, not
+            just the fact that somebody was signed in. Enough to tell whether sharing works at
+            all, and deliberately not a record of what you read: nothing about pages you visit
+            anywhere else in the app is recorded.
           </li>
           <li>
             <strong className="text-foreground">Your age answer</strong> — the date of birth and

@@ -346,55 +346,77 @@ export async function* runChatStream(
       streamUsage = { ...(streamUsage ?? {}), ...(incoming as Record<string, number>) };
     };
 
-    for await (const event of stream) {
-      switch (event.type) {
-        case "content_block_start": {
-          const cb = event.content_block;
-          if (cb.type === "text") {
-            blocks[event.index] = { type: "text", text: "" };
-          } else if (cb.type === "tool_use") {
-            blocks[event.index] = {
-              type: "tool_use",
-              id: cb.id ?? "",
-              name: cb.name ?? "",
-              partialJson: "",
-            };
+    /**
+     * The loop is wrapped so the meter reading survives an abnormal exit.
+     *
+     * `recordAiUsage` used to sit after the loop, which meant it ran only when
+     * the stream ended normally. Anthropic erroring mid-stream, or an SSE
+     * consumer going away and closing this generator, skipped it entirely —
+     * and by then `message_start` has already delivered the input and cache
+     * counts, which are billed whether or not anyone read the answer. So the
+     * calls that failed were exactly the ones missing from the cost totals,
+     * which is the direction that flatters the number.
+     *
+     * `finally` rather than a catch: the error still propagates to the caller
+     * unchanged, and `recordAiUsage` never throws, so this cannot turn a
+     * stream failure into a different one.
+     */
+    try {
+      for await (const event of stream) {
+        switch (event.type) {
+          case "content_block_start": {
+            const cb = event.content_block;
+            if (cb.type === "text") {
+              blocks[event.index] = { type: "text", text: "" };
+            } else if (cb.type === "tool_use") {
+              blocks[event.index] = {
+                type: "tool_use",
+                id: cb.id ?? "",
+                name: cb.name ?? "",
+                partialJson: "",
+              };
+            }
+            break;
           }
-          break;
-        }
-        case "content_block_delta": {
-          const block = blocks[event.index];
-          if (event.delta.type === "text_delta" && block?.type === "text") {
-            const text = event.delta.text ?? "";
-            block.text += text;
-            if (text) yield { type: "text", text };
-          } else if (event.delta.type === "input_json_delta" && block?.type === "tool_use") {
-            block.partialJson += event.delta.partial_json ?? "";
+          case "content_block_delta": {
+            const block = blocks[event.index];
+            if (event.delta.type === "text_delta" && block?.type === "text") {
+              const text = event.delta.text ?? "";
+              block.text += text;
+              if (text) yield { type: "text", text };
+            } else if (event.delta.type === "input_json_delta" && block?.type === "tool_use") {
+              block.partialJson += event.delta.partial_json ?? "";
+            }
+            break;
           }
-          break;
+          case "message_start": {
+            mergeUsage(event.message?.usage);
+            break;
+          }
+          case "message_delta": {
+            stopReason = event.delta?.stop_reason ?? stopReason;
+            // Output tokens only; the input and cache counts arrived at
+            // `message_start`. See `mergeUsage` above.
+            mergeUsage(event.usage);
+            break;
+          }
+          default:
+            break;
         }
-        case "message_start": {
-          mergeUsage(event.message?.usage);
-          break;
-        }
-        case "message_delta": {
-          stopReason = event.delta?.stop_reason ?? stopReason;
-          // Output tokens only; the input and cache counts arrived at
-          // `message_start`. See `mergeUsage` above.
-          mergeUsage(event.usage);
-          break;
-        }
-        default:
-          break;
+      }
+    } finally {
+      // Best-effort, and only when something was actually reported: a stream
+      // that died before `message_start` has nothing billable to record, and
+      // writing a zero row for it would add noise to the per-feature totals.
+      if (streamUsage) {
+        await recordAiUsage(db, {
+          userId,
+          feature: "chat",
+          model: streamModel,
+          usage: streamUsage,
+        });
       }
     }
-
-    await recordAiUsage(db, {
-      userId,
-      feature: "chat",
-      model: streamModel,
-      usage: streamUsage,
-    });
 
     const assembled = blocks.filter(Boolean);
     const texts = assembled.filter((b): b is Extract<AssembledBlock, { type: "text" }> => b.type === "text");

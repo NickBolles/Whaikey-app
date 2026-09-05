@@ -173,8 +173,40 @@ export async function captureError(err: unknown, context: ErrorContext = {}): Pr
     const scope = new Scope();
     applyScope(scope, context);
     sentry.captureException(err, undefined, scope);
+    await flushQuietly(sentry);
   } catch (reportingError) {
     console.error("[observability] failed to report an error", reportingError);
+  }
+}
+
+/**
+ * Wait for the transport, not just for the queue.
+ *
+ * `captureException` and `captureMessage` **enqueue**; they return before the
+ * event is on the wire. So the `after()` fix one function down was only ever
+ * half of it — the platform kept the invocation alive until a promise that
+ * resolved the moment the event entered Sentry's buffer, and then froze it
+ * with the HTTP request still in flight. Exactly the bug `after()` was added
+ * to fix, moved one layer in.
+ *
+ * Bounded, and deliberately short. `flush` extends a serverless invocation the
+ * caller is paying for, and this is best-effort telemetry attached to a
+ * request that has already failed: two seconds is enough for a healthy
+ * transport and short enough that a sick one cannot hold the function open.
+ * A `false` return means the queue did not drain in time — worth a line in the
+ * log, never worth throwing, since the whole module's contract is that
+ * reporting an error never becomes a second one.
+ */
+const FLUSH_TIMEOUT_MS = 2_000;
+
+async function flushQuietly(sentry: NodeClient): Promise<void> {
+  try {
+    const drained = await sentry.flush(FLUSH_TIMEOUT_MS);
+    if (!drained) {
+      console.error("[observability] report queue did not drain before the timeout");
+    }
+  } catch (flushError) {
+    console.error("[observability] failed to flush the report queue", flushError);
   }
 }
 
@@ -193,6 +225,7 @@ export async function captureMessage(
     const scope = new Scope();
     applyScope(scope, context);
     sentry.captureMessage(redacted, level, undefined, scope);
+    await flushQuietly(sentry);
   } catch (reportingError) {
     console.error("[observability] failed to report a message", reportingError);
   }
@@ -281,7 +314,18 @@ export async function reportingErrors<T>(where: string, fn: () => Promise<T>): P
   try {
     return await fn();
   } catch (err) {
-    await captureError(err, { where });
+    /**
+     * Handed to `after()` rather than awaited.
+     *
+     * It used to `await captureError(...)` before rethrowing, which was
+     * harmless while capture merely enqueued. Now that it also flushes the
+     * transport, awaiting would add up to `FLUSH_TIMEOUT_MS` to every failing
+     * request on all seven of these routes — including `/api/native/manifest`,
+     * whose entire design is to fail fast and open. `reportInBackground` gives
+     * the same delivery guarantee through `waitUntil` and costs the response
+     * nothing, and `after` runs even when the request ends by throwing.
+     */
+    reportInBackground(err, { where });
     throw err;
   }
 }
