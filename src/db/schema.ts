@@ -929,6 +929,112 @@ export const aiRateLimits = pgTable(
   (t) => [uniqueIndex("ai_rate_limits_user_window_start_uq").on(t.userId, t.window, t.windowStart)],
 );
 
+/**
+ * Which surface spent an AI call. Required, because "AI cost" is not one
+ * number: chat, pairings, extraction, scanning, enrichment and import each
+ * have a different shape, and the answer worth having is which of them is
+ * expensive (PLAN-A3).
+ */
+export const AI_FEATURES = [
+  "chat",
+  "pairings",
+  "extract",
+  "scan",
+  "enrich",
+  "import",
+  "recommend-explain",
+] as const;
+export type AiFeature = (typeof AI_FEATURES)[number];
+
+/**
+ * Tokens spent per AI call, per account (PLAN-A3: "AI cost per premium user
+ * is unmeasurable").
+ *
+ * `ai_rate_limits` counts *requests* in a rolling window and is swept after
+ * 48 hours, so it can answer "are they over their allowance" and cannot answer
+ * "what did they cost". This is the second question, and it needs the token
+ * counts the model reports back rather than a request tally.
+ *
+ * **Tokens, never dollars.** A stored dollar figure becomes a lie the moment
+ * prices change, and the rate table that converts at read time can be
+ * corrected where a written-down number cannot. Same rule COMPETITORS §2.7
+ * applies to bottle valuations: no false precision about money.
+ *
+ * `userId` is nullable because not every call is on a user's behalf — catalog
+ * enrichment runs on a schedule and belongs to the system. A null there is
+ * "nobody asked for this", which is a different and useful row, not a missing
+ * one.
+ */
+export const aiUsage = pgTable(
+  "ai_usage",
+  {
+    id: id(),
+    userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
+    feature: text("feature").$type<AiFeature>().notNull(),
+    model: text("model").notNull(),
+    inputTokens: integer("input_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull().default(0),
+    /** Cache reads bill at a fraction of input; kept apart or the maths is wrong. */
+    cachedInputTokens: integer("cached_input_tokens").notNull().default(0),
+    cacheWriteTokens: integer("cache_write_tokens").notNull().default(0),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("ai_usage_user_created_idx").on(t.userId, t.createdAt),
+    index("ai_usage_created_idx").on(t.createdAt),
+  ],
+);
+
+/**
+ * The S1 share funnel — the only thing here that needs an event at all.
+ *
+ * PLAN-A5's finding is that the S1→S2 overlap was never measured and S2/S3
+ * shipped anyway. Measuring it needs three numbers with no home in any
+ * existing table: a share page being *viewed*, a comparison being *rendered*
+ * on it, and a wishlist add *sourced from* it. Reads leave no trace, so
+ * without these the question cannot be asked at all.
+ *
+ * **Almost nothing else needed an event**, which is the point. `docs/SOCIAL.md`
+ * §12's guardrail metrics — pours per active user per week, the tried:owned
+ * ratio, reports per 1,000 social actions, block rate, share of accounts that
+ * switch social off — are all computable from `pours`, `user_bottles`,
+ * `reports`, `blocks` and `user_profiles` as they already stand. They were
+ * never unmeasurable; nobody had written the queries. `metrics.ts` writes
+ * them. Recording those as events too would store the same consumption
+ * timestamps a second time, in a table whose whole justification is that the
+ * first one could not answer.
+ *
+ * `userId` is nullable because a share link is readable signed-out, and
+ * whether the viewer was signed in **is** the S1 number — a signed-out view
+ * cannot convert.
+ */
+export const ANALYTICS_EVENTS = [
+  "share_view",
+  "share_comparison_rendered",
+  "share_wishlist_add",
+] as const;
+export type AnalyticsEventName = (typeof ANALYTICS_EVENTS)[number];
+
+export const analyticsEvents = pgTable(
+  "analytics_events",
+  {
+    id: id(),
+    name: text("name").$type<AnalyticsEventName>().notNull(),
+    userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
+    /**
+     * The share link this is about, so the funnel can be followed end to end.
+     * Deliberately the pour_shares row id and never the share CODE, which is a
+     * bearer credential: a table of live codes is a table of keys.
+     */
+    shareId: text("share_id").references(() => pourShares.id, { onDelete: "cascade" }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("analytics_events_name_created_idx").on(t.name, t.createdAt),
+    index("analytics_events_share_idx").on(t.shareId),
+  ],
+);
+
 export const REC_MODES = ["discovery", "tonight"] as const;
 export type RecMode = (typeof REC_MODES)[number];
 
@@ -1427,6 +1533,8 @@ export type Pour = typeof pours.$inferSelect;
 export type CriticNote = typeof criticNotes.$inferSelect;
 export type TastingNote = typeof tastingNotes.$inferSelect;
 export type Pairing = typeof pairings.$inferSelect;
+export type AiUsage = typeof aiUsage.$inferSelect;
+export type AnalyticsEvent = typeof analyticsEvents.$inferSelect;
 export type ChatSession = typeof chatSessions.$inferSelect;
 export type ChatMessage = typeof chatMessages.$inferSelect;
 export type RecExplanation = typeof recExplanations.$inferSelect;

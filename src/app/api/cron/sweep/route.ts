@@ -5,6 +5,7 @@ import { sweepExpiredSessions, sweepProviderTokens } from "@/lib/auth";
 import { sweepOrphanedSubmissions } from "@/lib/catalog";
 import { sweepNativeAuth } from "@/lib/native-auth";
 import { sweepExpiredPhoneLookups } from "@/lib/social";
+import { sweepTelemetry } from "@/lib/observability/metrics";
 
 export const dynamic = "force-dynamic";
 
@@ -55,6 +56,10 @@ export async function GET(request: Request): Promise<NextResponse> {
    * catch the result however the account went away.
    */
   await sweepOrphanedSubmissions(db);
+  // Telemetry past its retention (WP-19). Bounded here rather than left to
+  // grow, so the Privacy Policy's 90 days is enforced by something rather than
+  // asserted — the gap WP-18 found in the `ai_rate_limits` claim.
+  await sweepTelemetry(db, now);
   /**
    * And expired sessions. Better Auth stops honouring the row; nothing deletes
    * it, so a device that goes quiet leaves its bearer token, IP address and

@@ -12,6 +12,7 @@ import { getDb } from "@/db";
 import * as schema from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
 import { getPublicPourShare } from "@/lib/pour-sharing";
+import { recordEvent, shareIdForCode } from "@/lib/observability/analytics";
 import { getSocialNote, getSocialPrefs, listComments } from "@/lib/social";
 import { WishlistCta } from "./wishlist-cta";
 
@@ -41,6 +42,23 @@ export default async function SharedPourPage({ params }: Props) {
   const { code } = await params;
   const share = await getPublicPourShare(getDb(), code);
   if (!share) notFound();
+
+  /**
+   * PLAN-A5, the number that was supposed to gate S2 and never existed.
+   *
+   * Recorded here rather than in `getPublicPourShare`, which is also called by
+   * `opengraph-image.tsx` — every link preview a chat app generates would
+   * otherwise count as somebody reading the note, and the funnel would measure
+   * crawlers. This runs where a person actually landed on the page.
+   *
+   * The row stores the share's **id**, never the code in the URL: a table of
+   * live codes is a table of keys, which is the leak `Referrer-Policy` and the
+   * CSP endpoint's redaction both exist to prevent.
+   */
+  const viewer = await getSessionUser();
+  const shareId = await shareIdForCode(getDb(), code);
+  await recordEvent(getDb(), "share_view", { userId: viewer?.id ?? null, shareId });
+
   const noteParts = [["Nose", share.note.nose], ["Palate", share.note.palate], ["Finish", share.note.finish]].filter((part): part is [string, string] => Boolean(part[1]));
   const leafHeat = Object.fromEntries(Object.entries(share.note.flavorTags ?? {}).map(([id, intensity]) => [id, intensity / 3]));
   const wedgeHeat = Object.fromEntries(Object.entries(rollUpToWedges(share.note.flavorTags ?? {})).map(([id, intensity]) => [id, intensity / 10]));
@@ -54,7 +72,6 @@ export default async function SharedPourPage({ params }: Props) {
   // shared with a link-holding stranger still 404s on the comment/cheers
   // APIs, so the thread never renders for them.
   let discussionBlock: React.ReactNode = null;
-  const viewer = await getSessionUser();
   if (viewer) {
     const db = getDb();
     const shareRow = await db.query.pourShares.findFirst({ where: eq(schema.pourShares.code, code) });
@@ -88,6 +105,13 @@ export default async function SharedPourPage({ params }: Props) {
             viewerFlavorTags[leafId] = Math.max(viewerFlavorTags[leafId] ?? 0, intensity);
           }
         }
+        // The second step of the funnel: a signed-in viewer who has poured this
+        // bottle themselves, so there is something to compare. The gap between
+        // this and `share_view` IS the sparse-overlap risk S1 was meant to test.
+        await recordEvent(getDb(), "share_comparison_rendered", {
+          userId: viewer.id,
+          shareId,
+        });
         viewerBlock = (
           <div className="flex flex-col gap-2">
             <ShareComparison mine={viewerFlavorTags} theirs={share.note.flavorTags} />
@@ -105,7 +129,13 @@ export default async function SharedPourPage({ params }: Props) {
         const existing = await db.query.userBottles.findFirst({
           where: and(eq(schema.userBottles.userId, viewer.id), eq(schema.userBottles.bottleId, share.bottleId)),
         });
-        viewerBlock = <WishlistCta bottleId={share.bottleId} initialRelationship={existing?.relationship ?? null} />;
+        viewerBlock = (
+          <WishlistCta
+            bottleId={share.bottleId}
+            initialRelationship={existing?.relationship ?? null}
+            fromShareId={shareId}
+          />
+        );
       }
 
       if (socialNote && pourId) {

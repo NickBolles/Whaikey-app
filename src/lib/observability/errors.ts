@@ -1,0 +1,201 @@
+import type { NodeClient } from "@sentry/node";
+
+/**
+ * The one place an unexpected error leaves this process for a third party.
+ *
+ * **Off unless the owner turns it on.** With `SENTRY_DSN` unset every entry
+ * point here is a no-op — the same shape as `WHAIKEY_CSP_ENFORCE` and
+ * `legalIdentity()`: the feature ships, the secret is the owner's, and nothing
+ * invents one. That is also why the Privacy Policy's Sentry entry is rendered
+ * conditionally on the DSN: naming a processor we do not use is the same class
+ * of error as omitting one we do.
+ *
+ * **Server-only, deliberately.** `@sentry/node` rather than `@sentry/nextjs`,
+ * because the seam this attaches to is `withErrorHandling` and the CSP
+ * endpoint — both server. `@sentry/nextjs` would add build-time
+ * instrumentation and ship its client bundle to every visitor whether or not a
+ * DSN is set, which on an app the native shell loads over the network is real
+ * bytes for a feature that is off. The cost of this choice is honest and worth
+ * writing down: **no browser errors, no source-mapped stacks, no automatic
+ * breadcrumbs.** If those are wanted, `@sentry/nextjs` is the upgrade and this
+ * module is still the seam — `captureError` does not change.
+ *
+ * **What leaves this process is a decision, not a default.** Sentry's SDK is
+ * built to collect; this codebase has three things that must never reach a
+ * third party — a `/s/` share code (a bearer credential), the keyed phone
+ * hash, and the user's email — so `beforeSend` strips them on the way out
+ * rather than trusting each call site to have been careful. `sendDefaultPii`
+ * stays false, which already withholds cookies, headers and IP.
+ */
+
+let client: NodeClient | null = null;
+let initialised = false;
+let testHook: ((event: CapturedEvent) => void) | null = null;
+
+/** What a test observes: the payload, after redaction, that would be sent. */
+export interface CapturedEvent {
+  kind: "error" | "message";
+  message: string;
+  level: "error" | "warning";
+  context: ErrorContext;
+}
+
+export interface ErrorContext {
+  /** Which surface this came from: an API route path, a job name. */
+  where?: string;
+  /**
+   * The account, by id only.
+   *
+   * An id is what every table keys on and means nothing outside this database;
+   * an email is a claim about a person and is readable by anyone who reaches
+   * the issue. Same rule `operator.ts` applies to who may work the queue.
+   */
+  userId?: string;
+  /** Small, non-identifying labels — a route, a feature, a directive. */
+  tags?: Record<string, string>;
+}
+
+/** Configured only when the owner has supplied a DSN. */
+export function isErrorMonitoringConfigured(): boolean {
+  return Boolean(process.env.SENTRY_DSN);
+}
+
+/**
+ * Redaction applied to every string that leaves, whatever produced it.
+ *
+ * Written against the *output* rather than the input because the SDK collects
+ * from places no call site controls — a stack frame's source line, an error
+ * message that interpolated a URL, a breadcrumb. A guard that each caller has
+ * to remember is the kind that gets forgotten once and then leaks forever.
+ */
+export function redactSensitive(text: string): string {
+  return (
+    text
+      // A share code is a bearer credential: holding it reads the note.
+      .replace(/\/(s|add)\/[A-Za-z0-9_-]+/g, "/$1/[redacted]")
+      // Email addresses, wherever they were interpolated from.
+      .replace(/[\w.+-]+@[\w-]+\.[\w.-]+/g, "[email]")
+      // The keyed phone hash is a stable identifier for a real phone number.
+      .replace(/\b[a-f0-9]{64}\b/gi, "[hash]")
+  );
+}
+
+function redactDeep(value: unknown, depth = 0): unknown {
+  if (depth > 6) return value;
+  if (typeof value === "string") return redactSensitive(value);
+  if (Array.isArray(value)) return value.map((v) => redactDeep(v, depth + 1));
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = redactDeep(v, depth + 1);
+    }
+    return out;
+  }
+  return value;
+}
+
+async function getClient(): Promise<NodeClient | null> {
+  if (!isErrorMonitoringConfigured()) return null;
+  if (initialised) return client;
+  initialised = true;
+  try {
+    const Sentry = await import("@sentry/node");
+    client = new Sentry.NodeClient({
+      dsn: process.env.SENTRY_DSN,
+      environment: process.env.SENTRY_ENVIRONMENT ?? process.env.VERCEL_ENV ?? "development",
+      release: process.env.VERCEL_GIT_COMMIT_SHA,
+      // Cookies, headers and the client IP stay here. Nothing in this app needs
+      // them to diagnose a 500, and every one of them is about a person.
+      sendDefaultPii: false,
+      // Errors only. Tracing would sample ordinary requests — a much larger
+      // surface for the redaction above to be wrong about, bought for
+      // performance data PLAN-A9 does not ask a third party for.
+      tracesSampleRate: 0,
+      integrations: [],
+      transport: Sentry.makeNodeTransport,
+      stackParser: Sentry.defaultStackParser,
+      beforeSend: (event) => redactDeep(event) as typeof event,
+      beforeBreadcrumb: (crumb) => redactDeep(crumb) as typeof crumb,
+    });
+    client.init();
+    return client;
+  } catch (err) {
+    // Monitoring must never be the reason a request fails. If the SDK cannot
+    // start, say so once and carry on unmonitored.
+    console.error("[observability] Sentry failed to initialise", err);
+    client = null;
+    return null;
+  }
+}
+
+function applyScope(
+  scope: import("@sentry/node").Scope,
+  context: ErrorContext,
+): void {
+  if (context.userId) scope.setUser({ id: context.userId });
+  if (context.where) scope.setTag("where", context.where);
+  for (const [k, v] of Object.entries(context.tags ?? {})) scope.setTag(k, redactSensitive(v));
+}
+
+/**
+ * Report an unexpected error. Never throws and never rejects: a failure to
+ * report is not a reason to fail the thing that was being reported about.
+ */
+export async function captureError(err: unknown, context: ErrorContext = {}): Promise<void> {
+  try {
+    // Inside the try, deliberately. `String(err)` runs arbitrary user code —
+    // `toString` on whatever was thrown — and an earlier version computed it
+    // above the try, where a throwing `toString` would have escaped and turned
+    // reporting an error into a second, worse one. Writing the test for
+    // "never throws" is what surfaced it: with no hook set, optional-call
+    // short-circuiting meant the argument was never evaluated and the test
+    // passed without exercising anything.
+    testHook?.({
+      kind: "error",
+      message: redactSensitive(err instanceof Error ? err.message : String(err)),
+      level: "error",
+      context,
+    });
+    const sentry = await getClient();
+    if (!sentry) return;
+    const { Scope } = await import("@sentry/node");
+    const scope = new Scope();
+    applyScope(scope, context);
+    sentry.captureException(err, undefined, scope);
+  } catch (reportingError) {
+    console.error("[observability] failed to report an error", reportingError);
+  }
+}
+
+/** Report something noteworthy that is not an exception — a CSP violation. */
+export async function captureMessage(
+  message: string,
+  context: ErrorContext = {},
+  level: "error" | "warning" = "warning",
+): Promise<void> {
+  const redacted = redactSensitive(message);
+  testHook?.({ kind: "message", message: redacted, level, context });
+  try {
+    const sentry = await getClient();
+    if (!sentry) return;
+    const { Scope } = await import("@sentry/node");
+    const scope = new Scope();
+    applyScope(scope, context);
+    sentry.captureMessage(redacted, level, undefined, scope);
+  } catch (reportingError) {
+    console.error("[observability] failed to report a message", reportingError);
+  }
+}
+
+/**
+ * Observe what would be sent, without a DSN and without network.
+ *
+ * The interesting assertions are about redaction, and those are exactly the
+ * ones a mock of the SDK would not make — it would assert we called a
+ * function, not that a share code was gone from what we passed it.
+ */
+export function setErrorReporterForTests(hook: ((event: CapturedEvent) => void) | null): void {
+  testHook = hook;
+  client = null;
+  initialised = false;
+}

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { asc, desc, eq, and } from "drizzle-orm";
 import type Anthropic from "@anthropic-ai/sdk";
 import type { DB } from "@/db";
+import { recordAiUsage } from "@/lib/ai/usage";
 import * as schema from "@/db/schema";
 import {
   AI_LOOP_BUDGET_MS,
@@ -165,9 +166,10 @@ export async function runChat(
   for (let iteration = 0; ; iteration++) {
     const timeout = remainingBudget(startedAt, AI_LOOP_BUDGET_MS);
     if (timeout === null) break;
+    const model = chatModel();
     const response = await anthropic.messages.create(
       {
-        model: chatModel(),
+        model,
         max_tokens: 8192,
         system: SYSTEM_PROMPT,
         tools: TOOL_DEFINITIONS,
@@ -175,6 +177,11 @@ export async function runChat(
       },
       { timeout },
     );
+    // Once per ITERATION, not once per turn: a tool-using conversation makes
+    // several model calls and each one is billed. Recording only the last
+    // would under-count the feature that costs the most, which is the one
+    // PLAN-A3 exists to catch.
+    await recordAiUsage(db, { userId, feature: "chat", model, usage: response.usage });
 
     const content = response.content as Anthropic.Messages.ContentBlock[];
     const texts = content.filter(
@@ -308,9 +315,10 @@ export async function* runChatStream(
   for (let iteration = 0; ; iteration++) {
     const timeout = remainingBudget(startedAt, AI_LOOP_BUDGET_MS);
     if (timeout === null) break;
+    const streamModel = chatModel();
     const stream = (await anthropic.messages.create(
       {
-        model: chatModel(),
+        model: streamModel,
         max_tokens: 8192,
         system: SYSTEM_PROMPT,
         tools: TOOL_DEFINITIONS,
@@ -322,6 +330,7 @@ export async function* runChatStream(
 
     const blocks: AssembledBlock[] = [];
     let stopReason: string | null = null;
+    let streamUsage: Parameters<typeof recordAiUsage>[1]["usage"] = null;
 
     for await (const event of stream) {
       switch (event.type) {
@@ -352,12 +361,24 @@ export async function* runChatStream(
         }
         case "message_delta": {
           stopReason = event.delta?.stop_reason ?? stopReason;
+          // The only place a streamed response reports what it cost. Shaped
+          // like the non-streaming `usage` block, and absent on older events,
+          // which `recordAiUsage` reads as "we did not learn" rather than as
+          // zero.
+          streamUsage = (event.usage ?? null) as Parameters<typeof recordAiUsage>[1]["usage"];
           break;
         }
         default:
           break;
       }
     }
+
+    await recordAiUsage(db, {
+      userId,
+      feature: "chat",
+      model: streamModel,
+      usage: streamUsage,
+    });
 
     const assembled = blocks.filter(Boolean);
     const texts = assembled.filter((b): b is Extract<AssembledBlock, { type: "text" }> => b.type === "text");

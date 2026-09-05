@@ -13,6 +13,7 @@ import { randomUUID } from "node:crypto";
 import { and, desc, eq } from "drizzle-orm";
 import type Anthropic from "@anthropic-ai/sdk";
 import type { DB } from "@/db";
+import { recordAiUsage } from "@/lib/ai/usage";
 import { bottles, pours, recExplanations, tastingNotes } from "@/db/schema";
 import type { RecMode } from "@/db/schema";
 import type { Recommendation } from "@/lib/recommend";
@@ -86,11 +87,21 @@ async function generateReason(
   mode: RecMode,
   rec: Recommendation,
   context: string,
+  // Threaded through rather than looked up here: this function has no other
+  // reason to know who is asking, and PLAN-A3 needs the answer per account.
+  attribution: { db: DB; userId: string },
 ): Promise<string | null> {
+  const model = chatModel();
   const response = await anthropic.messages.create({
-    model: chatModel(),
+    model,
     max_tokens: 160,
     messages: [{ role: "user", content: buildPrompt(mode, rec, context) }],
+  });
+  await recordAiUsage(attribution.db, {
+    userId: attribution.userId,
+    feature: "recommend-explain",
+    model,
+    usage: response.usage,
   });
   const text = textFromContent(response.content as never).trim();
   if (!text) return null;
@@ -161,7 +172,7 @@ export async function attachAiExplanations(
   for (const rec of uncached) {
     try {
       if (!(await reserveAiRequest(db, userId))) continue;
-      const reason = await generateReason(anthropic, mode, rec, context);
+      const reason = await generateReason(anthropic, mode, rec, context, { db, userId });
       if (!reason) continue;
       await db
         .insert(recExplanations)

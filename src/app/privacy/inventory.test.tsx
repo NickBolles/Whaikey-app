@@ -118,6 +118,10 @@ const INVENTORY: Record<string, Verdict> = {
   // from, not what it is. It is per-user text keyed to `user_id`, stored.
   rec_explanations: { disclosed: "the\n            one-line reason behind a recommendation is cached against your account" },
 
+  // --- Telemetry (WP-19) ---
+  ai_usage: { disclosed: "which feature it was, which model answered, and how many tokens it" },
+  analytics_events: { disclosed: "that a\n            share page was opened" },
+
   // --- Devices ---
   push_devices: { disclosed: "Device push tokens" },
 

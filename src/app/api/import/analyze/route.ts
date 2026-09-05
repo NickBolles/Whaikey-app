@@ -6,6 +6,7 @@ import { fastModel, getAnthropic, isAiConfigured } from "@/lib/ai/client";
 import { parseModelJson, textFromContent } from "@/lib/ai/json";
 import { heuristicMapping, IMPORT_FIELDS, type ColumnMapping } from "@/lib/import";
 import { reserveAiRequest } from "@/lib/ai/rate-limit";
+import { recordAiUsage } from "@/lib/ai/usage";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -62,8 +63,9 @@ export async function POST(request: Request) {
         return NextResponse.json({ mapping: fallback, source: "heuristic" });
       }
       const anthropic = getAnthropic();
+      const model = fastModel();
       const response = await anthropic.messages.create({
-        model: fastModel(),
+        model,
         max_tokens: 512,
         messages: [
           {
@@ -75,6 +77,12 @@ export async function POST(request: Request) {
             ].join("\n\n"),
           },
         ],
+      });
+      await recordAiUsage(getDb(), {
+        userId: user.id,
+        feature: "import",
+        model,
+        usage: response.usage,
       });
       const raw = parseModelJson(textFromContent(response.content as never));
       const obj = (typeof raw === "object" && raw !== null ? raw : {}) as Record<string, unknown>;

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { and, eq, lte } from "drizzle-orm";
 import type Anthropic from "@anthropic-ai/sdk";
 import type { DB } from "@/db";
+import { recordAiUsage } from "@/lib/ai/usage";
 import * as schema from "@/db/schema";
 import { chatModel, getAnthropic, isAiConfigured } from "./client";
 import { parseModelJson, textFromContent } from "./json";
@@ -51,6 +52,13 @@ export async function getOrGeneratePairings(
   db: DB,
   bottleId: string,
   client?: Anthropic,
+  /**
+   * Who asked, for cost attribution (PLAN-A3). Optional because generation is
+   * cached per bottle and shared: the first person to ask pays for everybody,
+   * which is a real property of the feature and not a rounding error, so the
+   * row records who triggered it rather than pretending the cost was spread.
+   */
+  requestedBy?: string | null,
 ): Promise<PairingRow[] | null> {
   const [bottle] = await db
     .select()
@@ -92,7 +100,7 @@ export async function getOrGeneratePairings(
           .from(schema.pairings)
           .where(eq(schema.pairings.bottleId, bottleId));
         if (refreshed.length > 0) return refreshed;
-        return await generatePairings(db, bottle, client);
+        return await generatePairings(db, bottle, client, requestedBy);
       } finally {
         await db
           .delete(schema.pairingGenerationLocks)
@@ -114,14 +122,26 @@ export async function getCachedPairings(db: DB, bottleId: string): Promise<Pairi
   return db.select().from(schema.pairings).where(eq(schema.pairings.bottleId, bottleId));
 }
 
-async function generatePairings(db: DB, bottle: schema.Bottle, client?: Anthropic): Promise<PairingRow[]> {
+async function generatePairings(
+  db: DB,
+  bottle: schema.Bottle,
+  client?: Anthropic,
+  requestedBy?: string | null,
+): Promise<PairingRow[]> {
   const anthropic = client ?? (isAiConfigured() ? getAnthropic() : null);
   if (!anthropic) return [];
 
+  const model = chatModel();
   const response = await anthropic.messages.create({
-    model: chatModel(),
+    model,
     max_tokens: 2048,
     messages: [{ role: "user", content: buildPrompt(bottle) }],
+  });
+  await recordAiUsage(db, {
+    userId: requestedBy ?? null,
+    feature: "pairings",
+    model,
+    usage: response.usage,
   });
 
   const parsed = parseModelJson(textFromContent(response.content as never));

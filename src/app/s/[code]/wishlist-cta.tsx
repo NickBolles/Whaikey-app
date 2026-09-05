@@ -14,9 +14,12 @@ const RELATIONSHIP_LABEL: Record<Relationship, string> = {
 export function WishlistCta({
   bottleId,
   initialRelationship,
+  fromShareId,
 }: {
   bottleId: string;
   initialRelationship: Relationship | null;
+  /** The share row's id, so the add can be attributed to this page (PLAN-A5). */
+  fromShareId?: string | null;
 }) {
   const [relationship, setRelationship] = useState<Relationship | null>(initialRelationship);
   const [busy, setBusy] = useState(false);
@@ -46,7 +49,7 @@ export function WishlistCta({
       const res = await fetch("/api/user-bottles", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ bottleId, relationship: "wishlist" }),
+        body: JSON.stringify({ bottleId, relationship: "wishlist", ...(fromShareId ? { fromShareId } : {}) }),
       });
       if (!res.ok) throw new Error("Couldn't add that to your wishlist.");
       setRelationship("wishlist");

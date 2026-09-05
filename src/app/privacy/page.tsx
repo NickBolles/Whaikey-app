@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { PolicyPage } from "@/components/policy-page";
+import { isErrorMonitoringConfigured } from "@/lib/observability/errors";
 
 export const metadata: Metadata = {
   title: "Privacy",
@@ -16,6 +17,15 @@ export const metadata: Metadata = {
  * a control nobody has.
  */
 export default function PrivacyPage() {
+  /**
+   * Named only when it is actually in use.
+   *
+   * A policy that lists a processor we do not send anything to is the same
+   * class of error as one that omits a processor we do — both make the list
+   * something a reader learns to stop believing. `SENTRY_DSN` is the whole
+   * condition, and it is the same condition the code reports under.
+   */
+  const errorMonitoringEnabled = isErrorMonitoringConfigured();
   return (
     <PolicyPage title="Privacy">
       <Section title="The short version">
@@ -70,6 +80,19 @@ export default function PrivacyPage() {
             one-line reason behind a recommendation is cached against your account so the same
             suggestion reads the same way twice. It is written from your own journal and says
             nothing your journal does not.
+          </li>
+          <li>
+            <strong className="text-foreground">What the AI cost</strong> — for each request you
+            make of the AI, which feature it was, which model answered, and how many tokens it
+            used. No part of what you asked or what it said is in this; it is a meter reading, and
+            it exists so we can tell whether the AI is affordable before it becomes your problem.
+          </li>
+          <li>
+            <strong className="text-foreground">Three things about share links</strong> — that a
+            share page was opened, whether a comparison appeared on it, and whether it led to a
+            wishlist add. Enough to tell whether sharing works at all, and deliberately not a
+            record of what you read: which link, and whether you were signed in. Nothing about
+            pages you visit anywhere else in the app is recorded.
           </li>
           <li>
             <strong className="text-foreground">Your age answer</strong> — the date of birth and
@@ -131,6 +154,14 @@ export default function PrivacyPage() {
             <strong className="text-foreground">Hosting and the database</strong> — the servers
             that run the app and store the rows above.
           </li>
+          {errorMonitoringEnabled && (
+            <li>
+              <strong className="text-foreground">Error monitoring</strong> — when the app fails,
+              a report goes to Sentry so somebody can fix it: what broke, where, and the id of the
+              account it happened to. Not your name or address, not what you were writing, and
+              not the code from a share link — those are stripped before the report leaves.
+            </li>
+          )}
           <li>
             <strong className="text-foreground">The push services</strong> — Apple and Google, if
             you enable notifications.
@@ -144,6 +175,13 @@ export default function PrivacyPage() {
           Your journal is kept until you delete it or the account. Short-lived things are swept:
           native sign-in codes are deleted the moment they are used and swept when they expire,
           rate-limit counters are dropped after a couple of days, and phone lookups are pruned.
+        </p>
+        <p>
+          The AI meter readings and the three share-link events are kept for 90 days and then
+          deleted. That is the window the numbers are actually read over — a week for the
+          health checks, a month for the sharing ones — and past it they answer nothing anyone is
+          asking. It is swept, not just intended: the same job that prunes everything above does
+          this too.
         </p>
         <p>
           Concierge conversations are kept for the life of the account. Nothing prunes them and
