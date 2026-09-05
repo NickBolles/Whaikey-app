@@ -208,9 +208,11 @@ export async function aiCostSince(
         : gte(schema.aiUsage.createdAt, since),
     )
     .groupBy(schema.aiUsage.feature, schema.aiUsage.model)
+    // A stable base order only; the meaningful sort is by cost, below, and
+    // cannot be done here because the price table lives in TypeScript.
     .orderBy(desc(sql`sum(${schema.aiUsage.outputTokens})`));
 
-  return rows.map((r) => {
+  const priced = rows.map((r) => {
     const tokens = {
       inputTokens: Number(r.inputTokens ?? 0),
       outputTokens: Number(r.outputTokens ?? 0),
@@ -225,6 +227,22 @@ export async function aiCostSince(
       estimatedUsd: usdForTokens(r.model, tokens),
     };
   });
+
+  /**
+   * Sorted by what it COSTS, not by how many tokens came out.
+   *
+   * Output tokens were a proxy for spend, and a bad one the moment more than
+   * one model is in the mix — which is the normal state here: chat runs on
+   * Sonnet while scanning and extraction run on Haiku, at a fifth of the
+   * output price. It also ignored input and cache charges entirely, which for
+   * a long-context feature are most of the bill. So a cheap Haiku row could
+   * sit above a materially more expensive Sonnet one, and this list exists
+   * precisely to point an operator at the feature worth looking at first.
+   *
+   * Sorted in TypeScript because the rates are a TypeScript table; the SQL
+   * `orderBy` above is left as a deterministic tiebreak for equal cost.
+   */
+  return priced.sort((a, b) => b.estimatedUsd - a.estimatedUsd);
 }
 
 /**

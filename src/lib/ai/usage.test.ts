@@ -174,8 +174,35 @@ describe("reading the cost back", () => {
     expect(byFeature.chat.calls).toBe(2);
     expect(byFeature.chat.outputTokens).toBe(6000);
     expect(byFeature.pairings.outputTokens).toBe(10);
-    // Ordered by spend, so the expensive one is the one you read first.
+    // Ordered by spend, so the expensive one is the one you read first —
+    // which only became true when the sort moved off output tokens; see below.
     expect(rows[0].feature).toBe("chat");
+  });
+
+  it("orders by what it costs, not by how many tokens came out", async () => {
+    const user = await createTestUser(db);
+    // The normal mix: chat on Sonnet ($2/$10 per Mtok), scanning on Haiku
+    // ($1/$5). Haiku emits far MORE output tokens here and still costs less.
+    await recordAiUsage(db, {
+      userId: user.id,
+      feature: "scan",
+      model: "claude-haiku-4-5",
+      usage: { input_tokens: 0, output_tokens: 100_000 }, // 100k x $5/Mtok = $0.50
+    });
+    await recordAiUsage(db, {
+      userId: user.id,
+      feature: "chat",
+      model: "claude-sonnet-5",
+      usage: { input_tokens: 0, output_tokens: 60_000 }, // 60k x $10/Mtok = $0.60
+    });
+
+    const rows = await aiCostSince(db, new Date(Date.now() - 60_000));
+    // Sorting on output tokens put the scan row first and pointed the operator
+    // at the cheaper feature — and ignored input and cache charges entirely,
+    // which for a long-context feature are most of the bill.
+    expect(rows[0].feature).toBe("chat");
+    expect(rows[0].outputTokens).toBeLessThan(rows[1].outputTokens);
+    expect(rows[0].estimatedUsd).toBeGreaterThan(rows[1].estimatedUsd);
   });
 
   it("averages over accounts that used AI, not over everybody", async () => {

@@ -9,6 +9,10 @@ import {
   setupTestDb,
 } from "@/test/helpers";
 import { setAnthropicForTests } from "@/lib/ai/client";
+import {
+  setErrorReporterForTests,
+  type CapturedEvent,
+} from "@/lib/observability/errors";
 import { makeFakeAnthropic, textResponse, toolUseResponse } from "@/lib/ai/testing";
 import { POST, GET } from "./route";
 import { GET as getSessions } from "./sessions/route";
@@ -41,6 +45,7 @@ beforeEach(async () => {
   user = await createTestUser(db);
   setSessionUser(null);
   setAnthropicForTests(null);
+  setErrorReporterForTests(null);
   delete process.env.ANTHROPIC_API_KEY;
 });
 
@@ -128,6 +133,45 @@ describe("POST /api/chat", () => {
     expect(messagesBody.messages[1].content).toBe(done?.message);
     expect(messagesBody.messages[1].toolCalls).toHaveLength(1);
   });
+
+  it("reports a mid-stream failure that the SSE fallback hides from the user", async () => {
+    setSessionUser(user);
+    process.env.ANTHROPIC_API_KEY = "test-key";
+    const reported: CapturedEvent[] = [];
+    setErrorReporterForTests((e) => reported.push(e));
+
+    // A stream that starts fine and then dies — an Anthropic hiccup, a tool
+    // failure, a database blip. The route catches it inside
+    // `ReadableStream.start`, so `withErrorHandling` has already returned its
+    // Response and `onRequestError` never sees it either.
+    const create = async () => ({
+      async *[Symbol.asyncIterator]() {
+        yield {
+          type: "message_start",
+          message: { id: "msg_x", model: "claude-sonnet-5", usage: { input_tokens: 5, output_tokens: 0 } },
+        };
+        yield { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } };
+        yield { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Well" } };
+        throw new Error("anthropic stream died mid-answer");
+      },
+    });
+    setAnthropicForTests({ messages: { create } } as never);
+
+    const res = await POST(jsonRequest("/api/chat", "POST", { message: "what should I pour?" }));
+    expect(res.status).toBe(200);
+    const events = await readStreamEvents(res);
+
+    // The user still gets the graceful message — the fallback is unchanged.
+    expect(events.at(-1)).toMatchObject({ type: "error" });
+
+    // And the server no longer says nothing. Chat is the highest-volume AI
+    // surface, so this was the largest remaining hole in the monitoring.
+    await vi.waitFor(() => expect(reported).toHaveLength(1));
+    expect(reported[0].context.where).toBe("api/chat/stream");
+    expect(reported[0].context.userId).toBe(user.id);
+    expect(reported[0].message).toContain("anthropic stream died");
+  });
+
 });
 
 describe("GET /api/chat", () => {

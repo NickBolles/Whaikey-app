@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { requireUser, withErrorHandling } from "@/lib/session";
+import { reportInBackground } from "@/lib/observability/errors";
 import { isAiConfigured } from "@/lib/ai/client";
 import { reserveAiRequest } from "@/lib/ai/rate-limit";
 import type { ChatStreamEvent } from "@/lib/ai/chat";
@@ -70,6 +71,23 @@ export async function POST(request: Request) {
           for await (const event of generator) send(event);
         } catch (err) {
           console.error("chat stream failed", err instanceof Error ? err.name : "unknown error");
+          /**
+           * Reported here, because nothing else can see it.
+           *
+           * `withErrorHandling` returned the moment this `Response` was
+           * constructed, and `onRequestError` only sees what escapes to Next —
+           * so an Anthropic failure, a tool failure or a database failure
+           * *mid-stream* was swallowed into an SSE event and reported nowhere.
+           * Chat is the highest-volume AI surface, so this was the largest
+           * blind spot left in the monitoring: the user is told the concierge
+           * could not finish, and the server said nothing at all.
+           *
+           * Same shape as the native sign-in handlers: a catch that answers
+           * the client instead of rethrowing is invisible to every wrapper
+           * above it, and has to report for itself. The SSE fallback below is
+           * unchanged.
+           */
+          reportInBackground(err, { where: "api/chat/stream", userId: user.id });
           send({ type: "error", message: "The concierge couldn't finish that response. Please try again." });
         } finally {
           controller.close();
