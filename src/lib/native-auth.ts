@@ -7,6 +7,7 @@ import {
 } from "node:crypto";
 import { and, eq, lt, sql } from "drizzle-orm";
 import { getDb, schema, type DB } from "@/db";
+import { runIndependently, stepsFailed } from "@/lib/independently";
 
 /**
  * Handing a signed-in session from the system browser into the app's WebView
@@ -261,12 +262,31 @@ async function sweepExpiredCodes(now: Date): Promise<void> {
  * silence, and they are unauthenticated rows.
  */
 export async function sweepNativeAuth(db: DB, now = new Date()): Promise<void> {
-  await db
-    .delete(schema.nativeAuthCodes)
-    .where(lt(schema.nativeAuthCodes.expiresAt, new Date(now.getTime() - CODE_TTL_MS)));
-  await db
-    .delete(schema.nativeAuthRequests)
-    .where(lt(schema.nativeAuthRequests.expiresAt, requestSweepCutoff(now)));
+  /**
+   * Two independent deletes, run independently — the same defect the cron
+   * route and `sweepTelemetry` both had, and the one place it is worst. These
+   * rows hold **encrypted session cookies**: a failure on either table used to
+   * cancel the other, so a persistent error on the requests table would leave
+   * session-equivalent credentials sitting past their expiry forever, and the
+   * only thing deciding which table that was is which `await` came first.
+   */
+  const { outcomes, failed } = await runIndependently([
+    [
+      "native_auth_codes",
+      () =>
+        db
+          .delete(schema.nativeAuthCodes)
+          .where(lt(schema.nativeAuthCodes.expiresAt, new Date(now.getTime() - CODE_TTL_MS))),
+    ],
+    [
+      "native_auth_requests",
+      () =>
+        db
+          .delete(schema.nativeAuthRequests)
+          .where(lt(schema.nativeAuthRequests.expiresAt, requestSweepCutoff(now))),
+    ],
+  ]);
+  if (failed.length > 0) throw stepsFailed("native auth sweep", failed, outcomes);
 }
 
 /**

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { reportingErrors } from "@/lib/observability/errors";
 
 export const dynamic = "force-dynamic";
 
@@ -38,7 +39,7 @@ function validVersion(value: string | undefined): string | null {
   return value && /^\d+\.\d+\.\d+$/.test(value) ? value : null;
 }
 
-export async function GET(): Promise<NextResponse> {
+async function handleGet(): Promise<NextResponse> {
   const configured = validVersion(process.env.WHAIKEY_MIN_SHELL_VERSION);
   if (process.env.WHAIKEY_MIN_SHELL_VERSION && !configured) {
     // Loud, because a typo here silently removes the floor rather than
@@ -63,4 +64,13 @@ export async function GET(): Promise<NextResponse> {
     // asks. Sixty seconds is both.
     headers: { "cache-control": "public, max-age=60" },
   });
+}
+
+/**
+ * Reporting only (WP-19). This route does not use `withErrorHandling` — it
+ * owns its own responses for reasons documented above — so the wrapper adds
+ * the Sentry report and nothing else: same error, same response, same status.
+ */
+export async function GET(): Promise<NextResponse> {
+  return reportingErrors("native/manifest", () => handleGet());
 }

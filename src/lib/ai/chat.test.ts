@@ -14,6 +14,7 @@ import {
   type ChatStreamEvent,
 } from "./chat";
 import { makeFakeAnthropic, textResponse, toolUseResponse } from "./testing";
+import type Anthropic from "@anthropic-ai/sdk";
 
 async function drain(gen: AsyncGenerator<ChatStreamEvent>): Promise<ChatStreamEvent[]> {
   const events: ChatStreamEvent[] = [];
@@ -146,6 +147,66 @@ describe("runChat", () => {
     const messages = await getChatMessages(db, user.id, result.sessionId);
     expect(messages?.at(-1)?.role).toBe("assistant");
     expect(messages?.at(-1)?.content).toBeTruthy();
+  });
+});
+
+describe("runChatStream cost accounting when the stream does not finish", () => {
+  /**
+   * A client whose stream reports its usage and then dies. `message_start`
+   * carries the input and cache counts, which Anthropic bills whether or not
+   * anyone reads the answer, so this is the shape where the meter reading was
+   * being thrown away.
+   */
+  function dyingStreamClient(): Anthropic {
+    const create = async () => ({
+      async *[Symbol.asyncIterator]() {
+        yield {
+          type: "message_start",
+          message: {
+            id: "msg_dead",
+            model: "claude-sonnet-5",
+            usage: { input_tokens: 900, output_tokens: 0, cache_read_input_tokens: 100 },
+          },
+        };
+        yield { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } };
+        yield { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Half a" } };
+        throw new Error("upstream stream died");
+      },
+    });
+    return { messages: { create } } as unknown as Anthropic;
+  }
+
+  it("records the tokens already billed when the stream errors mid-flight", async () => {
+    await expect(
+      drain(runChatStream(db, user.id, null, "What should I pour?", { client: dyingStreamClient() })),
+    ).rejects.toThrow(/upstream stream died/);
+
+    const rows = await db.select().from(schema.aiUsage);
+    // Recorded despite the abnormal exit. Before the `finally`, the write sat
+    // after the loop, so exactly the calls that failed were the ones missing
+    // from the totals — the direction that flatters the number.
+    expect(rows).toHaveLength(1);
+    expect(rows[0].feature).toBe("chat");
+    expect(rows[0].userId).toBe(user.id);
+    expect(rows[0].inputTokens).toBe(900);
+    expect(rows[0].cachedInputTokens).toBe(100);
+  });
+
+  it("records nothing when the stream dies before reporting any usage", async () => {
+    const create = async () => ({
+      async *[Symbol.asyncIterator]() {
+        throw new Error("connection refused");
+      },
+    });
+    const client = { messages: { create } } as unknown as Anthropic;
+
+    await expect(
+      drain(runChatStream(db, user.id, null, "hi", { client })),
+    ).rejects.toThrow(/connection refused/);
+
+    // Nothing billable happened, so a zero row would be noise in the
+    // per-feature totals rather than a truer number.
+    expect(await db.select().from(schema.aiUsage)).toHaveLength(0);
   });
 });
 

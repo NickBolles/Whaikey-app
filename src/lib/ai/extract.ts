@@ -1,4 +1,6 @@
 import type Anthropic from "@anthropic-ai/sdk";
+import type { DB } from "@/db";
+import { recordAiUsage } from "@/lib/ai/usage";
 import { FLAVOR_WHEEL, isValidLeaf } from "@/lib/flavor-wheel";
 import { SERVING_STYLES, type ServingStyle } from "@/db/schema";
 import { aiSupportsPromptCaching, fastModel, getAnthropic } from "./client";
@@ -91,15 +93,31 @@ function cleanServingStyle(value: unknown): ServingStyle | null {
 export async function extractTastingNote(
   text: string,
   client?: Anthropic,
+  /**
+   * Who asked and where to record it (PLAN-A3). Optional so the eight existing
+   * tests, which care about parsing and not about billing, stay as they are —
+   * an unrecorded call in a test is correct, and making them all thread a DB
+   * would be noise around the thing they actually assert.
+   */
+  attribution?: { db: DB; userId: string },
 ): Promise<ExtractedTastingNote> {
   const anthropic = client ?? getAnthropic();
+  const model = fastModel();
   const response = await anthropic.messages.create({
-    model: fastModel(),
+    model,
     max_tokens: MAX_TOKENS,
     temperature: 0,
     system: systemPrompt(),
     messages: [{ role: "user", content: `Tasting note:\n${text}` }],
   });
+  if (attribution) {
+    await recordAiUsage(attribution.db, {
+      userId: attribution.userId,
+      feature: "extract",
+      model,
+      usage: response.usage,
+    });
+  }
 
   const parsed = parseModelJson(textFromContent(response.content as never));
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {

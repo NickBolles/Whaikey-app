@@ -10,6 +10,7 @@ import {
 import { requireUser, withErrorHandling } from "@/lib/session";
 import { canViewBottle } from "@/lib/catalog-visibility";
 import { listUserBottles, upsertUserBottle, userBottleCreateSchema } from "@/lib/bar";
+import { recordShareConversion } from "@/lib/observability/analytics";
 
 export const dynamic = "force-dynamic";
 
@@ -68,6 +69,25 @@ export async function POST(req: Request) {
     }
 
     const { row, created } = await upsertUserBottle(db, user.id, input);
+    // The third step of the S1 funnel (PLAN-A5): the discovery payoff the
+    // share page exists for. Only on a genuinely NEW shelf row — re-saving a
+    // bottle already on the wishlist is not a conversion, and counting it
+    // would make the number rise by repetition, which is the failure mode of
+    // every funnel metric.
+    if (created && input.fromShareId) {
+      /**
+       * Best-effort, and deliberately awaited: `recordShareConversion` owns
+       * both the validation query and the write, and swallows its own
+       * failures, so nothing about measuring this conversion can change the
+       * answer the person gets about their shelf.
+       */
+      await recordShareConversion(db, {
+        shareId: input.fromShareId,
+        bottleId: input.bottleId,
+        userId: user.id,
+        relationship: input.relationship,
+      });
+    }
     return NextResponse.json(row, { status: created ? 201 : 200 });
   });
 }

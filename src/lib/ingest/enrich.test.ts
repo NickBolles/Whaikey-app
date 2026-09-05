@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { eq, isNull } from "drizzle-orm";
 import type { DB } from "@/db";
-import { bottleClaims, bottleResources, bottles, catalogSources, pours, tastingNotes } from "@/db/schema";
+import { aiUsage, bottleClaims, bottleResources, bottles, catalogSources, pours, tastingNotes } from "@/db/schema";
 import { makeFakeAnthropic } from "@/lib/ai/testing";
 import { createTestBottle, createTestUser, setupTestDb, uid } from "@/test/helpers";
 import {
@@ -320,12 +320,55 @@ describe("enrichBottleProfiles", () => {
     await createTestBottle(db, { id: "aa-limit", flavorProfile: null });
     await createTestBottle(db, { id: "bb-limit", flavorProfile: null });
 
-    const fake = makeFakeAnthropic([textResponse([{ id: "aa-limit", profile: fullProfile() }])]);
+    // Usage on the fixture is load-bearing: `recordAiUsage` records nothing
+    // when the response reported none, so without it the assertion below
+    // passes whether or not the dry-run guard exists. It did, and only
+    // re-running against the unguarded code showed it.
+    const fake = makeFakeAnthropic([
+      {
+        ...textResponse([{ id: "aa-limit", profile: fullProfile() }]),
+        usage: { input_tokens: 90, output_tokens: 30 },
+      },
+    ]);
     const report = await enrichBottleProfiles(db, { client: fake.client, limit: 1, dryRun: true });
     expect(report).toMatchObject({ candidates: 1, fromAi: 1, dryRun: true });
 
     const remaining = await db.select({ id: bottles.id }).from(bottles).where(isNull(bottles.flavorProfile));
     expect(remaining).toHaveLength(2);
+
+    /**
+     * "No database writes" has to include the meter reading.
+     *
+     * `writeProfile` already honoured `dryRun`; `recordAiUsage` did not, so a
+     * dry run inserted `ai_usage` rows while advertising that it wrote
+     * nothing. The model call is real and costs money either way, which is the
+     * argument that made the write look correct — but a flag meaning "no
+     * writes" has to mean it, or somebody reaches for a dry run precisely when
+     * they must not write and gets a table they did not agree to.
+     */
+    expect(await db.select().from(aiUsage)).toHaveLength(0);
+  });
+
+  it("still records the meter reading on a real run", async () => {
+    await createTestBottle(db, { id: "aa-metered", flavorProfile: null });
+    // The shared helper above omits `usage`, and `recordAiUsage` deliberately
+    // records nothing when the response reported none — so the fixture has to
+    // carry it, or this test would assert something it could not produce.
+    const fake = makeFakeAnthropic([
+      {
+        ...textResponse([{ id: "aa-metered", profile: fullProfile() }]),
+        usage: { input_tokens: 120, output_tokens: 45 },
+      },
+    ]);
+    await enrichBottleProfiles(db, { client: fake.client, limit: 1 });
+
+    // The other half of the contract: suppressing telemetry in a dry run must
+    // not suppress it everywhere, or the cost of enrichment goes unmeasured.
+    const usage = await db.select().from(aiUsage);
+    expect(usage).toHaveLength(1);
+    expect(usage[0].feature).toBe("enrich");
+    expect(usage[0].userId).toBeNull();
+    expect(usage[0].inputTokens).toBe(120);
   });
 
   it("survives non-JSON model output, counting the batch as rejected", async () => {

@@ -1,13 +1,17 @@
 import { NextResponse } from "next/server";
 import { BodyTooLargeError, readTextWithinLimit } from "@/lib/body-limit";
+import { reportMessageInBackground } from "@/lib/observability/errors";
 
 /**
  * Where the Content-Security-Policy sends its violations (review SEC-H3).
  *
  * The policy ships report-only, and report-only is only worth anything if
  * somebody is reading the reports — otherwise it is an expensive way to write
- * a header. This logs them, which is what there is until error monitoring
- * lands (WP-19); at that point this becomes a Sentry breadcrumb instead.
+ * a header. Violations go to error monitoring when a DSN is configured
+ * (WP-19), and to the log either way: the log is what there is on a
+ * deployment that has not turned Sentry on, and losing the reports on that
+ * deployment would be the same "nobody is reading them" failure one level
+ * down.
  *
  * Unauthenticated by necessity — browsers post these with no credentials — so
  * it is treated as hostile input: nothing is stored, the body is capped *as it
@@ -121,10 +125,24 @@ export async function POST(req: Request) {
 
     if (!admitToLog(Date.now())) return new NextResponse(null, { status: 204 });
 
-    console.warn("[csp] violation", {
+    const violation = {
       directive: field(report, "violated-directive") || field(report, "effective-directive"),
       blocked: redactUri(field(report, "blocked-uri")),
       document: redactUri(field(report, "document-uri")),
+    };
+    console.warn("[csp] violation", violation);
+    // Redacted BEFORE it leaves, by `redactUri` above — the same values the
+    // log gets. `captureMessage` redacts again on the way out, which is
+    // belt-and-braces rather than duplication: this endpoint is
+    // unauthenticated, so its input is hostile by definition and a single
+    // guard on a path like that is one refactor away from being none.
+    reportMessageInBackground(`CSP violation: ${violation.directive || "unknown directive"}`, {
+      where: "csp-report",
+      tags: {
+        directive: violation.directive || "unknown",
+        blocked: violation.blocked || "unknown",
+        document: violation.document || "unknown",
+      },
     });
   } catch {
     // A malformed report is not worth an error path; the browser sent it and

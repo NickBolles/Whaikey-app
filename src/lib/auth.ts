@@ -2,6 +2,7 @@ import { isNotNull, lt, or } from "drizzle-orm";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { getDb, schema } from "@/db";
+import { reportInBackground } from "@/lib/observability/errors";
 import type { DB } from "@/db";
 
 /**
@@ -84,6 +85,37 @@ export const auth = betterAuth({
    * which was a data inventory missing its most sensitive row.
    */
   account: { encryptOAuthTokens: true },
+
+  /**
+   * WP-19: report sign-in failures, at Better Auth's own error boundary.
+   *
+   * Better Auth catches everything its handlers throw and answers with its own
+   * response, so **nothing escapes to Next's `onRequestError`** and nothing
+   * reaches `withErrorHandling` — the catch-all route exports
+   * `toNextJsHandler(auth)` directly. A wrapper around the route therefore
+   * could not see an OAuth exchange failing, a session write failing, or the
+   * adapter losing the database: web sign-in could be down for everybody and
+   * the monitoring this work package exists to add would show nothing at all.
+   * This hook is the only place those are observable.
+   *
+   * **4xx is not reported.** A refused request is the system working — a stale
+   * state parameter, an unknown provider, a rate limit — and filing one per
+   * failed attempt is how a signal becomes noise and then becomes ignored,
+   * which is the same mistake as reporting a reader who closed a chat tab.
+   * Anything without a status, and anything 5xx, is an outage and is reported.
+   *
+   * Setting this displaces Better Auth's own logging for the errors it sees,
+   * so the ones worth knowing about are logged here too rather than going
+   * quiet in exchange for being reported.
+   */
+  onAPIError: {
+    onError: (err: unknown) => {
+      const statusCode = (err as { statusCode?: unknown } | null)?.statusCode;
+      if (typeof statusCode === "number" && statusCode < 500) return;
+      console.error("[auth] request failed", err);
+      reportInBackground(err, { where: "api/auth/[...all]" });
+    },
+  },
 });
 
 export type Session = typeof auth.$Infer.Session;

@@ -1,6 +1,7 @@
 import { lt, sql } from "drizzle-orm";
 import type { DB } from "@/db";
 import { aiRateLimits } from "@/db/schema";
+import { reportInBackground } from "@/lib/observability/errors";
 
 export const AI_HOURLY_LIMIT = 20;
 export const AI_DAILY_LIMIT = 100;
@@ -95,8 +96,14 @@ export async function sweepExpiredCounters(
   try {
     await db.delete(aiRateLimits).where(lt(aiRateLimits.windowStart, cutoff));
   } catch (err) {
-    // Housekeeping. The next call tries again in an hour.
+    // Housekeeping, so it does not fail the request that happened to run it —
+    // and the next call tries again in an hour. Reported because "tries again
+    // in an hour" is only comforting while it eventually succeeds: a sweep
+    // that fails every hour forever leaves `ai_rate_limits` growing without
+    // bound and quietly breaks the retention `/privacy` promises, with nothing
+    // user-facing to notice.
     console.error("[ai] could not sweep rate-limit counters", err);
+    reportInBackground(err, { where: "ai/rate-limit:sweep" });
   }
 }
 

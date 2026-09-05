@@ -239,6 +239,55 @@
       "when": 1788537608233,
       "tag": "0033_goofy_robin_chapel",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1788572075124,
+      "tag": "0034_motionless_captain_midlands",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1788579530585,
+      "tag": "0035_real_vision",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1788581284971,
+      "tag": "0036_true_caretaker",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1788583784940,
+      "tag": "0037_aspiring_stellaris",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1788584597772,
+      "tag": "0038_bitter_pete_wisdom",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1788593028125,
+      "tag": "0039_brainy_mongu",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1788595795709,
+      "tag": "0040_nappy_patriot",
+      "breakpoints": true
     }
   ]
 }

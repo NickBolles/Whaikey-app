@@ -372,6 +372,50 @@ export const pours = pgTable(
     context: jsonb("context").$type<{ setting?: string; companions?: string; glassware?: string }>(),
     visibility: text("visibility").$type<PourVisibility>().notNull().default("private"),
     /**
+     * What this pour WAS, recorded when it happened (WP-19).
+     *
+     * Both columns exist because a metric that reads today's state to describe
+     * a past event is not measuring the past. `user_bottles.relationship` moves
+     * from `tried` to `own` the day somebody buys a bottle they had only
+     * sampled, which retroactively reclassifies every earlier sample of it —
+     * so the tried:owned ratio SOCIAL §12 says "should rise" could fall with
+     * nobody drinking or logging anything. And `visibility` is rewritten in
+     * bulk to `private` by `makeEverythingPrivate` and by a suspension, which
+     * erases social actions that demonstrably happened — shrinking the
+     * denominator of reports-per-1,000 at exactly the moment a moderation
+     * problem is what the number is being asked about.
+     *
+     * Nullable, and read as **unknown rather than as a value**: rows written
+     * before these columns existed have no honest answer, and falling back to
+     * the current column would reintroduce precisely the bug they exist to
+     * fix. The guardrails count only rows carrying a snapshot, which means
+     * they describe the period since this shipped — the same "the instrument
+     * has no readings on its first day" honesty PLAN-A5 is held to.
+     */
+    shelfRelationshipAtPour: text("shelf_relationship_at_pour").$type<Relationship>(),
+    visibilityAtCreation: text("visibility_at_creation").$type<PourVisibility>(),
+    /**
+     * When this pour FIRST became visible to anyone else, ever.
+     *
+     * `visibilityAtCreation` fixed one direction and opened the other. Pours
+     * default to private and `updatePourVisibility` publishes them later, so
+     * reading only the creation snapshot means the moment a pour actually
+     * crossed to other people — the social action itself — was never counted
+     * at all. The bulk-privacy bug counted things that had stopped being
+     * visible; this counted nothing for things that had started.
+     *
+     * Written once and never moved: set at insert when the pour is created
+     * visible, set on the first private → visible transition otherwise, and
+     * left alone by every later change including `makeEverythingPrivate` and a
+     * suspension. So the guardrail counts "a reader could have seen this, and
+     * here is when that began", which is the event it is trying to measure,
+     * and re-publishing something twice still counts once.
+     *
+     * Null on rows written before this shipped and on pours nobody has ever
+     * shared. Both are excluded rather than guessed at.
+     */
+    firstSharedAt: timestamp("first_shared_at", { withTimezone: true, mode: "date" }),
+    /**
      * Client-minted idempotency key (REL-4.2). A pour is written where the
      * signal isn't, so a save whose response is lost in transit gets retried
      * from the offline queue; the same key on the retry makes the second write
@@ -636,6 +680,24 @@ export const reactions = pgTable(
       .references(() => user.id, { onDelete: "cascade" }),
     kind: text("kind").$type<ReactionKind>().notNull().default("cheers"),
     createdAt: createdAt(),
+    /**
+     * Set when the reader took the cheer back.
+     *
+     * Soft, like `comments.deletedAt`, and for the same reason one level up:
+     * a guardrail metric that reports a different number for the same past
+     * week depending on when it is asked is not a measurement. Retraction used
+     * to DELETE the row, so a cheer given and withdrawn inside a window left
+     * nothing behind — and since cheers are the denominator of
+     * `reportsPerThousandSocialActions`, erasing them silently pushed that
+     * rate up. Pours got their snapshot columns (0035) for exactly this, and
+     * comments were already soft-deleted; reactions were the one social action
+     * still evaporating.
+     *
+     * Re-cheering clears this rather than inserting a second row, and keeps
+     * the ORIGINAL `createdAt`: the guardrail counts a reader deciding to
+     * cheer a note, not the number of times they toggled the control.
+     */
+    retractedAt: timestamp("retracted_at", { withTimezone: true, mode: "date" }),
   },
   (t) => [
     uniqueIndex("reactions_pour_user_kind_uq").on(t.pourId, t.userId, t.kind),
@@ -927,6 +989,176 @@ export const aiRateLimits = pgTable(
     count: integer("count").notNull().default(0),
   },
   (t) => [uniqueIndex("ai_rate_limits_user_window_start_uq").on(t.userId, t.window, t.windowStart)],
+);
+
+/**
+ * Which surface spent an AI call. Required, because "AI cost" is not one
+ * number: chat, pairings, extraction, scanning, enrichment and import each
+ * have a different shape, and the answer worth having is which of them is
+ * expensive (PLAN-A3).
+ */
+export const AI_FEATURES = [
+  "chat",
+  "pairings",
+  "extract",
+  "scan",
+  "enrich",
+  "import",
+  "recommend-explain",
+] as const;
+export type AiFeature = (typeof AI_FEATURES)[number];
+
+/**
+ * Tokens spent per AI call, per account (PLAN-A3: "AI cost per premium user
+ * is unmeasurable").
+ *
+ * `ai_rate_limits` counts *requests* in a rolling window and is swept after
+ * 48 hours, so it can answer "are they over their allowance" and cannot answer
+ * "what did they cost". This is the second question, and it needs the token
+ * counts the model reports back rather than a request tally.
+ *
+ * **Tokens, never dollars.** A stored dollar figure becomes a lie the moment
+ * prices change, and the rate table that converts at read time can be
+ * corrected where a written-down number cannot. Same rule COMPETITORS §2.7
+ * applies to bottle valuations: no false precision about money.
+ *
+ * `userId` is nullable because not every call is on a user's behalf — catalog
+ * enrichment runs on a schedule and belongs to the system. A null there is
+ * "nobody asked for this", which is a different and useful row, not a missing
+ * one.
+ */
+export const aiUsage = pgTable(
+  "ai_usage",
+  {
+    id: id(),
+    /**
+     * Who asked, when anybody did. Null already means "nobody asked" —
+     * scheduled catalog enrichment — and a deleted account now resolves to the
+     * same thing.
+     *
+     * `set null`, not `cascade`. The provider billed for these calls and does
+     * not un-bill them when somebody closes their account, so cascading made
+     * `aiCostSince` understate what was actually spent, and could make a
+     * feature's cost alarm FALL because a user left. What deletion owes the
+     * person is that the reading stops being about them, which is exactly what
+     * detaching the id does; the reading itself expires on the same 90-day
+     * telemetry sweep as everything else here.
+     */
+    userId: text("user_id").references(() => user.id, { onDelete: "set null" }),
+    feature: text("feature").$type<AiFeature>().notNull(),
+    model: text("model").notNull(),
+    inputTokens: integer("input_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull().default(0),
+    /** Cache reads bill at a fraction of input; kept apart or the maths is wrong. */
+    cachedInputTokens: integer("cached_input_tokens").notNull().default(0),
+    cacheWriteTokens: integer("cache_write_tokens").notNull().default(0),
+    /**
+     * Hosted tool calls, billed PER REQUEST rather than per token.
+     *
+     * Catalog enrichment turns on Anthropic's hosted web search for bottles
+     * with no source facts, and those searches are charged separately from the
+     * token meter. Counting only tokens made a real, recurring line of the
+     * bill invisible to the report whose whole job is to show what AI costs.
+     * Kept in their own columns for the same reason cache reads are: folding
+     * them into a token count would price them at the wrong rate.
+     */
+    webSearchRequests: integer("web_search_requests").notNull().default(0),
+    webFetchRequests: integer("web_fetch_requests").notNull().default(0),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("ai_usage_user_created_idx").on(t.userId, t.createdAt),
+    index("ai_usage_created_idx").on(t.createdAt),
+  ],
+);
+
+/**
+ * The S1 share funnel — the only thing here that needs an event at all.
+ *
+ * PLAN-A5's finding is that the S1→S2 overlap was never measured and S2/S3
+ * shipped anyway. Measuring it needs three numbers with no home in any
+ * existing table: a share page being *viewed*, a comparison being *rendered*
+ * on it, and a wishlist add *sourced from* it. Reads leave no trace, so
+ * without these the question cannot be asked at all.
+ *
+ * **Almost nothing else needed an event**, which is the point. `docs/SOCIAL.md`
+ * §12's guardrail metrics — pours per active user per week, the tried:owned
+ * ratio, reports per 1,000 social actions, block rate, share of accounts that
+ * switch social off — are all computable from `pours`, `user_bottles`,
+ * `reports`, `blocks` and `user_profiles` as they already stand. They were
+ * never unmeasurable; nobody had written the queries. `metrics.ts` writes
+ * them. Recording those as events too would store the same consumption
+ * timestamps a second time, in a table whose whole justification is that the
+ * first one could not answer.
+ *
+ * `userId` is nullable because a share link is readable signed-out, and
+ * whether the viewer was signed in **is** the S1 number — a signed-out view
+ * cannot convert.
+ */
+export const ANALYTICS_EVENTS = [
+  "share_view",
+  "share_comparison_rendered",
+  "share_wishlist_add",
+  /**
+   * The same conversion, arrived at differently: the recipient put the bottle
+   * on their shelf as `own` or `tried` rather than wishing for it.
+   *
+   * Separate from `share_wishlist_add` because `POST /api/user-bottles` takes
+   * the relationship from the caller and the funnel's field is called
+   * `wishlistAddsFromShare` — so recording an "I already own this" under that
+   * name was a number that said something it did not mean. Dropping those adds
+   * instead would have been the other error: someone who owns the bottle after
+   * following a share link is a stronger outcome than a wishlist entry, not a
+   * non-event.
+   */
+  "share_shelf_add",
+] as const;
+export type AnalyticsEventName = (typeof ANALYTICS_EVENTS)[number];
+
+export const analyticsEvents = pgTable(
+  "analytics_events",
+  {
+    id: id(),
+    name: text("name").$type<AnalyticsEventName>().notNull(),
+    /**
+     * `set null`, not `cascade` — for the same reason `shareId` below is, and
+     * this column is the one that was missed when that one was fixed. A
+     * recipient deleting their account erased every view, comparison and
+     * conversion they had ever contributed, rewriting a *past* month's S1
+     * numbers as a side effect of an action taken today.
+     */
+    userId: text("user_id").references(() => user.id, { onDelete: "set null" }),
+    /**
+     * Whether a signed-in person did this, recorded separately from WHO.
+     *
+     * `user_id` was carrying both facts, so detaching the identity would have
+     * silently reclassified a signed-in view as an anonymous one — moving
+     * `comparisonRate`'s denominator instead of the numerator, which is the
+     * same defect in a quieter form. The two facts have different lifetimes:
+     * the identity is the person's and goes when they go, the classification
+     * is a property of the event and belongs to the aggregate.
+     */
+    bySignedInUser: boolean("by_signed_in_user").notNull().default(false),
+    /**
+     * The share link this is about, so the funnel can be followed end to end.
+     * Deliberately the pour_shares row id and never the share CODE, which is a
+     * bearer credential: a table of live codes is a table of keys.
+     *
+     * `set null`, not `cascade`. Shares cascade from pours, so a cascade here
+     * meant deleting one ordinary journal entry silently erased every view,
+     * comparison and conversion ever recorded against its link — rewriting a
+     * *past* month's S1 numbers as a side effect of an unrelated action today.
+     * `shareFunnel` aggregates by event name and never needs a live share, so
+     * the row keeps its meaning without the reference; the events still expire
+     * on the 90-day telemetry sweep like everything else here.
+     */
+    shareId: text("share_id").references(() => pourShares.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("analytics_events_name_created_idx").on(t.name, t.createdAt),
+    index("analytics_events_share_idx").on(t.shareId),
+  ],
 );
 
 export const REC_MODES = ["discovery", "tonight"] as const;
@@ -1427,6 +1659,8 @@ export type Pour = typeof pours.$inferSelect;
 export type CriticNote = typeof criticNotes.$inferSelect;
 export type TastingNote = typeof tastingNotes.$inferSelect;
 export type Pairing = typeof pairings.$inferSelect;
+export type AiUsage = typeof aiUsage.$inferSelect;
+export type AnalyticsEvent = typeof analyticsEvents.$inferSelect;
 export type ChatSession = typeof chatSessions.$inferSelect;
 export type ChatMessage = typeof chatMessages.$inferSelect;
 export type RecExplanation = typeof recExplanations.$inferSelect;

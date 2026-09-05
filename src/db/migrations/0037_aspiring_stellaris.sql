@@ -1,0 +1,1 @@
+ALTER TABLE "pours" ADD COLUMN "first_shared_at" timestamp with time zone;

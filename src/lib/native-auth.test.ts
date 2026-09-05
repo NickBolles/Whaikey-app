@@ -373,3 +373,29 @@ describe("sweeping pending sign-in requests", () => {
     expect(await consumeNativeAuthRequest(id, wellPast)).toBeNull();
   });
 });
+
+
+describe("a broken sweep on one credential table must not spare the other", () => {
+  it("still deletes expired requests when the codes delete fails", async () => {
+    // Both tables hold session-equivalent credentials, and as two sequential
+    // awaits the first to fail cancelled the second -- so which one kept
+    // holding an expired encrypted session cookie forever was decided by which
+    // delete happened to be written first.
+    const id = await startNativeAuthRequest({ codeChallenge: CHALLENGE, state: "state-nonce" });
+    const wellPast = new Date(Date.now() + REQUEST_TTL_MS * 2 + 1_000);
+
+    const real = db.delete.bind(db);
+    db.delete = ((t: unknown) =>
+      t === schema.nativeAuthCodes
+        ? { where: () => Promise.reject(new Error("native_auth_codes is gone")) }
+        : real(t as never)) as unknown as typeof db.delete;
+    try {
+      await expect(sweepNativeAuth(db, wellPast)).rejects.toThrow(/native_auth_codes/);
+    } finally {
+      db.delete = real;
+    }
+
+    // The request table was swept anyway.
+    expect(await consumeNativeAuthRequest(id, wellPast)).toBeNull();
+  });
+});

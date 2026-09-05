@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { asc, desc, eq, and } from "drizzle-orm";
 import type Anthropic from "@anthropic-ai/sdk";
 import type { DB } from "@/db";
+import { recordAiUsage } from "@/lib/ai/usage";
 import * as schema from "@/db/schema";
 import {
   AI_LOOP_BUDGET_MS,
@@ -165,9 +166,10 @@ export async function runChat(
   for (let iteration = 0; ; iteration++) {
     const timeout = remainingBudget(startedAt, AI_LOOP_BUDGET_MS);
     if (timeout === null) break;
+    const model = chatModel();
     const response = await anthropic.messages.create(
       {
-        model: chatModel(),
+        model,
         max_tokens: 8192,
         system: SYSTEM_PROMPT,
         tools: TOOL_DEFINITIONS,
@@ -175,6 +177,11 @@ export async function runChat(
       },
       { timeout },
     );
+    // Once per ITERATION, not once per turn: a tool-using conversation makes
+    // several model calls and each one is billed. Recording only the last
+    // would under-count the feature that costs the most, which is the one
+    // PLAN-A3 exists to catch.
+    await recordAiUsage(db, { userId, feature: "chat", model, usage: response.usage });
 
     const content = response.content as Anthropic.Messages.ContentBlock[];
     const texts = content.filter(
@@ -237,7 +244,7 @@ export async function runChat(
 
 /** Minimal structural view of the Anthropic raw streaming events we consume. */
 type RawStreamEvent =
-  | { type: "message_start"; message?: unknown }
+  | { type: "message_start"; message?: { usage?: unknown } }
   | {
       type: "content_block_start";
       index: number;
@@ -308,9 +315,10 @@ export async function* runChatStream(
   for (let iteration = 0; ; iteration++) {
     const timeout = remainingBudget(startedAt, AI_LOOP_BUDGET_MS);
     if (timeout === null) break;
+    const streamModel = chatModel();
     const stream = (await anthropic.messages.create(
       {
-        model: chatModel(),
+        model: streamModel,
         max_tokens: 8192,
         system: SYSTEM_PROMPT,
         tools: TOOL_DEFINITIONS,
@@ -322,40 +330,91 @@ export async function* runChatStream(
 
     const blocks: AssembledBlock[] = [];
     let stopReason: string | null = null;
+    /**
+     * A streamed turn reports its tokens in TWO events, not one.
+     *
+     * `message_start.message.usage` carries `input_tokens` and both cache
+     * counts; `message_delta.usage` carries only `output_tokens`. Reading the
+     * delta alone recorded zero input and zero cache for every streamed chat
+     * turn — the highest-volume feature, and the one PLAN-A3 most needs a true
+     * number for. Merged rather than overwritten, because each event is
+     * authoritative for different fields.
+     */
+    let streamUsage: Parameters<typeof recordAiUsage>[1]["usage"] = null;
+    const mergeUsage = (incoming: unknown) => {
+      if (!incoming || typeof incoming !== "object") return;
+      streamUsage = { ...(streamUsage ?? {}), ...(incoming as Record<string, number>) };
+    };
 
-    for await (const event of stream) {
-      switch (event.type) {
-        case "content_block_start": {
-          const cb = event.content_block;
-          if (cb.type === "text") {
-            blocks[event.index] = { type: "text", text: "" };
-          } else if (cb.type === "tool_use") {
-            blocks[event.index] = {
-              type: "tool_use",
-              id: cb.id ?? "",
-              name: cb.name ?? "",
-              partialJson: "",
-            };
+    /**
+     * The loop is wrapped so the meter reading survives an abnormal exit.
+     *
+     * `recordAiUsage` used to sit after the loop, which meant it ran only when
+     * the stream ended normally. Anthropic erroring mid-stream, or an SSE
+     * consumer going away and closing this generator, skipped it entirely —
+     * and by then `message_start` has already delivered the input and cache
+     * counts, which are billed whether or not anyone read the answer. So the
+     * calls that failed were exactly the ones missing from the cost totals,
+     * which is the direction that flatters the number.
+     *
+     * `finally` rather than a catch: the error still propagates to the caller
+     * unchanged, and `recordAiUsage` never throws, so this cannot turn a
+     * stream failure into a different one.
+     */
+    try {
+      for await (const event of stream) {
+        switch (event.type) {
+          case "content_block_start": {
+            const cb = event.content_block;
+            if (cb.type === "text") {
+              blocks[event.index] = { type: "text", text: "" };
+            } else if (cb.type === "tool_use") {
+              blocks[event.index] = {
+                type: "tool_use",
+                id: cb.id ?? "",
+                name: cb.name ?? "",
+                partialJson: "",
+              };
+            }
+            break;
           }
-          break;
-        }
-        case "content_block_delta": {
-          const block = blocks[event.index];
-          if (event.delta.type === "text_delta" && block?.type === "text") {
-            const text = event.delta.text ?? "";
-            block.text += text;
-            if (text) yield { type: "text", text };
-          } else if (event.delta.type === "input_json_delta" && block?.type === "tool_use") {
-            block.partialJson += event.delta.partial_json ?? "";
+          case "content_block_delta": {
+            const block = blocks[event.index];
+            if (event.delta.type === "text_delta" && block?.type === "text") {
+              const text = event.delta.text ?? "";
+              block.text += text;
+              if (text) yield { type: "text", text };
+            } else if (event.delta.type === "input_json_delta" && block?.type === "tool_use") {
+              block.partialJson += event.delta.partial_json ?? "";
+            }
+            break;
           }
-          break;
+          case "message_start": {
+            mergeUsage(event.message?.usage);
+            break;
+          }
+          case "message_delta": {
+            stopReason = event.delta?.stop_reason ?? stopReason;
+            // Output tokens only; the input and cache counts arrived at
+            // `message_start`. See `mergeUsage` above.
+            mergeUsage(event.usage);
+            break;
+          }
+          default:
+            break;
         }
-        case "message_delta": {
-          stopReason = event.delta?.stop_reason ?? stopReason;
-          break;
-        }
-        default:
-          break;
+      }
+    } finally {
+      // Best-effort, and only when something was actually reported: a stream
+      // that died before `message_start` has nothing billable to record, and
+      // writing a zero row for it would add noise to the per-feature totals.
+      if (streamUsage) {
+        await recordAiUsage(db, {
+          userId,
+          feature: "chat",
+          model: streamModel,
+          usage: streamUsage,
+        });
       }
     }
 

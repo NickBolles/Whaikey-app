@@ -7,6 +7,7 @@ import * as schema from "@/db/schema";
 import { catalogVisibleTo } from "@/lib/catalog-visibility";
 import { escapeLike, getCommunityRating } from "@/lib/search";
 import { getOrGeneratePairings } from "./pairings";
+import { reportInBackground } from "@/lib/observability/errors";
 
 /**
  * Concierge tool definitions (Anthropic tool-use format) plus a DB-backed
@@ -396,7 +397,17 @@ async function execGetPairings(db: DB, userId: string, input: z.infer<typeof bot
   if (!(await getBottle(db, input.bottleId, userId))) {
     return toolError(`No bottle found with id "${input.bottleId}"`);
   }
-  const pairings = await getOrGeneratePairings(db, input.bottleId);
+  /**
+   * `userId` is passed for cost attribution (PLAN-A3), not for visibility —
+   * the check above already did that. Without it a pairing generated because
+   * somebody asked the concierge for one was recorded with `userId: null`,
+   * i.e. as a system job like the catalog enrichment, which took it out of
+   * `meanAiCostPerActiveUser` entirely. The route handler
+   * (`/api/bottles/[id]/pairings`) has always passed it; the tool that reaches
+   * the same generator from chat did not, so the cheaper path was measured and
+   * the paid one was not.
+   */
+  const pairings = await getOrGeneratePairings(db, input.bottleId, undefined, userId);
   if (pairings === null) return toolError(`No bottle found with id "${input.bottleId}"`);
   return {
     pairings: pairings.map((p) => ({
@@ -464,6 +475,23 @@ export async function executeTool(
     }
   } catch (err) {
     console.error(`Tool ${name} failed:`, err);
+    /**
+     * Reported here, because nothing above can see it.
+     *
+     * This catch answers the model with a tool-error value rather than
+     * rethrowing, so the chat stream continues normally: the stream's own
+     * catch never fires, `onRequestError` sees nothing escape, and a failing
+     * pairing generation or database read inside a tool was invisible while
+     * the concierge quietly told the user it could not do that thing.
+     *
+     * Fourth site for the same rule — after `/api/auth/native/start`,
+     * `/api/auth/native/complete` and the chat stream — which is enough
+     * repetitions to state it as a property of this codebase rather than a
+     * coincidence: **a catch that answers its caller instead of rethrowing is
+     * invisible to every wrapper above it, and has to report for itself.**
+     * The graceful fallback below is unchanged.
+     */
+    reportInBackground(err, { where: "ai/tools", userId, tags: { tool: name } });
     return toolError(`Tool "${name}" failed unexpectedly`);
   }
 }

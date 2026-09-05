@@ -6,6 +6,7 @@ import { fastModel, getAnthropic, isAiConfigured } from "@/lib/ai/client";
 import { parseModelJson, textFromContent } from "@/lib/ai/json";
 import { searchBottlesLike, type BottleSearchResult } from "@/lib/ai/tools";
 import { reserveAiRequest } from "@/lib/ai/rate-limit";
+import { recordAiUsage } from "@/lib/ai/usage";
 import { readJsonWithinLimit } from "@/lib/body-limit";
 
 // Node runtime (not edge): uses the DB driver and the Anthropic SDK.
@@ -81,8 +82,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "AI request limit reached. Try again later." }, { status: 429 });
     }
     const anthropic = getAnthropic();
+    const model = fastModel();
     const response = await anthropic.messages.create({
-      model: fastModel(),
+      model,
       max_tokens: 1024,
       messages: [
         {
@@ -100,6 +102,15 @@ export async function POST(request: Request) {
           ],
         },
       ],
+    });
+    // Recorded after the call returns, so a failed request costs nothing and
+    // records nothing; `recordAiUsage` never throws, so this cannot turn a
+    // successful scan into an error.
+    await recordAiUsage(db, {
+      userId: user.id,
+      feature: "scan",
+      model,
+      usage: response.usage,
     });
 
     const raw = parseModelJson(textFromContent(response.content as never));

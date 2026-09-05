@@ -39,7 +39,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     if (!(await reserveAiRequest(db, user.id))) {
       return NextResponse.json({ error: "AI request limit reached. Try again later." }, { status: 429 });
     }
-    const pairings = await getOrGeneratePairings(db, id);
+    const pairings = await getOrGeneratePairings(db, id, undefined, user.id);
     return NextResponse.json({ pairings });
   });
 }

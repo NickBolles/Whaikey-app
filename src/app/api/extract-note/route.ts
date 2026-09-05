@@ -31,7 +31,10 @@ export async function POST(request: Request) {
     if (!(await reserveAiRequest(getDb(), user.id))) {
       return NextResponse.json({ error: "AI request limit reached. Try again later." }, { status: 429 });
     }
-    const result = await extractTastingNote(parsed.data.text);
+    const result = await extractTastingNote(parsed.data.text, undefined, {
+      db: getDb(),
+      userId: user.id,
+    });
     return NextResponse.json(result);
   });
 }

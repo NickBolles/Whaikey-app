@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
@@ -7,6 +7,7 @@ import type { Recommendation } from "@/lib/recommend";
 import { attachAiExplanations } from "./recommend-explain";
 import { setAnthropicForTests } from "./client";
 import { makeFakeAnthropic, textResponse } from "./testing";
+import { setErrorReporterForTests, type CapturedEvent } from "@/lib/observability/errors";
 
 let db: DB;
 let userId: string;
@@ -128,5 +129,54 @@ describe("attachAiExplanations", () => {
     expect(fake.create).toHaveBeenCalledTimes(1);
     const rows = await db.select().from(schema.recExplanations);
     expect(rows).toHaveLength(0);
+  });
+});
+
+
+describe("a fallback that stays silent hides a recurring bill", () => {
+  let captured: CapturedEvent[];
+  beforeEach(() => {
+    captured = [];
+    setErrorReporterForTests((e) => captured.push(e));
+  });
+  afterEach(() => setErrorReporterForTests(null));
+
+  it("reports a generation that throws, and still returns the deterministic reason", async () => {
+    const fake = makeFakeAnthropic([]);
+    fake.create.mockRejectedValue(new Error("anthropic exploded"));
+
+    const result = await attachAiExplanations(db, userId, "discovery", [makeRec()], fake.client);
+
+    // The fallback is the point of the catch and stays exactly as it was.
+    expect(result[0].reason).toBe("Deterministic reason.");
+    // But the catch answers its caller instead of rethrowing, so neither
+    // withErrorHandling nor onRequestError can see it: it reports for itself.
+    expect(captured.map((e) => e.context.where)).toContain("ai/recommend-explain");
+  });
+
+  it("reports a cache write that fails, because that one is paid for again every request", async () => {
+    const fake = makeFakeAnthropic([textResponse('{"reason":"Because you like peat."}')]);
+    const realInsert = db.insert.bind(db);
+    // Fail only the rec_explanations write; everything else behaves.
+    db.insert = ((table: unknown) => {
+      if (table === schema.recExplanations) {
+        return {
+          values: () => ({ onConflictDoNothing: () => Promise.reject(new Error("cache write failed")) }),
+        } as never;
+      }
+      return realInsert(table as never);
+    }) as typeof db.insert;
+
+    try {
+      const result = await attachAiExplanations(db, userId, "discovery", [makeRec()], fake.client);
+      // The generation happened and was paid for; the row it would be reused
+      // from never landed, so the next request pays again. From outside this
+      // looks like nothing at all, which is why it has to be reported.
+      expect(result[0].reason).toBe("Deterministic reason.");
+    } finally {
+      db.insert = realInsert;
+    }
+
+    expect(captured.map((e) => e.context.where)).toContain("ai/recommend-explain");
   });
 });

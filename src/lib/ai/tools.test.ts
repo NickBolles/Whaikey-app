@@ -4,6 +4,8 @@ import type { DB } from "@/db";
 import * as schema from "@/db/schema";
 import { createTestBottle, createTestUser, setupTestDb, uid } from "@/test/helpers";
 import { executeTool, isWriteTool, searchBottlesLike } from "./tools";
+import { setAnthropicForTests } from "./client";
+import { makeFakeAnthropic, textResponse } from "./testing";
 
 let db: DB;
 let user: schema.User;
@@ -11,6 +13,7 @@ let user: schema.User;
 beforeEach(async () => {
   db = await setupTestDb();
   user = await createTestUser(db);
+  setAnthropicForTests(null);
 });
 
 describe("search_bottles", () => {
@@ -312,6 +315,33 @@ describe("add_to_wishlist", () => {
       bottleId: "missing",
     })) as { error?: string };
     expect(result.error).toBeTruthy();
+  });
+});
+
+describe("get_pairings cost attribution (PLAN-A3)", () => {
+  it("bills a chat-triggered generation to the person who asked", async () => {
+    const bottle = await createTestBottle(db);
+    const fake = makeFakeAnthropic([
+      textResponse(
+        JSON.stringify([
+          { pairingType: "food", suggestion: "Dark chocolate", rationale: "Echoes the oak" },
+          { pairingType: "food", suggestion: "Smoked brisket", rationale: "Char matches it" },
+          { pairingType: "food", suggestion: "Aged cheddar", rationale: "Cuts the spice" },
+        ]),
+      ),
+    ]);
+    setAnthropicForTests(fake.client);
+
+    await executeTool(db, user.id, "get_pairings", { bottleId: bottle.id });
+
+    const rows = await db.select().from(schema.aiUsage);
+    expect(rows).toHaveLength(1);
+    // Recorded against the asker, not null. `userId: null` is reserved for
+    // genuine system jobs (catalog enrichment), and a call filed that way is
+    // dropped from `meanAiCostPerActiveUser` — so the cheap cached path was
+    // being measured while the paid one was invisible.
+    expect(rows[0].userId).toBe(user.id);
+    expect(rows[0].feature).toBe("pairings");
   });
 });
 

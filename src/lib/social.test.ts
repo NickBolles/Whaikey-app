@@ -514,6 +514,43 @@ describe("cheers", () => {
     expect(await uncheerPour(db, stranger.id, pour.id)).toEqual({ cheersCount: 0 });
     expect(await uncheerPour(db, stranger.id, pour.id)).toEqual({ cheersCount: 0 }); // idempotent
   });
+
+  it("marks a retraction rather than erasing it, and re-cheering revives the same row", async () => {
+    const owner = await createTestUser(db);
+    const stranger = await createTestUser(db);
+    await claim(db, owner, "owner_r", { isPublic: true });
+    await claim(db, stranger, "reader_r", { isPublic: true });
+    const bottle = await createTestBottle(db);
+    const pour = await insertPour(db, owner.id, bottle.id, { visibility: "public", rating: 4 });
+
+    await cheerPour(db, stranger.id, pour.id);
+    const [given] = await db
+      .select()
+      .from(schema.reactions)
+      .where(eq(schema.reactions.pourId, pour.id));
+    expect(given.retractedAt).toBeNull();
+
+    await uncheerPour(db, stranger.id, pour.id);
+    const afterRetraction = await db
+      .select()
+      .from(schema.reactions)
+      .where(eq(schema.reactions.pourId, pour.id));
+    // Still there — `guardrailMetrics` counts social actions by
+    // `reactions.createdAt`, and a deleted row rewrites a past week's total.
+    expect(afterRetraction).toHaveLength(1);
+    expect(afterRetraction[0].retractedAt).toBeInstanceOf(Date);
+
+    expect(await cheerPour(db, stranger.id, pour.id)).toEqual({ cheersCount: 1 });
+    const revived = await db
+      .select()
+      .from(schema.reactions)
+      .where(eq(schema.reactions.pourId, pour.id));
+    expect(revived).toHaveLength(1);
+    expect(revived[0].retractedAt).toBeNull();
+    // The original timestamp survives the round trip: the guardrail counts a
+    // reader deciding to cheer, not how often they tapped the control.
+    expect(revived[0].createdAt.getTime()).toBe(given.createdAt.getTime());
+  });
 });
 
 describe("comments", () => {

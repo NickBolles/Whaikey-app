@@ -1,7 +1,8 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
 import { createTestUser, setupTestDb } from "@/test/helpers";
+import { setErrorReporterForTests, type CapturedEvent } from "@/lib/observability/errors";
 import {
   AI_DAILY_LIMIT,
   AI_HOURLY_LIMIT,
@@ -93,5 +94,37 @@ describe("sweepExpiredCounters", () => {
     expect(await reserveAiRequest(db, userId, now)).toBe(true);
     const rows = await db.select().from(schema.aiRateLimits);
     expect(rows.find((row) => row.window === "hour")?.count).toBe(2);
+  });
+});
+
+
+describe("the retention sweep is housekeeping, not a thing to lose quietly", () => {
+  let captured: CapturedEvent[];
+  beforeEach(() => {
+    captured = [];
+    setErrorReporterForTests((e) => captured.push(e));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    setErrorReporterForTests(null);
+    vi.restoreAllMocks();
+  });
+
+  it("reports a sweep that cannot run, without failing the request that ran it", async () => {
+    const real = db.delete.bind(db);
+    db.delete = (() => ({
+      where: () => Promise.reject(new Error("permission denied for ai_rate_limits")),
+    })) as unknown as typeof db.delete;
+    try {
+      // Swallowed on purpose: a request that happens to trigger housekeeping
+      // must not fail because the housekeeping did.
+      await expect(sweepExpiredCounters(db, new Date(), { force: true })).resolves.toBeUndefined();
+    } finally {
+      db.delete = real;
+    }
+    // "The next call tries again in an hour" only comforts while it eventually
+    // succeeds. Failing every hour forever grows the table without bound and
+    // breaks the retention /privacy promises, with nothing user-facing to see.
+    expect(captured.map((e) => e.context.where)).toContain("ai/rate-limit:sweep");
   });
 });
