@@ -171,16 +171,24 @@ export async function createPourShare(
            * per thousand. Stamped in the same transaction as the share row, so
            * a link that fails to be created stamps nothing.
            *
-           * `coalesce` for the usual reason: the first crossing wins, and
-           * revoking a link and making a new one is not a second social
-           * action. Only on a genuinely new share row — an existing share was
-           * created at some earlier moment this column may predate, and
-           * writing `now()` for it would file old history in today's window.
+           * Three conditions, and the third was missing for a round.
+           *
+           * `coalesce`, because the first crossing wins and revoking a link to
+           * mint a new one is not a second social action. Only on a genuinely
+           * NEW share row, because an existing share was created at some
+           * earlier moment this column may predate. And only while the pour is
+           * still **private** — the guard `updatePourVisibility` already had,
+           * which this path did not, even though both were written in the same
+           * commit. Without it, a pre-0037 pour that is already public with a
+           * null stamp gets `now()` the first time anybody makes a link for
+           * it, filing a publication from months ago as this week's social
+           * action. Null and excluded stays the honest answer for history the
+           * column did not exist for.
            */
           await tx
             .update(schema.pours)
             .set({ firstSharedAt: sql`coalesce(${schema.pours.firstSharedAt}, now())` })
-            .where(eq(schema.pours.id, pourId));
+            .where(and(eq(schema.pours.id, pourId), eq(schema.pours.visibility, "private")));
           return inserted[0];
         }
         const raced = await tx.query.pourShares.findFirst({

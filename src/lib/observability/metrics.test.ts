@@ -365,6 +365,45 @@ describe("the guardrail metrics SOCIAL §12 committed to", () => {
     expect((await guardrailMetrics(db)).socialActions).toBe(0);
   });
 
+  it("does not stamp a link on a pour that was already visible before the column existed", async () => {
+    const author = await createTestUser(db);
+    const bottle = await createTestBottle(db);
+    await db.insert(schema.userProfiles).values({
+      userId: author.id,
+      handle: "historic-link",
+      displayName: "historic-link",
+      isPublic: true,
+    });
+    // A pre-0037 row: already public, no stamp.
+    const [row] = await db
+      .insert(schema.pours)
+      .values({
+        id: uid("pour"),
+        userId: author.id,
+        bottleId: bottle.id,
+        visibility: "public",
+        visibilityAtCreation: "public",
+        createdAt: new Date(Date.now() - 200 * DAY),
+      })
+      .returning();
+
+    const { createPourShare } = await import("@/lib/pour-sharing");
+    await createPourShare(db, author.id, row.id);
+
+    const [after] = await db
+      .select({ at: schema.pours.firstSharedAt })
+      .from(schema.pours)
+      .where(eq(schema.pours.id, row.id));
+    /**
+     * `updatePourVisibility` already refused to invent a date for these rows;
+     * the bearer-link path — added in the SAME commit as that guard — did not
+     * carry it, so making a link for a months-old public pour filed the old
+     * publication as this week's social action.
+     */
+    expect(after.at).toBeNull();
+    expect((await guardrailMetrics(db)).socialActions).toBe(0);
+  });
+
   it("does not count an operator suspension as somebody choosing to leave", async () => {
     const quitter = await createTestUser(db);
     const suspended = await createTestUser(db);

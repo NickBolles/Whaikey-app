@@ -83,9 +83,21 @@ export default async function SharedPourPage({ params }: Props) {
    * the heuristic errs towards over-counting rather than dropping anyone real.
    */
   const automated = isAutomatedFetch(await headers());
-  if (!viewerIsOwner && !automated) {
-    await recordEvent(getDb(), "share_view", { userId: viewer?.id ?? null, shareId });
-  }
+  /**
+   * Decided here, WRITTEN at the bottom of this component.
+   *
+   * Recording on the way in meant a visitor whose page then failed — a viewer
+   * note query, the shelf lookup, the discussion reads — got an error screen
+   * while the funnel counted a successful view. `views` would have included
+   * people who saw nothing, which is the same class of defect as counting a
+   * crawler: the number moving for a reason unrelated to what it names.
+   *
+   * Deferring to after every await narrows that to a failure during React's
+   * own render, which no server-side ordering can cover. The honest fix for
+   * the remainder is the client-confirmed impression already recorded in
+   * `docs/REVIEW_2026-09.md`; this is the part that costs nothing.
+   */
+  const shouldRecordView = !viewerIsOwner && !automated;
 
   const noteParts = [["Nose", share.note.nose], ["Palate", share.note.palate], ["Finish", share.note.finish]].filter((part): part is [string, string] => Boolean(part[1]));
   const leafHeat = Object.fromEntries(Object.entries(share.note.flavorTags ?? {}).map(([id, intensity]) => [id, intensity / 3]));
@@ -94,6 +106,7 @@ export default async function SharedPourPage({ params }: Props) {
   // Viewer-private block: computed only for a signed-in viewer, never shown to
   // (or stored for) the sharer, and never allowed to touch the card above.
   let viewerBlock: React.ReactNode = null;
+  let comparisonRendered = false;
   // The signed-in comment/cheers thread (docs/SOCIAL.md US-9/US-12) — only
   // when the bearer link's pour also clears the ordinary canViewPour check
   // for this viewer (getSocialNote non-null). A friends-visibility pour
@@ -146,12 +159,10 @@ export default async function SharedPourPage({ params }: Props) {
          * numerator drawn from a wider population than its denominator — and I
          * reintroduced it one event later while fixing the first one.
          */
-        if (!automated) {
-          await recordEvent(getDb(), "share_comparison_rendered", {
-            userId: viewer.id,
-            shareId,
-          });
-        }
+        // Same deferral as the view, and for a stronger reason: recording a
+        // comparison whose page then failed would leave the numerator of
+        // `comparisonRate` counting a render nobody received.
+        comparisonRendered = !automated;
         viewerBlock = (
           <div className="flex flex-col gap-2">
             <ShareComparison mine={viewerFlavorTags} theirs={share.note.flavorTags} />
@@ -224,6 +235,19 @@ export default async function SharedPourPage({ params }: Props) {
         }
       }
     }
+  }
+
+  /**
+   * Every query has succeeded by here, so these two describe a page that was
+   * actually assembled. Written together so the funnel cannot end up holding a
+   * comparison without the view it is divided by — the asymmetry that let
+   * `comparisonRate` exceed 100% two rounds ago.
+   */
+  if (shouldRecordView) {
+    await recordEvent(getDb(), "share_view", { userId: viewer?.id ?? null, shareId });
+  }
+  if (comparisonRendered && viewer) {
+    await recordEvent(getDb(), "share_comparison_rendered", { userId: viewer.id, shareId });
   }
 
   return (
