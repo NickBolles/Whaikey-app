@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import type { DB } from "@/db";
 import { schema } from "@/db";
 import type { AnalyticsEventName, Relationship } from "@/db/schema";
+import { reportInBackground } from "./errors";
 
 /**
  * First-party product events — the S1 share funnel, and nothing else (WP-19).
@@ -64,7 +65,12 @@ export async function shareIdForCode(db: DB, code: string): Promise<string | nul
       where: eq(schema.pourShares.code, code),
     });
     return row?.id ?? null;
-  } catch {
+  } catch (err) {
+    // Null here does not fail anything visible — it drops the share id off the
+    // event, so the row still lands and is simply unattributable. That is the
+    // quietest failure in this file: the funnel keeps counting and the counts
+    // stop meaning what their column says.
+    reportInBackground(err, { where: "analytics/shareIdForCode" });
     return null;
   }
 }
@@ -114,6 +120,7 @@ export async function recordShareConversion(
     );
   } catch (err) {
     console.error("[analytics] failed to record a share conversion", err);
+    reportInBackground(err, { where: "analytics/recordShareConversion" });
   }
 }
 
@@ -150,6 +157,10 @@ export async function recordEvents(
       `[analytics] failed to record ${events.map((e) => e.name).join(" + ")}`,
       err,
     );
+    reportInBackground(err, {
+      where: "analytics/recordEvents",
+      tags: { events: events.map((e) => e.name).join("+") },
+    });
   }
 }
 
@@ -167,5 +178,6 @@ export async function recordEvent(
     });
   } catch (err) {
     console.error(`[analytics] failed to record ${name}`, err);
+    reportInBackground(err, { where: "analytics/recordEvent", tags: { event: name } });
   }
 }

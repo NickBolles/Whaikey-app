@@ -1,8 +1,15 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
 import { createTestBottle, createTestUser, setupTestDb, uid } from "@/test/helpers";
-import { isAutomatedFetch, recordEvent, recordEvents, recordShareConversion } from "./analytics";
+import {
+  isAutomatedFetch,
+  recordEvent,
+  recordEvents,
+  recordShareConversion,
+  shareIdForCode,
+} from "./analytics";
+import { setErrorReporterForTests, type CapturedEvent } from "./errors";
 
 /**
  * The contract this module states about itself: recording must not be able to
@@ -203,5 +210,91 @@ describe("writing a pair of funnel events", () => {
   it("writes nothing for an empty list", async () => {
     await recordEvents(db, []);
     expect(await db.select().from(schema.analyticsEvents)).toHaveLength(0);
+  });
+});
+
+
+describe("a telemetry write that fails silently flattens the funnel it feeds", () => {
+  let captured: CapturedEvent[];
+  beforeEach(() => {
+    captured = [];
+    setErrorReporterForTests((e) => captured.push(e));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    setErrorReporterForTests(null);
+    vi.restoreAllMocks();
+  });
+
+  /** Every write in this module goes through db.insert; break just that. */
+  function breakInserts(): () => void {
+    const real = db.insert.bind(db);
+    db.insert = (() => ({
+      values: () => Promise.reject(new Error("analytics_events is gone")),
+    })) as unknown as typeof db.insert;
+    return () => {
+      db.insert = real;
+    };
+  }
+
+  it("reports a single event that cannot be written", async () => {
+    const restore = breakInserts();
+    try {
+      // The contract holds: it does not throw, and the caller is unaffected.
+      await expect(recordEvent(db, "share_view")).resolves.toBeUndefined();
+    } finally {
+      restore();
+    }
+    expect(captured.map((e) => e.context.where)).toContain("analytics/recordEvent");
+  });
+
+  it("reports a funnel pair that cannot be written", async () => {
+    const restore = breakInserts();
+    try {
+      await expect(
+        recordEvents(db, [{ name: "share_view" }, { name: "share_comparison_rendered" }]),
+      ).resolves.toBeUndefined();
+    } finally {
+      restore();
+    }
+    expect(captured.map((e) => e.context.where)).toContain("analytics/recordEvents");
+  });
+
+  it("reports a share code that cannot be resolved", async () => {
+    // shareIdForCode answers null on failure, which does not break anything
+    // visible: the page still renders and the event still lands, with no share
+    // id on it. That is the quietest failure in this file -- the funnel keeps
+    // counting and stops meaning what its columns say.
+    const realQuery = db.query.pourShares.findFirst;
+    db.query.pourShares.findFirst = (() =>
+      Promise.reject(new Error("pour_shares is gone"))) as typeof realQuery;
+    try {
+      await expect(shareIdForCode(db, "whatever")).resolves.toBeNull();
+    } finally {
+      db.query.pourShares.findFirst = realQuery;
+    }
+    expect(captured.map((e) => e.context.where)).toContain("analytics/shareIdForCode");
+  });
+
+  it("reports a conversion whose own validation query fails", async () => {
+    // The validation lives inside this boundary deliberately (see the
+    // docstring), which means its failures are inside the silence too.
+    const realSelect = db.select.bind(db);
+    db.select = (() => ({
+      from: () => ({ innerJoin: () => ({ where: () => Promise.reject(new Error("pool timeout")) }) }),
+    })) as unknown as typeof db.select;
+    try {
+      await expect(
+        recordShareConversion(db, {
+          shareId: uid("share"),
+          bottleId: uid("bottle"),
+          userId: uid("user"),
+          relationship: "wishlist",
+        }),
+      ).resolves.toBeUndefined();
+    } finally {
+      db.select = realSelect;
+    }
+    expect(captured.map((e) => e.context.where)).toContain("analytics/recordShareConversion");
   });
 });

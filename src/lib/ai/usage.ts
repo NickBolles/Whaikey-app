@@ -2,6 +2,7 @@ import { and, eq, gte, sql } from "drizzle-orm";
 import type { DB } from "@/db";
 import { schema } from "@/db";
 import type { AiFeature } from "@/db/schema";
+import { reportInBackground } from "@/lib/observability/errors";
 
 /**
  * What each AI call cost, in tokens (PLAN-A3).
@@ -371,6 +372,22 @@ export async function recordAiUsage(db: DB, input: AiUsageInput): Promise<void> 
     });
   } catch (err) {
     console.error("[ai-usage] failed to record token spend", err);
+    /**
+     * Best-effort, and reported. Losing a telemetry row is cheaper than losing
+     * the response, which is why this catch exists — but a write that fails
+     * PERSISTENTLY (a column this deployment has not migrated, a constraint,
+     * a permission) makes every paid call vanish from the cost totals while
+     * every request still succeeds. Nothing user-facing goes wrong, so no
+     * wrapper above this can see it: the budget alarm simply reads zero, which
+     * is the exact failure the unknown-model and all-zero rules exist to
+     * prevent, arriving through the recorder rather than the price table.
+     */
+    reportInBackground(err, {
+      where: "ai/usage:record",
+      // Null is the scheduled enrichment job, which has no user to name.
+      userId: input.userId ?? undefined,
+      tags: { feature: input.feature, model: input.model },
+    });
   }
 }
 

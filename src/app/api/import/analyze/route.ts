@@ -7,6 +7,7 @@ import { parseModelJson, textFromContent } from "@/lib/ai/json";
 import { heuristicMapping, IMPORT_FIELDS, type ColumnMapping } from "@/lib/import";
 import { reserveAiRequest } from "@/lib/ai/rate-limit";
 import { recordAiUsage } from "@/lib/ai/usage";
+import { reportInBackground } from "@/lib/observability/errors";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -104,8 +105,15 @@ export async function POST(request: Request) {
         mapping.name = fallback.name;
       }
       return NextResponse.json({ mapping, source: "ai" });
-    } catch {
-      // Any model hiccup degrades to heuristics — import never blocks on AI.
+    } catch (err) {
+      // Any model hiccup degrades to heuristics — import never blocks on AI,
+      // and that fallback is deliberate. But it answers the caller with a 200,
+      // so `withErrorHandling` and `onRequestError` both see a success: an AI
+      // outage could downgrade every import in the product indefinitely and
+      // the only evidence would be that mappings got worse. Reported here
+      // because a catch that answers instead of rethrowing has to report for
+      // itself.
+      reportInBackground(err, { where: "api/import/analyze", userId: user.id });
       return NextResponse.json({ mapping: fallback, source: "heuristic" });
     }
   });

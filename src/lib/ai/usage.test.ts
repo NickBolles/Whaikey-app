@@ -1,7 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
 import { createTestUser, setupTestDb } from "@/test/helpers";
+import { setErrorReporterForTests, type CapturedEvent } from "@/lib/observability/errors";
 import {
   aiCostSince,
   isKnownModel,
@@ -451,5 +452,43 @@ describe("hosted tools are billed per request, beside the tokens", () => {
     const rows = await db.select().from(schema.aiUsage);
     expect(rows).toHaveLength(1);
     expect(rows[0].webSearchRequests).toBe(3);
+  });
+});
+
+
+describe("a recorder that fails silently makes the budget alarm read zero", () => {
+  let captured: CapturedEvent[];
+  beforeEach(() => {
+    captured = [];
+    setErrorReporterForTests((e) => captured.push(e));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    setErrorReporterForTests(null);
+    vi.restoreAllMocks();
+  });
+
+  it("reports a usage row that cannot be written, and still never throws", async () => {
+    const real = db.insert.bind(db);
+    db.insert = (() => ({
+      values: () => Promise.reject(new Error("column web_search_requests does not exist")),
+    })) as unknown as typeof db.insert;
+    try {
+      // The contract holds: the caller already has its answer and must not
+      // lose it over a telemetry row.
+      await expect(
+        recordAiUsage(db, {
+          userId: null,
+          feature: "enrich",
+          model: "claude-sonnet-5",
+          usage: { input_tokens: 10, output_tokens: 5 },
+        }),
+      ).resolves.toBeUndefined();
+    } finally {
+      db.insert = real;
+    }
+    // But a write failing PERSISTENTLY makes every paid call vanish from the
+    // totals while every request still succeeds, so nothing above can see it.
+    expect(captured.map((e) => e.context.where)).toContain("ai/usage:record");
   });
 });
