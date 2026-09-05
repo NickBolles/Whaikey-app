@@ -448,17 +448,26 @@ export async function updatePourVisibility(
       .set({
         visibility,
         /**
-         * Stamped on the FIRST crossing only.
+         * Stamped on an actual private → visible crossing, and only then.
          *
-         * `coalesce` rather than a conditional write: this is the moment the
-         * pour became visible to other people, and the guardrail counts that
-         * event once. Re-publishing after a step-back must not move it into a
-         * later window and be counted a second time — a metric you can inflate
-         * by toggling a control is the same defect the cheer retraction had.
+         * Two conditions, both load-bearing. `coalesce` means the FIRST
+         * crossing wins, so re-publishing after a step-back cannot slide the
+         * timestamp into a later window and be counted twice. The `case` on
+         * the CURRENT visibility (inside an UPDATE, `pours.visibility` still
+         * reads the old row) means a pour that was already visible is left
+         * alone: rows written before migration 0037 carry a null here even
+         * when they are public, and without this guard a later switch from
+         * `public` to `friends` — or a replay of the same value — would stamp
+         * `now()` and file a publication from months ago as a social action in
+         * this week's window. Null and excluded is the honest answer for
+         * history the column did not exist for.
          */
-        ...(visibility === "private"
-          ? {}
-          : { firstSharedAt: sql`coalesce(${schema.pours.firstSharedAt}, now())` }),
+        firstSharedAt:
+          visibility === "private"
+            ? sql`${schema.pours.firstSharedAt}`
+            : sql`case when ${schema.pours.visibility} = 'private'
+                    then coalesce(${schema.pours.firstSharedAt}, now())
+                    else ${schema.pours.firstSharedAt} end`,
       })
       .where(and(eq(schema.pours.id, pourId), eq(schema.pours.userId, userId)))
       .returning();

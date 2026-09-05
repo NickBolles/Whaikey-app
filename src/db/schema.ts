@@ -1100,8 +1100,16 @@ export const analyticsEvents = pgTable(
      * The share link this is about, so the funnel can be followed end to end.
      * Deliberately the pour_shares row id and never the share CODE, which is a
      * bearer credential: a table of live codes is a table of keys.
+     *
+     * `set null`, not `cascade`. Shares cascade from pours, so a cascade here
+     * meant deleting one ordinary journal entry silently erased every view,
+     * comparison and conversion ever recorded against its link — rewriting a
+     * *past* month's S1 numbers as a side effect of an unrelated action today.
+     * `shareFunnel` aggregates by event name and never needs a live share, so
+     * the row keeps its meaning without the reference; the events still expire
+     * on the 90-day telemetry sweep like everything else here.
      */
-    shareId: text("share_id").references(() => pourShares.id, { onDelete: "cascade" }),
+    shareId: text("share_id").references(() => pourShares.id, { onDelete: "set null" }),
     createdAt: createdAt(),
   },
   (t) => [

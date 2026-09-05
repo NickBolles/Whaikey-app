@@ -20,6 +20,19 @@ beforeEach(async () => {
 
 const DAY = 86_400_000;
 
+/**
+ * An `until` a moment in the future, for reads that immediately follow writes.
+ *
+ * The windows here are half-open — `[since, until)` — which is right, because
+ * it is what stops two adjacent windows counting the same row twice. It also
+ * means an event written in the SAME MILLISECOND as a read that defaults
+ * `until` to `new Date()` falls outside it. In production that is a boundary
+ * effect nobody can see; in a test that inserts and then immediately reads it
+ * is a reliable failure, and one that disappears the moment you add a
+ * `console.log` — which is exactly how this was found.
+ */
+const justAfterNow = () => new Date(Date.now() + 60_000);
+
 async function pour(
   userId: string,
   bottleId: string,
@@ -285,6 +298,73 @@ describe("the guardrail metrics SOCIAL §12 committed to", () => {
     expect((await guardrailMetrics(db)).socialActions).toBe(1);
   });
 
+  it("counts a pour shared by bearer link, which never touches the visibility control", async () => {
+    const bottle = await createTestBottle(db);
+    const author = await createTestUser(db);
+    await db.insert(schema.userProfiles).values({
+      userId: author.id,
+      handle: "linker",
+      displayName: "linker",
+      isPublic: true,
+    });
+    const [row] = await db
+      .insert(schema.pours)
+      .values({
+        id: uid("pour"),
+        userId: author.id,
+        bottleId: bottle.id,
+        visibility: "private",
+        visibilityAtCreation: "private",
+      })
+      .returning();
+
+    const { createPourShare } = await import("@/lib/pour-sharing");
+    await createPourShare(db, author.id, row.id);
+
+    // A bearer link is how most sharing actually happens; it makes the pour
+    // visible to another person without ever changing `visibility`. Stamping
+    // only on the visibility control left this flow out of the denominator
+    // forever, which inflates reports per thousand.
+    const m = await guardrailMetrics(db);
+    expect(m.socialActions).toBe(1);
+  });
+
+  it("does not stamp a pour that was already visible before the column existed", async () => {
+    const bottle = await createTestBottle(db);
+    const author = await createTestUser(db);
+    await db.insert(schema.userProfiles).values({
+      userId: author.id,
+      handle: "historic",
+      displayName: "historic",
+      isPublic: true,
+    });
+    // A row from before migration 0037: already public, no first_shared_at.
+    const [row] = await db
+      .insert(schema.pours)
+      .values({
+        id: uid("pour"),
+        userId: author.id,
+        bottleId: bottle.id,
+        visibility: "public",
+        visibilityAtCreation: "public",
+        createdAt: new Date(Date.now() - 200 * DAY),
+      })
+      .returning();
+
+    const { updatePourVisibility } = await import("@/lib/pours");
+    await updatePourVisibility(db, author.id, row.id, "friends");
+
+    const [after] = await db
+      .select({ at: schema.pours.firstSharedAt })
+      .from(schema.pours)
+      .where(eq(schema.pours.id, row.id));
+    // Stamping now() here would file a publication from months ago as a social
+    // action in this week's window. Null and excluded is the honest answer for
+    // history the column did not exist for.
+    expect(after.at).toBeNull();
+    expect((await guardrailMetrics(db)).socialActions).toBe(0);
+  });
+
   it("does not count an operator suspension as somebody choosing to leave", async () => {
     const quitter = await createTestUser(db);
     const suspended = await createTestUser(db);
@@ -450,7 +530,7 @@ describe("the S1 share funnel (PLAN-A5)", () => {
     await recordEvent(db, "share_comparison_rendered", { userId: viewerA.id, shareId });
     await recordEvent(db, "share_wishlist_add", { userId: viewerB.id, shareId });
 
-    const f = await shareFunnel(db);
+    const f = await shareFunnel(db, { until: justAfterNow() });
     expect(f.views).toBe(3);
     // The denominator is signed-in views: a signed-out reader has no notes to
     // compare and cannot convert, so counting them would understate the rate.
@@ -468,11 +548,45 @@ describe("the S1 share funnel (PLAN-A5)", () => {
 
     await recordEvent(db, "share_shelf_add", { userId: viewer.id, shareId });
 
-    const f = await shareFunnel(db);
+    const f = await shareFunnel(db, { until: justAfterNow() });
     // Not folded in: `wishlistAddsFromShare` is read as "people who wanted the
     // bottle", and someone who already owns it is a different answer.
     expect(f.wishlistAddsFromShare).toBe(0);
     expect(f.shelfAddsFromShare).toBe(1);
+  });
+
+  it("keeps the funnel numbers when the underlying pour is deleted", async () => {
+    const owner = await createTestUser(db);
+    const bottle = await createTestBottle(db);
+    const viewer = await createTestUser(db);
+    const pourId = uid("pour");
+    await db
+      .insert(schema.pours)
+      .values({ id: pourId, userId: owner.id, bottleId: bottle.id, visibility: "private" });
+    const shareId = uid("share");
+    await db
+      .insert(schema.pourShares)
+      .values({ id: shareId, pourId, userId: owner.id, code: uid("code") });
+
+    await recordEvent(db, "share_view", { userId: viewer.id, shareId });
+    await recordEvent(db, "share_wishlist_add", { userId: viewer.id, shareId });
+    const before = await shareFunnel(db, { until: justAfterNow() });
+    expect(before.views).toBe(1);
+    expect(before.wishlistAddsFromShare).toBe(1);
+
+    // Shares cascade from pours, so a `cascade` on share_id meant deleting one
+    // ordinary journal entry erased every view and conversion ever recorded
+    // against its link — rewriting a past month's S1 numbers as a side effect
+    // of an unrelated action today.
+    await db.delete(schema.pours).where(eq(schema.pours.id, pourId));
+
+    const after = await shareFunnel(db, { until: justAfterNow() });
+    expect(after.views).toBe(1);
+    expect(after.wishlistAddsFromShare).toBe(1);
+    // The reference goes, the measurement stays.
+    const rows = await db.select().from(schema.analyticsEvents);
+    expect(rows).toHaveLength(2);
+    expect(rows.every((r) => r.shareId === null)).toBe(true);
   });
 
   it("says unknown rather than zero when nobody signed in has looked", async () => {
