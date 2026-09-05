@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   captureError,
+  reportingErrors,
   captureMessage,
   isErrorMonitoringConfigured,
   redactSensitive,
@@ -121,5 +122,24 @@ describe("off unless the owner turns it on", () => {
     await expect(captureError(undefined)).resolves.toBeUndefined();
     await expect(captureError("a string")).resolves.toBeUndefined();
     await expect(captureError(hostile)).resolves.toBeUndefined();
+  });
+});
+
+describe("routes that own their own responses", () => {
+  it("reports what a handler throws and rethrows it unchanged", async () => {
+    const events = collect();
+    const boom = new Error("sweep failed at https://whaikey.app/s/LEAKY");
+    await expect(reportingErrors("cron/sweep", async () => { throw boom; })).rejects.toBe(boom);
+    // Same error object out — the wrapper adds reporting and changes nothing
+    // about the response, which is why these routes can use it at all.
+    expect(events).toHaveLength(1);
+    expect(events[0].context.where).toBe("cron/sweep");
+    expect(events[0].message).toBe("sweep failed at https://whaikey.app/s/[redacted]");
+  });
+
+  it("passes a success straight through without reporting", async () => {
+    const events = collect();
+    await expect(reportingErrors("native/manifest", async () => "ok")).resolves.toBe("ok");
+    expect(events).toHaveLength(0);
   });
 });

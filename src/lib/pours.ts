@@ -242,6 +242,12 @@ export async function logPour(db: DB, userId: string, input: PourInput): Promise
         id: crypto.randomUUID(), userId, bottleId: parsed.bottleId, userBottleId: userBottle?.id ?? null,
         rating: parsed.rating ?? null, servingStyle: parsed.servingStyle ?? null, amountMl, context: parsed.context ?? null,
         visibility, clientId: parsed.clientId ?? null,
+        // Snapshots, written once and never updated (WP-19). `userBottle` is
+        // the row this pour was logged against, so its relationship here is
+        // what the shelf said AT POUR TIME — before a later purchase can flip
+        // a sample into an owned bottle and rewrite history under the metric.
+        shelfRelationshipAtPour: userBottle?.relationship ?? null,
+        visibilityAtCreation: visibility,
       })
       .returning();
     if (userBottle?.status === "open" && userBottle.fillLevel != null) {

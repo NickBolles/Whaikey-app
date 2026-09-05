@@ -198,6 +198,31 @@ export async function captureMessage(
 }
 
 /**
+ * Report anything this function throws, then rethrow it unchanged.
+ *
+ * `withErrorHandling` is the funnel for routes that want its 401/403/413/500
+ * behaviour, and seven do not: the Better Auth catch-all, the three native
+ * sign-in handlers, `/api/native/manifest` (which must fail OPEN — a version
+ * check that locks people out on a hiccup is a worse outage than the one it
+ * prevents), `/api/csp-report` (which reports directly), and `/api/cron/sweep`.
+ * They own their own responses for good reasons, and routing them through a
+ * wrapper that turns every failure into a 500 would break those reasons.
+ *
+ * What they were missing is only the *reporting*. This adds that and nothing
+ * else: same error, same response, same status. The cron sweep is the one that
+ * mattered most — it is unattended, so a failure there is invisible by
+ * definition, and it is where the telemetry retention runs.
+ */
+export async function reportingErrors<T>(where: string, fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    await captureError(err, { where });
+    throw err;
+  }
+}
+
+/**
  * Observe what would be sent, without a DSN and without network.
  *
  * The interesting assertions are about redaction, and those are exactly the

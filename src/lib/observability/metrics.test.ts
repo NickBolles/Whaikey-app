@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
@@ -22,13 +23,28 @@ const DAY = 86_400_000;
 async function pour(
   userId: string,
   bottleId: string,
-  opts: { at?: Date; visibility?: schema.PourVisibility } = {},
+  opts: {
+    at?: Date;
+    visibility?: schema.PourVisibility;
+    shelf?: schema.Relationship | null;
+    /** Simulates a row written before the snapshot columns existed. */
+    noSnapshot?: boolean;
+  } = {},
 ) {
+  const visibility = opts.visibility ?? "private";
   await db.insert(schema.pours).values({
     id: uid("pour"),
     userId,
     bottleId,
-    visibility: opts.visibility ?? "private",
+    visibility,
+    // `logPour` writes both of these at pour time; fixtures do the same, or
+    // deliberately omit them to stand in for pre-column history.
+    ...(opts.noSnapshot
+      ? {}
+      : {
+          shelfRelationshipAtPour: opts.shelf === undefined ? "tried" : opts.shelf,
+          visibilityAtCreation: visibility,
+        }),
     ...(opts.at ? { createdAt: opts.at } : {}),
   });
 }
@@ -110,25 +126,38 @@ describe("the guardrail metrics SOCIAL §12 committed to", () => {
     expect(m.establishedPoursPerActiveUserPerWeek).toBeNull();
   });
 
-  it("counts a pour of an unshelved bottle as tried, not owned", async () => {
-    const owned = await createTestBottle(db, { name: "Owned" });
-    const sampled = await createTestBottle(db, { name: "Sampled" });
+  it("classifies a pour by what the shelf said AT POUR TIME", async () => {
+    const bottle = await createTestBottle(db, { name: "Later Bought" });
     const user = await createTestUser(db);
+    // Sampled at a bar, then bought later. The shelf row flips tried -> own,
+    // and reading it today would reclassify the sample retroactively.
+    await pour(user.id, bottle.id, { shelf: "tried" });
+    await pour(user.id, bottle.id, { shelf: "own" });
     await db.insert(schema.userBottles).values({
       id: uid("ub"),
       userId: user.id,
-      bottleId: owned.id,
+      bottleId: bottle.id,
       relationship: "own",
     });
-    await pour(user.id, owned.id);
-    await pour(user.id, sampled.id);
 
-    // A sample from a bar is not on your shelf and is exactly the breadth the
-    // ratio is meant to reward — counting it as owned would invert the signal.
     const m = await guardrailMetrics(db);
-    expect(m.ownedPours).toBe(1);
+    // One of each, despite the shelf now saying "own" for both.
     expect(m.triedPours).toBe(1);
+    expect(m.ownedPours).toBe(1);
     expect(m.triedToOwnedPourRatio).toBeCloseTo(1, 6);
+  });
+
+  it("ignores pours written before the snapshot existed rather than guessing", async () => {
+    const bottle = await createTestBottle(db);
+    const user = await createTestUser(db);
+    await pour(user.id, bottle.id, { noSnapshot: true });
+    await pour(user.id, bottle.id, { shelf: "own" });
+
+    // Falling back to the live shelf join for the null row IS the bug these
+    // columns exist to fix, so an unknown stays out of both counts.
+    const m = await guardrailMetrics(db);
+    expect(m.triedPours + m.ownedPours).toBe(1);
+    expect(m.ownedPours).toBe(1);
   });
 
   it("reports the tried:owned ratio as unknown rather than as infinity", async () => {
@@ -160,6 +189,70 @@ describe("the guardrail metrics SOCIAL §12 committed to", () => {
     const m = await guardrailMetrics(db);
     expect(m.socialActions).toBe(1);
     expect(m.reportsPerThousandSocialActions).toBeCloseTo(1000, 6);
+  });
+
+  it("keeps social actions that happened, after a privacy reset erases them", async () => {
+    const bottle = await createTestBottle(db);
+    const author = await createTestUser(db);
+    const reporter = await createTestUser(db);
+    await pour(author.id, bottle.id, { visibility: "public" });
+    await db.insert(schema.reports).values({
+      id: uid("report"),
+      subjectType: "profile",
+      subjectId: author.id,
+      reporterId: reporter.id,
+      reason: "abuse",
+    });
+
+    // What `makeEverythingPrivate` and a suspension both do: rewrite every
+    // pour to private, including ones already published.
+    await db
+      .update(schema.pours)
+      .set({ visibility: "private" })
+      .where(eq(schema.pours.userId, author.id));
+
+    const m = await guardrailMetrics(db);
+    // The action still happened. Counting current visibility would drop the
+    // denominator to zero and make reports-per-1,000 null — the safety metric
+    // erased by the safety action, at exactly the moment it is being asked.
+    expect(m.socialActions).toBe(1);
+    expect(m.reportsPerThousandSocialActions).toBeCloseTo(1000, 6);
+  });
+
+  it("does not count an operator suspension as somebody choosing to leave", async () => {
+    const quitter = await createTestUser(db);
+    const suspended = await createTestUser(db);
+    const operator = await createTestUser(db);
+    for (const [u, handle] of [
+      [quitter, "quitter"],
+      [suspended, "suspended"],
+    ] as const) {
+      await db.insert(schema.userProfiles).values({
+        userId: u.id,
+        handle,
+        displayName: handle,
+        isPublic: true,
+        socialEnabled: false,
+      });
+    }
+    // A suspension sets socialEnabled = false, and WP-18 deliberately does not
+    // restore it on reinstatement. Without this exclusion a moderation action
+    // registers permanently as a voluntary step-back.
+    // The row shape `suspendAccount` writes: action "suspend" against a
+    // profile subject, with the operator's reason in `note`.
+    await db.insert(schema.moderationActions).values({
+      id: uid("action"),
+      actorId: operator.id,
+      action: "suspend",
+      subjectType: "profile",
+      subjectId: suspended.id,
+      note: "abuse",
+    });
+
+    const m = await guardrailMetrics(db);
+    // One profile counted, and it is the one who chose.
+    expect(m.profiles).toBe(1);
+    expect(m.socialOffRate).toBeCloseTo(1, 6);
   });
 
   it("returns zeroes and nulls on an empty database rather than dividing by it", async () => {

@@ -106,23 +106,28 @@ export async function guardrailMetrics(
     .from(schema.pours)
     .where(inWindow);
 
-  // Tried vs owned, decided by the viewer's OWN relationship to the bottle at
-  // read time. A pour of a bottle absent from the shelf is neither: it is a
-  // sample from somewhere else, which counts as tried — that is the breadth
-  // case the ratio exists to reward.
+  /**
+   * Tried vs owned, from the snapshot taken WHEN THE POUR HAPPENED.
+   *
+   * The first version joined `user_bottles` and read `relationship` today.
+   * That row moves from `tried` to `own` the moment somebody buys a bottle
+   * they had only sampled, so every earlier sample of it was retroactively
+   * reclassified as an owned pour — and a ratio §12 says "should rise" could
+   * fall with nobody drinking or logging anything. Reading current state to
+   * describe a past event is not measuring the past.
+   *
+   * Rows without a snapshot are excluded rather than falling back to the live
+   * join, because the fallback IS the bug. A pour whose snapshot is null but
+   * which has no shelf row at all is still `tried` — that is the bar sample
+   * the ratio exists to reward, and its absence from the shelf is itself the
+   * fact, not a missing reading.
+   */
   const [ratioRow] = await db
     .select({
-      owned: sql<number>`count(*) filter (where ${schema.userBottles.relationship} = 'own')`,
-      tried: sql<number>`count(*) filter (where ${schema.userBottles.relationship} is distinct from 'own')`,
+      owned: sql<number>`count(*) filter (where ${schema.pours.shelfRelationshipAtPour} = 'own')`,
+      tried: sql<number>`count(*) filter (where ${schema.pours.shelfRelationshipAtPour} is not null and ${schema.pours.shelfRelationshipAtPour} <> 'own')`,
     })
     .from(schema.pours)
-    .leftJoin(
-      schema.userBottles,
-      and(
-        eq(schema.userBottles.userId, schema.pours.userId),
-        eq(schema.userBottles.bottleId, schema.pours.bottleId),
-      ),
-    )
     .where(inWindow);
 
   // Cohort-adjusted: accounts that existed BEFORE the window opened, so a
@@ -136,10 +141,23 @@ export async function guardrailMetrics(
     .innerJoin(schema.user, eq(schema.user.id, schema.pours.userId))
     .where(and(inWindow, lt(schema.user.createdAt, since)));
 
+  /**
+   * Pours that WERE shared, by the visibility they were created with.
+   *
+   * `makeEverythingPrivate` and a suspension both rewrite every one of an
+   * account's pours to `private` in bulk. Counting current visibility
+   * therefore erased social actions that demonstrably happened — shrinking
+   * this denominator at exactly the moment somebody stepped back or was
+   * suspended, which is precisely when the reports-per-1,000 numerator is
+   * highest. The safety metric would have spiked, or gone null, because of
+   * the safety action. Snapshot only, for the same reason as the ratio above.
+   */
   const [socialRow] = await db
     .select({ n: sql<number>`count(*)` })
     .from(schema.pours)
-    .where(and(inWindow, inArray(schema.pours.visibility, ["public", "friends", "followers"])));
+    .where(
+      and(inWindow, inArray(schema.pours.visibilityAtCreation, ["public", "friends", "followers"])),
+    );
   const [commentRow] = await db
     .select({ n: sql<number>`count(*)` })
     .from(schema.comments)
@@ -156,10 +174,28 @@ export async function guardrailMetrics(
   // These two are STATE, not events, so they are current shares rather than
   // windowed rates: nothing records when social was switched off, only that it
   // is. Saying so is better than presenting a lifetime figure as a weekly one.
+  /**
+   * Social-off is a metric about people CHOOSING to leave, so an operator
+   * turning it off for them does not belong in it.
+   *
+   * `suspendAccount` sets `socialEnabled = false`, and WP-18 deliberately does
+   * not restore it on reinstatement — coming back is the account's own choice
+   * to make again. Both of those are right, and together they meant a
+   * suspension registered permanently as a voluntary step-back, contaminating
+   * the guardrail with the moderation actions taken to protect the same
+   * people. Anyone ever suspended is excluded from BOTH sides of the share:
+   * leaving them in the denominator alone would understate the rate instead.
+   */
+  const everSuspended = sql`exists (
+    select 1 from moderation_actions ma
+    where ma.subject_type = 'profile'
+      and ma.subject_id = ${schema.userProfiles.userId}
+      and ma.action = 'suspend'
+  )`;
   const [profileRow] = await db
     .select({
-      profiles: sql<number>`count(*)`,
-      off: sql<number>`count(*) filter (where ${schema.userProfiles.socialEnabled} = false)`,
+      profiles: sql<number>`count(*) filter (where not ${everSuspended})`,
+      off: sql<number>`count(*) filter (where ${schema.userProfiles.socialEnabled} = false and not ${everSuspended})`,
     })
     .from(schema.userProfiles);
   const [blockerRow] = await db

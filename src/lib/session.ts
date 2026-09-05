@@ -84,9 +84,15 @@ export async function withErrorHandling<T>(fn: () => Promise<T>): Promise<T | Ne
       return NextResponse.json({ error: "Request body too large" }, { status: 413 });
     }
     console.error(err);
-    // The one funnel every API route already comes through, so error
-    // monitoring attaches here rather than at ~40 call sites that would each
-    // have to remember. Deliberately NOT awaited: reporting is best-effort and
+    // The funnel MOST API routes come through, so monitoring attaches here
+    // rather than at ~40 call sites that each have to remember. Not all of
+    // them: seven own their own responses and are wrapped with
+    // `reportingErrors` instead — the Better Auth catch-all, the three native
+    // sign-in handlers, `/api/native/manifest`, `/api/csp-report` and
+    // `/api/cron/sweep`. An earlier version of this comment claimed "every
+    // route", which was the kind of claim that stops anyone checking; the
+    // cron sweep in particular is unattended, so a failure there is invisible
+    // by definition. Deliberately NOT awaited: reporting is best-effort and
     // `captureError` never rejects, so waiting on a third party before
     // answering a request that has already failed would turn a 500 into a slow
     // 500. The four handled cases above are not reported — a 401, a 403, a 413

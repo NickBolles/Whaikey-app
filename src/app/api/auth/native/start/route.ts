@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { reportingErrors } from "@/lib/observability/errors";
 import { isNativeProvider, safeReturnPath, startNativeAuthRequest } from "@/lib/native-auth";
 
 /**
@@ -25,7 +26,7 @@ function isChallenge(value: string | null): value is string {
   return value !== null && /^[A-Za-z0-9._~-]{32,128}$/.test(value);
 }
 
-export async function GET(request: NextRequest) {
+async function handleGet(request: NextRequest) {
   const provider = request.nextUrl.searchParams.get("provider");
   if (!isNativeProvider(provider)) {
     return NextResponse.json(
@@ -79,4 +80,13 @@ export async function GET(request: NextRequest) {
     console.error("[native-auth] failed to start social sign-in", err);
     return NextResponse.json({ error: "Sign-in unavailable" }, { status: 503 });
   }
+}
+
+/**
+ * Reporting only (WP-19). This route does not use `withErrorHandling` — it
+ * owns its own responses for reasons documented above — so the wrapper adds
+ * the Sentry report and nothing else: same error, same response, same status.
+ */
+export async function GET(request: NextRequest) {
+  return reportingErrors("auth/native/start", () => handleGet(request));
 }

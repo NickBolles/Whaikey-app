@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { reportingErrors } from "@/lib/observability/errors";
 import {
   consumeNativeAuthRequest,
   issueNativeAuthCode,
@@ -32,7 +33,7 @@ function appRedirect(params: Record<string, string>): NextResponse {
   return new NextResponse(null, { status: 302, headers: { location: url.toString() } });
 }
 
-export async function GET(request: NextRequest) {
+async function handleGet(request: NextRequest) {
   // Single-use: consumed here whatever the outcome, so a callback URL that
   // leaks (browser history, a shared screen) can't be walked back through.
   const pending = await consumeNativeAuthRequest(
@@ -91,4 +92,13 @@ export async function GET(request: NextRequest) {
     console.error("[native-auth] failed to issue exchange code", err);
     return withState({ error: "exchange_failed" });
   }
+}
+
+/**
+ * Reporting only (WP-19). This route does not use `withErrorHandling` — it
+ * owns its own responses for reasons documented above — so the wrapper adds
+ * the Sentry report and nothing else: same error, same response, same status.
+ */
+export async function GET(request: NextRequest) {
+  return reportingErrors("auth/native/complete", () => handleGet(request));
 }

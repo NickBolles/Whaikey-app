@@ -372,6 +372,29 @@ export const pours = pgTable(
     context: jsonb("context").$type<{ setting?: string; companions?: string; glassware?: string }>(),
     visibility: text("visibility").$type<PourVisibility>().notNull().default("private"),
     /**
+     * What this pour WAS, recorded when it happened (WP-19).
+     *
+     * Both columns exist because a metric that reads today's state to describe
+     * a past event is not measuring the past. `user_bottles.relationship` moves
+     * from `tried` to `own` the day somebody buys a bottle they had only
+     * sampled, which retroactively reclassifies every earlier sample of it —
+     * so the tried:owned ratio SOCIAL §12 says "should rise" could fall with
+     * nobody drinking or logging anything. And `visibility` is rewritten in
+     * bulk to `private` by `makeEverythingPrivate` and by a suspension, which
+     * erases social actions that demonstrably happened — shrinking the
+     * denominator of reports-per-1,000 at exactly the moment a moderation
+     * problem is what the number is being asked about.
+     *
+     * Nullable, and read as **unknown rather than as a value**: rows written
+     * before these columns existed have no honest answer, and falling back to
+     * the current column would reintroduce precisely the bug they exist to
+     * fix. The guardrails count only rows carrying a snapshot, which means
+     * they describe the period since this shipped — the same "the instrument
+     * has no readings on its first day" honesty PLAN-A5 is held to.
+     */
+    shelfRelationshipAtPour: text("shelf_relationship_at_pour").$type<Relationship>(),
+    visibilityAtCreation: text("visibility_at_creation").$type<PourVisibility>(),
+    /**
      * Client-minted idempotency key (REL-4.2). A pour is written where the
      * signal isn't, so a save whose response is lost in transit gets retried
      * from the offline queue; the same key on the retry makes the second write

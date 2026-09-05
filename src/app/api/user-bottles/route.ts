@@ -75,10 +75,28 @@ export async function POST(req: Request) {
     // would make the number rise by repetition, which is the failure mode of
     // every funnel metric.
     if (created && input.fromShareId) {
-      await recordEvent(db, "share_wishlist_add", {
-        userId: user.id,
-        shareId: input.fromShareId,
-      });
+      /**
+       * The claim is checked, not taken.
+       *
+       * `fromShareId` arrives from the client, and the foreign key only proves
+       * the id exists — not that this share is about this bottle, nor that the
+       * caller is a recipient. Anyone holding any share id could otherwise add
+       * an unrelated bottle and manufacture a conversion, and PLAN-A5's number
+       * is exactly the kind that invites being flattered. Resolved server-side
+       * against the share's own pour, and the owner is excluded on the same
+       * reasoning as the view event: the funnel is about recipients.
+       */
+      const [share] = await db
+        .select({ ownerId: schema.pourShares.userId, bottleId: schema.pours.bottleId })
+        .from(schema.pourShares)
+        .innerJoin(schema.pours, eq(schema.pours.id, schema.pourShares.pourId))
+        .where(eq(schema.pourShares.id, input.fromShareId));
+      if (share && share.bottleId === input.bottleId && share.ownerId !== user.id) {
+        await recordEvent(db, "share_wishlist_add", {
+          userId: user.id,
+          shareId: input.fromShareId,
+        });
+      }
     }
     return NextResponse.json(row, { status: created ? 201 : 200 });
   });
