@@ -788,3 +788,81 @@ describe("deleting an account must not rewrite a past month", () => {
     expect(funnel.viewsBySignedInUsers).toBe(0);
   });
 });
+
+
+describe("one broken telemetry table must not spare the others", () => {
+  /** Break exactly one table's delete, leaving the rest working. */
+  function breakDeleteOf(table: unknown): () => void {
+    const real = db.delete.bind(db);
+    db.delete = ((t: unknown) =>
+      t === table
+        ? { where: () => ({ returning: () => Promise.reject(new Error("table is gone")) }) }
+        : real(t as never)) as unknown as typeof db.delete;
+    return () => {
+      db.delete = real;
+    };
+  }
+
+  async function seedStaleTelemetry(): Promise<void> {
+    const stale = new Date(Date.now() - (TELEMETRY_RETENTION_DAYS + 1) * 24 * 60 * 60 * 1000);
+    const user = await createTestUser(db);
+    const bottle = await createTestBottle(db);
+    await db.insert(schema.aiUsage).values({
+      id: uid("usage"),
+      userId: null,
+      feature: "enrich",
+      model: "claude-sonnet-5",
+      inputTokens: 1,
+      outputTokens: 1,
+      createdAt: stale,
+    });
+    await db.insert(schema.analyticsEvents).values({
+      id: uid("event"),
+      name: "share_view",
+      createdAt: stale,
+    });
+    const pourId = uid("pour");
+    await db.insert(schema.pours).values({ id: pourId, userId: user.id, bottleId: bottle.id });
+    await db.insert(schema.reactions).values({
+      id: uid("reaction"),
+      pourId,
+      userId: user.id,
+      kind: "cheers",
+      retractedAt: stale,
+    });
+  }
+
+  it("still prunes cheers when the analytics delete fails", async () => {
+    await seedStaleTelemetry();
+    const restore = breakDeleteOf(schema.analyticsEvents);
+    try {
+      // It still fails -- the caller must record the task as failed -- but the
+      // other two tables are no longer collateral damage. A withdrawn cheer
+      // sitting past 90 days because an unrelated table broke is a retention
+      // /privacy states and nothing enforces.
+      await expect(sweepTelemetry(db)).rejects.toThrow(/analytics_events/);
+    } finally {
+      restore();
+    }
+    expect(await db.select().from(schema.aiUsage)).toHaveLength(0);
+    expect(await db.select().from(schema.reactions)).toHaveLength(0);
+    // And the broken one is untouched, which is what "failed" should mean.
+    expect(await db.select().from(schema.analyticsEvents)).toHaveLength(1);
+  });
+
+  it("names every table that failed, so two breakages are two alerts", async () => {
+    await seedStaleTelemetry();
+    const real = db.delete.bind(db);
+    db.delete = ((t: unknown) =>
+      t === schema.aiUsage || t === schema.reactions
+        ? { where: () => ({ returning: () => Promise.reject(new Error("nope")) }) }
+        : real(t as never)) as unknown as typeof db.delete;
+    try {
+      await expect(sweepTelemetry(db)).rejects.toThrow(/ai_usage, retracted_cheers/);
+    } finally {
+      db.delete = real;
+    }
+    // The one that could be swept was swept.
+    expect(await db.select().from(schema.analyticsEvents)).toHaveLength(0);
+  });
+});

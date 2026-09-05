@@ -1,6 +1,7 @@
 import { and, eq, gte, lt, sql } from "drizzle-orm";
 import type { DB } from "@/db";
 import { schema } from "@/db";
+import { runIndependently, stepsFailed } from "@/lib/independently";
 import { meanAiCostPerActiveUser, aiCostSince, type AiCostRow } from "@/lib/ai/usage";
 
 /**
@@ -421,32 +422,57 @@ export async function sweepTelemetry(
   now = new Date(),
 ): Promise<{ aiUsage: number; analyticsEvents: number; retractedCheers: number }> {
   const cutoff = new Date(now.getTime() - TELEMETRY_RETENTION_DAYS * DAY_MS);
-  const usage = await db
-    .delete(schema.aiUsage)
-    .where(lt(schema.aiUsage.createdAt, cutoff))
-    .returning({ id: schema.aiUsage.id });
-  const events = await db
-    .delete(schema.analyticsEvents)
-    .where(lt(schema.analyticsEvents.createdAt, cutoff))
-    .returning({ id: schema.analyticsEvents.id });
   /**
-   * And withdrawn cheers, on the same clock.
+   * Three tables, three independent deletes — and they were three sequential
+   * `await`s, so one of them failing cancelled the ones after it. The cron
+   * route was fixed for exactly this two rounds ago and the same defect was
+   * still here, one level down, inside a single one of that route's tasks:
+   * a broken `analytics_events` delete left withdrawn cheers past the ninety
+   * days `/privacy` states, indefinitely and invisibly.
    *
-   * A retracted cheer survives its retraction for one reason only — so the
-   * guardrail window it happened in keeps its number — and that reason expires
-   * with the window. Keeping it past then would be holding a social gesture
-   * somebody explicitly took back, which is not a retention the privacy page
-   * should have to explain. Cut on `retracted_at`, not `created_at`: an old
-   * cheer withdrawn yesterday is still inside the window that has to stay
-   * stable.
+   * Withdrawn cheers go on the same clock as the rest. A retracted cheer
+   * survives its retraction for one reason only — so the guardrail window it
+   * happened in keeps its number — and that reason expires with the window.
+   * Keeping it past then would be holding a social gesture somebody explicitly
+   * took back, which is not a retention the privacy page should have to
+   * explain. Cut on `retracted_at`, not `created_at`: an old cheer withdrawn
+   * yesterday is still inside the window that has to stay stable.
    */
-  const cheers = await db
-    .delete(schema.reactions)
-    .where(lt(schema.reactions.retractedAt, cutoff))
-    .returning({ id: schema.reactions.id });
+  const { outcomes, failed } = await runIndependently<{ id: string }[]>([
+    [
+      "ai_usage",
+      () =>
+        db
+          .delete(schema.aiUsage)
+          .where(lt(schema.aiUsage.createdAt, cutoff))
+          .returning({ id: schema.aiUsage.id }),
+    ],
+    [
+      "analytics_events",
+      () =>
+        db
+          .delete(schema.analyticsEvents)
+          .where(lt(schema.analyticsEvents.createdAt, cutoff))
+          .returning({ id: schema.analyticsEvents.id }),
+    ],
+    [
+      "retracted_cheers",
+      () =>
+        db
+          .delete(schema.reactions)
+          .where(lt(schema.reactions.retractedAt, cutoff))
+          .returning({ id: schema.reactions.id }),
+    ],
+  ]);
+
+  const swept = (name: string) => outcomes.find((o) => o.name === name)?.value?.length ?? 0;
+  // Thrown AFTER every delete has been attempted, so the tables that could be
+  // pruned have been. The caller records the task as failed either way; what
+  // changes is that the other two are no longer collateral.
+  if (failed.length > 0) throw stepsFailed("telemetry sweep", failed, outcomes);
   return {
-    aiUsage: usage.length,
-    analyticsEvents: events.length,
-    retractedCheers: cheers.length,
+    aiUsage: swept("ai_usage"),
+    analyticsEvents: swept("analytics_events"),
+    retractedCheers: swept("retracted_cheers"),
   };
 }

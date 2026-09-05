@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { reportInBackground, reportingErrors } from "@/lib/observability/errors";
 import { getDb } from "@/db";
+import { runIndependently } from "@/lib/independently";
 import { sweepExpiredCounters } from "@/lib/ai/rate-limit";
 import { sweepExpiredSessions, sweepProviderTokens } from "@/lib/auth";
 import { sweepOrphanedSubmissions } from "@/lib/catalog";
@@ -49,7 +50,9 @@ export async function GET(request: Request): Promise<NextResponse> {
     const now = new Date();
 
     /**
-     * Independent tasks, run independently.
+     * Independent tasks, run independently (`runIndependently` states the
+     * rule, because the same defect turned up again one level down inside
+     * `sweepTelemetry` a round after this was fixed).
      *
      * They were a straight line of `await`s, so the FIRST one to throw ended
      * the request and every task after it was never attempted. This route is
@@ -64,7 +67,7 @@ export async function GET(request: Request): Promise<NextResponse> {
      * connection pool, and a nightly job has no deadline worth a thundering
      * herd. Codes stay first because they hold encrypted session cookies.
      */
-    const tasks: Array<[string, () => Promise<unknown>]> = [
+    const tasks: Array<readonly [string, () => Promise<unknown>]> = [
       // `force: true` because the once-per-process hour throttle exists to keep
       // the sweep off the request path; a schedule that asked for it gets it.
       ["ai-rate-limits", () => sweepExpiredCounters(db, now, { force: true })],
@@ -93,23 +96,19 @@ export async function GET(request: Request): Promise<NextResponse> {
       ["provider-tokens", () => sweepProviderTokens(db)],
     ];
 
-    const failed: string[] = [];
-    for (const [task, run] of tasks) {
-      try {
-        await run();
-      } catch (err) {
-        failed.push(task);
-        /**
-         * Reported per task, not once for the run. "The nightly sweep failed"
-         * and "the phone-lookup sweep failed" are different alerts: each task
-         * is a different table with a different root cause and a different fix,
-         * and one event for the run would hide a second breakage behind the
-         * first. Reported here and answered below rather than rethrown, so the
-         * wrapper cannot file a duplicate on top — two events for one failure
-         * is how an alert gets muted.
-         */
-        reportInBackground(err, { where: "cron/sweep", tags: { task } });
-      }
+    const { outcomes, failed } = await runIndependently(tasks);
+    for (const { name: task, error } of outcomes) {
+      if (error === undefined) continue;
+      /**
+       * Reported per task, not once for the run. "The nightly sweep failed"
+       * and "the phone-lookup sweep failed" are different alerts: each task is
+       * a different table with a different root cause and a different fix, and
+       * one event for the run would hide a second breakage behind the first.
+       * Reported here and answered below rather than rethrown, so the wrapper
+       * cannot file a duplicate on top — two events for one failure is how an
+       * alert gets muted.
+       */
+      reportInBackground(error, { where: "cron/sweep", tags: { task } });
     }
 
     // A non-200 so the scheduler and its logs see a partial run for what it is,
