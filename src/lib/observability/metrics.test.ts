@@ -29,6 +29,8 @@ async function pour(
     shelf?: schema.Relationship | null;
     /** Simulates a row written before the snapshot columns existed. */
     noSnapshot?: boolean;
+    /** When the pour first became visible, if that was not at creation. */
+    sharedAt?: Date | null;
   } = {},
 ) {
   const visibility = opts.visibility ?? "private";
@@ -44,6 +46,10 @@ async function pour(
       : {
           shelfRelationshipAtPour: opts.shelf === undefined ? "tried" : opts.shelf,
           visibilityAtCreation: visibility,
+          // `logPour` stamps this when the pour is created visible; a pour
+          // published later gets it from `updatePourVisibility` instead.
+          firstSharedAt:
+            opts.sharedAt ?? (visibility === "private" ? null : (opts.at ?? new Date())),
         }),
     ...(opts.at ? { createdAt: opts.at } : {}),
   });
@@ -217,6 +223,66 @@ describe("the guardrail metrics SOCIAL §12 committed to", () => {
     // erased by the safety action, at exactly the moment it is being asked.
     expect(m.socialActions).toBe(1);
     expect(m.reportsPerThousandSocialActions).toBeCloseTo(1000, 6);
+  });
+
+  it("counts a pour published later, in the window it was published in", async () => {
+    const bottle = await createTestBottle(db);
+    const author = await createTestUser(db);
+    // Logged privately three months ago, published today. The creation
+    // snapshot says "private" forever, so reading it alone counted nothing —
+    // the mirror image of the bulk-privacy bug, and introduced by its fix.
+    await pour(author.id, bottle.id, {
+      visibility: "public",
+      at: new Date(Date.now() - 90 * DAY),
+      sharedAt: new Date(),
+    });
+
+    const m = await guardrailMetrics(db);
+    // The window is on when it became visible, not when it was poured: that
+    // is the moment a reader could see it, which is the event being counted.
+    expect(m.socialActions).toBe(1);
+  });
+
+  it("counts publishing once, however many times the control is toggled", async () => {
+    const bottle = await createTestBottle(db);
+    const author = await createTestUser(db);
+    // `updatePourVisibility` refuses to publish without an enabled profile.
+    await db.insert(schema.userProfiles).values({
+      userId: author.id,
+      handle: "toggler",
+      displayName: "toggler",
+      isPublic: true,
+    });
+    const [row] = await db
+      .insert(schema.pours)
+      .values({
+        id: uid("pour"),
+        userId: author.id,
+        bottleId: bottle.id,
+        visibility: "private",
+        visibilityAtCreation: "private",
+      })
+      .returning();
+
+    const { updatePourVisibility } = await import("@/lib/pours");
+    await updatePourVisibility(db, author.id, row.id, "public");
+    const [first] = await db
+      .select({ at: schema.pours.firstSharedAt })
+      .from(schema.pours)
+      .where(eq(schema.pours.id, row.id));
+    expect(first.at).toBeInstanceOf(Date);
+
+    await updatePourVisibility(db, author.id, row.id, "private");
+    await updatePourVisibility(db, author.id, row.id, "followers");
+    const [again] = await db
+      .select({ at: schema.pours.firstSharedAt })
+      .from(schema.pours)
+      .where(eq(schema.pours.id, row.id));
+
+    // Stamped once and never moved. A metric somebody can inflate by toggling
+    // a control is the defect the cheer retraction already had.
+    expect(again.at?.getTime()).toBe(first.at?.getTime());
+    expect((await guardrailMetrics(db)).socialActions).toBe(1);
   });
 
   it("does not count an operator suspension as somebody choosing to leave", async () => {

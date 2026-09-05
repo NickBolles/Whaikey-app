@@ -1,4 +1,4 @@
-import { and, eq, gte, inArray, lt, sql } from "drizzle-orm";
+import { and, eq, gte, lt, sql } from "drizzle-orm";
 import type { DB } from "@/db";
 import { schema } from "@/db";
 import { meanAiCostPerActiveUser, aiCostSince, type AiCostRow } from "@/lib/ai/usage";
@@ -142,21 +142,32 @@ export async function guardrailMetrics(
     .where(and(inWindow, lt(schema.user.createdAt, since)));
 
   /**
-   * Pours that WERE shared, by the visibility they were created with.
+   * Pours that became visible to other people, counted at the moment they did.
    *
-   * `makeEverythingPrivate` and a suspension both rewrite every one of an
-   * account's pours to `private` in bulk. Counting current visibility
-   * therefore erased social actions that demonstrably happened — shrinking
-   * this denominator at exactly the moment somebody stepped back or was
-   * suspended, which is precisely when the reports-per-1,000 numerator is
-   * highest. The safety metric would have spiked, or gone null, because of
-   * the safety action. Snapshot only, for the same reason as the ratio above.
+   * Two failed attempts are worth keeping in view. Counting CURRENT visibility
+   * was wrong because `makeEverythingPrivate` and a suspension rewrite every
+   * one of an account's pours to `private` in bulk, erasing social actions
+   * that demonstrably happened — shrinking this denominator exactly when the
+   * reports-per-1,000 numerator is highest, so the safety metric spiked
+   * because of the safety action. Counting the CREATION snapshot fixed that
+   * and broke the mirror image: pours default to private and are published
+   * later, so the moment one actually crossed to other people was never
+   * counted at all.
+   *
+   * `first_shared_at` is that moment, written once on the first private →
+   * visible transition and never moved afterwards. Note the window is on
+   * `first_shared_at`, not `created_at`: a pour logged in January and shared
+   * in March is a March social action, because March is when a reader could
+   * see it.
    */
   const [socialRow] = await db
     .select({ n: sql<number>`count(*)` })
     .from(schema.pours)
     .where(
-      and(inWindow, inArray(schema.pours.visibilityAtCreation, ["public", "friends", "followers"])),
+      and(
+        gte(schema.pours.firstSharedAt, since),
+        lt(schema.pours.firstSharedAt, until),
+      ),
     );
   const [commentRow] = await db
     .select({ n: sql<number>`count(*)` })

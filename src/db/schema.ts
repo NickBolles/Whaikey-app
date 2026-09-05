@@ -395,6 +395,27 @@ export const pours = pgTable(
     shelfRelationshipAtPour: text("shelf_relationship_at_pour").$type<Relationship>(),
     visibilityAtCreation: text("visibility_at_creation").$type<PourVisibility>(),
     /**
+     * When this pour FIRST became visible to anyone else, ever.
+     *
+     * `visibilityAtCreation` fixed one direction and opened the other. Pours
+     * default to private and `updatePourVisibility` publishes them later, so
+     * reading only the creation snapshot means the moment a pour actually
+     * crossed to other people — the social action itself — was never counted
+     * at all. The bulk-privacy bug counted things that had stopped being
+     * visible; this counted nothing for things that had started.
+     *
+     * Written once and never moved: set at insert when the pour is created
+     * visible, set on the first private → visible transition otherwise, and
+     * left alone by every later change including `makeEverythingPrivate` and a
+     * suspension. So the guardrail counts "a reader could have seen this, and
+     * here is when that began", which is the event it is trying to measure,
+     * and re-publishing something twice still counts once.
+     *
+     * Null on rows written before this shipped and on pours nobody has ever
+     * shared. Both are excluded rather than guessed at.
+     */
+    firstSharedAt: timestamp("first_shared_at", { withTimezone: true, mode: "date" }),
+    /**
      * Client-minted idempotency key (REL-4.2). A pour is written where the
      * signal isn't, so a save whose response is lost in transit gets retried
      * from the offline queue; the same key on the retry makes the second write

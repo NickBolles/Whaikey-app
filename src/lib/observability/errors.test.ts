@@ -97,6 +97,70 @@ describe("what leaves this process", () => {
   });
 });
 
+describe("a database error, which carries the user's own words", () => {
+  /** The shape Drizzle throws: message already contains the bound values. */
+  function drizzleError(query: string, params: unknown[]): Error {
+    const err = new Error(`Failed query: ${query}\nparams: ${params}`);
+    Object.assign(err, { query, params });
+    return err;
+  }
+
+  it("never reports the bound parameters", async () => {
+    const events = collect();
+    const note = "Tastes of my grandfather's cellar and I cried a bit";
+    await captureError(drizzleError("insert into tasting_notes (body) values ($1)", [note]), {
+      where: "api",
+    });
+
+    const payload = JSON.stringify(events[0]);
+    // Asserted as the ABSENCE of every fragment, not the presence of a marker:
+    // a redaction test that only checks for "[redacted]" passes while half the
+    // secret is still in the string. That mistake is already in this PR once.
+    for (const fragment of ["grandfather", "cellar", "cried", note]) {
+      expect(payload).not.toContain(fragment);
+    }
+    // The SQL survives: it is the schema rather than the data, and it is most
+    // of what makes the report worth having.
+    expect(events[0].message).toContain("insert into tasting_notes");
+    expect(events[0].message).toContain("1 value(s) withheld");
+  });
+
+  it("keeps the schema-shaped parts of the driver error as tags", async () => {
+    const events = collect();
+    const err = drizzleError("insert into user_profiles (handle) values ($1)", ["sam"]);
+    // A Postgres error quotes the offending value in its own message, which is
+    // exactly why the cause is dropped rather than chained.
+    Object.assign(err, {
+      cause: Object.assign(new Error("Key (handle)=(sam) already exists"), {
+        code: "23505",
+        constraint: "user_profiles_handle_uq",
+        table: "user_profiles",
+        detail: "Key (handle)=(sam) already exists.",
+      }),
+    });
+
+    await captureError(err, { where: "api" });
+
+    const payload = JSON.stringify(events[0]);
+    expect(payload).not.toContain("already exists");
+    expect(events[0].context.tags).toMatchObject({
+      db_error: "true",
+      db_code: "23505",
+      db_constraint: "user_profiles_handle_uq",
+      db_table: "user_profiles",
+    });
+    // `detail` is the field that quotes values, so it is not on the safe list.
+    expect(events[0].context.tags).not.toHaveProperty("db_detail");
+  });
+
+  it("leaves an ordinary error alone", async () => {
+    const events = collect();
+    await captureError(new Error("something ordinary broke"), { where: "api" });
+    expect(events[0].message).toBe("something ordinary broke");
+    expect(events[0].context.tags).toBeUndefined();
+  });
+});
+
 describe("off unless the owner turns it on", () => {
   it("reports nothing configured without a DSN", () => {
     expect(isErrorMonitoringConfigured()).toBe(false);

@@ -196,8 +196,6 @@ describe("runChatStream cost accounting when the stream does not finish", () => 
     const create = async () => ({
       async *[Symbol.asyncIterator]() {
         throw new Error("connection refused");
-        // eslint-disable-next-line no-unreachable
-        yield {} as never;
       },
     });
     const client = { messages: { create } } as unknown as Anthropic;

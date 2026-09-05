@@ -248,6 +248,9 @@ export async function logPour(db: DB, userId: string, input: PourInput): Promise
         // a sample into an owned bottle and rewrite history under the metric.
         shelfRelationshipAtPour: userBottle?.relationship ?? null,
         visibilityAtCreation: visibility,
+        // The moment it became visible to anyone else — here if it was logged
+        // that way, otherwise on the first publish (see `updatePourVisibility`).
+        firstSharedAt: visibility === "private" ? null : new Date(),
       })
       .returning();
     if (userBottle?.status === "open" && userBottle.fillLevel != null) {
@@ -442,7 +445,21 @@ export async function updatePourVisibility(
     }
     const rows = await tx
       .update(schema.pours)
-      .set({ visibility })
+      .set({
+        visibility,
+        /**
+         * Stamped on the FIRST crossing only.
+         *
+         * `coalesce` rather than a conditional write: this is the moment the
+         * pour became visible to other people, and the guardrail counts that
+         * event once. Re-publishing after a step-back must not move it into a
+         * later window and be counted a second time — a metric you can inflate
+         * by toggling a control is the same defect the cheer retraction had.
+         */
+        ...(visibility === "private"
+          ? {}
+          : { firstSharedAt: sql`coalesce(${schema.pours.firstSharedAt}, now())` }),
+      })
       .where(and(eq(schema.pours.id, pourId), eq(schema.pours.userId, userId)))
       .returning();
     return rows[0] ?? null;

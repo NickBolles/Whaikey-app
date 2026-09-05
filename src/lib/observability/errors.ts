@@ -30,7 +30,8 @@ import type { NodeClient } from "@sentry/node";
  */
 
 let client: NodeClient | null = null;
-let initialised = false;
+/** The in-flight or finished construction; see `getClient`. */
+let clientPromise: Promise<NodeClient | null> | null = null;
 let testHook: ((event: CapturedEvent) => void) | null = null;
 
 /** What a test observes: the payload, after redaction, that would be sent. */
@@ -105,10 +106,26 @@ function redactDeep(value: unknown, depth = 0): unknown {
   return value;
 }
 
+/**
+ * One initialisation, shared by everyone who asks for it.
+ *
+ * The flag version set `initialised = true` and then `await`ed the dynamic
+ * import, so a second report arriving during a cold start saw "initialised"
+ * and read a `client` that was still null — and dropped its event. Two
+ * failures at once is not an exotic case; it is what a cold start under load
+ * looks like, and the second one is often the more interesting.
+ *
+ * Caching the promise instead makes every concurrent caller await the same
+ * construction. `isErrorMonitoringConfigured()` stays outside the cache so
+ * turning the DSN on or off is still read fresh.
+ */
 async function getClient(): Promise<NodeClient | null> {
   if (!isErrorMonitoringConfigured()) return null;
-  if (initialised) return client;
-  initialised = true;
+  clientPromise ??= buildClient();
+  return clientPromise;
+}
+
+async function buildClient(): Promise<NodeClient | null> {
   try {
     const Sentry = await import("@sentry/node");
     client = new Sentry.NodeClient({
@@ -152,6 +169,65 @@ function applyScope(
  * Report an unexpected error. Never throws and never rejects: a failure to
  * report is not a reason to fail the thing that was being reported about.
  */
+/**
+ * What a `DrizzleQueryError` carries, and why it must never be reported as-is.
+ *
+ * Drizzle builds its message as `Failed query: <sql>\nparams: <values>` — the
+ * **bound parameters**, which on this app's write paths are a tasting note, a
+ * comment body, a feedback message, a handle. A failed insert would therefore
+ * have sent the user's own words to a third party, which is the one thing
+ * `/privacy` promises error reports do not contain. `redactSensitive` could
+ * not catch it: it recognises share codes, emails and phone hashes, and a
+ * tasting note looks like none of those. Redaction by pattern only ever
+ * removes what somebody thought of in advance, so this removes the values by
+ * **construction** instead of by recognition.
+ *
+ * The SQL itself stays — it is the schema, not the data, and it is most of the
+ * diagnostic value. `cause` is deliberately dropped rather than chained: a
+ * Postgres error embeds offending values in its own message ("Key (email)=(…)
+ * already exists"), so keeping it would reintroduce the leak one level down.
+ * The parts of it that are schema rather than data — the SQLSTATE code, the
+ * constraint, the table and column — come through as tags, which is enough to
+ * identify what broke.
+ */
+interface DrizzleQueryShape {
+  query: string;
+  params: unknown[];
+}
+
+function isDrizzleQueryError(err: unknown): err is Error & DrizzleQueryShape {
+  const candidate = err as Partial<DrizzleQueryShape> | null;
+  return (
+    err instanceof Error &&
+    typeof candidate?.query === "string" &&
+    Array.isArray(candidate?.params)
+  );
+}
+
+/** Schema-shaped fields only. Never `detail`, which quotes the values. */
+const SAFE_DB_FIELDS = ["code", "constraint", "table", "column", "schema"] as const;
+
+function sanitizeForReport(err: unknown): { error: unknown; tags: Record<string, string> } {
+  if (!isDrizzleQueryError(err)) return { error: err, tags: {} };
+
+  const safe = new Error(
+    `Failed query: ${err.query} — params: [${err.params.length} value(s) withheld]`,
+  );
+  safe.name = err.name;
+  // Frames only; no data rides on a stack.
+  safe.stack = err.stack;
+
+  const tags: Record<string, string> = { db_error: "true" };
+  const cause = err.cause;
+  if (cause && typeof cause === "object") {
+    for (const field of SAFE_DB_FIELDS) {
+      const value = (cause as Record<string, unknown>)[field];
+      if (typeof value === "string" && value) tags[`db_${field}`] = value;
+    }
+  }
+  return { error: safe, tags };
+}
+
 export async function captureError(err: unknown, context: ErrorContext = {}): Promise<void> {
   try {
     // Inside the try, deliberately. `String(err)` runs arbitrary user code —
@@ -161,18 +237,28 @@ export async function captureError(err: unknown, context: ErrorContext = {}): Pr
     // "never throws" is what surfaced it: with no hook set, optional-call
     // short-circuiting meant the argument was never evaluated and the test
     // passed without exercising anything.
+    // Stripped BEFORE anything reads the message — including the test hook,
+    // so a test can assert the user's words are gone rather than assert that
+    // a redactor was called.
+    const { error: reportable, tags: dbTags } = sanitizeForReport(err);
+    const reported: ErrorContext =
+      Object.keys(dbTags).length > 0
+        ? { ...context, tags: { ...(context.tags ?? {}), ...dbTags } }
+        : context;
     testHook?.({
       kind: "error",
-      message: redactSensitive(err instanceof Error ? err.message : String(err)),
+      message: redactSensitive(
+        reportable instanceof Error ? reportable.message : String(reportable),
+      ),
       level: "error",
-      context,
+      context: reported,
     });
     const sentry = await getClient();
     if (!sentry) return;
     const { Scope } = await import("@sentry/node");
     const scope = new Scope();
-    applyScope(scope, context);
-    sentry.captureException(err, undefined, scope);
+    applyScope(scope, reported);
+    sentry.captureException(reportable, undefined, scope);
     await flushQuietly(sentry);
   } catch (reportingError) {
     console.error("[observability] failed to report an error", reportingError);
@@ -340,5 +426,5 @@ export async function reportingErrors<T>(where: string, fn: () => Promise<T>): P
 export function setErrorReporterForTests(hook: ((event: CapturedEvent) => void) | null): void {
   testHook = hook;
   client = null;
-  initialised = false;
+  clientPromise = null;
 }
