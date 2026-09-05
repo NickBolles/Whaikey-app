@@ -7,13 +7,19 @@
  * a one-line explanation grounded in the user's own recent pours, and CACHES it
  * per (user, bottle, mode) in rec_explanations so we pay the model cost once.
  * Follows the getOrGeneratePairings caching shape. It never throws into the
- * caller: any AI/parse/DB hiccup falls back to the deterministic reason.
+ * caller: any AI/parse/DB hiccup falls back to the deterministic reason — and
+ * REPORTS on the way past, because a boundary that answers its caller instead
+ * of rethrowing is invisible to `withErrorHandling` and `onRequestError`
+ * alike. A permanently failing cache write would otherwise buy a fresh model
+ * generation on every request while looking, from outside, like slightly duller
+ * copy.
  */
 import { randomUUID } from "node:crypto";
 import { and, desc, eq } from "drizzle-orm";
 import type Anthropic from "@anthropic-ai/sdk";
 import type { DB } from "@/db";
 import { recordAiUsage } from "@/lib/ai/usage";
+import { reportInBackground } from "@/lib/observability/errors";
 import { bottles, pours, recExplanations, tastingNotes } from "@/db/schema";
 import type { RecMode } from "@/db/schema";
 import type { Recommendation } from "@/lib/recommend";
@@ -165,7 +171,12 @@ export async function attachAiExplanations(
   let context = "";
   try {
     context = await loadUserContext(db, userId);
-  } catch {
+  } catch (err) {
+    // Reported, not rethrown. An empty context degrades the reason rather than
+    // breaking the page, so the fallback stays — but a catch that answers its
+    // caller instead of rethrowing is invisible to `withErrorHandling` and to
+    // `onRequestError` alike, and has to report for itself.
+    reportInBackground(err, { where: "ai/recommend-explain:context", userId });
     context = "";
   }
 
@@ -179,8 +190,19 @@ export async function attachAiExplanations(
         .values({ id: randomUUID(), userId, bottleId: rec.bottleId, mode, reason })
         .onConflictDoNothing();
       rec.reason = reason;
-    } catch {
-      // Keep the deterministic reason for this rec.
+    } catch (err) {
+      // Keep the deterministic reason for this rec — and report, because this
+      // boundary hides two different failures that both cost money. A model
+      // call that throws is a paid call with nothing to show for it, and a
+      // failing `rec_explanations` insert makes the cache permanently cold, so
+      // every recommendations request pays for a generation it can never
+      // reuse. Both look identical from outside: reasons that are a little
+      // duller than usual.
+      reportInBackground(err, {
+        where: "ai/recommend-explain",
+        userId,
+        tags: { bottleId: rec.bottleId, mode },
+      });
     }
   }
 

@@ -381,3 +381,75 @@ describe("a price change must not rewrite what past months cost", () => {
     expect(totalUsd).toBeCloseTo(20 + 25 + 20, 9);
   });
 });
+
+
+describe("hosted tools are billed per request, beside the tokens", () => {
+  it("stores the search count the response reported", async () => {
+    await recordAiUsage(db, {
+      userId: null,
+      feature: "enrich",
+      model: "claude-sonnet-5",
+      usage: {
+        input_tokens: 100,
+        output_tokens: 50,
+        server_tool_use: { web_search_requests: 4, web_fetch_requests: 0 },
+      },
+    });
+    const [row] = await db.select().from(schema.aiUsage);
+    expect(row.webSearchRequests).toBe(4);
+  });
+
+  it("prices a search at $10 per 1,000, on top of the token meter", () => {
+    const tokens = {
+      inputTokens: 0,
+      outputTokens: 0,
+      cachedInputTokens: 0,
+      cacheWriteTokens: 0,
+    };
+    const withoutSearch = usdForTokens("claude-sonnet-5", tokens);
+    const withSearch = usdForTokens("claude-sonnet-5", { ...tokens, webSearchRequests: 100 });
+    expect(withoutSearch).toBeCloseTo(0, 9);
+    // 100 searches at $10/1,000. Counted as zero, a catalog run that searched
+    // for every bottle would report as free.
+    expect(withSearch).toBeCloseTo(1, 9);
+  });
+
+  it("carries the searches into the cost report", async () => {
+    await recordAiUsage(db, {
+      userId: null,
+      feature: "enrich",
+      model: "claude-sonnet-5",
+      // One cheap turn that ran 50 searches: the tokens say pennies and the
+      // searches say half a dollar, which is the whole point of the column.
+      usage: {
+        input_tokens: 1000,
+        output_tokens: 100,
+        server_tool_use: { web_search_requests: 50 },
+      },
+    });
+    const [row] = await aiCostSince(db, new Date(Date.now() - 60_000));
+    expect(row.webSearchRequests).toBe(50);
+    const tokenOnly = usdForTokens("claude-sonnet-5", {
+      inputTokens: 1000,
+      outputTokens: 100,
+      cachedInputTokens: 0,
+      cacheWriteTokens: 0,
+    });
+    expect(row.estimatedUsd).toBeCloseTo(tokenOnly + 0.5, 9);
+  });
+
+  it("records a turn whose only meter was a hosted tool", async () => {
+    // The all-zero guard exists so a fabricated {0, 0} does not read as free.
+    // A turn that searched is not that case: it cost money, and dropping the
+    // row would lose the only evidence of it.
+    await recordAiUsage(db, {
+      userId: null,
+      feature: "enrich",
+      model: "claude-sonnet-5",
+      usage: { input_tokens: 0, output_tokens: 0, server_tool_use: { web_search_requests: 3 } },
+    });
+    const rows = await db.select().from(schema.aiUsage);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].webSearchRequests).toBe(3);
+  });
+});

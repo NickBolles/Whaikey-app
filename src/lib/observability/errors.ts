@@ -485,14 +485,27 @@ function deferReport(start: () => Promise<void>): void {
  * behaviour, and seven do not: the Better Auth catch-all, the three native
  * sign-in handlers, `/api/native/manifest` (which must fail OPEN — a version
  * check that locks people out on a hiccup is a worse outage than the one it
- * prevents), `/api/csp-report` (which reports directly), and `/api/cron/sweep`.
- * They own their own responses for good reasons, and routing them through a
- * wrapper that turns every failure into a 500 would break those reasons.
+ * prevents), `/api/csp-report` and `/api/cron/sweep`. They own their own
+ * responses for good reasons, and routing them through a wrapper that turns
+ * every failure into a 500 would break those reasons.
  *
  * What they were missing is only the *reporting*. This adds that and nothing
  * else: same error, same response, same status. The cron sweep is the one that
  * mattered most — it is unattended, so a failure there is invisible by
  * definition, and it is where the telemetry retention runs.
+ *
+ * **THREE of those seven are not covered by this wrapper, and saying so is the
+ * point of this paragraph.** `/api/csp-report` reports directly. And the
+ * Better Auth catch-all cannot be covered from outside at all: it exports
+ * `toNextJsHandler(auth)`, and Better Auth catches everything its handlers
+ * throw and answers with its own response, so no exception ever reaches a
+ * wrapper placed around the route — nor `onRequestError`. It is reported at
+ * Better Auth's own error boundary instead, `onAPIError` in `src/lib/auth.ts`.
+ * An earlier version of this comment listed the catch-all among the routes
+ * this wrapper covers, which was a claim about intent and not about what runs
+ * — the failure mode this file keeps rediscovering. Adding a route to the list
+ * above does not add reporting to it; wrapping it, or hooking its own
+ * boundary, does.
  */
 export async function reportingErrors<T>(where: string, fn: () => Promise<T>): Promise<T> {
   try {

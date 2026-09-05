@@ -119,7 +119,9 @@ const INVENTORY: Record<string, Verdict> = {
   rec_explanations: { disclosed: "the\n            one-line reason behind a recommendation is cached against your account" },
 
   // --- Telemetry (WP-19) ---
-  ai_usage: { disclosed: "which feature it was, which model answered, and how many tokens it" },
+  ai_usage: {
+    disclosed: "which model answered, how many tokens it used, and how many web searches it ran",
+  },
   analytics_events: { disclosed: "that a\n            share page was opened" },
 
   // --- Devices ---

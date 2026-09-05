@@ -1039,6 +1039,18 @@ export const aiUsage = pgTable(
     /** Cache reads bill at a fraction of input; kept apart or the maths is wrong. */
     cachedInputTokens: integer("cached_input_tokens").notNull().default(0),
     cacheWriteTokens: integer("cache_write_tokens").notNull().default(0),
+    /**
+     * Hosted tool calls, billed PER REQUEST rather than per token.
+     *
+     * Catalog enrichment turns on Anthropic's hosted web search for bottles
+     * with no source facts, and those searches are charged separately from the
+     * token meter. Counting only tokens made a real, recurring line of the
+     * bill invisible to the report whose whole job is to show what AI costs.
+     * Kept in their own columns for the same reason cache reads are: folding
+     * them into a token count would price them at the wrong rate.
+     */
+    webSearchRequests: integer("web_search_requests").notNull().default(0),
+    webFetchRequests: integer("web_fetch_requests").notNull().default(0),
     createdAt: createdAt(),
   },
   (t) => [

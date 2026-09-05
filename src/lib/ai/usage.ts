@@ -27,6 +27,11 @@ export interface AiUsageInput {
     output_tokens?: number | null;
     cache_read_input_tokens?: number | null;
     cache_creation_input_tokens?: number | null;
+    /** Hosted tools the model called itself, billed per request. */
+    server_tool_use?: {
+      web_search_requests?: number | null;
+      web_fetch_requests?: number | null;
+    } | null;
   } | null | undefined;
 }
 
@@ -106,6 +111,31 @@ export function setRateTableForTests(rates?: Record<string, DatedRate[]>): void 
   RATES = rates ?? DEFAULT_RATES;
 }
 
+/** A hosted-tool price, per REQUEST rather than per million tokens. */
+interface DatedToolRate {
+  from: string;
+  usdPerRequest: number;
+}
+
+/**
+ * Hosted tools the model calls itself, billed per request beside the tokens.
+ *
+ * Catalog enrichment enables Anthropic's hosted web search for bottles with no
+ * source facts (`src/lib/ingest/enrich.ts`), and each search is charged
+ * separately from the token meter. Counting only tokens left a real and
+ * recurring line of the bill out of the report whose entire purpose is to show
+ * what AI costs — the same failure as pricing an unknown model at zero, in a
+ * different unit.
+ *
+ * Dated for the reason the model rates are, and appended to rather than
+ * edited: a tool price moves exactly as a token price does, and dating one and
+ * not the other would leave half the report repricing its own history.
+ */
+const TOOL_RATES: { webSearch: DatedToolRate[] } = {
+  // Anthropic's published hosted web-search price: $10 per 1,000 searches.
+  webSearch: [{ from: SINCE_FIRST_ROW, usdPerRequest: 10 / 1000 }],
+};
+
 /** Cache reads bill at ~0.1x input; cache writes at ~1.25x. */
 const CACHE_READ_MULTIPLIER = 0.1;
 const CACHE_WRITE_MULTIPLIER = 1.25;
@@ -147,6 +177,16 @@ function rateAt(entries: DatedRate[], at: Date): ModelRate | undefined {
  * expensive rate in the table. A budget alarm that reads several times high on
  * every deployment is not a conservative alarm, it is a broken one.
  */
+/** The hosted-tool entry in effect at `at`, or `undefined` before the first. */
+function rateAtTool(entries: DatedToolRate[], at: Date): DatedToolRate | undefined {
+  const ms = at.getTime();
+  let chosen: DatedToolRate | undefined;
+  for (const entry of entries) {
+    if (utcMidnight(entry.from) <= ms) chosen = entry;
+  }
+  return chosen;
+}
+
 export function normalizeModelId(model: string): string {
   return model
     .trim()
@@ -248,19 +288,38 @@ export function isKnownModel(model: string): boolean {
  * summing rows out of `ai_usage` must pass the time those rows were written,
  * or a later price change moves a figure that has already been reported.
  */
-export function usdForTokens(
-  model: string,
-  tokens: { inputTokens: number; outputTokens: number; cachedInputTokens: number; cacheWriteTokens: number },
-  at: Date = new Date(),
-): number {
+export interface UsageTotals {
+  inputTokens: number;
+  outputTokens: number;
+  cachedInputTokens: number;
+  cacheWriteTokens: number;
+  /** Hosted searches, billed per request. Absent is treated as none. */
+  webSearchRequests?: number;
+  webFetchRequests?: number;
+}
+
+export function usdForTokens(model: string, tokens: UsageTotals, at: Date = new Date()): number {
   const rate = rateFor(model, at);
-  return (
+  const tokenUsd =
     (tokens.inputTokens * rate.input +
       tokens.outputTokens * rate.output +
       tokens.cachedInputTokens * rate.input * CACHE_READ_MULTIPLIER +
       tokens.cacheWriteTokens * rate.input * CACHE_WRITE_MULTIPLIER) /
-    1_000_000
-  );
+    1_000_000;
+  const search = rateAtTool(TOOL_RATES.webSearch, at);
+  const toolUsd = (tokens.webSearchRequests ?? 0) * (search?.usdPerRequest ?? 0);
+  /**
+   * `webFetchRequests` is recorded and NOT priced, which is a stated gap
+   * rather than a silent zero. No fetch tool is enabled anywhere in this
+   * codebase — catalog enrichment turns on `web_search_20260209` and nothing
+   * else — so the column is always 0 today, and inventing a rate for a tool
+   * nobody has turned on is the false precision `docs/COMPETITORS.md` §2.7
+   * rules out. The count is stored anyway because the API reports both halves
+   * of the meter in one object, and recording half of a meter is exactly how
+   * the search half went missing. **Enable a fetch tool and add its rate in
+   * the same commit.**
+   */
+  return tokenUsd + toolUsd;
 }
 
 /** Record one model call's token spend. Best-effort; never throws. */
@@ -285,11 +344,17 @@ export async function recordAiUsage(db: DB, input: AiUsageInput): Promise<void> 
    * omitting the row is correct either way, and correct sooner.)
    */
   if (!u) return;
+  const webSearchRequests = u.server_tool_use?.web_search_requests ?? 0;
+  const webFetchRequests = u.server_tool_use?.web_fetch_requests ?? 0;
+  // Hosted tool calls count towards "did we learn anything" as well: a turn
+  // that searched is a turn that cost money, whatever the token meter says.
   const total =
     (u.input_tokens ?? 0) +
     (u.output_tokens ?? 0) +
     (u.cache_read_input_tokens ?? 0) +
-    (u.cache_creation_input_tokens ?? 0);
+    (u.cache_creation_input_tokens ?? 0) +
+    webSearchRequests +
+    webFetchRequests;
   if (total === 0) return;
   try {
     await db.insert(schema.aiUsage).values({
@@ -301,6 +366,8 @@ export async function recordAiUsage(db: DB, input: AiUsageInput): Promise<void> 
       outputTokens: u.output_tokens ?? 0,
       cachedInputTokens: u.cache_read_input_tokens ?? 0,
       cacheWriteTokens: u.cache_creation_input_tokens ?? 0,
+      webSearchRequests,
+      webFetchRequests,
     });
   } catch (err) {
     console.error("[ai-usage] failed to record token spend", err);
@@ -315,6 +382,9 @@ export interface AiCostRow {
   outputTokens: number;
   cachedInputTokens: number;
   cacheWriteTokens: number;
+  /** Hosted tool calls, billed per request rather than per token. */
+  webSearchRequests: number;
+  webFetchRequests: number;
   estimatedUsd: number;
 }
 
@@ -374,6 +444,8 @@ export async function aiCostSince(
       outputTokens: sql<number>`sum(${schema.aiUsage.outputTokens})`,
       cachedInputTokens: sql<number>`sum(${schema.aiUsage.cachedInputTokens})`,
       cacheWriteTokens: sql<number>`sum(${schema.aiUsage.cacheWriteTokens})`,
+      webSearchRequests: sql<number>`sum(${schema.aiUsage.webSearchRequests})`,
+      webFetchRequests: sql<number>`sum(${schema.aiUsage.webFetchRequests})`,
     })
     .from(schema.aiUsage)
     .where(
@@ -390,6 +462,8 @@ export async function aiCostSince(
       outputTokens: Number(r.outputTokens ?? 0),
       cachedInputTokens: Number(r.cachedInputTokens ?? 0),
       cacheWriteTokens: Number(r.cacheWriteTokens ?? 0),
+      webSearchRequests: Number(r.webSearchRequests ?? 0),
+      webFetchRequests: Number(r.webFetchRequests ?? 0),
     };
     const key = `${r.feature}\u0000${r.model}`;
     const acc = byPair.get(key) ?? {
@@ -400,6 +474,8 @@ export async function aiCostSince(
       outputTokens: 0,
       cachedInputTokens: 0,
       cacheWriteTokens: 0,
+      webSearchRequests: 0,
+      webFetchRequests: 0,
       estimatedUsd: 0,
     };
     acc.calls += Number(r.calls ?? 0);
@@ -407,6 +483,8 @@ export async function aiCostSince(
     acc.outputTokens += tokens.outputTokens;
     acc.cachedInputTokens += tokens.cachedInputTokens;
     acc.cacheWriteTokens += tokens.cacheWriteTokens;
+    acc.webSearchRequests += tokens.webSearchRequests;
+    acc.webFetchRequests += tokens.webFetchRequests;
     acc.estimatedUsd += usdForTokens(r.model, tokens, dayStart(r.day));
     byPair.set(key, acc);
   }
@@ -470,6 +548,8 @@ export async function meanAiCostPerActiveUser(
         outputTokens: sql<number>`sum(${schema.aiUsage.outputTokens})`,
         cachedInputTokens: sql<number>`sum(${schema.aiUsage.cachedInputTokens})`,
         cacheWriteTokens: sql<number>`sum(${schema.aiUsage.cacheWriteTokens})`,
+        webSearchRequests: sql<number>`sum(${schema.aiUsage.webSearchRequests})`,
+        webFetchRequests: sql<number>`sum(${schema.aiUsage.webFetchRequests})`,
       })
       .from(schema.aiUsage)
       .where(attributed)
@@ -486,6 +566,8 @@ export async function meanAiCostPerActiveUser(
         outputTokens: Number(r.outputTokens ?? 0),
         cachedInputTokens: Number(r.cachedInputTokens ?? 0),
         cacheWriteTokens: Number(r.cacheWriteTokens ?? 0),
+        webSearchRequests: Number(r.webSearchRequests ?? 0),
+        webFetchRequests: Number(r.webFetchRequests ?? 0),
       },
       dayStart(r.day),
     );

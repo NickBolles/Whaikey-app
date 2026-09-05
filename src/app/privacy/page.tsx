@@ -83,9 +83,10 @@ export default function PrivacyPage() {
           </li>
           <li>
             <strong className="text-foreground">What the AI cost</strong> — for each request you
-            make of the AI, which feature it was, which model answered, and how many tokens it
-            used. No part of what you asked or what it said is in this; it is a meter reading, and
-            it exists so we can tell whether the AI is affordable before it becomes your problem.
+            make of the AI, which feature it was, which model answered, how many tokens it used,
+            and how many web searches it ran. No part of what you asked or what it said is in
+            this — nor what was searched for — it is a meter reading, and it exists so we can tell
+            whether the AI is affordable before it becomes your problem.
           </li>
           <li>
             <strong className="text-foreground">Four things about share links</strong> — that a
