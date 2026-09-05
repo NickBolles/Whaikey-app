@@ -124,10 +124,20 @@ export async function POST(request: Request) {
       },
       cancel() {
         cancelled = true;
-        // Stop the model call rather than letting it run on for a reader who
-        // has gone: the generator's `finally` still records the tokens already
-        // billed (see `runChatStream`).
-        void generator.return(undefined as never);
+        /**
+         * Stop the model call rather than letting it run on for a reader who
+         * has gone. `return()` on an async generator is queued behind the
+         * in-flight `next()`, so it takes effect at the next yield point and
+         * the generator's own `finally` still records the tokens already
+         * billed (see `runChatStream`) — verified, not assumed.
+         *
+         * `.catch` rather than `void`: a floating promise that rejects is an
+         * unhandled rejection, which is the same escape route as throwing
+         * from the `catch` and `finally` above. Nothing here should reject —
+         * `recordAiUsage` swallows its own failures — but "should not" is what
+         * the rest of this file has spent ten review rounds disproving.
+         */
+        generator.return(undefined as never).catch(() => {});
       },
     });
 
