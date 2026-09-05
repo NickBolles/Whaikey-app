@@ -10,7 +10,7 @@ import {
 import { requireUser, withErrorHandling } from "@/lib/session";
 import { canViewBottle } from "@/lib/catalog-visibility";
 import { listUserBottles, upsertUserBottle, userBottleCreateSchema } from "@/lib/bar";
-import { recordEvent } from "@/lib/observability/analytics";
+import { recordShareConversion } from "@/lib/observability/analytics";
 
 export const dynamic = "force-dynamic";
 
@@ -76,33 +76,17 @@ export async function POST(req: Request) {
     // every funnel metric.
     if (created && input.fromShareId) {
       /**
-       * The claim is checked, not taken.
-       *
-       * `fromShareId` arrives from the client, and the foreign key only proves
-       * the id exists — not that this share is about this bottle, nor that the
-       * caller is a recipient. Anyone holding any share id could otherwise add
-       * an unrelated bottle and manufacture a conversion, and PLAN-A5's number
-       * is exactly the kind that invites being flattered. Resolved server-side
-       * against the share's own pour, and the owner is excluded on the same
-       * reasoning as the view event: the funnel is about recipients.
+       * Best-effort, and deliberately awaited: `recordShareConversion` owns
+       * both the validation query and the write, and swallows its own
+       * failures, so nothing about measuring this conversion can change the
+       * answer the person gets about their shelf.
        */
-      const [share] = await db
-        .select({ ownerId: schema.pourShares.userId, bottleId: schema.pours.bottleId })
-        .from(schema.pourShares)
-        .innerJoin(schema.pours, eq(schema.pours.id, schema.pourShares.pourId))
-        .where(eq(schema.pourShares.id, input.fromShareId));
-      if (share && share.bottleId === input.bottleId && share.ownerId !== user.id) {
-        // And the relationship decides which event it is. `share_wishlist_add`
-        // feeds a funnel field named `wishlistAddsFromShare`; this endpoint
-        // takes the relationship from the caller, so an `own` or `tried` add
-        // was being counted under a name that says wishlist. Both are real
-        // conversions and neither is the other one.
-        await recordEvent(
-          db,
-          input.relationship === "wishlist" ? "share_wishlist_add" : "share_shelf_add",
-          { userId: user.id, shareId: input.fromShareId },
-        );
-      }
+      await recordShareConversion(db, {
+        shareId: input.fromShareId,
+        bottleId: input.bottleId,
+        userId: user.id,
+        relationship: input.relationship,
+      });
     }
     return NextResponse.json(row, { status: created ? 201 : 200 });
   });
