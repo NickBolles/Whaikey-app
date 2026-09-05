@@ -6,7 +6,7 @@ import {
   timingSafeEqual,
 } from "node:crypto";
 import { and, eq, lt, sql } from "drizzle-orm";
-import { getDb, schema } from "@/db";
+import { getDb, schema, type DB } from "@/db";
 
 /**
  * Handing a signed-in session from the system browser into the app's WebView
@@ -38,6 +38,23 @@ export const CODE_TTL_MS = 60_000;
  * — and no longer, because the row is what makes a callback legitimate.
  */
 export const REQUEST_TTL_MS = 10 * 60_000;
+
+/**
+ * Requests are deleted a further TTL **after** they expire, not at expiry.
+ *
+ * `consumeNativeAuthRequest` deliberately keeps an expired row so the callback
+ * can hand back its `state` and a clean `expired` error — "an expired row is
+ * still this app's row, and telling it so is what lets it fail cleanly", as
+ * that function says. Deleting at the instant of expiry took that away: a
+ * sweep landing between expiry and the system browser returning left
+ * `/api/auth/native/complete` with `no_request` and no state, which the shell
+ * rejects as an unmatched callback and sits on "Connecting…" forever. The
+ * cleanup existed to bound the table, and bounding it a TTL later costs
+ * nothing and keeps the failure legible. Codes already work this way.
+ */
+export function requestSweepCutoff(now: Date): Date {
+  return new Date(now.getTime() - REQUEST_TTL_MS);
+}
 
 /**
  * Ceiling on live pending sign-ins.
@@ -164,7 +181,7 @@ export async function startNativeAuthRequest(params: NativeAuthRequestInit): Pro
 
   await db
     .delete(schema.nativeAuthRequests)
-    .where(lt(schema.nativeAuthRequests.expiresAt, now));
+    .where(lt(schema.nativeAuthRequests.expiresAt, requestSweepCutoff(now)));
 
   // Expiry alone bounds nothing inside the TTL window, and this endpoint is
   // unauthenticated. Keep the newest MAX_LIVE_AUTH_REQUESTS and drop the rest,
@@ -229,9 +246,27 @@ export async function consumeNativeAuthRequest(
  * sitting in the table, which is precisely when nobody is looking.
  */
 async function sweepExpiredCodes(now: Date): Promise<void> {
-  await getDb()
+  await sweepNativeAuth(getDb(), now);
+}
+
+/**
+ * The same sweep, callable from scheduled housekeeping.
+ *
+ * The comment above is right that cleanup on issue alone leaves session
+ * cookies sitting through a quiet week — and it is right one level up too:
+ * both call sites are on the native sign-in path, so a deployment with *no*
+ * native traffic never sweeps at all. `/privacy` says these are deleted when
+ * they expire, and a promise that holds only while the feature is in use is
+ * not the promise it makes. Pending requests go with them: same path, same
+ * silence, and they are unauthenticated rows.
+ */
+export async function sweepNativeAuth(db: DB, now = new Date()): Promise<void> {
+  await db
     .delete(schema.nativeAuthCodes)
     .where(lt(schema.nativeAuthCodes.expiresAt, new Date(now.getTime() - CODE_TTL_MS)));
+  await db
+    .delete(schema.nativeAuthRequests)
+    .where(lt(schema.nativeAuthRequests.expiresAt, requestSweepCutoff(now)));
 }
 
 /**

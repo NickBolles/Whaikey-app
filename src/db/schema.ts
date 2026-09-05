@@ -1,4 +1,5 @@
 import {
+  bigserial,
   pgTable,
   text,
   integer,
@@ -161,7 +162,16 @@ export const bottles = pgTable(
       .$type<"verified" | "user_submitted" | "imported">()
       .notNull()
       .default("verified"),
-    submittedBy: text("submitted_by").references(() => user.id),
+    /**
+     * Who first added this bottle, when a user did.
+     *
+     * `set null` rather than the default `no action`: a verified bottle is
+     * catalog data everybody's shelf points at, so it must outlive its
+     * submitter's account — and with `no action` a single submission made an
+     * account permanently undeletable, which is a deletion right the schema
+     * quietly revokes.
+     */
+    submittedBy: text("submitted_by").references(() => user.id, { onDelete: "set null" }),
     createdAt: createdAt(),
   },
   (t) => [index("bottles_category_idx").on(t.category), index("bottles_name_idx").on(t.name)],
@@ -202,7 +212,13 @@ export const bottleSubmissions = pgTable(
     upc: text("upc"),
     /** Where the submission came from, for triage: scan, search, import, direct. */
     source: text("source"),
-    reviewedBy: text("reviewed_by").references(() => user.id),
+    /**
+     * The reviewer. `set null` for the same reason as `bottles.submittedBy`,
+     * and safe because `state` — not this column — is what says whether a
+     * submission is still pending; clearing it cannot put a decided row back
+     * in the queue.
+     */
+    reviewedBy: text("reviewed_by").references(() => user.id, { onDelete: "set null" }),
     reviewedAt: timestamp("reviewed_at", { withTimezone: true, mode: "date" }),
     /** Set when a reviewer marks this a duplicate of an existing catalog bottle. */
     duplicateOfBottleId: text("duplicate_of_bottle_id").references(() => bottles.id),
@@ -485,6 +501,19 @@ export const userProfiles = pgTable("user_profiles", {
    */
   socialEnabled: boolean("social_enabled").notNull().default(true),
   /**
+   * Set by an operator, never by the user (PLAN.md §9.4).
+   *
+   * Distinct from `socialEnabled`, which is the owner's own step-back switch:
+   * a suspension is not theirs to reverse, and collapsing the two would let
+   * anyone lift their own with one tap of a toggle they already have. Social
+   * reads and writes are refused while it is set; the journal, the shelf and
+   * the export are untouched, because a suspension is from the social surfaces
+   * and not from someone's own records.
+   */
+  suspendedAt: timestamp("suspended_at", { withTimezone: true, mode: "date" }),
+  /** Shown to the suspended account, so an appeal has something to answer. */
+  suspendedReason: text("suspended_reason"),
+  /**
    * Phone discovery (docs/SOCIAL.md §7.2, D8 as amended): the raw number is
    * NEVER stored — only an HMAC (keyed by a server secret) for exact-match
    * lookup, plus the last two digits so the owner can recognize which number
@@ -633,7 +662,24 @@ export const comments = pgTable(
     body: text("body").notNull(),
     createdAt: createdAt(),
     editedAt: timestamp("edited_at", { withTimezone: true, mode: "date" }),
+    /** Set by whatever removed it from view — the author, or a moderation hide. */
     deletedAt: timestamp("deleted_at", { withTimezone: true, mode: "date" }),
+    /**
+     * Set when the **author** (or the pour's owner) withdrew it.
+     *
+     * `deletedAt` alone could not tell the two apart, and a moderation hide
+     * shares that column: while a hide stood, the author had no way to delete
+     * their own comment — the control was gone and the write refused — and
+     * lifting the hide republished it whether or not they had wanted it gone.
+     * A takedown is not supposed to take away the author's own control over
+     * their words; `docs/SOCIAL.md` gives comments soft deletion and a hide is
+     * not an exception to it.
+     *
+     * Recorded separately rather than by overwriting `deletedAt`, because the
+     * lift matches that timestamp against the hide's own to avoid republishing
+     * what the author removed — so it is the one value that must not move.
+     */
+    authorDeletedAt: timestamp("author_deleted_at", { withTimezone: true, mode: "date" }),
   },
   (t) => [index("comments_pour_idx").on(t.pourId)],
 );
@@ -658,10 +704,161 @@ export const reports = pgTable(
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
     reason: text("reason").notNull(),
+    /**
+     * Who owned the reported thing when it was reported.
+     *
+     * The subject can be deleted — `deletePour` is a hard delete — and without
+     * this the queue lost the owner along with it, taking the Suspend control
+     * with it: deleting the reported pour was a way to put the account itself
+     * out of reach of moderation while the report stayed open. The content
+     * going away is not the account being answered for.
+     */
+    subjectOwnerId: text("subject_owner_id"),
+    /**
+     * What the reported thing said **when it was reported**.
+     *
+     * The queue used to render the subject's current text, which let a
+     * reported user edit the abuse away before an operator opened the report:
+     * the complaint then described content that no longer existed, so it could
+     * neither be judged nor evidenced. Captured at report time so the operator
+     * sees what the reporter saw, and the trail keeps it after the fact.
+     *
+     * Null on rows filed before snapshots existed; the queue says so rather
+     * than showing the current text in the slot where the original belongs.
+     */
+    subjectSnapshot: text("subject_snapshot"),
     state: text("state").$type<ReportState>().notNull().default("open"),
     createdAt: createdAt(),
   },
   (t) => [index("reports_state_idx").on(t.state)],
+);
+
+/**
+ * What an operator did, and why (PLAN.md §9.4).
+ *
+ * Reports were written and never read; the queue that reads them has to leave
+ * its own record or the same hole reopens one level up. Append-only: rows are
+ * never edited or removed, so "who hid this and when" survives the thing being
+ * hidden, and an appeal has something to answer.
+ */
+/**
+ * `unhide` is the reversal of a hide, and it exists because the hide sticks:
+ * a hidden pour cannot be re-published by its owner, so an appeal upheld has
+ * to be actionable by an operator rather than by asking the owner to try again.
+ */
+/**
+ * `resolve` is the odd one: a decision that changed no state.
+ *
+ * Several reports about one comment is the ordinary case, and the later ones
+ * are genuinely handled by the hide or the suspension already in force — the
+ * queue offers "Resolve as hidden" and "Resolve as suspended" for exactly
+ * that. Applying a second hide or a second suspension would overwrite a
+ * timestamp that means something, so those branches change nothing; but the
+ * operator still made a decision, with a reason `docs/STORYBOARD.md` §3.17
+ * requires "for every action without exception". Recording it as `hide` would
+ * put a rival entry in front of `isModerationHidden` and the lift's timestamp
+ * match; recording it as `dismiss` would tell an appeal the complaint was
+ * unfounded. It is its own thing, and it is deliberately outside every
+ * hide/unhide and suspend/reinstate filter in this file.
+ */
+export const MODERATION_ACTIONS = [
+  "hide",
+  "unhide",
+  "suspend",
+  "reinstate",
+  "dismiss",
+  "resolve",
+] as const;
+export type ModerationActionKind = (typeof MODERATION_ACTIONS)[number];
+
+export const moderationActions = pgTable(
+  "moderation_actions",
+  {
+    id: id(),
+    /**
+     * The operator.
+     *
+     * Nullable only because the account can be deleted, and null means exactly
+     * that: the operator's account is gone, not that nobody acted. The write
+     * path always has an actor. The alternative was `no action`, which made an
+     * operator undeletable the moment they touched the queue — so the only
+     * ways to honour a deletion request were to erase the audit history or to
+     * reassign its actor to somebody who did not decide it, and an append-only
+     * trail cannot survive either. What an appeal is answered from is the
+     * decision, its reason and its order; those all keep.
+     */
+    actorId: text("actor_id").references(() => user.id, { onDelete: "set null" }),
+    action: text("action").$type<ModerationActionKind>().notNull(),
+    /**
+     * For a `hide`: whether this action is what removed the row.
+     *
+     * `unhideSubject` restores a comment by matching its `deletedAt` against
+     * the hide's own `createdAt`, so that it never republishes something the
+     * author deliberately deleted. Two instants can be the same millisecond,
+     * though — an author's delete and a hide landing right behind it — and
+     * then the match succeeds on a coincidence and the lift publishes text its
+     * author removed. A timestamp is not an identity; this records the fact
+     * instead of inferring it.
+     *
+     * False when the row was already gone when the hide landed. Null on hides
+     * recorded before this column existed, where the timestamp match is still
+     * the best available answer.
+     */
+    tookDown: boolean("took_down"),
+    subjectType: text("subject_type").$type<ReportSubjectType>().notNull(),
+    subjectId: text("subject_id").notNull(),
+    /** The report this answered, when it came from the queue. */
+    reportId: text("report_id").references(() => reports.id, { onDelete: "set null" }),
+    /** The operator's reasoning, in their own words. */
+    note: text("note"),
+    /**
+     * The order decisions actually happened in.
+     *
+     * `createdAt` cannot answer "is this subject hidden right now": two actions
+     * can share a millisecond, and a request that captured its timestamp before
+     * waiting on the moderation lock commits *after* one that captured a later
+     * one. Ordering by `(createdAt, id)` disambiguates the rows without
+     * preserving their order, since the id is a random UUID — so a freshly
+     * hidden pour could read as lifted, or a lifted one keep blocking its owner.
+     *
+     * The sequence is assigned at insert, inside the per-subject advisory lock
+     * every write to this table takes, so for one subject it is exactly the
+     * order the decisions were made in. Every current-state query orders by it.
+     */
+    seq: bigserial("seq", { mode: "number" }).notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("moderation_actions_subject_idx").on(t.subjectType, t.subjectId),
+    index("moderation_actions_created_idx").on(t.createdAt),
+    index("moderation_actions_seq_idx").on(t.seq),
+  ],
+);
+
+/**
+ * In-app feedback (PLAN.md §9.7).
+ *
+ * A store submission needs a support route that is not a GitHub issue form,
+ * and the app has none. Stored rather than mailed because there is no mailer:
+ * a row an operator reads is a support channel, an email to an address nobody
+ * configured is not. The app version and platform ride along because the first
+ * question about any report is "which build".
+ */
+export const feedback = pgTable(
+  "feedback",
+  {
+    id: id(),
+    /** Null for a signed-out sender; the support page works either way. */
+    userId: text("user_id").references(() => user.id, { onDelete: "set null" }),
+    body: text("body").notNull(),
+    /** Optional reply address, for a signed-out sender or a different inbox. */
+    contact: text("contact"),
+    platform: text("platform"),
+    appVersion: text("app_version"),
+    handledAt: timestamp("handled_at", { withTimezone: true, mode: "date" }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("feedback_created_idx").on(t.createdAt)],
 );
 
 export const pairings = pgTable(
@@ -1221,6 +1418,8 @@ export type Distillery = typeof distilleries.$inferSelect;
 export type Bottle = typeof bottles.$inferSelect;
 export type BottleSubmission = typeof bottleSubmissions.$inferSelect;
 export type AgeVerification = typeof ageVerifications.$inferSelect;
+export type ModerationAction = typeof moderationActions.$inferSelect;
+export type Feedback = typeof feedback.$inferSelect;
 export type NewBottle = typeof bottles.$inferInsert;
 export type UserBottle = typeof userBottles.$inferSelect;
 export type PassportTierRow = typeof passportTiers.$inferSelect;

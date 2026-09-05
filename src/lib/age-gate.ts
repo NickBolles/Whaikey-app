@@ -218,11 +218,24 @@ export async function recordAgeAnswer(
  * The gate itself, obviously, or it redirects to itself. Sign-in, so an
  * account can be swapped rather than stranded. The resources page, because
  * the one moment somebody most needs it is when they have just been told they
- * are too young. And `/s/<code>` share pages, which are public content a
- * signed-out visitor can already read — gating a signed-in viewer out of a
- * page they could see by signing out protects nobody.
+ * are too young — and the policies and support page for the same reason, plus
+ * a store listing links to them. And `/s/<code>` share pages, which are public
+ * content a signed-out visitor can already read — gating a signed-in viewer
+ * out of a page they could see by signing out protects nobody.
  */
-const UNGATED_ROOTS = ["/age", "/sign-in", "/responsible", "/s", "/api"];
+const UNGATED_ROOTS = [
+  "/age",
+  "/sign-in",
+  "/responsible",
+  // The policies and the support route (PLAN.md §9.3, §9.7). A store listing
+  // links to them, they have to be readable without an account, and somebody
+  // who cannot get past this gate is exactly the person who needs support.
+  "/terms",
+  "/privacy",
+  "/support",
+  "/s",
+  "/api",
+];
 
 /**
  * Matched on whole segments, never as a bare prefix: `/ages-of-whiskey` is not

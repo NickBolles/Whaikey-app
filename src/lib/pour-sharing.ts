@@ -1,7 +1,8 @@
 import { and, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
-import { PendingBottleError, SocialDisabledError } from "@/lib/pours";
+import { isModerationHidden, moderationLockKey } from "@/lib/moderation";
+import { ModeratedError, PendingBottleError, SocialDisabledError } from "@/lib/pours";
 
 const SHARE_CODE_LENGTH = 12;
 
@@ -92,6 +93,22 @@ export async function createPourShare(
           .where(and(eq(schema.pours.id, pourId), eq(schema.pours.userId, userId)))
           .limit(1);
         if (bottle?.status === "user_submitted") throw new PendingBottleError();
+
+        /**
+         * And no bearer link to a pour a moderator took down (PLAN.md §9.4).
+         *
+         * Hiding revokes the links that exist; without this the owner presses
+         * Share again and gets a fresh `/s/<code>` serving the same content,
+         * because `getPublicPourShare` never consults visibility. Revoking
+         * what exists and leaving the mint open is not a takedown, it is a
+         * pause. Under the subject's moderation lock so the check and the
+         * insert cannot straddle a hide — taken after `social-reset` above,
+         * the one order every path that needs both takes.
+         */
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(hashtext(${moderationLockKey("pour", pourId)}))`,
+        );
+        if (await isModerationHidden(tx, "pour", pourId)) throw new ModeratedError();
 
         const existing = await tx.query.pourShares.findFirst({
           where: and(eq(schema.pourShares.pourId, pourId), eq(schema.pourShares.userId, userId)),

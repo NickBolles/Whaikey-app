@@ -315,6 +315,14 @@ describe("/api/pours", () => {
   });
 
   it("PATCH /api/pours/[id] updates visibility, owner-only", async () => {
+    // Publishing is a social act and needs a claimed handle. This test is
+    // about ownership and validation, so the owner gets one.
+    await db.insert(schema.userProfiles).values({
+      userId: user.id,
+      handle: "owner",
+      displayName: "Owner",
+      socialEnabled: true,
+    });
     const createRes = await POST(jsonRequest("/api/pours", "POST", { bottleId: bottle.id, rating: 4 }));
     const { pour } = await createRes.json();
     expect(pour.visibility).toBe("private");

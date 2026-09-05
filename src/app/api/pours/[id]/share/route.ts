@@ -3,7 +3,7 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import { requireUser, withErrorHandling } from "@/lib/session";
 import { createPourShare, revokePourShare } from "@/lib/pour-sharing";
-import { PendingBottleError, SocialDisabledError } from "@/lib/pours";
+import { ModeratedError, PendingBottleError, SocialDisabledError } from "@/lib/pours";
 
 const inputSchema = z.object({ locationLabel: z.string().max(80).optional().nullable() });
 
@@ -23,6 +23,16 @@ export async function POST(_request: Request, ctx: Ctx) {
     } catch (err) {
       if (err instanceof SocialDisabledError) {
         return NextResponse.json({ error: "social_disabled" }, { status: 409 });
+      }
+      if (err instanceof ModeratedError) {
+        return NextResponse.json(
+          {
+            error: "moderated",
+            message:
+              "A moderator hid this note, so it can't be shared. Ask through support if you think that was wrong.",
+          },
+          { status: 409 },
+        );
       }
       if (err instanceof PendingBottleError) {
         return NextResponse.json(

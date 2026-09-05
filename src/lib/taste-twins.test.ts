@@ -246,6 +246,54 @@ describe("taste twins against the graph", () => {
     expect([...palates.keys()].sort()).toEqual([followee.id, viewer.id].sort());
   });
 
+  it("shows a suspended viewer no twins, and no matches either", async () => {
+    const viewer = await createTestUser(db);
+    const close = await createTestUser(db);
+    await profile(viewer.id, "viewer");
+    await profile(close.id, "close");
+    await follow(viewer.id, close.id);
+    await seedPalate(viewer.id, { peaty: 9 });
+    await seedPalate(close.id, { peaty: 8 });
+
+    // Everything is in place first, so the assertions below can only be the
+    // suspension talking.
+    expect((await getTasteTwins(db, viewer.id)).length).toBe(1);
+    expect(await getPalateMatch(db, viewer.id, close.id)).not.toBeNull();
+
+    await db
+      .update(schema.userProfiles)
+      .set({ suspendedAt: new Date() })
+      .where(eq(schema.userProfiles.userId, viewer.id));
+
+    // Taste twins reach another account's palate without ever going through
+    // social.ts's own read functions, so the guard has to sit on this path in
+    // its own right (review §5.4).
+    expect(await getTasteTwins(db, viewer.id)).toEqual([]);
+    expect(await getPalateMatch(db, viewer.id, close.id)).toBeNull();
+    expect((await getPalateMatches(db, viewer.id, [close.id])).size).toBe(0);
+  });
+
+  it("still reads a suspended followee's palate: the sanction is on the viewer", async () => {
+    const viewer = await createTestUser(db);
+    const close = await createTestUser(db);
+    await profile(viewer.id, "viewer");
+    await profile(close.id, "close");
+    await follow(viewer.id, close.id);
+    await seedPalate(viewer.id, { peaty: 9 });
+    await seedPalate(close.id, { peaty: 8 });
+
+    await db
+      .update(schema.userProfiles)
+      .set({ suspendedAt: new Date() })
+      .where(eq(schema.userProfiles.userId, close.id));
+
+    // A suspension stops that account posting and reading, not everyone else
+    // from seeing what it already published. Hiding their contributions is
+    // what `hideSubject` is for, and it is a separate decision a moderator
+    // makes explicitly.
+    expect((await getTasteTwins(db, viewer.id)).map((t) => t.handle)).toEqual(["close"]);
+  });
+
   it("gives no self-match", async () => {
     const viewer = await createTestUser(db);
     await profile(viewer.id, "viewer");
@@ -273,6 +321,12 @@ describe("getTwinEndorsements", () => {
    * A twin is by definition someone the viewer follows, and the endorsement
    * query re-checks that live rather than trusting the passed-in list — so the
    * follow has to exist for any of these fixtures to be visible.
+   *
+   * And the profile with it: `followUser` refuses a target that has none, so a
+   * followee without one is a state the app cannot produce. These fixtures
+   * skipped it only because nothing had ever required it — until
+   * `contributorVisibleSql` started asking for a socially present author
+   * rather than merely one not switched off.
    */
   async function followedTwin(
     viewerId: string,
@@ -280,6 +334,13 @@ describe("getTwinEndorsements", () => {
     handle: string,
     matchPercent: number,
   ) {
+    await db.insert(schema.userProfiles).values({
+      userId,
+      handle,
+      displayName: handle,
+      isPublic: true,
+      socialEnabled: true,
+    });
     await db.insert(schema.follows).values({
       id: uid("f"),
       followerId: viewerId,
@@ -441,6 +502,37 @@ describe("getTwinEndorsements", () => {
       twin(stranger.id, "stranger", 95),
     ]);
     expect(found.size).toBe(0);
+  });
+
+  it("returns no endorsements to a suspended viewer, even with a twin list in hand", async () => {
+    const viewer = await createTestUser(db);
+    const a = await createTestUser(db);
+    const bottle = await createTestBottle(db, { name: "Shared Favourite" });
+    await ratedPour(a.id, bottle.id, 5, "public");
+    const twins = [await followedTwin(viewer.id, a.id, "closest", 91)];
+    // The viewer needs a profile row of their own for a suspension to land on;
+    // the other fixtures in this block never gave them one because nothing had
+    // ever read the viewer's own profile.
+    await db.insert(schema.userProfiles).values({
+      userId: viewer.id,
+      handle: "viewer",
+      displayName: "viewer",
+      isPublic: true,
+      socialEnabled: true,
+    });
+
+    expect((await getTwinEndorsements(db, viewer.id, [bottle.id], twins)).size).toBe(1);
+
+    await db
+      .update(schema.userProfiles)
+      .set({ suspendedAt: new Date() })
+      .where(eq(schema.userProfiles.userId, viewer.id));
+
+    // `getTasteTwins` would hand a suspended viewer an empty list, so this can
+    // only be reached with a list built elsewhere or carried over from before
+    // the suspension — which is exactly why this export carries its own gate
+    // rather than relying on its caller's.
+    expect((await getTwinEndorsements(db, viewer.id, [bottle.id], twins)).size).toBe(0);
   });
 
   it("returns nothing without bottles or twins to work with", async () => {

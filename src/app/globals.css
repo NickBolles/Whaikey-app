@@ -112,7 +112,14 @@ body {
    lens are deliberately compact — raising their min-height would make the bar
    the thing it was rewritten to stop being. This grows the *hit area* to 44px
    while the control keeps its own height, so a 36px pill is still a 36px pill
-   and still comfortably tappable. Paints nothing. */
+   and still comfortably tappable. Paints nothing.
+
+   ONLY for a control with room around it. The overlay extends past the
+   element, so on a row of adjacent controls each one reaches under its
+   neighbours and the later one in DOM order wins the tap — making a mis-tap
+   more likely, which is the opposite of the point. Where controls sit side by
+   side, give them real height (min-h-11) and real separation instead; the
+   moderation queue's action row is the worked example. */
 .tap-target {
   position: relative;
 }

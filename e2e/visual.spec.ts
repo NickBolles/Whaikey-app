@@ -45,6 +45,33 @@ test.describe("signed out", () => {
     await expect(page).toHaveScreenshot(shot("signed-out-sign-in"), { fullPage: true });
   });
 
+  /**
+   * The store-prerequisite pages (PLAN.md §9.3/§9.7, WP-18). Captured signed
+   * out because that is how a store reviewer and a search engine reach them,
+   * and captured with the legal identity unset — the "not finished" banner is
+   * a state that has to be visible, not one to hide behind a fixture.
+   *
+   * `/admin/*` has no baseline on purpose: an internal tool for one operator,
+   * deliberately outside the design system (docs/STORYBOARD.md §3.17).
+   */
+  test("terms", async ({ page }) => {
+    await page.goto("/terms");
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("terms"), { fullPage: true });
+  });
+
+  test("privacy policy", async ({ page }) => {
+    await page.goto("/privacy");
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("privacy"), { fullPage: true });
+  });
+
+  test("support", async ({ page }) => {
+    await page.goto("/support");
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("support"), { fullPage: true });
+  });
+
   test("search empty state", async ({ page }) => {
     await page.goto("/search");
     await settle(page);

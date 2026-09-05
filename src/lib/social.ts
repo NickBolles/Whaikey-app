@@ -12,11 +12,16 @@
  * A signed-out viewer (viewerId === null) sees nothing cross-user — share
  * links (src/lib/pour-sharing.ts) are a separate bearer-token mechanism.
  */
-import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, or, sql, type AnyColumn } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, ne, or, sql, type AnyColumn } from "drizzle-orm";
 import { z } from "zod";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
 import { REPORT_SUBJECT_TYPES, type FollowState, type PourVisibility, type ReportSubjectType } from "@/db/schema";
+import { subjectPreview } from "@/lib/moderation";
+import { commentWithdrawnByAuthor } from "@/lib/comment-visibility";
+
+// Re-exported so callers that already reach for it here keep working.
+export { commentWithdrawnByAuthor } from "@/lib/comment-visibility";
 import { getUserPalate } from "@/lib/palate-store";
 import { palateWheelHeat } from "@/lib/palate";
 import { hashPhone, normalizePhone, phoneLast2 } from "@/lib/phone";
@@ -59,6 +64,18 @@ export function isValidHandle(handle: string): boolean {
 
 export function isReservedHandle(handle: string): boolean {
   return RESERVED_HANDLES.has(normalizeHandle(handle));
+}
+
+/**
+ * Raised when a suspended account tries to undo its suspension (PLAN.md §9.4).
+ * Distinct from `SocialDisabledError`, which is the owner's own step-back
+ * switch and theirs to reverse whenever they like.
+ */
+export class AccountSuspendedError extends Error {
+  constructor() {
+    super("This account is suspended");
+    this.name = "AccountSuspendedError";
+  }
 }
 
 /** Thrown when a write would raise social exposure while the owner is stepped back (US-11). */
@@ -107,6 +124,29 @@ function toProfileSummary(row: {
   return { userId: row.userId, handle: row.handle, displayName: row.displayName, avatarUrl: row.avatarUrl };
 }
 
+export interface OwnSuspension {
+  reason: string | null;
+  suspendedAt: Date;
+}
+
+/**
+ * This account's own suspension, if it has one (PLAN.md §9.4).
+ *
+ * Deliberately not on `SocialProfile`: that shape is projected to other people
+ * in places, and a suspension reason is between the account and the operator.
+ * It is read only for the signed-in owner, so they can see what they are being
+ * asked to appeal — the Terms and `/support` both promise they were told, and
+ * a reason stored where nobody can read it does not keep that promise.
+ */
+export async function getOwnSuspension(db: DB, userId: string): Promise<OwnSuspension | null> {
+  const row = await db.query.userProfiles.findFirst({
+    columns: { suspendedAt: true, suspendedReason: true },
+    where: eq(schema.userProfiles.userId, userId),
+  });
+  if (!row?.suspendedAt) return null;
+  return { reason: row.suspendedReason, suspendedAt: row.suspendedAt };
+}
+
 export async function getOwnProfile(db: DB, userId: string): Promise<SocialProfile | null> {
   const row = await db.query.userProfiles.findFirst({ where: eq(schema.userProfiles.userId, userId) });
   return row ? toSocialProfile(row) : null;
@@ -131,19 +171,47 @@ export async function createProfile(
   const existing = await db.query.userProfiles.findFirst({ where: eq(schema.userProfiles.handle, normalized) });
   if (existing) throw new HandleTakenError(normalized);
 
-  const inserted = await db
-    .insert(schema.userProfiles)
-    .values({
-      userId: user.id,
-      handle: normalized,
-      displayName: user.name,
-      avatarUrl: user.image ?? null,
-    })
-    .onConflictDoNothing()
-    .returning();
-  const row = inserted[0];
-  if (!row) throw new HandleTakenError(normalized);
-  return toSocialProfile(row);
+  return db.transaction(async (tx) => {
+    const inserted = await tx
+      .insert(schema.userProfiles)
+      .values({
+        userId: user.id,
+        handle: normalized,
+        displayName: user.name,
+        avatarUrl: user.image ?? null,
+      })
+      .onConflictDoNothing()
+      .returning();
+    const row = inserted[0];
+    if (!row) throw new HandleTakenError(normalized);
+
+    /**
+     * Claiming a handle must not publish anything written before there was
+     * one.
+     *
+     * `logPour` and `updatePourVisibility` refuse a non-private visibility
+     * from an account with no profile — but that is a guard on *future*
+     * writes, and earlier releases stored `public`/`friends`/`followers` rows
+     * freely. Those are invisible today only because `canViewPourContext`
+     * reads `authorSocialEnabled ?? false`, and **this insert is exactly what
+     * flips that condition**: without this clamp, claiming a handle would
+     * publish every historical note at once, with no per-object choice by
+     * anyone. AGENTS.md is unambiguous that notes are private by default and
+     * that visibility is never raised retroactively.
+     *
+     * Clamped here rather than backfilled by a migration because this is the
+     * only moment the exposure can happen: until the profile exists the rows
+     * are unreadable, and after it exists nothing can write another one. In
+     * the same transaction as the insert, so there is no instant where the
+     * profile is live and the old pours are still public.
+     */
+    await tx
+      .update(schema.pours)
+      .set({ visibility: "private" })
+      .where(and(eq(schema.pours.userId, user.id), ne(schema.pours.visibility, "private")));
+
+    return toSocialProfile(row);
+  });
 }
 
 export async function updateProfile(
@@ -309,19 +377,40 @@ export async function unfollow(db: DB, followerId: string, followeeId: string): 
   return deleted.length > 0;
 }
 
+/**
+ * Accepting a follow is an exposure-raising write, so it answers to the same
+ * lock and the same state check as the others.
+ *
+ * A suspended account keeps whatever pending requests it had, and approving
+ * one grants a *new* reader — an account that cannot post while suspended
+ * could still widen its audience, and the new follower would find the profile
+ * waiting for them on reinstatement. `denyFollow` and `removeFollower` need no
+ * such guard: they only ever narrow.
+ */
 export async function approveFollow(db: DB, followeeId: string, followerId: string): Promise<boolean> {
-  const updated = await db
-    .update(schema.follows)
-    .set({ state: "accepted" })
-    .where(
-      and(
-        eq(schema.follows.followeeId, followeeId),
-        eq(schema.follows.followerId, followerId),
-        eq(schema.follows.state, "pending"),
-      ),
-    )
-    .returning({ id: schema.follows.id });
-  return updated.length > 0;
+  return db.transaction(async (tx) => {
+    // The same key `makeEverythingPrivate` and `suspendAccount` contend on, so
+    // an approval in flight cannot land just after a suspension commits.
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`social-reset:${followeeId}`}))`);
+    const profile = await tx.query.userProfiles.findFirst({
+      columns: { socialEnabled: true, suspendedAt: true },
+      where: eq(schema.userProfiles.userId, followeeId),
+    });
+    if (!profile?.socialEnabled || profile.suspendedAt != null) return false;
+
+    const updated = await tx
+      .update(schema.follows)
+      .set({ state: "accepted" })
+      .where(
+        and(
+          eq(schema.follows.followeeId, followeeId),
+          eq(schema.follows.followerId, followerId),
+          eq(schema.follows.state, "pending"),
+        ),
+      )
+      .returning({ id: schema.follows.id });
+    return updated.length > 0;
+  });
 }
 
 export async function denyFollow(db: DB, followeeId: string, followerId: string): Promise<boolean> {
@@ -494,6 +583,72 @@ export async function listBlocked(db: DB, userId: string): Promise<ProfileSummar
   }));
 }
 
+/**
+ * The viewer-side half of a suspension, in one place.
+ *
+ * A suspension takes the account off the social surfaces in **both**
+ * directions, and the first version of this guard reached only
+ * `canViewPourContext` — so the feed, Same Dram, profile views and phone
+ * discovery all still worked, because suspension deliberately leaves the
+ * follow edges alone. Every cross-user read projection calls this now rather
+ * than repeating the condition, which is the difference between one rule and
+ * five copies of it.
+ *
+ * **Where it goes matters as much as whether it is there.** In any function
+ * that has a self exception, the call belongs *inside* it — a guard evaluated
+ * before the target row is loaded cannot know whether the read is cross-user,
+ * and above the exception it locked accounts out of their own profile page
+ * (`getProfileView`) and their own QR code (`getAddTarget`), twice, one
+ * function at a time. The current placements, audited together:
+ * `canViewPourContext` after its self check; `getProfileView` and
+ * `getAddTarget` inside `!isSelf`; `getFriendFeed` and
+ * `getFriendNotesForBottle` at the top, because a feed of other people has no
+ * self case; `findProfileByPhone` at the top for the same reason, discovery
+ * being about somebody else by construction; and `createReport`'s profile
+ * branch before its own visibility test, where the only self case is
+ * reporting yourself, which is not an action worth preserving.
+ *
+ * **What it deliberately does not gate**, so the line is a decision rather
+ * than an oversight: the account's own data — `getOwnProfile`, its palate,
+ * its journal — and its own relationship lists (`listFollowing`,
+ * `listFollowers`, `listBlocked`). Those are the account's own records, which
+ * a suspension explicitly does not touch, and `listBlocked` in particular is a
+ * safety control that must never be taken away. A suspension is not a ban from
+ * the product.
+ *
+ * **Enumerating this function's callers is not an audit.** Doing exactly that
+ * found seven correct placements inside `social.ts` and still missed
+ * `taste-twins.ts`, which reads followees' palates and pours through
+ * `social.ts`'s SQL helpers without ever calling this one — a caller list only
+ * ever contains the places that already call. The question to ask instead is
+ * which modules READ another account's social data, whatever route they take
+ * to it; today that is this file, `taste-twins.ts` (gated at
+ * `visibleFolloweeIds` and `getTwinEndorsements`) and `bottle-compare.ts`
+ * (deliberately not gated: its community segment is an anonymised aggregate
+ * behind a contributor floor, catalog-class data rather than a projection of
+ * anyone's social graph). Anything new that joins to `follows`, `pours` or
+ * `user_profiles` for somebody else belongs on that list before it ships.
+ */
+export async function suspendedViewer(db: DB, viewerId: string | null): Promise<boolean> {
+  if (!viewerId) return false;
+  return isSuspended(db, viewerId);
+}
+
+/**
+ * Whether this account is under a moderation suspension.
+ *
+ * Read on the **viewer** side of a cross-user read. `socialEnabled` is not a
+ * substitute: an account can switch social off itself (US-11), which is not a
+ * sanction and does not stop it reading.
+ */
+export async function isSuspended(db: DB, userId: string): Promise<boolean> {
+  const row = await db.query.userProfiles.findFirst({
+    columns: { suspendedAt: true },
+    where: eq(schema.userProfiles.userId, userId),
+  });
+  return row?.suspendedAt != null;
+}
+
 export async function isBlockedEither(db: DB, a: string, b: string): Promise<boolean> {
   const rows = await db
     .select({ id: schema.blocks.id })
@@ -561,6 +716,21 @@ async function recordPhoneProbe(db: DB, userId: string): Promise<void> {
     await tx.insert(schema.phoneLookups).values({ id: crypto.randomUUID(), userId });
     await tx.delete(schema.phoneLookups).where(lt(schema.phoneLookups.createdAt, hourAgo));
   });
+}
+
+/**
+ * The same pruning, on a schedule rather than on traffic.
+ *
+ * Above it happens inside a *permitted* probe, which is the wrong condition
+ * for a retention promise: an account that stops looking people up — or a
+ * deployment where nobody uses phone discovery at all — keeps its rows, and
+ * `/privacy` says phone lookups are pruned without qualification. Same shape
+ * as the AI counters and the native codes: cleanup that rides on a feature is
+ * cleanup that stops when the feature is idle.
+ */
+export async function sweepExpiredPhoneLookups(db: DB, now = new Date()): Promise<void> {
+  const hourAgo = new Date(now.getTime() - 60 * 60 * 1000);
+  await db.delete(schema.phoneLookups).where(lt(schema.phoneLookups.createdAt, hourAgo));
 }
 
 /**
@@ -664,6 +834,8 @@ export async function setPhoneDiscoverable(db: DB, userId: string, discoverable:
  * match (harmless; the UI can say "that's you").
  */
 export async function findProfileByPhone(db: DB, viewerId: string, rawPhone: string): Promise<ProfileSummary | null> {
+  // Discovery is a social surface like any other (see `suspendedViewer`).
+  if (await suspendedViewer(db, viewerId)) return null;
   const canonical = normalizePhone(rawPhone); // throws InvalidPhoneError
   const hash = hashPhone(canonical);
 
@@ -697,6 +869,14 @@ export async function getAddTarget(db: DB, viewerId: string, handle: string): Pr
 
   const isSelf = viewerId === row.userId;
   if (!isSelf) {
+    /**
+     * Inside `!isSelf`, for the reason `getProfileView` says: a guard placed
+     * before the row is loaded cannot know whether this is a cross-user read.
+     * Above it, a suspended account scanning its **own** QR code got `null`
+     * and a 404 instead of the "that's your own code" state this function
+     * exists to return.
+     */
+    if (await suspendedViewer(db, viewerId)) return null;
     if (!row.socialEnabled) return null;
     if (await isBlockedEither(db, viewerId, row.userId)) return null;
   }
@@ -825,6 +1005,22 @@ export async function setSocialEnabled(db: DB, userId: string, enabled: boolean)
     // Serialized with makeEverythingPrivate so a stale "turn social back on"
     // can't commit immediately after a reset and undo it.
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`social-reset:${userId}`}))`);
+    /**
+     * A suspension is not the user's to lift (PLAN.md §9.4). Suspending sets
+     * `socialEnabled = false`, and this control is the one the account already
+     * has for turning it back on — so without this check a suspension would
+     * last exactly as long as it took someone to find the toggle.
+     *
+     * Turning social *off* stays available: nothing here should stop somebody
+     * withdrawing further.
+     */
+    if (enabled) {
+      const current = await tx.query.userProfiles.findFirst({
+        columns: { suspendedAt: true },
+        where: eq(schema.userProfiles.userId, userId),
+      });
+      if (current?.suspendedAt) throw new AccountSuspendedError();
+    }
     const rows = await tx
       .update(schema.userProfiles)
       .set({ socialEnabled: enabled, updatedAt: new Date() })
@@ -876,6 +1072,21 @@ async function canViewPourContext(db: DB, viewerId: string | null, ctx: PourAuth
   if (viewerId != null && viewerId === ctx.authorId) return true;
   if (!ctx.authorSocialEnabled) return false;
   if (viewerId == null) return false;
+  /**
+   * And the **viewer** must not be suspended.
+   *
+   * Every check here was about the author, so a suspended account kept reading
+   * everything it could reach before: `suspendAccount` clears its own exposure
+   * flags but deliberately leaves the follow edges alone (they are what a
+   * reinstatement restores), and an accepted follow is what friends- and
+   * followers-tier pours are gated on. A suspension that stops you posting and
+   * lets you keep reading other people's notes is not a suspension from the
+   * social surfaces, which is what the Terms say it is.
+   *
+   * After the self check, so a suspended account still reads its own pours —
+   * suspension is not a ban from the product, and the journal is theirs.
+   */
+  if (await suspendedViewer(db, viewerId)) return false;
   if (await isBlockedEither(db, viewerId, ctx.authorId)) return false;
 
   switch (ctx.visibility) {
@@ -927,16 +1138,41 @@ export interface SocialNote {
 
 /**
  * SQL predicate: the contribution's author (`userCol`) is visible to the
- * viewer — not blocked in either direction, and not stepped back
- * (userProfiles.socialEnabled=false hides a user's cheers, comments, and
- * graph rows from everyone but themself; US-11). Every count rendered next
- * to a thread or card must use this so counts agree with the visible thread —
- * a mismatched count would reveal hidden activity.
+ * viewer — not blocked in either direction, and socially present (US-11).
+ * Every count rendered next to a thread or card must use this so counts agree
+ * with the visible thread — a mismatched count would reveal hidden activity.
+ *
+ * Two things this got wrong, both of which broke that agreement on the counts
+ * that join nothing (`countCheers`, `countComments`, and the feed's two
+ * grouped counts; the follow lists and the feed's pour query already
+ * `innerJoin` an enabled profile, so neither reached them).
+ *
+ * **A missing profile is not an enabled one.** The test was `not exists (…
+ * social_enabled = false)`, which is true when there is no profile row at
+ * all — the same "not false means yes" reading `commentWithdrawnByAuthor`
+ * exists to refuse. So a legacy comment from an account that never opted into
+ * social counted here while the thread omitted it, and the difference is
+ * exactly the withdrawn activity the count is meant not to disclose. Written
+ * as `exists (… social_enabled = true)` the SQL asks the question the
+ * TypeScript predicate asks, which is the point: one rule, not two.
+ *
+ * **And "no viewer" meant "no filter".** Both counts applied this only
+ * `if (viewerId)`, so a null viewer — which their signatures accept — got an
+ * unfiltered count while `listComments` filters a null viewer like any other.
+ * Not reachable today (`canViewPourContext` refuses a signed-out reader
+ * outright, and both callers pass a session), so this is a latent gap rather
+ * than a live leak — but "the privacy filter is skipped when the argument is
+ * absent" is the wrong default to leave sitting behind a nullable parameter.
+ * There is no viewer to be blocked by, but there is still an author who has
+ * stepped back, so the presence test stands on its own and only the block
+ * clause and the see-your-own-work exemption need a viewer.
  */
-export function contributorVisibleSql(userCol: AnyColumn, viewerId: string) {
+export function contributorVisibleSql(userCol: AnyColumn, viewerId: string | null) {
+  const present = sql`exists (select 1 from user_profiles sp where sp.user_id = ${userCol} and sp.social_enabled = true)`;
+  if (!viewerId) return present;
   return sql`(${userCol} = ${viewerId} or (
     not exists (select 1 from blocks b where (b.blocker_id = ${viewerId} and b.blocked_id = ${userCol}) or (b.blocker_id = ${userCol} and b.blocked_id = ${viewerId}))
-    and not exists (select 1 from user_profiles sp where sp.user_id = ${userCol} and sp.social_enabled = false)
+    and ${present}
   ))`;
 }
 
@@ -955,8 +1191,16 @@ export function acceptedFollowSql(follower: AnyColumn | string, followee: AnyCol
 }
 
 async function countCheers(db: DB, pourId: string, viewerId: string | null): Promise<number> {
-  const conditions = [eq(schema.reactions.pourId, pourId), eq(schema.reactions.kind, "cheers")];
-  if (viewerId) conditions.push(contributorVisibleSql(schema.reactions.userId, viewerId));
+  const conditions = [
+    eq(schema.reactions.pourId, pourId),
+    eq(schema.reactions.kind, "cheers"),
+    // Unconditional: a stepped-back author's cheer is hidden from a signed-out
+    // reader too, and the count has to say the same thing the card does.
+    contributorVisibleSql(schema.reactions.userId, viewerId),
+    // And a cheer from before its author had a profile stays withdrawn once
+    // they claim one — the same rule comments got, on the table beside them.
+    actedAfterAuthorJoinedSql(schema.reactions.userId, schema.reactions.createdAt, viewerId),
+  ];
   const rows = await db
     .select({ n: sql<number>`count(*)` })
     .from(schema.reactions)
@@ -964,9 +1208,50 @@ async function countCheers(db: DB, pourId: string, viewerId: string | null): Pro
   return Number(rows[0]?.n ?? 0);
 }
 
+/**
+ * SQL for the second half of `commentWithdrawnByAuthor`, generalised: this
+ * social act was performed **after** its author had a profile.
+ *
+ * `contributorVisibleSql` only asks whether an enabled profile exists, so
+ * claiming a handle flips `socialEnabled` from null to true and republishes
+ * every historical act at once — with nobody choosing it, which is precisely
+ * what `docs/SOCIAL.md` forbids: visibility is opt-in per object and never
+ * raised retroactively.
+ *
+ * **Written against columns rather than for comments**, because it shipped as
+ * a comments-only helper and the cheer beside the comment went unfixed: the
+ * count/thread disagreement was closed for one table and left open for the
+ * one rendered next to it. A legacy cheer is exactly the same shape — no
+ * per-object visibility control, so the withdrawal has to be derived, and
+ * `cheerPour` requires a profile now, so only rows written under the old
+ * behaviour can satisfy this.
+ *
+ * `<=` on the profile side (so the act must not PREDATE the profile): an act
+ * sharing its millisecond with the profile came after it, and erring visible
+ * there is the safe direction — the author chose to act as a social account.
+ */
+function actedAfterAuthorJoinedSql(
+  userCol: AnyColumn,
+  createdAtCol: AnyColumn,
+  viewerId: string | null,
+) {
+  const after = sql`exists (
+    select 1 from user_profiles sp
+    where sp.user_id = ${userCol} and sp.created_at <= ${createdAtCol}
+  )`;
+  if (!viewerId) return after;
+  return sql`(${userCol} = ${viewerId} or ${after})`;
+}
+
 async function countComments(db: DB, pourId: string, viewerId: string | null): Promise<number> {
-  const conditions = [eq(schema.comments.pourId, pourId), isNull(schema.comments.deletedAt)];
-  if (viewerId) conditions.push(contributorVisibleSql(schema.comments.userId, viewerId));
+  const conditions = [
+    eq(schema.comments.pourId, pourId),
+    isNull(schema.comments.deletedAt),
+    // Same rule `listComments` applies per row, in the same shape: the count
+    // beside a thread and the thread itself are one claim.
+    contributorVisibleSql(schema.comments.userId, viewerId),
+    actedAfterAuthorJoinedSql(schema.comments.userId, schema.comments.createdAt, viewerId),
+  ];
   const rows = await db
     .select({ n: sql<number>`count(*)` })
     .from(schema.comments)
@@ -1088,6 +1373,7 @@ export interface FeedItem extends SocialNote {
  * the viewer's own flavorTags on the same bottle ("you tasted this too").
  */
 export async function getFriendFeed(db: DB, viewerId: string, opts: { limit?: number } = {}): Promise<FeedItem[]> {
+  if (await suspendedViewer(db, viewerId)) return [];
   const limit = Math.min(Math.max(opts.limit ?? 20, 1), 100);
 
   const blocked = await getBlockedCounterparts(db, viewerId);
@@ -1165,6 +1451,7 @@ export async function getFriendFeed(db: DB, viewerId: string, opts: { limit?: nu
         inArray(schema.reactions.pourId, pourIds),
         eq(schema.reactions.kind, "cheers"),
         contributorVisibleSql(schema.reactions.userId, viewerId),
+        actedAfterAuthorJoinedSql(schema.reactions.userId, schema.reactions.createdAt, viewerId),
       ),
     )
     .groupBy(schema.reactions.pourId);
@@ -1178,6 +1465,7 @@ export async function getFriendFeed(db: DB, viewerId: string, opts: { limit?: nu
         inArray(schema.comments.pourId, pourIds),
         isNull(schema.comments.deletedAt),
         contributorVisibleSql(schema.comments.userId, viewerId),
+        actedAfterAuthorJoinedSql(schema.comments.userId, schema.comments.createdAt, viewerId),
       ),
     )
     .groupBy(schema.comments.pourId);
@@ -1261,6 +1549,7 @@ export interface FriendBottleNote {
 
 /** Same Dram source: one entry per followee (their latest note on this bottle), visibility+block enforced. */
 export async function getFriendNotesForBottle(db: DB, viewerId: string, bottleId: string): Promise<FriendBottleNote[]> {
+  if (await suspendedViewer(db, viewerId)) return [];
   const blocked = await getBlockedCounterparts(db, viewerId);
   const followeeIds = (await getAcceptedFolloweeIds(db, viewerId)).filter((id) => !blocked.has(id));
   if (followeeIds.length === 0) return [];
@@ -1483,6 +1772,18 @@ export async function getProfileView(db: DB, viewerId: string | null, handle: st
 
   const isSelf = viewerId != null && viewerId === row.userId;
   if (!isSelf) {
+    /**
+     * The suspension gate belongs **after** `isSelf`, not before it.
+     *
+     * Placed at the top it ran before the profile was even loaded, so a
+     * suspended account following the app's own "View profile" link to its
+     * own handle got a 404 — losing the profile editor and its own palate.
+     * That is not a smaller version of the sanction, it is a different one:
+     * the whole point of this gate is that a suspension takes the account off
+     * *other people's* surfaces while leaving its own records alone, and I
+     * wrote that sentence while placing the check where it could not be true.
+     */
+    if (await suspendedViewer(db, viewerId)) return null;
     if (!row.socialEnabled) return null;
     if (viewerId != null && (await isBlockedEither(db, viewerId, row.userId))) return null;
   }
@@ -1580,6 +1881,7 @@ export interface CommentView {
  * w.r.t. the viewer are dropped entirely (replies to a dropped comment keep
  * rendering under it — orphan-tolerant); ordered oldest-first.
  */
+
 export async function listComments(db: DB, viewerId: string | null, pourId: string): Promise<CommentView[] | null> {
   if (!(await canViewPour(db, viewerId, pourId))) return null;
 
@@ -1596,10 +1898,12 @@ export async function listComments(db: DB, viewerId: string | null, pourId: stri
       createdAt: schema.comments.createdAt,
       editedAt: schema.comments.editedAt,
       deletedAt: schema.comments.deletedAt,
+      authorDeletedAt: schema.comments.authorDeletedAt,
       authorHandle: schema.userProfiles.handle,
       authorDisplayName: schema.userProfiles.displayName,
       authorAvatarUrl: schema.userProfiles.avatarUrl,
       authorSocialEnabled: schema.userProfiles.socialEnabled,
+      authorProfileCreatedAt: schema.userProfiles.createdAt,
     })
     .from(schema.comments)
     .leftJoin(schema.userProfiles, eq(schema.userProfiles.userId, schema.comments.userId))
@@ -1612,12 +1916,28 @@ export async function listComments(db: DB, viewerId: string | null, pourId: stri
   const out: CommentView[] = [];
   for (const row of rows) {
     if (blocked.has(row.userId)) continue;
-    // A stepped-back author's comments vanish for everyone but themself (US-11).
-    if (row.authorSocialEnabled === false && row.userId !== viewerId) continue;
+    if (
+      commentWithdrawnByAuthor(
+        { socialEnabled: row.authorSocialEnabled, profileCreatedAt: row.authorProfileCreatedAt },
+        row,
+        viewerId,
+      )
+    )
+      continue;
     const deleted = row.deletedAt != null;
     const isAuthor = viewerId != null && viewerId === row.userId;
     const canEdit = isAuthor && !deleted && now - row.createdAt.getTime() <= COMMENT_EDIT_WINDOW_MS;
-    const canDelete = !deleted && viewerId != null && (isAuthor || viewerId === pour.userId);
+    /**
+     * Offered while a moderation hide stands, withheld once the author has
+     * withdrawn it.
+     *
+     * `!deleted` covered both, so a hide removed the author's own delete
+     * control along with the content — and their comment came back if the hide
+     * was later lifted. What the control is for is the author's decision about
+     * their own words, which a takedown does not replace.
+     */
+    const canDelete =
+      row.authorDeletedAt == null && viewerId != null && (isAuthor || viewerId === pour.userId);
     out.push({
       id: row.id,
       pourId: row.pourId,
@@ -1660,6 +1980,32 @@ export async function addComment(
   const ctx = await loadPourAuthContext(db, pourId);
   if (!ctx) return null;
   if (!(await canViewPourContext(db, userId, ctx))) return null;
+
+  /**
+   * The commenter needs a social profile of their own.
+   *
+   * Nothing here used to check it — only the *pour author's* state — so an
+   * account that had never opted into social at all could post comments.
+   * Three things followed. Moderation could not answer for it, because
+   * suspension is stored on the profile row and `suspendAccount` throws
+   * without one: the operator could hide each comment and never stop the
+   * next. `listComments` rendered `authorHandle ?? row.userId`, publishing an
+   * internal id as a display handle. And it contradicts the model itself —
+   * `commentWithdrawnByAuthor` exists because a *stepped-back* author's
+   * comments must vanish, which makes no sense if a never-opted-in account
+   * may post them freely.
+   *
+   * Closing it here rather than teaching moderation to cope: content that
+   * should not exist is better prevented than moderated. If some later path
+   * does produce reportable content from an account with no profile, the
+   * answer is to move suspension off the profile row — noted in the review
+   * rather than built now, because nothing reaches that state today.
+   */
+  const commenter = await db.query.userProfiles.findFirst({
+    columns: { socialEnabled: true },
+    where: eq(schema.userProfiles.userId, userId),
+  });
+  if (!commenter?.socialEnabled) return null;
 
   const ownerPrefs = await getSocialPrefs(db, ctx.authorId);
   if (!ownerPrefs.allowComments) return null;
@@ -1729,8 +2075,22 @@ export async function editComment(db: DB, userId: string, commentId: string, bod
   const [row] = await db
     .update(schema.comments)
     .set({ body: trimmed, editedAt: now })
-    .where(eq(schema.comments.id, commentId))
+    /**
+     * Still predicated on the row being undeleted, not only on its id.
+     *
+     * The check above is a read, and a moderator's hide can land between it
+     * and this write: the update then replaced the body of a comment that was
+     * already hidden, leaving `deletedAt` untouched — so `unhideSubject`, which
+     * restores by matching `deletedAt` against the hide's own timestamp, still
+     * matched and republished text written while hidden and never reviewed.
+     * The same instant is the whole basis of that match, so what has to be
+     * excluded is the body changing underneath it.
+     */
+    .where(and(eq(schema.comments.id, commentId), isNull(schema.comments.deletedAt)))
     .returning();
+  // Lost the race with a hide or a delete: nothing to show, and nothing was
+  // written.
+  if (!row) return null;
 
   const author = await getOwnProfile(db, userId);
   return {
@@ -1750,7 +2110,16 @@ export async function editComment(db: DB, userId: string, commentId: string, bod
 /** Author, or the pour's owner, may soft-delete. Tombstones (blanks body/author on read) without removing the row. */
 export async function softDeleteComment(db: DB, userId: string, commentId: string): Promise<boolean> {
   const existing = await db.query.comments.findFirst({ where: eq(schema.comments.id, commentId) });
-  if (!existing || existing.deletedAt != null) return false;
+  /**
+   * `authorDeletedAt`, not `deletedAt`.
+   *
+   * A moderation hide sets `deletedAt` too, and testing it here meant that
+   * while a hide stood the author could not withdraw their own comment at all
+   * — and lifting the hide then republished it whether or not they had wanted
+   * it gone. A takedown removes the content from everyone else; it is not
+   * supposed to take away the author's own control over their words.
+   */
+  if (!existing || existing.authorDeletedAt != null) return false;
 
   const isAuthor = existing.userId === userId;
   if (!isAuthor) {
@@ -1758,10 +2127,25 @@ export async function softDeleteComment(db: DB, userId: string, commentId: strin
     if (pour?.userId !== userId) return false;
   }
 
+  const now = new Date();
   const updated = await db
     .update(schema.comments)
-    .set({ deletedAt: new Date() })
-    .where(eq(schema.comments.id, commentId))
+    .set({
+      authorDeletedAt: now,
+      /**
+       * `coalesce`, so a hide's timestamp is never overwritten.
+       *
+       * The lift matches `deletedAt` against the hide's own instant precisely
+       * so it cannot republish what an author removed; moving it would break
+       * that match in the other direction and strand the comment down with the
+       * hide recorded as lifted. If nothing has removed it yet, this is what
+       * removes it.
+       */
+      deletedAt: sql`coalesce(${schema.comments.deletedAt}, ${now})`,
+    })
+    // Still predicated, for the race the read above cannot close: two
+    // withdrawals of the same comment are one withdrawal.
+    .where(and(eq(schema.comments.id, commentId), isNull(schema.comments.authorDeletedAt)))
     .returning({ id: schema.comments.id });
   return updated.length > 0;
 }
@@ -1779,33 +2163,156 @@ export async function createReport(
   reporterId: string,
   input: { subjectType: ReportSubjectType; subjectId: string; reason: string },
 ): Promise<boolean> {
-  // The subject must be VISIBLE to the reporter, not merely exist — a bare
-  // existence check would make the 201/404 split an oracle for probing
-  // private pour/comment ids, and you can only report what reached you.
-  let subjectVisible = false;
-  if (input.subjectType === "pour") {
-    subjectVisible = await canViewPour(db, reporterId, input.subjectId);
-  } else if (input.subjectType === "comment") {
-    const comment = await db.query.comments.findFirst({
-      columns: { id: true, pourId: true, userId: true },
-      where: eq(schema.comments.id, input.subjectId),
-    });
-    subjectVisible =
-      comment != null &&
-      (await canViewPour(db, reporterId, comment.pourId)) &&
-      !(await isBlockedEither(db, reporterId, comment.userId));
-  } else {
-    const profile = await db.query.userProfiles.findFirst({
-      columns: { userId: true, socialEnabled: true },
-      where: eq(schema.userProfiles.userId, input.subjectId),
-    });
-    subjectVisible =
-      profile != null && profile.socialEnabled && !(await isBlockedEither(db, reporterId, profile.userId));
-  }
-  if (!subjectVisible) return false;
+  /**
+   * Two transactions, because they need opposite things from their snapshots.
+   *
+   * The capture needs every read to agree with every other read; the limiter
+   * needs to see what the request ahead of it just committed. One transaction
+   * cannot give both, and trying cost a working rate limiter: at repeatable
+   * read the snapshot is fixed by the first *query*, which was the blocking
+   * `pg_advisory_xact_lock` — so every waiter pinned a view from before the
+   * lock holder inserted, and the duplicate check and hourly count could not
+   * see it. Concurrent reports from one reporter would all have been admitted,
+   * defeating the flood control SOCIAL §11 requires. Separating them gives
+   * each phase the isolation it actually wants.
+   */
 
-  await db.transaction(async (tx) => {
+  /**
+   * Phase one: what was reported, read consistently.
+   *
+   * Repeatable read, and read-only — so the first query is the subject read
+   * rather than something that blocks, and the snapshot is taken at the moment
+   * this request looks at the world. The subject must be VISIBLE to the
+   * reporter, not merely exist: a bare existence check would make the 201/404
+   * split an oracle for probing private pour and comment ids, and you can only
+   * report what reached you. Visibility and content come off one snapshot, so
+   * an author editing mid-request cannot have the report record their
+   * replacement text — the bug the snapshot column exists to prevent.
+   */
+  const captured = await db.transaction(async (tx) => {
+    await tx.execute(sql`set transaction isolation level repeatable read`);
+
+    let subjectVisible = false;
+    let subjectOwnerId: string | null = null;
+    let subjectSnapshot: string | null = null;
+    if (input.subjectType === "pour") {
+      const pour = await tx.query.pours.findFirst({
+        columns: { userId: true },
+        where: eq(schema.pours.id, input.subjectId),
+      });
+      subjectVisible = pour != null && (await canViewPour(tx, reporterId, input.subjectId));
+      subjectOwnerId = pour?.userId ?? null;
+    } else if (input.subjectType === "comment") {
+      const [comment] = await tx
+        .select({
+          id: schema.comments.id,
+          pourId: schema.comments.pourId,
+          userId: schema.comments.userId,
+          body: schema.comments.body,
+          deletedAt: schema.comments.deletedAt,
+          createdAt: schema.comments.createdAt,
+          authorSocialEnabled: schema.userProfiles.socialEnabled,
+          authorProfileCreatedAt: schema.userProfiles.createdAt,
+        })
+        .from(schema.comments)
+        .leftJoin(schema.userProfiles, eq(schema.userProfiles.userId, schema.comments.userId))
+        .where(eq(schema.comments.id, input.subjectId))
+        .limit(1);
+      subjectVisible =
+        comment != null &&
+        /**
+         * A deleted comment is a tombstone with no body — `listComments`
+         * returns `body: null` for one, to *everybody* including its author.
+         * So there is nothing here anyone could have read and nothing left to
+         * moderate, and capturing `comments.body` anyway would put text no
+         * reporter ever saw into the queue as their evidence. Its own rule
+         * rather than part of the withdrawn-author predicate, because this one
+         * applies to the author too.
+         */
+        comment.deletedAt == null &&
+        // The same rule `listComments` applies, from the same helper. Checking
+        // the pour and the block relationship but not this made the report
+        // path laxer than the read path: a stale id could report a comment the
+        // app no longer showed, and the snapshot would preserve a revision
+        // written after its author stepped back.
+        !commentWithdrawnByAuthor(
+          {
+            socialEnabled: comment.authorSocialEnabled,
+            profileCreatedAt: comment.authorProfileCreatedAt,
+          },
+          comment,
+          reporterId,
+        ) &&
+        (await canViewPour(tx, reporterId, comment.pourId)) &&
+        !(await isBlockedEither(tx, reporterId, comment.userId));
+      subjectOwnerId = comment?.userId ?? null;
+      // Straight off the row the check just read.
+      subjectSnapshot = comment?.body ?? null;
+    } else {
+      const profile = await tx.query.userProfiles.findFirst({
+        columns: { userId: true, socialEnabled: true, isPublic: true },
+        where: eq(schema.userProfiles.userId, input.subjectId),
+      });
+      subjectOwnerId = profile?.userId ?? null;
+      /**
+       * A **private** profile is only visible to an accepted follower.
+       *
+       * `socialEnabled` alone was the whole test, so anyone holding the user's
+       * id — a former follower who was removed, most obviously — could file a
+       * profile report and have `subjectPreview` capture that profile's
+       * display name and bio into the queue as evidence. `getProfileView`
+       * withholds exactly that content from the same viewer, and STORYBOARD
+       * §3.17 is binding that an operator cannot read what was never shared.
+       * A report is not a way to make something shared.
+       */
+      subjectVisible =
+        profile != null &&
+        profile.socialEnabled &&
+        /**
+         * And the reporter must not be suspended.
+         *
+         * The pour and comment branches get this free from
+         * `canViewPourContext`; this one builds its own predicate and so had
+         * to be told separately — which is how the previous fix put the
+         * private/follower rule here and left the suspension rule out, at the
+         * same lines. A suspended account cannot read a private profile, and
+         * a report is not a way to read one.
+         */
+        !(await suspendedViewer(tx, reporterId)) &&
+        !(await isBlockedEither(tx, reporterId, profile.userId)) &&
+        (profile.isPublic ||
+          profile.userId === reporterId ||
+          (await tx.query.follows.findFirst({
+            where: and(
+              eq(schema.follows.followerId, reporterId),
+              eq(schema.follows.followeeId, profile.userId),
+              eq(schema.follows.state, "accepted"),
+            ),
+          })) != null);
+    }
+    if (!subjectVisible) return null;
+    if (subjectSnapshot == null) {
+      subjectSnapshot = await subjectPreview(tx, input.subjectType, input.subjectId);
+    }
+    return { subjectOwnerId, subjectSnapshot };
+  });
+  if (!captured) return false;
+
+  /**
+   * Phase two: serialize this reporter, then write.
+   *
+   * Read committed on purpose — each statement here takes a fresh view, so the
+   * duplicate check and the hourly count see whatever the request that held
+   * the lock before us committed. That is exactly the freshness phase one must
+   * not have.
+   *
+   * The subject is not re-read. Visibility was true when the reporter looked,
+   * which is the question this path asks; a withdrawal in the microseconds
+   * since does not unmake the thing they saw.
+   */
+  return db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`report-rl:${reporterId}`}))`);
+
     const existing = await tx.query.reports.findFirst({
       where: and(
         eq(schema.reports.reporterId, reporterId),
@@ -1814,7 +2321,7 @@ export async function createReport(
         eq(schema.reports.state, "open"),
       ),
     });
-    if (existing) return;
+    if (existing) return true;
     const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
     const recent = await tx
       .select({ n: sql<number>`count(*)` })
@@ -1827,9 +2334,14 @@ export async function createReport(
       subjectId: input.subjectId,
       reporterId,
       reason: input.reason.trim(),
+      // Who to answer for it, and what they said. The owner is recorded because
+      // the subject can be hard-deleted, and a report whose subject is gone
+      // still has an account behind it.
+      subjectOwnerId: captured.subjectOwnerId,
+      subjectSnapshot: captured.subjectSnapshot,
     });
+    return true;
   });
-  return true;
 }
 
 export const commentCreateSchema = z.object({

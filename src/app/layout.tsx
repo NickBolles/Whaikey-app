@@ -83,8 +83,22 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
    * pathname arrives as a header from `src/proxy.ts`; without it (a context
    * that skipped the proxy) the gate still runs, which fails closed.
    */
-  if (user) {
-    const pathname = (await headers()).get(PATH_HEADER) ?? "";
+  const pathname = (await headers()).get(PATH_HEADER) ?? "";
+
+  /**
+   * The operator screens carry no app shell (docs/STORYBOARD.md §3.17), and
+   * they are decided before the age gate below.
+   *
+   * The gate is a consumer-protection mechanism on the consumer product. An
+   * operator answering a report is not using the product, and an unanswered
+   * date-of-birth question should not stand between them and a takedown — nor
+   * should a redirect stand where the operator screens promise a flat 404 to
+   * everyone else. Authorization for these routes is the page's own
+   * `isOperator` check, which is stricter than the gate and answers 404.
+   */
+  const bare = pathname === "/admin" || pathname.startsWith("/admin/");
+
+  if (user && !bare) {
     if (!isUngatedPath(pathname)) {
       const state = await getAgeGateState(getDb(), user.id);
       if (state.status !== "verified") {
@@ -93,7 +107,10 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
     }
   }
 
-  const profile = user ? await getOwnProfile(getDb(), user.id) : null;
+  // No header, so no profile to feed it. Decided in the root layout rather
+  // than a nested one because a nested layout can only add to the root's
+  // chrome, never take it away.
+  const profile = user && !bare ? await getOwnProfile(getDb(), user.id) : null;
   return (
     <html
       lang="en"
@@ -103,14 +120,20 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
         {/* The queue lives in per-origin storage, so the flush has to know
             whose pours it is allowed to send. */}
         <NativeShell userId={user?.id ?? null} />
-        <div className="mx-auto max-w-2xl min-h-dvh flex flex-col">
-          <AppHeader
-            user={user ? { name: user.name, image: user.image } : null}
-            profileHandle={profile?.handle ?? null}
-          />
-          <main className="flex-1">{children}</main>
-          <AppNav />
-        </div>
+        {bare ? (
+          <div className="mx-auto max-w-2xl min-h-dvh flex flex-col">
+            <main className="flex-1">{children}</main>
+          </div>
+        ) : (
+          <div className="mx-auto max-w-2xl min-h-dvh flex flex-col">
+            <AppHeader
+              user={user ? { name: user.name, image: user.image } : null}
+              profileHandle={profile?.handle ?? null}
+            />
+            <main className="flex-1">{children}</main>
+            <AppNav />
+          </div>
+        )}
       </body>
     </html>
   );

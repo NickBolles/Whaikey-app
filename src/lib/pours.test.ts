@@ -37,6 +37,18 @@ async function createUserBottle(
   return row;
 }
 
+/**
+ * A social user. Publishing a pour is a social act, so it needs a profile —
+ * without one `logPour` holds the pour private, which is the rule these
+ * visibility tests are not about.
+ */
+async function socialProfileFor(db: DB, id: string, handle = `u${id.slice(-6)}`) {
+  await db
+    .insert(schema.userProfiles)
+    .values({ userId: id, handle, displayName: "Tester", socialEnabled: true })
+    .onConflictDoNothing();
+}
+
 describe("fillDecrementFor", () => {
   it("is ~3% per 30ml, rounded", () => {
     expect(fillDecrementFor(30)).toBe(3);
@@ -85,12 +97,14 @@ describe("logPour", () => {
   });
 
   it("uses the user's defaultPourVisibility pref when input.visibility is absent", async () => {
+    await socialProfileFor(db, userId);
     await updateSocialPrefs(db, userId, { defaultPourVisibility: "followers" });
     const { pour } = await logPour(db, userId, { bottleId, rating: 4 });
     expect(pour.visibility).toBe("followers");
   });
 
   it("prefers an explicit input.visibility over the user's pref", async () => {
+    await socialProfileFor(db, userId);
     await updateSocialPrefs(db, userId, { defaultPourVisibility: "followers" });
     const { pour } = await logPour(db, userId, { bottleId, rating: 4, visibility: "public" });
     expect(pour.visibility).toBe("public");
@@ -282,6 +296,7 @@ describe("listPours / getPour / deletePour", () => {
 
   it("updatePourVisibility changes visibility only for the owner", async () => {
     const other = await createTestUser(db);
+    await socialProfileFor(db, userId);
     const { pour } = await logPour(db, userId, { bottleId, rating: 4 });
     expect(pour.visibility).toBe("private");
 
@@ -322,6 +337,7 @@ describe("visible-write guards (docs/SOCIAL.md §11 / US-11)", () => {
   });
 
   it("downgrades visible pours to private past the hourly cap, without blocking logging", async () => {
+    await socialProfileFor(db, userId);
     for (let i = 0; i < VISIBLE_POUR_LIMIT_PER_HOUR; i += 1) {
       const { pour } = await logPour(db, userId, { bottleId, rating: 4, visibility: "public" });
       expect(pour.visibility).toBe("public");

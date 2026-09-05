@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
@@ -593,6 +593,105 @@ describe("comments", () => {
     expect(listed?.[0].parentId).toBe(c1!.id); // orphaned, but still renders
   });
 
+  /**
+   * Commenting is a social act, and nothing used to check the *commenter's*
+   * own profile — only the pour author's. An account that had never opted into
+   * social could post comments that moderation then could not answer for,
+   * because suspension lives on the profile row that does not exist.
+   */
+  /**
+   * Accepting a follow grants a new reader, so it is an exposure-raising write
+   * like any other. A suspended account could still do it, and the new
+   * follower would find the profile waiting on reinstatement.
+   */
+  it("refuses to approve a follow while the account is suspended", async () => {
+    const fan = await createTestUser(db);
+    await db.insert(schema.follows).values({
+      id: crypto.randomUUID(),
+      followerId: fan.id,
+      followeeId: owner.id,
+      state: "pending",
+    });
+
+    await db
+      .update(schema.userProfiles)
+      .set({ suspendedAt: new Date(), socialEnabled: false })
+      .where(eq(schema.userProfiles.userId, owner.id));
+    expect(await approveFollow(db, owner.id, fan.id)).toBe(false);
+
+    // Still pending, not silently accepted.
+    const still = await db.query.follows.findFirst({
+      where: and(eq(schema.follows.followerId, fan.id), eq(schema.follows.followeeId, owner.id)),
+    });
+    expect(still?.state).toBe("pending");
+
+    // Reinstated and re-enabled, the same approval works.
+    await db
+      .update(schema.userProfiles)
+      .set({ suspendedAt: null, socialEnabled: true })
+      .where(eq(schema.userProfiles.userId, owner.id));
+    expect(await approveFollow(db, owner.id, fan.id)).toBe(true);
+  });
+
+  /**
+   * The write guards are forward-only, and rows written under the old
+   * behaviour are still there. Claiming a handle is the exact moment
+   * `canViewPourContext` starts returning true for them, so it is the moment
+   * the retroactive publication would happen.
+   */
+  it("claiming a handle does not publish pours written before there was one", async () => {
+    const late = await createTestUser(db);
+    const bottle = await createTestBottle(db);
+    // Written the way an earlier release allowed: no profile, non-private.
+    const legacy = uid("pour");
+    await db
+      .insert(schema.pours)
+      .values({ id: legacy, userId: late.id, bottleId: bottle.id, visibility: "public" });
+
+    const { createProfile } = await import("./social");
+    await createProfile(db, { id: late.id, name: "Late Comer" }, "latecomer");
+
+    const after = await db.query.pours.findFirst({ where: eq(schema.pours.id, legacy) });
+    expect(after?.visibility).toBe("private");
+  });
+
+  /**
+   * Legacy comments from profile-less accounts are unsuspendable — the queue
+   * offers Suspend and `suspendAccount` throws on the missing profile row. A
+   * missing profile is the same answer as social switched off, so they are
+   * withdrawn from view and unreportable, as a stepped-back author's are.
+   */
+  it("treats a comment with no author profile as withdrawn", async () => {
+    const ghost = await createTestUser(db);
+    const legacy = uid("comment");
+    await db
+      .insert(schema.comments)
+      .values({ id: legacy, pourId, userId: ghost.id, body: "legacy abuse" });
+
+    const listed = await listComments(db, owner.id, pourId);
+    expect(listed?.some((c) => c.id === legacy)).toBe(false);
+    await expect(
+      createReport(db, owner.id, { subjectType: "comment", subjectId: legacy, reason: "spam" }),
+    ).resolves.toBe(false);
+
+    // Its own author still sees it, exactly as a stepped-back author does.
+    const own = await listComments(db, ghost.id, pourId);
+    expect(own?.some((c) => c.id === legacy)).toBe(true);
+  });
+
+  it("refuses a comment from an account with no social profile", async () => {
+    const stranger = await createTestUser(db);
+    expect(await addComment(db, stranger.id, pourId, "hello")).toBeNull();
+    // And once they have one, the same call works.
+    await db.insert(schema.userProfiles).values({
+      userId: stranger.id,
+      handle: "stranger",
+      displayName: "Stranger",
+      socialEnabled: true,
+    });
+    expect(await addComment(db, stranger.id, pourId, "hello")).not.toBeNull();
+  });
+
   it("createReport records a report, absorbs duplicates, and rejects fabricated subjects", async () => {
     const c1 = await addComment(db, commenter.id, pourId, "spam-ish");
     await expect(
@@ -603,6 +702,69 @@ describe("comments", () => {
     const rows = await db.select().from(schema.reports);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ subjectType: "comment", subjectId: c1!.id, reporterId: owner.id, reason: "spam" });
+    // The complaint has to carry what it is about. An operator opening this
+    // report days later must see what the reporter saw, not whatever the
+    // author has since rewritten it to.
+    expect(rows[0].subjectSnapshot).toBe("spam-ish");
+    // And who to answer for it. The subject can be hard-deleted; the account
+    // behind it is what an account-level action needs, so the report carries it.
+    expect(rows[0].subjectOwnerId).toBe(commenter.id);
+  });
+
+  /**
+   * The limiter has to see what the request ahead of it committed. Putting the
+   * capture and the limiter in one repeatable-read transaction pinned every
+   * waiter's snapshot before the advisory lock — so concurrent reports from
+   * one reporter all read a pre-lock view, and both the duplicate check and
+   * the hourly count went blind. SOCIAL §11 requires the queue not be
+   * floodable, so this is the property that has to hold.
+   */
+  it("createReport still limits a reporter firing several at once", async () => {
+    const c = await addComment(db, commenter.id, pourId, "spam-ish");
+
+    // The same subject, concurrently: exactly one report, not five.
+    await Promise.all(
+      Array.from({ length: 5 }, () =>
+        createReport(db, owner.id, { subjectType: "comment", subjectId: c!.id, reason: "spam" }),
+      ),
+    );
+    const forSubject = await db
+      .select()
+      .from(schema.reports)
+      .where(eq(schema.reports.subjectId, c!.id));
+    expect(forSubject).toHaveLength(1);
+    // And the snapshot survived the split into two transactions.
+    expect(forSubject[0].subjectSnapshot).toBe("spam-ish");
+    // A stepped-back author's comment is not reportable either, because
+    // `listComments` already stopped showing it — the report path checked the
+    // pour and the block relationship but not this, so a stale id could pull a
+    // withdrawn comment's current body into the queue as evidence.
+    const c3 = await addComment(db, commenter.id, pourId, "was visible");
+    await db
+      .update(schema.userProfiles)
+      .set({ socialEnabled: false })
+      .where(eq(schema.userProfiles.userId, commenter.id));
+    await expect(
+      createReport(db, owner.id, { subjectType: "comment", subjectId: c3!.id, reason: "spam" }),
+    ).resolves.toBe(false);
+    await db
+      .update(schema.userProfiles)
+      .set({ socialEnabled: true })
+      .where(eq(schema.userProfiles.userId, commenter.id));
+
+    // Nor a deleted one: `listComments` returns `body: null` for a tombstone,
+    // to everybody including its author, so there is nothing anyone could have
+    // read and nothing left to moderate — capturing the row's body anyway
+    // would put text no reporter ever saw into the queue as their evidence.
+    const c4 = await addComment(db, commenter.id, pourId, "then deleted");
+    await db
+      .update(schema.comments)
+      .set({ deletedAt: new Date() })
+      .where(eq(schema.comments.id, c4!.id));
+    await expect(
+      createReport(db, owner.id, { subjectType: "comment", subjectId: c4!.id, reason: "spam" }),
+    ).resolves.toBe(false);
+
     // A fabricated subject never reaches the queue.
     await expect(
       createReport(db, owner.id, { subjectType: "pour", subjectId: "no-such-pour", reason: "spam" }),
@@ -792,6 +954,234 @@ describe("review-pass hardening", () => {
     // The stepped-back user still sees their own comment (nothing deleted).
     const own = await listComments(db, stepped.id, pour.id);
     expect(own!.some((c) => c.author?.userId === stepped.id)).toBe(true);
+  });
+
+  it("keeps a legacy comment withdrawn when its author claims a handle", async () => {
+    const owner = await createTestUser(db);
+    const viewer = await createTestUser(db);
+    const legacy = await createTestUser(db);
+    const bottle = await createTestBottle(db);
+    await claim(db, owner, "owner_cl", { isPublic: true });
+    await claim(db, viewer, "viewer_cl", { isPublic: true });
+
+    const pour = await insertPour(db, owner.id, bottle.id, { visibility: "public", rating: 4 });
+    await insertNote(db, pour.id, { freeform: "mine" });
+    // Written under the old behaviour, when nothing required a profile.
+    await db.insert(schema.comments).values({
+      id: uid("comment"),
+      pourId: pour.id,
+      userId: legacy.id,
+      body: "written before the commenter needed a profile",
+      createdAt: new Date(Date.now() - 60_000),
+    });
+
+    // Claiming a handle is exactly what flips `socialEnabled` to true. It must
+    // not publish a back catalogue nobody chose to publish.
+    await claim(db, legacy, "legacy_cl", { isPublic: true });
+
+    const comments = await listComments(db, viewer.id, pour.id);
+    expect(comments!.some((c) => c.author?.userId === legacy.id)).toBe(false);
+    const note = await getSocialNote(db, viewer.id, pour.id);
+    expect(note!.commentCount).toBe(0);
+
+    // The author still sees their own.
+    const own = await listComments(db, legacy.id, pour.id);
+    expect(own!.some((c) => c.author?.userId === legacy.id)).toBe(true);
+  });
+
+  it("keeps a legacy cheer withdrawn when its author claims a handle", async () => {
+    const owner = await createTestUser(db);
+    const viewer = await createTestUser(db);
+    const legacy = await createTestUser(db);
+    const bottle = await createTestBottle(db);
+    await claim(db, owner, "owner_ch", { isPublic: true });
+    await claim(db, viewer, "viewer_ch", { isPublic: true });
+
+    const pour = await insertPour(db, owner.id, bottle.id, { visibility: "public", rating: 4 });
+    await insertNote(db, pour.id, { freeform: "mine" });
+    // Cheered under the old behaviour, before anything required a profile.
+    await db.insert(schema.reactions).values({
+      id: uid("reaction"),
+      pourId: pour.id,
+      userId: legacy.id,
+      kind: "cheers",
+      createdAt: new Date(Date.now() - 60_000),
+    });
+
+    // The same door the comment above closes, on the table rendered beside it:
+    // the comment rule shipped with no equivalent for reactions, so claiming a
+    // handle silently republished the cheer.
+    await claim(db, legacy, "legacy_ch", { isPublic: true });
+
+    const note = await getSocialNote(db, viewer.id, pour.id);
+    expect(note!.cheersCount).toBe(0);
+
+    // And the feed's batch count says the same thing as the note's — the pair
+    // that drifted the first time this rule was applied to one query and not
+    // the other. The follow is what puts the pour in the feed at all; without
+    // it the assertion would pass on an empty list and prove nothing.
+    await followByHandle(db, viewer.id, "owner_ch");
+    const feed = await getFriendFeed(db, viewer.id);
+    const item = feed.find((f) => f.pourId === pour.id);
+    expect(item).toBeDefined();
+    expect(item!.cheersCount).toBe(0);
+  });
+
+  it("counts a cheer given after the author claimed their handle", async () => {
+    const owner = await createTestUser(db);
+    const viewer = await createTestUser(db);
+    const cheerer = await createTestUser(db);
+    const bottle = await createTestBottle(db);
+    await claim(db, owner, "owner_ca", { isPublic: true });
+    await claim(db, viewer, "viewer_ca", { isPublic: true });
+    await claim(db, cheerer, "after_ca", { isPublic: true });
+
+    const pour = await insertPour(db, owner.id, bottle.id, { visibility: "public", rating: 4 });
+    await insertNote(db, pour.id, { freeform: "mine" });
+    await cheerPour(db, cheerer.id, pour.id);
+
+    const note = await getSocialNote(db, viewer.id, pour.id);
+    expect(note!.cheersCount).toBe(1);
+  });
+
+  it("shows a comment written after the author claimed their handle", async () => {
+    const owner = await createTestUser(db);
+    const viewer = await createTestUser(db);
+    const commenter = await createTestUser(db);
+    const bottle = await createTestBottle(db);
+    await claim(db, owner, "owner_af", { isPublic: true });
+    await claim(db, viewer, "viewer_af", { isPublic: true });
+    await claim(db, commenter, "after_af", { isPublic: true });
+
+    const pour = await insertPour(db, owner.id, bottle.id, { visibility: "public", rating: 4 });
+    await insertNote(db, pour.id, { freeform: "mine" });
+    await addComment(db, commenter.id, pour.id, "said with a handle");
+
+    const comments = await listComments(db, viewer.id, pour.id);
+    expect(comments!.some((c) => c.author?.userId === commenter.id)).toBe(true);
+    const note = await getSocialNote(db, viewer.id, pour.id);
+    expect(note!.commentCount).toBe(1);
+  });
+
+  it("refuses a profile report from someone the profile is not visible to", async () => {
+    const reporter = await createTestUser(db);
+    const target = await createTestUser(db);
+    await claim(db, reporter, "reporter_pv", { isPublic: true });
+    // Private: visible to accepted followers only, which is what
+    // `getProfileView` enforces on the read path.
+    await claim(db, target, "target_pv", { isPublic: false });
+
+    expect(
+      await createReport(db, reporter.id, {
+        subjectType: "profile",
+        subjectId: target.id,
+        reason: "abuse",
+      }),
+    ).toBe(false);
+    expect(await db.select().from(schema.reports)).toHaveLength(0);
+
+    // An accepted follower sees it, so they can report it — and the snapshot
+    // is theirs to have captured.
+    await db.insert(schema.follows).values({
+      id: uid("f"),
+      followerId: reporter.id,
+      followeeId: target.id,
+      state: "accepted",
+    });
+    expect(
+      await createReport(db, reporter.id, {
+        subjectType: "profile",
+        subjectId: target.id,
+        reason: "abuse",
+      }),
+    ).toBe(true);
+    const [row] = await db.select().from(schema.reports);
+    expect(row.subjectSnapshot).toContain("target_pv");
+  });
+
+  it("refuses a profile report from a suspended reporter", async () => {
+    const reporter = await createTestUser(db);
+    const target = await createTestUser(db);
+    await claim(db, reporter, "reporter_sus", { isPublic: true });
+    await claim(db, target, "target_sus", { isPublic: false });
+    await db.insert(schema.follows).values({
+      id: uid("f"),
+      followerId: reporter.id,
+      followeeId: target.id,
+      state: "accepted",
+    });
+
+    // Suspension preserves the follow edge, so the private/follower rule alone
+    // would still let this through and snapshot the private profile.
+    await db
+      .update(schema.userProfiles)
+      .set({ suspendedAt: new Date() })
+      .where(eq(schema.userProfiles.userId, reporter.id));
+
+    expect(
+      await createReport(db, reporter.id, {
+        subjectType: "profile",
+        subjectId: target.id,
+        reason: "abuse",
+      }),
+    ).toBe(false);
+    expect(await db.select().from(schema.reports)).toHaveLength(0);
+  });
+
+  it("still takes a report against a public profile from anyone", async () => {
+    const reporter = await createTestUser(db);
+    const target = await createTestUser(db);
+    await claim(db, reporter, "reporter_pub", { isPublic: true });
+    await claim(db, target, "target_pub", { isPublic: true });
+
+    expect(
+      await createReport(db, reporter.id, {
+        subjectType: "profile",
+        subjectId: target.id,
+        reason: "abuse",
+      }),
+    ).toBe(true);
+  });
+
+  it("counts a legacy profile-less contributor exactly as the thread does, signed in or out", async () => {
+    const owner = await createTestUser(db);
+    const viewer = await createTestUser(db);
+    // Never opted into social at all — `addComment` refuses this account now,
+    // but rows written before that guard existed are still in the table.
+    const legacy = await createTestUser(db);
+    const bottle = await createTestBottle(db);
+    await claim(db, owner, "owner_lg", { isPublic: true });
+    await claim(db, viewer, "viewer_lg", { isPublic: true });
+
+    const pour = await insertPour(db, owner.id, bottle.id, { visibility: "public", rating: 4 });
+    await insertNote(db, pour.id, { freeform: "mine" });
+    await db.insert(schema.comments).values({
+      id: uid("comment"),
+      pourId: pour.id,
+      userId: legacy.id,
+      body: "written before the commenter needed a profile",
+    });
+    await db.insert(schema.reactions).values({
+      id: uid("reaction"),
+      pourId: pour.id,
+      userId: legacy.id,
+      kind: "cheers",
+    });
+
+    // The thread has always hidden it — `commentWithdrawnByAuthor` reads a
+    // missing profile as withdrawn. The counts read `not exists (… = false)`,
+    // which a missing row satisfies, so they disagreed by exactly the row the
+    // reader is not allowed to know about.
+    const comments = await listComments(db, viewer.id, pour.id);
+    expect(comments!.some((c) => c.author?.userId === legacy.id)).toBe(false);
+    const note = await getSocialNote(db, viewer.id, pour.id);
+    expect(note!.commentCount).toBe(0);
+    expect(note!.cheersCount).toBe(0);
+
+    // And the author of the row still sees their own, as a stepped-back
+    // author does — nothing was deleted.
+    const own = await listComments(db, legacy.id, pour.id);
+    expect(own!.some((c) => c.author?.userId === legacy.id)).toBe(true);
   });
 
   it("Same Dram picks a friend's latest NOTED pour, not a newer note-less one", async () => {

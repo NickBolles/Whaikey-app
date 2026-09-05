@@ -23,6 +23,14 @@ export const GATE_USER_ID = "gate-user";
 export const GATE_SESSION_TOKEN = "e2e-gate-session-token";
 export const GATE_MINOR_USER_ID = "gate-minor-user";
 export const GATE_MINOR_SESSION_TOKEN = "e2e-gate-minor-session-token";
+/**
+ * The one account on the operator allowlist (`WHAIKEY_OPERATOR_IDS` is set to
+ * this id in playwright.config.ts). Separate from the demo collector because
+ * being an operator changes what a page returns, and Jordan's screens are the
+ * visual baselines.
+ */
+export const OPERATOR_USER_ID = "operator-user";
+export const OPERATOR_SESSION_TOKEN = "e2e-operator-session-token";
 const SESSION_COOKIE = "better-auth.session_token";
 
 /**

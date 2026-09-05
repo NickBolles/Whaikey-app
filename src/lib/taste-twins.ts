@@ -30,7 +30,7 @@ import type { DB } from "@/db";
 import { schema } from "@/db";
 import { cosineSimilarity, type PalateVector } from "@/lib/palate";
 import { getUserPalate, getUserPalates } from "@/lib/palate-store";
-import { acceptedFollowSql, contributorVisibleSql } from "@/lib/social";
+import { acceptedFollowSql, contributorVisibleSql, suspendedViewer } from "@/lib/social";
 
 /**
  * Rated pours each side needs before a match is reported — counted as
@@ -101,8 +101,20 @@ export function palateReadableBy(viewerId: string) {
   )!;
 }
 
-/** Accepted followees of the viewer who are visible to them right now. */
+/**
+ * Accepted followees of the viewer who are visible to them right now.
+ *
+ * The suspension gate lives HERE rather than on each export because this is
+ * the one door every palate read goes through — `getPalateMatch` delegates to
+ * `getPalateMatches`, and both it and `getTasteTwins` start here — so a future
+ * export that needs the viewer's followees is gated by construction instead of
+ * by somebody remembering. A suspended viewer has no visible followees, which
+ * collapses every caller to its own empty case: no matches, no twins, and so
+ * no endorsements downstream. `getTwinEndorsements` carries its own gate,
+ * being the one entry point that takes a twin list rather than deriving one.
+ */
 async function visibleFolloweeIds(db: DB, viewerId: string): Promise<string[]> {
+  if (await suspendedViewer(db, viewerId)) return [];
   const rows = await db
     .select({ followeeId: schema.follows.followeeId })
     .from(schema.follows)
@@ -289,6 +301,10 @@ export async function getTwinEndorsements(
 ): Promise<Map<string, TwinEndorsement>> {
   const out = new Map<string, TwinEndorsement>();
   if (bottleIds.length === 0 || twins.length === 0) return out;
+  // Not reachable through `getTasteTwins` (a suspended viewer has no twins to
+  // pass), but this export takes the twin list as an argument, so it is the
+  // one place a caller can hand it a stale or independently built one.
+  if (await suspendedViewer(db, viewerId)) return out;
 
   const twinById = new Map(twins.map((t) => [t.userId, t]));
   const twinIds = [...twinById.keys()];

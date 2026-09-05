@@ -1,10 +1,11 @@
-import { and, desc, eq, gt, isNotNull, ne, sql } from "drizzle-orm";
+import { and, desc, eq, gt, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
 import { POUR_VISIBILITIES, SERVING_STYLES, type Pour, type PourVisibility, type TastingNote } from "@/db/schema";
 import { canViewBottle } from "@/lib/catalog-visibility";
 import { isValidLeaf } from "@/lib/flavor-wheel";
+import { isModerationHidden, moderationLockKey } from "@/lib/moderation";
 import { refreshUserPalate } from "@/lib/palate-store";
 import { getSocialPrefs } from "@/lib/social";
 
@@ -193,7 +194,16 @@ export async function logPour(db: DB, userId: string, input: PourInput): Promise
         columns: { socialEnabled: true },
         where: eq(schema.userProfiles.userId, userId),
       });
-      if (profile && !profile.socialEnabled) visibility = "private";
+      /**
+       * No profile is the same answer as social switched off, and used not to
+       * be: a missing row left the explicit visibility standing, so the pour
+       * was stored "public" while `canViewPourContext` — which reads
+       * `authorSocialEnabled ?? false` — showed it to nobody. A visibility
+       * that is not in force is worse than a wrong one, because creating a
+       * profile later would publish it retroactively with no fresh decision,
+       * which is exactly what the US-11 rule above refuses to do.
+       */
+      if (!profile || !profile.socialEnabled) visibility = "private";
     }
     if (visibility !== "private") {
       // docs/SOCIAL.md §11: notes are user-generated text and cross-user
@@ -349,6 +359,14 @@ export class PendingBottleError extends Error {
  * re-expose a pour that "make everything private" just hid, with the change
  * surfacing only when social is re-enabled (docs/SOCIAL.md US-11).
  */
+/** Raised when the owner tries to re-publish something moderation took down. */
+export class ModeratedError extends Error {
+  constructor() {
+    super("A moderator hid this note");
+    this.name = "ModeratedError";
+  }
+}
+
 export async function updatePourVisibility(
   db: DB,
   userId: string,
@@ -369,17 +387,52 @@ export async function updatePourVisibility(
         .innerJoin(schema.bottles, eq(schema.bottles.id, schema.pours.bottleId))
         .where(and(eq(schema.pours.id, pourId), eq(schema.pours.userId, userId)))
         .limit(1);
-      if (row?.status === "user_submitted") throw new PendingBottleError();
+      // Not found, or not theirs: answer that before any social check, so a
+      // missing pour cannot come back as "social is turned off" — which would
+      // be both wrong and a small oracle about somebody else's row.
+      if (!row) return null;
+      if (row.status === "user_submitted") throw new PendingBottleError();
     }
     if (visibility !== "private") {
       // Same lock as makeEverythingPrivate: the check and the write are
       // atomic w.r.t. a concurrent US-11 reset.
+      //
+      // Taken FIRST, before the moderation lock. `createPourShare` needs both
+      // too, and two paths taking the same pair in opposite orders is a
+      // deadlock Postgres resolves by aborting one of them — an intermittent
+      // 500 on a race nobody can reproduce. One order everywhere: social-reset,
+      // then moderation.
       await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`social-reset:${userId}`}))`);
+
+      /**
+       * A moderation hide is not the owner's to undo (PLAN.md §9.4).
+       *
+       * Hiding a pour uses the visibility field, which is the owner's own
+       * control — so without this the operator hides it, the report closes,
+       * and the owner puts it straight back. That is the same hole a profile
+       * "hide" had, and the answer there was to refuse the action; here the
+       * action is right and it is this door that has to close. Only an
+       * operator's `unhide` reopens it.
+       *
+       * Under the subject's moderation lock, which `hideSubject` also takes:
+       * unlocked, this read can see "no hide", then block on the row and
+       * commit after the hide completes, putting back exactly what was taken
+       * down. The hide has no idea who the owner is, so the lock is keyed on
+       * the subject rather than on the account.
+       */
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtext(${moderationLockKey("pour", pourId)}))`,
+      );
+      if (await isModerationHidden(tx, "pour", pourId)) throw new ModeratedError();
       const profile = await tx.query.userProfiles.findFirst({
         columns: { socialEnabled: true },
         where: eq(schema.userProfiles.userId, userId),
       });
-      if (profile && !profile.socialEnabled) throw new SocialDisabledError();
+      // No profile is the same answer as social switched off, for the reason
+      // `logPour` gives: the visibility would be stored without being in
+      // force, and creating a profile later would publish the pour with no
+      // fresh decision. Same door, same rule.
+      if (!profile?.socialEnabled) throw new SocialDisabledError();
     }
     const rows = await tx
       .update(schema.pours)
@@ -390,15 +443,69 @@ export async function updatePourVisibility(
   });
 }
 
-/** Delete a pour (tasting note cascades). Returns false for missing/others'. */
+/**
+ * Delete a pour (tasting note and comments cascade). Returns false for
+ * missing/others'.
+ *
+ * **This is the one instant at which a report's subject owner stops being
+ * derivable**, so it is where the owner gets recorded. `reports` keeps
+ * `subject_owner_id` precisely so a complaint can still be claimed after its
+ * subject is gone — otherwise deleting the evidence is a way to keep a
+ * complaint permanently unresolvable, and the "Suspend author" action goes
+ * with it. Migration 0030 backfilled the rows that existed when the column
+ * shipped and its comment claimed a lazy backfill was impossible; that is only
+ * true once the subject is *already* gone. While the subject is alive the
+ * owner is derivable at any time, and the last such moment is here.
+ *
+ * Recording it here rather than only in the migration is what closes the
+ * deploy window `scripts/build.mjs` opens: `pnpm db:push` runs before
+ * `next build`, so the previous deployment keeps serving for the length of a
+ * build and any report it files carries a null owner the one-time migration
+ * will never revisit. Same shape as the provider-token gap migration 0032
+ * could not see — a one-time migration cannot cover writes that happen after
+ * it runs, so the guarantee has to live in code that runs on every request.
+ *
+ * Ownership is verified before the backfill because the report's owner is
+ * written from it: an unauthorized caller must not be able to stamp their own
+ * id onto somebody else's report. Comments carry their OWN author, not this
+ * pour's owner — a comment on your note is not yours — so they need a
+ * correlated update, read before the cascade takes them.
+ */
 export async function deletePour(db: DB, userId: string, pourId: string): Promise<boolean> {
-  const deleted = await db
-    .delete(schema.pours)
-    .where(and(eq(schema.pours.id, pourId), eq(schema.pours.userId, userId)))
-    .returning({ id: schema.pours.id });
-  if (deleted.length > 0) {
+  const deleted = await db.transaction(async (tx) => {
+    const own = await tx
+      .select({ id: schema.pours.id })
+      .from(schema.pours)
+      .where(and(eq(schema.pours.id, pourId), eq(schema.pours.userId, userId)));
+    if (own.length === 0) return false;
+
+    // Never overwrite a recorded owner: `is null` only, the same condition
+    // migration 0030 uses, so a re-derivation can never replace a fact.
+    await tx
+      .update(schema.reports)
+      .set({ subjectOwnerId: userId })
+      .where(
+        and(
+          isNull(schema.reports.subjectOwnerId),
+          eq(schema.reports.subjectType, "pour"),
+          eq(schema.reports.subjectId, pourId),
+        ),
+      );
+    await tx.execute(sql`
+      update ${schema.reports} set "subject_owner_id" = c."user_id"
+      from ${schema.comments} as c
+      where ${schema.reports.subjectOwnerId} is null
+        and ${schema.reports.subjectType} = 'comment'
+        and c."id" = ${schema.reports.subjectId}
+        and c."pour_id" = ${pourId}
+    `);
+
+    await tx.delete(schema.pours).where(eq(schema.pours.id, pourId));
+    return true;
+  });
+  if (deleted) {
     // Removing a pour changes the palate; keep the snapshot in sync.
     await refreshUserPalate(db, userId);
   }
-  return deleted.length > 0;
+  return deleted;
 }

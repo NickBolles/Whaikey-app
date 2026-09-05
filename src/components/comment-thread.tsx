@@ -192,9 +192,54 @@ function CommentRow(props: CommentRowProps) {
   const reported = reportedIds.has(comment.id);
 
   if (comment.deleted) {
+    /**
+     * A tombstone, plus the author's own delete when they still have one.
+     *
+     * `canDelete` is true here exactly when a moderator hid the comment and
+     * its author has not withdrawn it themselves — and this branch returned
+     * before rendering any control, so the API allowed a withdrawal the UI
+     * offered no way to make. If the hide is later lifted the comment comes
+     * back, which is the outcome the author had no way to prevent.
+     */
     return (
       <li className={isReply ? "ml-8 border-l border-border-subtle pl-3" : ""}>
         <p className="text-sm italic text-muted">Comment removed</p>
+        {comment.canDelete && (
+          <p className="mt-1 text-xs text-muted">
+            {deletingId === comment.id ? (
+              <span className="inline-flex items-center gap-2">
+                Delete this for good?
+                {/* `tap-target` on both: DESIGN.md's 44px minimum, and one of
+                    these deletes the comment for good. Bare text in a text-xs
+                    line is the smallest possible hit area for the most
+                    destructive control on the screen. */}
+                <button
+                  type="button"
+                  onClick={() => onDeleteConfirm(comment.id)}
+                  disabled={busy}
+                  className="tap-target inline-flex items-center font-medium text-danger"
+                >
+                  {busy ? "…" : "Confirm"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onDeleteToggle(comment.id)}
+                  className="tap-target inline-flex items-center text-muted"
+                >
+                  Cancel
+                </button>
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={() => onDeleteToggle(comment.id)}
+                className="tap-target inline-flex items-center gap-1 transition-colors hover:text-danger"
+              >
+                <Trash2 size={13} strokeWidth={1.8} aria-hidden /> Delete for good
+              </button>
+            )}
+          </p>
+        )}
       </li>
     );
   }
@@ -247,10 +292,22 @@ function CommentRow(props: CommentRowProps) {
                 (deletingId === comment.id ? (
                   <span className="inline-flex items-center gap-2">
                     Delete this comment?
-                    <button type="button" onClick={() => onDeleteConfirm(comment.id)} disabled={busy} className="font-medium text-danger">
+                    {/* Same 44px minimum as the tombstone's pair below: this is
+                        where that markup was copied from, and it had the same
+                        problem. */}
+                    <button
+                      type="button"
+                      onClick={() => onDeleteConfirm(comment.id)}
+                      disabled={busy}
+                      className="tap-target inline-flex items-center font-medium text-danger"
+                    >
                       {busy ? "…" : "Confirm"}
                     </button>
-                    <button type="button" onClick={() => onDeleteToggle(comment.id)} className="text-muted">
+                    <button
+                      type="button"
+                      onClick={() => onDeleteToggle(comment.id)}
+                      className="tap-target inline-flex items-center text-muted"
+                    >
                       Cancel
                     </button>
                   </span>

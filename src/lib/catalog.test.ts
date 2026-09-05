@@ -12,6 +12,13 @@ import {
   looksLikeDuplicate,
   publishSubmissionUpc,
   submitBottle,
+  UnknownSubmissionError,
+  approveSubmission,
+  countPendingSubmissions,
+  listPendingSubmissions,
+  markSubmissionDuplicate,
+  rejectSubmission,
+  sweepOrphanedSubmissions,
 } from "./catalog";
 import { canViewBottle } from "./catalog-visibility";
 import { searchBottles, getBottleDetail } from "./search";
@@ -270,6 +277,14 @@ describe("a pour of an unreviewed bottle", () => {
    */
   it("is private whatever was asked for, and stays that way after promotion", async () => {
     const { logPour } = await import("@/lib/pours");
+    // Publishing is a social act and needs a claimed handle; this test is
+    // about the pending-bottle rule, not about opting into social.
+    await db.insert(schema.userProfiles).values({
+      userId: alice.id,
+      handle: "alice",
+      displayName: "Alice",
+      socialEnabled: true,
+    });
     const { bottle } = await submitBottle(db, alice.id, {
       name: "Alice's Barrel Pick",
       category: "bourbon",
@@ -304,6 +319,12 @@ describe("a pour of an unreviewed bottle", () => {
   it("cannot be published or shared after the fact either", async () => {
     const { logPour, updatePourVisibility, PendingBottleError } = await import("@/lib/pours");
     const { createPourShare } = await import("@/lib/pour-sharing");
+    await db.insert(schema.userProfiles).values({
+      userId: alice.id,
+      handle: "alice",
+      displayName: "Alice",
+      socialEnabled: true,
+    });
     const { bottle } = await submitBottle(db, alice.id, {
       name: "Alice's Barrel Pick",
       category: "bourbon",
@@ -352,5 +373,314 @@ describe("listOwnSubmissions", () => {
     const mine = await listOwnSubmissions(db, alice.id);
     expect(mine.map((s) => s.name)).toEqual(["Alice One"]);
     expect(mine[0].state).toBe("pending");
+  });
+});
+
+/**
+ * WP-16 left the far end of the submission path open: rows piled up and
+ * nothing could promote one, so a submitted bottle was private forever and the
+ * "once someone has checked it over" copy promised a review nobody could do.
+ */
+describe("catalog review", () => {
+  it("lists what is waiting, oldest first, with the typed distillery kept apart", async () => {
+    await submitBottle(db, alice.id, {
+      name: "Older One",
+      category: "bourbon",
+      distillery: "A Distillery Nobody Has",
+    });
+    await submitBottle(db, bob.id, { name: "Newer One", category: "rye" });
+    // Age the first so the ordering assertion is about createdAt, not insert order.
+    await db
+      .update(schema.bottleSubmissions)
+      .set({ createdAt: new Date(Date.now() - 5 * 3_600_000) })
+      .where(eq(schema.bottleSubmissions.submittedBy, alice.id));
+
+    const pending = await listPendingSubmissions(db);
+    expect(pending.map((s) => s.name)).toEqual(["Older One", "Newer One"]);
+    expect(pending[0].ageHours).toBeGreaterThanOrEqual(5);
+    expect(pending[0].distilleryText).toBe("A Distillery Nobody Has");
+    expect(pending[0].distilleryName).toBeNull();
+    expect(await countPendingSubmissions(db)).toBe(2);
+  });
+
+  it("approving makes the bottle everyone's and publishes its barcode", async () => {
+    const { bottle, submissionId } = await submitBottle(db, alice.id, {
+      name: "Approve Me",
+      category: "bourbon",
+      upc: "012345678912",
+    });
+    // Held back until a human looked: bottle_upcs is what every other scan
+    // resolves against.
+    expect(await db.select().from(schema.bottleUpcs)).toHaveLength(0);
+    expect(canViewBottle(bottle, bob.id)).toBe(false);
+
+    await approveSubmission(db, bob.id, submissionId, "looks real");
+
+    const after = await db.query.bottles.findFirst({ where: eq(schema.bottles.id, bottle.id) });
+    expect(after?.status).toBe("verified");
+    expect(canViewBottle(after!, bob.id)).toBe(true);
+    const upcs = await db.select().from(schema.bottleUpcs);
+    expect(upcs).toHaveLength(1);
+    expect(upcs[0]).toMatchObject({ upc: "012345678912", bottleId: bottle.id, source: "user" });
+
+    const row = await db.query.bottleSubmissions.findFirst({
+      where: eq(schema.bottleSubmissions.id, submissionId),
+    });
+    expect(row).toMatchObject({ state: "approved", reviewedBy: bob.id, reviewNote: "looks real" });
+    expect(row?.reviewedAt).toBeInstanceOf(Date);
+  });
+
+  it("approving does not raise the visibility of a pour logged while it was pending", async () => {
+    const { bottle, submissionId } = await submitBottle(db, alice.id, {
+      name: "Clamped",
+      category: "bourbon",
+    });
+    const { logPour } = await import("@/lib/pours");
+    const { pour } = await logPour(db, alice.id, { bottleId: bottle.id, visibility: "public" });
+    expect(pour.visibility).toBe("private");
+
+    await approveSubmission(db, bob.id, submissionId);
+
+    const after = await db.query.pours.findFirst({ where: eq(schema.pours.id, pour.id) });
+    // The system never raises a visibility. Its owner can publish it now.
+    expect(after?.visibility).toBe("private");
+  });
+
+  it("a second operator on the same row changes nothing and is told so", async () => {
+    const { submissionId } = await submitBottle(db, alice.id, {
+      name: "Race Me",
+      category: "bourbon",
+    });
+    await approveSubmission(db, bob.id, submissionId);
+    await expect(approveSubmission(db, bob.id, submissionId)).rejects.toBeInstanceOf(
+      UnknownSubmissionError,
+    );
+    await expect(rejectSubmission(db, bob.id, submissionId, "no")).rejects.toBeInstanceOf(
+      UnknownSubmissionError,
+    );
+  });
+
+  it("declining keeps the bottle working for the person who added it", async () => {
+    const { bottle, submissionId } = await submitBottle(db, alice.id, {
+      name: "Decline Me",
+      category: "bourbon",
+    });
+    await rejectSubmission(db, bob.id, submissionId, "already listed under another name");
+
+    const after = await db.query.bottles.findFirst({ where: eq(schema.bottles.id, bottle.id) });
+    // Not deleted, not taken away: their own records stay theirs.
+    expect(after?.status).toBe("user_submitted");
+    expect(canViewBottle(after!, alice.id)).toBe(true);
+    expect(canViewBottle(after!, bob.id)).toBe(false);
+    const row = await db.query.bottleSubmissions.findFirst({
+      where: eq(schema.bottleSubmissions.id, submissionId),
+    });
+    expect(row).toMatchObject({
+      state: "rejected",
+      reviewNote: "already listed under another name",
+    });
+  });
+
+  it("refuses to record a duplicate of a bottle nobody can see", async () => {
+    const other = await submitBottle(db, bob.id, { name: "Also Pending", category: "rye" });
+    const { submissionId } = await submitBottle(db, alice.id, {
+      name: "Dupe Me",
+      category: "bourbon",
+    });
+
+    await expect(
+      markSubmissionDuplicate(db, bob.id, submissionId, other.bottle.id, undefined),
+    ).rejects.toBeInstanceOf(UnknownSubmissionError);
+
+    const canonical = await createTestBottle(db, { name: "The Real One", category: "bourbon" });
+    await markSubmissionDuplicate(db, bob.id, submissionId, canonical.id, "same bottle");
+    const row = await db.query.bottleSubmissions.findFirst({
+      where: eq(schema.bottleSubmissions.id, submissionId),
+    });
+    expect(row).toMatchObject({ state: "duplicate", duplicateOfBottleId: canonical.id });
+  });
+});
+
+/**
+ * The strongest version of the same defect: `bottles.submittedBy` had no
+ * delete policy either, so submitting a single bottle made an ordinary account
+ * permanently undeletable — a deletion right revoked by a foreign key. The
+ * bottle is catalog data other people's shelves point at, so it stays; the
+ * attribution is what goes.
+ */
+describe("a submitter can be deleted", () => {
+  it("keeps the bottle and its review record, and drops only the attribution", async () => {
+    const db = await setupTestDb();
+    const submitter = await createTestUser(db);
+    const reviewer = await createTestUser(db);
+    const bottle = await createTestBottle(db, { status: "user_submitted", submittedBy: submitter.id });
+    const submissionId = crypto.randomUUID();
+    await db.insert(schema.bottleSubmissions).values({
+      id: submissionId,
+      bottleId: bottle.id,
+      submittedBy: submitter.id,
+      source: "search",
+    });
+    await approveSubmission(db, reviewer.id, submissionId, "checked against the distillery site");
+
+    // The reviewer goes first: their decision is not theirs to take away.
+    await db.delete(schema.user).where(eq(schema.user.id, reviewer.id));
+    const reviewed = await db.query.bottleSubmissions.findFirst({
+      where: eq(schema.bottleSubmissions.id, submissionId),
+    });
+    // `state`, not `reviewedBy`, is what says a submission is still pending —
+    // so clearing the reviewer cannot put a decided row back in the queue.
+    expect(reviewed?.state).toBe("approved");
+    expect(reviewed?.reviewedBy).toBeNull();
+    expect(reviewed?.reviewNote).toBe("checked against the distillery site");
+    expect(await countPendingSubmissions(db)).toBe(0);
+
+    // The submitter goes second. Their submission is a request they made, so it
+    // cascades away with them — but the bottle it produced is now catalog data
+    // other people's shelves point at, and only the attribution goes.
+    await db.delete(schema.user).where(eq(schema.user.id, submitter.id));
+    const kept = await db.query.bottles.findFirst({ where: eq(schema.bottles.id, bottle.id) });
+    expect(kept?.status).toBe("verified");
+    expect(kept?.submittedBy).toBeNull();
+    expect(
+      await db.query.bottleSubmissions.findFirst({
+        where: eq(schema.bottleSubmissions.id, submissionId),
+      }),
+    ).toBeUndefined();
+  });
+});
+
+/**
+ * `bottles.submittedBy` is `set null` so a promoted bottle outlives its
+ * submitter — but an unapproved one is then visible to nobody
+ * (`catalogVisibleTo` shows `user_submitted` only to its submitter) and
+ * reviewable by nobody (`bottle_submissions.submittedBy` cascades away). That
+ * is user-entered content surviving the account it belongs to, against a
+ * Privacy Policy that promises deletion.
+ */
+describe("sweeping unapproved bottles whose submitter is gone", () => {
+  let db: DB;
+  let submitter: schema.User;
+  let reviewer: schema.User;
+
+  beforeEach(async () => {
+    db = await setupTestDb();
+    submitter = await createTestUser(db);
+    reviewer = await createTestUser(db);
+  });
+
+  it("deletes the orphan and leaves everything else alone", async () => {
+    const orphan = await submitBottle(db, submitter.id, {
+      name: "Orphan Single Cask",
+      category: "scotch-single-malt",
+    });
+    const mine = await submitBottle(db, submitter.id, {
+      name: "Still Mine Rye",
+      category: "rye",
+    });
+    const promoted = await submitBottle(db, submitter.id, {
+      name: "Promoted Bourbon",
+      category: "bourbon",
+    });
+    await approveSubmission(db, reviewer.id, promoted.submissionId, "verified");
+
+    // Only the orphan's submission row goes; the others keep an owner or a
+    // catalog status of their own.
+    await db
+      .delete(schema.bottleSubmissions)
+      .where(eq(schema.bottleSubmissions.id, orphan.submissionId));
+    await db
+      .update(schema.bottles)
+      .set({ submittedBy: null })
+      .where(eq(schema.bottles.id, orphan.bottle.id));
+
+    expect(await sweepOrphanedSubmissions(db)).toBe(1);
+
+    expect(
+      await db.query.bottles.findFirst({ where: eq(schema.bottles.id, orphan.bottle.id) }),
+    ).toBeUndefined();
+    // Still has a submitter: theirs to see, and still in the queue.
+    expect(
+      await db.query.bottles.findFirst({ where: eq(schema.bottles.id, mine.bottle.id) }),
+    ).toBeDefined();
+    // Promoted into the shared catalog: outlives its submitter by design.
+    expect(
+      await db.query.bottles.findFirst({ where: eq(schema.bottles.id, promoted.bottle.id) }),
+    ).toBeDefined();
+  });
+
+  it("keeps a bottle whose submission row is still in the queue", async () => {
+    const { bottle } = await submitBottle(db, submitter.id, {
+      name: "Reviewable Without An Owner",
+      category: "bourbon",
+    });
+    // Submitter gone from the bottle, but the submission survives — a decision
+    // an operator can still make is not orphaned.
+    await db
+      .update(schema.bottles)
+      .set({ submittedBy: null })
+      .where(eq(schema.bottles.id, bottle.id));
+
+    expect(await sweepOrphanedSubmissions(db)).toBe(0);
+    expect(
+      await db.query.bottles.findFirst({ where: eq(schema.bottles.id, bottle.id) }),
+    ).toBeDefined();
+  });
+
+  /**
+   * `markSubmissionDuplicate` refuses a target that is still `user_submitted`,
+   * so this state is not reachable through the app — the row is built directly,
+   * because the guard is on the column rather than on that rule.
+   * `duplicate_of_bottle_id` has no delete policy: if the rule ever relaxes,
+   * the delete throws and takes the rest of the sweep with it.
+   */
+  it("skips a bottle a submission points at, rather than throwing on the FK", async () => {
+    const original = await submitBottle(db, submitter.id, {
+      name: "Duplicated Original",
+      category: "bourbon",
+    });
+    const other = await createTestUser(db);
+    const copy = await submitBottle(db, other.id, {
+      name: "Duplicated Original Batch 2",
+      category: "bourbon",
+    });
+    await db
+      .update(schema.bottleSubmissions)
+      .set({ state: "duplicate", duplicateOfBottleId: original.bottle.id })
+      .where(eq(schema.bottleSubmissions.id, copy.submissionId));
+
+    await db
+      .delete(schema.bottleSubmissions)
+      .where(eq(schema.bottleSubmissions.id, original.submissionId));
+    await db
+      .update(schema.bottles)
+      .set({ submittedBy: null })
+      .where(eq(schema.bottles.id, original.bottle.id));
+
+    expect(await sweepOrphanedSubmissions(db)).toBe(0);
+    expect(
+      await db.query.bottles.findFirst({ where: eq(schema.bottles.id, original.bottle.id) }),
+    ).toBeDefined();
+  });
+
+  it("is what the account deletion it cleans up after actually produces", async () => {
+    const { bottle } = await submitBottle(db, submitter.id, {
+      name: "Gone With Their Account",
+      category: "bourbon",
+    });
+
+    // The real path, not a hand-built state: deleting the account cascades the
+    // submission and nulls the bottle's submitter.
+    await db.delete(schema.user).where(eq(schema.user.id, submitter.id));
+    const stranded = await db.query.bottles.findFirst({
+      where: eq(schema.bottles.id, bottle.id),
+    });
+    expect(stranded?.status).toBe("user_submitted");
+    expect(stranded?.submittedBy).toBeNull();
+
+    expect(await sweepOrphanedSubmissions(db)).toBe(1);
+    expect(
+      await db.query.bottles.findFirst({ where: eq(schema.bottles.id, bottle.id) }),
+    ).toBeUndefined();
   });
 });

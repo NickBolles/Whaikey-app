@@ -1,10 +1,12 @@
-import { and, desc, eq, gt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNull, notExists, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import type { DB } from "@/db";
 import {
   bottleSubmissions,
   bottleUpcs,
   bottles,
   distilleries,
+  userProfiles,
   type Bottle,
   type Relationship,
   type UserBottle,
@@ -264,4 +266,292 @@ export async function listOwnSubmissions(db: DB, userId: string, limit = 50) {
     .where(eq(bottleSubmissions.submittedBy, userId))
     .orderBy(desc(bottleSubmissions.createdAt))
     .limit(limit);
+}
+
+/* -------------------------------------------------------------------------
+ * Review (WP-18)
+ *
+ * WP-16 shipped the submission path and left the other end of it open: rows
+ * accumulated in `bottle_submissions` and nothing could promote one, so a
+ * submitted bottle stayed private to its submitter indefinitely. This is that
+ * end.
+ *
+ * Catalog review is deliberately NOT recorded in `moderation_actions`. That
+ * table's subject types are the social ones (comment, pour, profile), and a
+ * submission already has its own append-once record on the row itself —
+ * `reviewedBy`, `reviewedAt`, `reviewNote` and, for a duplicate, what it
+ * duplicates. Widening a social audit table to carry catalog decisions would
+ * make both harder to read and neither more complete.
+ * ---------------------------------------------------------------------- */
+
+export interface PendingSubmission {
+  id: string;
+  bottleId: string;
+  name: string;
+  category: WhiskeyCategory | null;
+  /** The distillery we matched, when the typed name matched one exactly. */
+  distilleryName: string | null;
+  /** The distillery as typed, parked because it matched nothing. */
+  distilleryText: string | null;
+  country: string | null;
+  region: string | null;
+  abv: number | null;
+  upc: string | null;
+  source: string | null;
+  createdAt: Date;
+  ageHours: number;
+  submittedBy: string;
+  submitterHandle: string | null;
+}
+
+/**
+ * Submissions waiting on review, oldest first.
+ *
+ * Oldest first for the same reason the report queue is: a newest-first queue
+ * is one where the row that has waited longest is the row nobody ever reaches.
+ */
+export async function listPendingSubmissions(
+  db: DB,
+  limit = 100,
+  now = new Date(),
+): Promise<PendingSubmission[]> {
+  const rows = await db
+    .select({
+      id: bottleSubmissions.id,
+      bottleId: bottleSubmissions.bottleId,
+      name: bottles.name,
+      category: bottles.category,
+      distilleryName: distilleries.name,
+      distilleryText: bottleSubmissions.distilleryText,
+      country: bottles.country,
+      region: bottles.region,
+      abv: bottles.abv,
+      upc: bottleSubmissions.upc,
+      source: bottleSubmissions.source,
+      createdAt: bottleSubmissions.createdAt,
+      submittedBy: bottleSubmissions.submittedBy,
+      submitterHandle: userProfiles.handle,
+    })
+    .from(bottleSubmissions)
+    .innerJoin(bottles, eq(bottles.id, bottleSubmissions.bottleId))
+    .leftJoin(distilleries, eq(distilleries.id, bottles.distilleryId))
+    .leftJoin(userProfiles, eq(userProfiles.userId, bottleSubmissions.submittedBy))
+    .where(eq(bottleSubmissions.state, "pending"))
+    .orderBy(asc(bottleSubmissions.createdAt))
+    .limit(limit);
+
+  return rows.map((row) => ({
+    ...row,
+    ageHours: Math.floor((now.getTime() - row.createdAt.getTime()) / 3_600_000),
+  }));
+}
+
+export class UnknownSubmissionError extends Error {
+  constructor() {
+    super("There is no pending submission at that id");
+    this.name = "UnknownSubmissionError";
+  }
+}
+
+/**
+ * Promote a submission into the shared catalog.
+ *
+ * Two writes that must not come apart: the bottle becomes visible to everyone
+ * and the submission stops being pending. A barcode that arrived with it
+ * becomes a catalog mapping here and nowhere earlier — `bottle_upcs` is
+ * crowdsourced truth every other scanner resolves against, so publishing it
+ * before a human looked would let one submission answer everybody's scan.
+ *
+ * Promotion does not touch any pour's visibility. The system never raises a
+ * visibility; a pour clamped private while the bottle was pending stays
+ * private until its owner says otherwise.
+ */
+export async function approveSubmission(
+  db: DB,
+  reviewerId: string,
+  submissionId: string,
+  note?: string,
+  now = new Date(),
+): Promise<{ bottleId: string }> {
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .update(bottleSubmissions)
+      .set({
+        state: "approved",
+        reviewedBy: reviewerId,
+        reviewedAt: now,
+        reviewNote: note?.trim() || null,
+      })
+      .where(and(eq(bottleSubmissions.id, submissionId), eq(bottleSubmissions.state, "pending")))
+      .returning({ bottleId: bottleSubmissions.bottleId, upc: bottleSubmissions.upc });
+    // The state predicate is the concurrency control: two operators clicking
+    // the same row means the second one changes nothing and is told so,
+    // rather than re-approving something already decided.
+    if (!row) throw new UnknownSubmissionError();
+
+    await tx
+      .update(bottles)
+      .set({ status: "verified" })
+      .where(eq(bottles.id, row.bottleId));
+
+    if (row.upc) await publishSubmissionUpc(tx, row.bottleId, row.upc);
+    return { bottleId: row.bottleId };
+  });
+}
+
+/**
+ * Decline a submission.
+ *
+ * The bottle is not deleted and not taken away from the person who added it:
+ * it stays `user_submitted`, which means it stays visible to its submitter and
+ * keeps working on their shelf and in their journal. Their records are theirs.
+ * What declining withholds is the shared catalog — and the passport, which
+ * already excludes `user_submitted` rows for exactly this reason.
+ *
+ * The reason is required. A decision the submitter cannot be told the grounds
+ * for is one nobody can argue with.
+ */
+export async function rejectSubmission(
+  db: DB,
+  reviewerId: string,
+  submissionId: string,
+  reason: string,
+  now = new Date(),
+): Promise<void> {
+  const [row] = await db
+    .update(bottleSubmissions)
+    .set({ state: "rejected", reviewedBy: reviewerId, reviewedAt: now, reviewNote: reason.trim() })
+    .where(and(eq(bottleSubmissions.id, submissionId), eq(bottleSubmissions.state, "pending")))
+    .returning({ id: bottleSubmissions.id });
+  if (!row) throw new UnknownSubmissionError();
+}
+
+/**
+ * Record that a submission duplicates a bottle we already have.
+ *
+ * The target must be a bottle everyone can see — pointing one pending
+ * submission at another would record a duplicate of something that may itself
+ * never exist. Like a rejection, the submitted row stays private rather than
+ * being deleted; re-pointing the submitter's shelf rows and pours at the
+ * canonical bottle is a merge, and a merge is not this (PLAN.md §9.4).
+ */
+export async function markSubmissionDuplicate(
+  db: DB,
+  reviewerId: string,
+  submissionId: string,
+  duplicateOfBottleId: string,
+  note: string | undefined,
+  now = new Date(),
+): Promise<void> {
+  const target = await db.query.bottles.findFirst({
+    columns: { id: true, status: true },
+    where: eq(bottles.id, duplicateOfBottleId),
+  });
+  if (!target || target.status === "user_submitted") throw new UnknownSubmissionError();
+
+  const [row] = await db
+    .update(bottleSubmissions)
+    .set({
+      state: "duplicate",
+      duplicateOfBottleId,
+      reviewedBy: reviewerId,
+      reviewedAt: now,
+      reviewNote: note?.trim() || null,
+    })
+    .where(and(eq(bottleSubmissions.id, submissionId), eq(bottleSubmissions.state, "pending")))
+    .returning({ id: bottleSubmissions.id });
+  if (!row) throw new UnknownSubmissionError();
+}
+
+/** How many submissions are waiting — the queue's own header, and a backlog alarm. */
+export async function countPendingSubmissions(db: DB): Promise<number> {
+  const [row] = await db
+    .select({ n: sql<number>`count(*)` })
+    .from(bottleSubmissions)
+    .where(eq(bottleSubmissions.state, "pending"));
+  return Number(row?.n ?? 0);
+}
+
+/**
+ * This viewer's own submission of this bottle, when there is one.
+ *
+ * The review outcome has to be readable by the person who submitted it — a
+ * decline writes a required reason, and a reason nobody can read is a reason
+ * in name only. Scoped to the submitter: what a reviewer wrote is between
+ * them, not something another viewer of the bottle gets to see.
+ */
+export async function getSubmissionForBottle(
+  db: DB,
+  bottleId: string,
+  userId: string,
+): Promise<Pick<
+  typeof bottleSubmissions.$inferSelect,
+  "id" | "state" | "reviewNote" | "duplicateOfBottleId" | "createdAt"
+> | null> {
+  const row = await db.query.bottleSubmissions.findFirst({
+    columns: {
+      id: true,
+      state: true,
+      reviewNote: true,
+      duplicateOfBottleId: true,
+      createdAt: true,
+    },
+    where: and(eq(bottleSubmissions.bottleId, bottleId), eq(bottleSubmissions.submittedBy, userId)),
+  });
+  return row ?? null;
+}
+
+/**
+ * Delete unapproved bottles whose submitter's account is gone.
+ *
+ * `bottles.submittedBy` is `set null` on account deletion, because a bottle
+ * already promoted into the shared catalog is data everybody's shelf points at
+ * and has to outlive whoever first typed it. But an **unapproved** one is not
+ * shared data yet: `catalogVisibleTo` shows a `user_submitted` bottle only to
+ * its submitter, so with the submitter null it is visible to nobody — and
+ * `bottle_submissions.submittedBy` cascades, so the row that would have put it
+ * back in the review queue is gone too. The result is user-entered content
+ * that survives the account it belongs to, unreachable and unreviewable,
+ * against a Privacy Policy that promises deletion.
+ *
+ * Swept rather than deleted at the point of account deletion because that path
+ * does not exist yet (SEC-M5): today the Privacy Policy describes deletion as
+ * a support request, so the cleanup has to be something that catches the
+ * result however the account went away, including by hand.
+ *
+ * Two rows are deliberately spared:
+ *
+ * - A bottle with a submission row still attached. Its submitter's account may
+ *   be gone, but the queue can still see it, and a decision an operator can
+ *   still make is not orphaned.
+ * - A bottle another submission was marked a **duplicate of**. Not reachable
+ *   through the app today — `markSubmissionDuplicate` refuses a target that is
+ *   still `user_submitted`, so a duplicate always points at a promoted bottle,
+ *   which this sweep never considers. The guard is on the *column*, not on
+ *   that rule: `duplicate_of_bottle_id` has no delete policy, so if the rule
+ *   ever relaxes the delete would throw and take the rest of the sweep with
+ *   it. Skipping a row is a smaller failure than a housekeeping job that stops
+ *   at the first one.
+ */
+export async function sweepOrphanedSubmissions(db: DB): Promise<number> {
+  const dupe = alias(bottleSubmissions, "dupe_of");
+  const rows = await db
+    .delete(bottles)
+    .where(
+      and(
+        eq(bottles.status, "user_submitted"),
+        isNull(bottles.submittedBy),
+        notExists(
+          db
+            .select({ one: sql`1` })
+            .from(bottleSubmissions)
+            .where(eq(bottleSubmissions.bottleId, bottles.id)),
+        ),
+        notExists(
+          db.select({ one: sql`1` }).from(dupe).where(eq(dupe.duplicateOfBottleId, bottles.id)),
+        ),
+      ),
+    )
+    .returning({ id: bottles.id });
+  return rows.length;
 }

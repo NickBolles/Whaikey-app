@@ -61,6 +61,10 @@ export default defineConfig({
       // app actually needs shows up here as a broken page, not as a report
       // nobody read.
       WHAIKEY_CSP_ENFORCE: "true",
+      // One account is on the moderation allowlist (PLAN.md §9.4), so the e2e
+      // suite can walk both sides of it: a queue for the operator, a 404 for
+      // everybody else. Left UNSET would only ever prove the 404.
+      WHAIKEY_OPERATOR_IDS: "operator-user",
     },
     timeout: 120_000,
   },

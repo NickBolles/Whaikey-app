@@ -407,6 +407,29 @@ describe("recommendBottles — taste twins (US-16)", () => {
     await logPour(owned.id, 5);
   }
 
+  it("gives a suspended viewer no twin sentence, only the palate reason", async () => {
+    await peatyViewer();
+    const candidate = await createTestBottle(db, { name: "Twin Pick", flavorProfile: { peaty: 8 } });
+    await twinWhoLikes("sasha", candidate.id, 4.5);
+    await db.insert(schema.userProfiles).values({
+      userId,
+      handle: "viewer",
+      displayName: "viewer",
+      isPublic: true,
+      socialEnabled: true,
+      suspendedAt: new Date(),
+    });
+
+    // Recommendations reach other people's ratings through taste twins, which
+    // is a social read like any other. The bottle still gets recommended on
+    // the viewer's own palate — a suspension takes away other people's data,
+    // not the product.
+    const recs = await recommendBottles(db, userId, { mode: "discovery" });
+    const pick = recs.find((r) => r.bottleId === candidate.id);
+    expect(pick).toBeDefined();
+    expect(pick!.reason).not.toMatch(/sasha|palate match|taste like you/);
+  });
+
   it("cites the twin who rated it, with the match that earned the mention", async () => {
     await peatyViewer();
     const candidate = await createTestBottle(db, { name: "Twin Pick", flavorProfile: { peaty: 8 } });
