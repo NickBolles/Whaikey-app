@@ -1,11 +1,13 @@
 import { eq } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
 import { createTestUser, setupTestDb, uid } from "@/test/helpers";
 import { RATE_LIMIT_RETENTION_MS } from "@/lib/ai/rate-limit";
 import { submitBottle } from "@/lib/catalog";
 import { GET } from "./route";
+import { setErrorReporterForTests, type CapturedEvent } from "@/lib/observability/errors";
+import * as socialModule from "@/lib/social";
 
 /**
  * The retention claim in `/privacy` used to hold only while somebody was using
@@ -178,5 +180,85 @@ describe("GET /api/cron/sweep", () => {
 
     // Nothing was swept by any of those.
     expect(await db.select().from(schema.aiRateLimits)).toHaveLength(1);
+  });
+});
+
+
+describe("one broken sweeper must not stop the rest", () => {
+  let db: DB;
+  const original = process.env.CRON_SECRET;
+  let captured: CapturedEvent[];
+
+  beforeEach(async () => {
+    db = await setupTestDb();
+    process.env.CRON_SECRET = "test-secret";
+    captured = [];
+    setErrorReporterForTests((e) => captured.push(e));
+  });
+
+  afterEach(() => {
+    if (original === undefined) delete process.env.CRON_SECRET;
+    else process.env.CRON_SECRET = original;
+    setErrorReporterForTests(null);
+    vi.restoreAllMocks();
+  });
+
+  function authed(): Request {
+    return new Request("http://localhost/api/cron/sweep", {
+      headers: { authorization: "Bearer test-secret" },
+    });
+  }
+
+  it("still prunes telemetry when an earlier sweeper throws", async () => {
+    // Phone lookups run BEFORE telemetry. As a straight line of awaits, this
+    // ended the request and the 90-day telemetry retention silently stopped
+    // being enforced -- for as long as the unrelated table stayed broken.
+    vi.spyOn(socialModule, "sweepExpiredPhoneLookups").mockRejectedValue(
+      new Error("phone_lookups is gone"),
+    );
+    const stale = new Date(Date.now() - 91 * 24 * 60 * 60 * 1000);
+    await db.insert(schema.aiUsage).values({
+      id: uid("usage"),
+      userId: null,
+      feature: "enrich",
+      model: "claude-sonnet-5",
+      inputTokens: 10,
+      outputTokens: 1,
+      createdAt: stale,
+    });
+    await db.insert(schema.analyticsEvents).values({
+      id: uid("event"),
+      name: "share_view",
+      createdAt: stale,
+    });
+
+    const res = await GET(authed());
+
+    // The row past its retention is gone even though an earlier task failed.
+    expect(await db.select().from(schema.aiUsage)).toHaveLength(0);
+    expect(await db.select().from(schema.analyticsEvents)).toHaveLength(0);
+    // And the failure is neither hidden nor mistaken for a clean run.
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ ok: false, failed: ["phone-lookups"] });
+    expect(captured.map((e) => e.context.tags?.task)).toContain("phone-lookups");
+  });
+
+  it("reports each broken task separately, not once for the run", async () => {
+    vi.spyOn(socialModule, "sweepExpiredPhoneLookups").mockRejectedValue(new Error("a"));
+    const catalog = await import("@/lib/catalog");
+    vi.spyOn(catalog, "sweepOrphanedSubmissions").mockRejectedValue(new Error("b"));
+
+    const res = await GET(authed());
+
+    // Two different tables, two different root causes, two different fixes:
+    // one event for the run would hide the second behind the first.
+    expect(await res.json()).toEqual({
+      ok: false,
+      failed: ["phone-lookups", "orphaned-submissions"],
+    });
+    expect(captured.map((e) => e.context.tags?.task).sort()).toEqual([
+      "orphaned-submissions",
+      "phone-lookups",
+    ]);
   });
 });

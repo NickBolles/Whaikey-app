@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
+  reportInBackground,
+  reportMessageInBackground,
+  reportingErrors,
+} from "@/lib/observability/errors";
+import {
   consumeNativeAuthRequest,
   issueNativeAuthCode,
   NATIVE_CALLBACK_SCHEME,
@@ -32,7 +37,7 @@ function appRedirect(params: Record<string, string>): NextResponse {
   return new NextResponse(null, { status: 302, headers: { location: url.toString() } });
 }
 
-export async function GET(request: NextRequest) {
+async function handleGet(request: NextRequest) {
   // Single-use: consumed here whatever the outcome, so a callback URL that
   // leaks (browser history, a shared screen) can't be walked back through.
   const pending = await consumeNativeAuthRequest(
@@ -76,6 +81,15 @@ export async function GET(request: NextRequest) {
 
   if (!sessionCookie) {
     console.error("[native-auth] signed in but no session cookie named", cookieName);
+    // Not an exception, so nothing would ever have reported it — but it means
+    // Better Auth signed somebody in and the cookie is not on the request,
+    // which is a misconfiguration that breaks native sign-in for everyone at
+    // once and shows up on the device as a generic failure.
+    reportMessageInBackground("native sign-in completed without a session cookie", {
+      where: "auth/native/complete",
+      userId: user.id,
+      tags: { cookieName },
+    });
     return withState({ error: "no_session_cookie" });
   }
 
@@ -89,6 +103,20 @@ export async function GET(request: NextRequest) {
     return withState({ code });
   } catch (err) {
     console.error("[native-auth] failed to issue exchange code", err);
+    // Same reason as `/start`: this catch answers the app rather than
+    // rethrowing, so `reportingErrors` never sees it. The person is signed in
+    // at this point and still cannot get into the app, which is the worst
+    // failure in the flow to leave unreported.
+    reportInBackground(err, { where: "auth/native/complete", userId: user.id });
     return withState({ error: "exchange_failed" });
   }
+}
+
+/**
+ * Reporting only (WP-19). This route does not use `withErrorHandling` — it
+ * owns its own responses for reasons documented above — so the wrapper adds
+ * the Sentry report and nothing else: same error, same response, same status.
+ */
+export async function GET(request: NextRequest) {
+  return reportingErrors("auth/native/complete", () => handleGet(request));
 }

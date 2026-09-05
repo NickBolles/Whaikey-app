@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { requireUser, withErrorHandling } from "@/lib/session";
+import { reportInBackground } from "@/lib/observability/errors";
 import { isAiConfigured } from "@/lib/ai/client";
 import { reserveAiRequest } from "@/lib/ai/rate-limit";
 import type { ChatStreamEvent } from "@/lib/ai/chat";
@@ -61,6 +62,19 @@ export async function POST(request: Request) {
     }
 
     const encoder = new TextEncoder();
+    /**
+     * Set when the CONSUMER goes away — a closed tab, a navigation, a client
+     * abort — as opposed to the answer failing.
+     *
+     * Without this the two are indistinguishable from inside `start`: a
+     * cancelled stream closes the controller, so the next `enqueue` throws and
+     * lands in the same catch as a genuine Anthropic or database failure. The
+     * report added for those would then have filed every routine navigation as
+     * a chat error, which is how a monitoring signal becomes noise and then
+     * becomes ignored — the failure this work package exists to prevent,
+     * arriving through its own fix.
+     */
+    let cancelled = false;
     const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
         const send = (event: unknown) =>
@@ -69,11 +83,71 @@ export async function POST(request: Request) {
           if (!first.done) send(first.value);
           for await (const event of generator) send(event);
         } catch (err) {
+          if (cancelled) {
+            // Nobody is listening and nothing went wrong. Not reported, and
+            // not sent: enqueueing into a closed controller throws again, and
+            // a throw from this catch escapes `start` as an unhandled
+            // rejection.
+            return;
+          }
           console.error("chat stream failed", err instanceof Error ? err.name : "unknown error");
-          send({ type: "error", message: "The concierge couldn't finish that response. Please try again." });
+          /**
+           * Reported here, because nothing else can see it.
+           *
+           * `withErrorHandling` returned the moment this `Response` was
+           * constructed, and `onRequestError` only sees what escapes to Next —
+           * so an Anthropic failure, a tool failure or a database failure
+           * *mid-stream* was swallowed into an SSE event and reported nowhere.
+           * Chat is the highest-volume AI surface, so this was the largest
+           * blind spot left in the monitoring: the user is told the concierge
+           * could not finish, and the server said nothing at all.
+           *
+           * Same shape as the native sign-in handlers: a catch that answers
+           * the client instead of rethrowing is invisible to every wrapper
+           * above it, and has to report for itself.
+           */
+          reportInBackground(err, { where: "api/chat/stream", userId: user.id });
+          try {
+            send({ type: "error", message: "The concierge couldn't finish that response. Please try again." });
+          } catch {
+            // The client left between the failure and this line. The report
+            // above is the part that matters; there is nobody to tell.
+          }
         } finally {
-          controller.close();
+          try {
+            controller.close();
+          } catch {
+            // Already closed by a cancel. Closing twice is a TypeError, and
+            // one thrown here would escape `start` unhandled.
+          }
         }
+      },
+      cancel() {
+        cancelled = true;
+        /**
+         * Stop the model call rather than letting it run on for a reader who
+         * has gone. `return()` on an async generator is queued behind the
+         * in-flight `next()`, so it takes effect at the next yield point and
+         * the generator's own `finally` still records the tokens already
+         * billed (see `runChatStream`) — verified, not assumed.
+         *
+         * **Returned**, not just caught. The Web Streams cancellation
+         * lifecycle awaits whatever `cancel()` returns; discarding the promise
+         * meant the response could finish — and a serverless invocation
+         * freeze — while the generator's `finally` was still writing the
+         * tokens already billed, so the aborted calls this was meant to
+         * capture could go missing from the totals anyway. The previous
+         * version added `.catch` to stop an unhandled rejection and stopped
+         * there: half of a floating promise is the rejection, the other half
+         * is that nobody waits for it, and only the first half got fixed.
+         *
+         * Rejections still swallowed, because a cleanup failure must not
+         * become the cancellation's problem.
+         */
+        return generator.return(undefined as never).then(
+          () => undefined,
+          () => undefined,
+        );
       },
     });
 

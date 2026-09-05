@@ -293,3 +293,89 @@ describe("/api/user-bottles", () => {
     expect(remaining).toHaveLength(0);
   });
 });
+
+describe("attributing a wishlist add to a share (PLAN-A5)", () => {
+  let db: DB;
+  let owner: schema.User;
+  let viewer: schema.User;
+  let shared: schema.Bottle;
+  let other: schema.Bottle;
+  let shareId: string;
+
+  beforeEach(async () => {
+    db = await setupTestDb();
+    owner = await createTestUser(db);
+    viewer = await createTestUser(db);
+    shared = await createTestBottle(db, { name: "Shared" });
+    other = await createTestBottle(db, { name: "Unrelated" });
+    const pourId = uid("pour");
+    await db
+      .insert(schema.pours)
+      .values({ id: pourId, userId: owner.id, bottleId: shared.id, visibility: "public" });
+    shareId = uid("share");
+    await db
+      .insert(schema.pourShares)
+      .values({ id: shareId, pourId, userId: owner.id, code: uid("code") });
+    setSessionUser(viewer);
+  });
+
+  async function add(
+    bottleId: string,
+    fromShareId?: string,
+    relationship: schema.Relationship = "wishlist",
+  ) {
+    return POST(
+      jsonRequest("/api/user-bottles", "POST", {
+        bottleId,
+        relationship,
+        ...(fromShareId ? { fromShareId } : {}),
+      }),
+    );
+  }
+
+  it("records the conversion when the share really is for that bottle", async () => {
+    expect((await add(shared.id, shareId)).status).toBe(201);
+    const events = await db.select().from(schema.analyticsEvents);
+    expect(events).toHaveLength(1);
+    expect(events[0].name).toBe("share_wishlist_add");
+    expect(events[0].shareId).toBe(shareId);
+  });
+
+  it("does not file an `own` add under the name that says wishlist", async () => {
+    // The share page's button always sends "wishlist", but the endpoint takes
+    // the relationship from the caller — so the funnel's `wishlistAddsFromShare`
+    // was one hand-written request away from counting people who already own
+    // the bottle. Recorded, because it is a real conversion, under its own name.
+    expect((await add(shared.id, shareId, "own")).status).toBe(201);
+    const events = await db.select().from(schema.analyticsEvents);
+    expect(events).toHaveLength(1);
+    expect(events[0].name).toBe("share_shelf_add");
+  });
+
+  it("refuses to credit a share for a bottle it is not about", async () => {
+    // The id exists, so the foreign key is satisfied — which is all the first
+    // version checked. Anyone holding any share id could otherwise add an
+    // unrelated bottle and manufacture a conversion in the number PLAN-A5's
+    // phase gate turns on.
+    expect((await add(other.id, shareId)).status).toBe(201);
+    expect(await db.select().from(schema.analyticsEvents)).toHaveLength(0);
+  });
+
+  it("does not credit the sharer for shelving their own bottle", async () => {
+    setSessionUser(owner);
+    expect((await add(shared.id, shareId)).status).toBe(201);
+    // Same reasoning as the view event: the funnel is about recipients.
+    expect(await db.select().from(schema.analyticsEvents)).toHaveLength(0);
+  });
+
+  it("ignores a share id that does not exist, and still adds the bottle", async () => {
+    expect((await add(shared.id, "no-such-share")).status).toBe(201);
+    expect(await db.select().from(schema.analyticsEvents)).toHaveLength(0);
+    // The shelf write is the user's action and must not depend on telemetry.
+    const rows = await db
+      .select()
+      .from(schema.userBottles)
+      .where(eq(schema.userBottles.bottleId, shared.id));
+    expect(rows).toHaveLength(1);
+  });
+});

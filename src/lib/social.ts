@@ -1194,6 +1194,9 @@ async function countCheers(db: DB, pourId: string, viewerId: string | null): Pro
   const conditions = [
     eq(schema.reactions.pourId, pourId),
     eq(schema.reactions.kind, "cheers"),
+    // A retracted cheer is gone from every count the UI renders; the row
+    // survives only so the guardrail window it happened in keeps its number.
+    isNull(schema.reactions.retractedAt),
     // Unconditional: a stepped-back author's cheer is hidden from a signed-out
     // reader too, and the count has to say the same thing the card does.
     contributorVisibleSql(schema.reactions.userId, viewerId),
@@ -1261,7 +1264,12 @@ async function countComments(db: DB, pourId: string, viewerId: string | null): P
 
 async function hasCheered(db: DB, userId: string, pourId: string): Promise<boolean> {
   const row = await db.query.reactions.findFirst({
-    where: and(eq(schema.reactions.pourId, pourId), eq(schema.reactions.userId, userId), eq(schema.reactions.kind, "cheers")),
+    where: and(
+      eq(schema.reactions.pourId, pourId),
+      eq(schema.reactions.userId, userId),
+      eq(schema.reactions.kind, "cheers"),
+      isNull(schema.reactions.retractedAt),
+    ),
   });
   return Boolean(row);
 }
@@ -1450,6 +1458,7 @@ export async function getFriendFeed(db: DB, viewerId: string, opts: { limit?: nu
       and(
         inArray(schema.reactions.pourId, pourIds),
         eq(schema.reactions.kind, "cheers"),
+        isNull(schema.reactions.retractedAt),
         contributorVisibleSql(schema.reactions.userId, viewerId),
         actedAfterAuthorJoinedSql(schema.reactions.userId, schema.reactions.createdAt, viewerId),
       ),
@@ -1479,6 +1488,7 @@ export async function getFriendFeed(db: DB, viewerId: string, opts: { limit?: nu
         inArray(schema.reactions.pourId, pourIds),
         eq(schema.reactions.userId, viewerId),
         eq(schema.reactions.kind, "cheers"),
+        isNull(schema.reactions.retractedAt),
       ),
     );
   const viewerCheeredSet = new Set(viewerCheersRows.map((r) => r.pourId));
@@ -1843,16 +1853,42 @@ export async function cheerPour(db: DB, userId: string, pourId: string): Promise
     await tx
       .insert(schema.reactions)
       .values({ id: crypto.randomUUID(), pourId, userId, kind: "cheers" })
-      .onConflictDoNothing();
+      // Un-retracts rather than inserting a second row: the unique index is on
+      // (pour, user, kind), and `createdAt` is deliberately left alone so the
+      // guardrail keeps attributing the cheer to the week it was first given
+      // instead of moving it every time the control is toggled.
+      .onConflictDoUpdate({
+        target: [schema.reactions.pourId, schema.reactions.userId, schema.reactions.kind],
+        set: { retractedAt: null },
+      });
   });
   return { cheersCount: await countCheers(db, pourId, userId) };
 }
 
+/**
+ * Take a cheer back.
+ *
+ * Marks rather than deletes. The reader sees the same thing either way — every
+ * count and every "did I cheer this" check filters `retractedAt` — but the row
+ * stays so `guardrailMetrics` can still count the social actions that happened
+ * in a past window. Deleting made that window's total depend on when it was
+ * asked for, which is the same defect the pour snapshot columns fixed one
+ * table over, and it moved the reports-per-thousand rate in the direction
+ * least likely to prompt a look.
+ */
 export async function uncheerPour(db: DB, userId: string, pourId: string): Promise<{ cheersCount: number } | null> {
   if (!(await canViewPour(db, userId, pourId))) return null;
   await db
-    .delete(schema.reactions)
-    .where(and(eq(schema.reactions.pourId, pourId), eq(schema.reactions.userId, userId), eq(schema.reactions.kind, "cheers")));
+    .update(schema.reactions)
+    .set({ retractedAt: new Date() })
+    .where(
+      and(
+        eq(schema.reactions.pourId, pourId),
+        eq(schema.reactions.userId, userId),
+        eq(schema.reactions.kind, "cheers"),
+        isNull(schema.reactions.retractedAt),
+      ),
+    );
   return { cheersCount: await countCheers(db, pourId, userId) };
 }
 

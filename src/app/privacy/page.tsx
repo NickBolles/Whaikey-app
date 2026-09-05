@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { PolicyPage } from "@/components/policy-page";
+import { isErrorMonitoringConfigured } from "@/lib/observability/errors";
 
 export const metadata: Metadata = {
   title: "Privacy",
@@ -16,6 +17,15 @@ export const metadata: Metadata = {
  * a control nobody has.
  */
 export default function PrivacyPage() {
+  /**
+   * Named only when it is actually in use.
+   *
+   * A policy that lists a processor we do not send anything to is the same
+   * class of error as one that omits a processor we do — both make the list
+   * something a reader learns to stop believing. `SENTRY_DSN` is the whole
+   * condition, and it is the same condition the code reports under.
+   */
+  const errorMonitoringEnabled = isErrorMonitoringConfigured();
   return (
     <PolicyPage title="Privacy">
       <Section title="The short version">
@@ -72,6 +82,22 @@ export default function PrivacyPage() {
             nothing your journal does not.
           </li>
           <li>
+            <strong className="text-foreground">What the AI cost</strong> — for each request you
+            make of the AI, which feature it was, which model answered, how many tokens it used,
+            and how many web searches it ran. No part of what you asked or what it said is in
+            this — nor what was searched for — it is a meter reading, and it exists so we can tell
+            whether the AI is affordable before it becomes your problem.
+          </li>
+          <li>
+            <strong className="text-foreground">Four things about share links</strong> — that a
+            share page was opened, whether a comparison appeared on it, and whether it led to the
+            bottle going on your wishlist or straight onto your shelf. Each one records which
+            link it was and, if you were signed in, <em>which account</em> — your user id, not
+            just the fact that somebody was signed in. Enough to tell whether sharing works at
+            all, and deliberately not a record of what you read: nothing about pages you visit
+            anywhere else in the app is recorded.
+          </li>
+          <li>
             <strong className="text-foreground">Your age answer</strong> — the date of birth and
             market you gave the gate, once, and whether it met the minimum.
           </li>
@@ -80,7 +106,10 @@ export default function PrivacyPage() {
             and profile, who you follow and who follows you, the accounts you have blocked, the
             notes you have cheered, the comments you write, and any share links you create. A
             block is kept until you lift it, because being kept is what makes a block hold; the
-            rest go with the thing they are attached to or with the account.
+            rest go with the thing they are attached to or with the account. Taking a cheer back
+            removes it from the note and from every count immediately, and the record that a
+            cheer happened is kept for 90 days after that — long enough that our safety ratios
+            cannot be rewritten after the fact, and no longer.
           </li>
           <li>
             <strong className="text-foreground">A phone number, only if you offer one</strong> — and
@@ -131,6 +160,14 @@ export default function PrivacyPage() {
             <strong className="text-foreground">Hosting and the database</strong> — the servers
             that run the app and store the rows above.
           </li>
+          {errorMonitoringEnabled && (
+            <li>
+              <strong className="text-foreground">Error monitoring</strong> — when the app fails,
+              a report goes to Sentry so somebody can fix it: what broke, where, and the id of the
+              account it happened to. Not your name or address, not what you were writing, and
+              not the code from a share link — those are stripped before the report leaves.
+            </li>
+          )}
           <li>
             <strong className="text-foreground">The push services</strong> — Apple and Google, if
             you enable notifications.
@@ -144,6 +181,28 @@ export default function PrivacyPage() {
           Your journal is kept until you delete it or the account. Short-lived things are swept:
           native sign-in codes are deleted the moment they are used and swept when they expire,
           rate-limit counters are dropped after a couple of days, and phone lookups are pruned.
+        </p>
+        <p>
+          The AI meter readings, the four share-link events, and cheers you have taken back are
+          kept for 90 days and then deleted. That is the window the numbers are actually read
+          over — a week for the health checks, a month for the sharing ones — and past it they
+          answer nothing anyone is asking. It is swept, not just intended: the same job that
+          prunes everything above does this too.
+        </p>
+        <p>
+          Deleting the account <strong className="text-foreground">unlinks</strong> the first two
+          of those from you rather than erasing them on the spot, and they still go on the same
+          90 days. The reason is that they are counts of things that happened — an AI call the
+          provider billed us for, a link that was opened — and removing them would change last
+          month&rsquo;s totals to say those things never happened. What deletion owes you is that
+          the record stops being about you, and that is what unlinking does: the row keeps a
+          feature name, a model name and a number, and no link back to an account.
+        </p>
+        <p>
+          A cheer you took back is different, and goes with the account. It is something you did
+          on somebody else&rsquo;s note rather than a meter reading, so there is no version of it
+          with your name taken off — an anonymous cheer on a stranger&rsquo;s tasting note would
+          be a thing we invented, not a thing that happened. It is deleted outright.
         </p>
         <p>
           Concierge conversations are kept for the life of the account. Nothing prunes them and

@@ -118,6 +118,12 @@ const INVENTORY: Record<string, Verdict> = {
   // from, not what it is. It is per-user text keyed to `user_id`, stored.
   rec_explanations: { disclosed: "the\n            one-line reason behind a recommendation is cached against your account" },
 
+  // --- Telemetry (WP-19) ---
+  ai_usage: {
+    disclosed: "which model answered, how many tokens it used, and how many web searches it ran",
+  },
+  analytics_events: { disclosed: "that a\n            share page was opened" },
+
   // --- Devices ---
   push_devices: { disclosed: "Device push tokens" },
 
@@ -217,6 +223,39 @@ describe("the privacy policy against the schema", () => {
     expect(screen.getByText(/the notes you have cheered/)).toBeInTheDocument();
     // A block outlives the thing it is attached to, which is worth saying.
     expect(screen.getByText(/A block is kept until you lift it/)).toBeInTheDocument();
+  });
+
+  it("does not promise that a withdrawn cheer survives account deletion", () => {
+    render(<PrivacyPage />);
+    /**
+     * `ai_usage.user_id` and `analytics_events.user_id` are `set null`, so those
+     * rows outlive the account unattributed. `reactions.user_id` is NOT NULL and
+     * cascades, so a withdrawn cheer is erased outright — and a first draft of
+     * the paragraph above swept all three into one sentence about unlinking,
+     * which made the retention disclosure false for a third of what it named.
+     *
+     * A page that oversells what it keeps is the failure this file exists for;
+     * a page that oversells what it DELETES is the same failure pointing the
+     * other way, and it is the more tempting one to write.
+     */
+    expect(screen.getByText(/A cheer you took back is different, and goes with the account/)).toBeInTheDocument();
+    expect(screen.getByText(/It is deleted outright/)).toBeInTheDocument();
+  });
+
+  it("says which account a share event names, not just that somebody was signed in", () => {
+    render(<PrivacyPage />);
+    /**
+     * `analytics_events.user_id` is a foreign key to the account, not a
+     * boolean. The disclosure used to describe it as "whether you were signed
+     * in", which understates the identifiability of the row it is describing —
+     * and a privacy page that undersells what it holds is the one failure mode
+     * this whole file exists to catch.
+     */
+    expect(screen.getByText(/which account/)).toBeInTheDocument();
+    expect(screen.getByText(/your user id, not/)).toBeInTheDocument();
+    // And all four events, not the three that existed before `share_shelf_add`.
+    expect(screen.getByText(/Four things about share links/)).toBeInTheDocument();
+    expect(screen.getByText(/straight onto your shelf/)).toBeInTheDocument();
   });
 
   it("still tells the reader what the concierge keeps and for how long", () => {

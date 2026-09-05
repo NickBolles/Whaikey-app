@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, eq } from "drizzle-orm";
 import type * as schema from "@/db/schema";
 import { type DB, schema as dbSchema } from "@/db";
@@ -11,6 +11,7 @@ import {
   setupTestDb,
 } from "@/test/helpers";
 import { setAnthropicForTests } from "@/lib/ai/client";
+import { setErrorReporterForTests, type CapturedEvent } from "@/lib/observability/errors";
 import { AI_HOURLY_LIMIT, reserveAiRequest } from "@/lib/ai/rate-limit";
 import { makeFakeAnthropic, textResponse } from "@/lib/ai/testing";
 import { confirmUpcMapping, resolveUpc } from "@/lib/scan";
@@ -90,20 +91,30 @@ describe("POST /api/import/analyze", () => {
     expect(body.mapping.notes).toBeNull();
   });
 
-  it("degrades to heuristics when the model errors", async () => {
-    setSessionUser(user);
-    const fake = makeFakeAnthropic([]); // queue empty → create() throws
-    setAnthropicForTests(fake.client);
-    const res = await analyzePost(
-      jsonRequest("/api/import/analyze", "POST", {
-        headers: ["Bottle"],
-        sampleRows: [],
-      }),
-    );
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.source).toBe("heuristic");
-    expect(body.mapping.name).toBe(0);
+  it("degrades to heuristics when the model errors, and reports why", async () => {
+    const captured: CapturedEvent[] = [];
+    setErrorReporterForTests((e) => captured.push(e));
+    try {
+      setSessionUser(user);
+      const fake = makeFakeAnthropic([]); // queue empty → create() throws
+      setAnthropicForTests(fake.client);
+      const res = await analyzePost(
+        jsonRequest("/api/import/analyze", "POST", {
+          headers: ["Bottle"],
+          sampleRows: [],
+        }),
+      );
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.source).toBe("heuristic");
+      expect(body.mapping.name).toBe(0);
+      // The fallback answers 200, so withErrorHandling and onRequestError both
+      // see a success: an AI outage could downgrade every import in the product
+      // indefinitely and the only evidence would be that mappings got worse.
+      expect(captured.map((e) => e.context.where)).toContain("api/import/analyze");
+    } finally {
+      setErrorReporterForTests(null);
+    }
   });
 
   it("degrades to heuristics without calling the model when AI quota is exhausted", async () => {

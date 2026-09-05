@@ -159,7 +159,38 @@ export async function createPourShare(
           .values({ id: crypto.randomUUID(), pourId, userId, code, locationLabel })
           .onConflictDoNothing()
           .returning({ code: schema.pourShares.code });
-        if (inserted[0]) return inserted[0];
+        if (inserted[0]) {
+          /**
+           * A bearer link is a way of making a pour visible to another person,
+           * so it is a first-share event exactly as publishing is (WP-19).
+           *
+           * `updatePourVisibility` got this stamp and this path did not, which
+           * left the *primary* S1 flow out of the social-action denominator
+           * entirely — a pour shared by link and never published through the
+           * visibility control counted as nothing forever, inflating reports
+           * per thousand. Stamped in the same transaction as the share row, so
+           * a link that fails to be created stamps nothing.
+           *
+           * Three conditions, and the third was missing for a round.
+           *
+           * `coalesce`, because the first crossing wins and revoking a link to
+           * mint a new one is not a second social action. Only on a genuinely
+           * NEW share row, because an existing share was created at some
+           * earlier moment this column may predate. And only while the pour is
+           * still **private** — the guard `updatePourVisibility` already had,
+           * which this path did not, even though both were written in the same
+           * commit. Without it, a pre-0037 pour that is already public with a
+           * null stamp gets `now()` the first time anybody makes a link for
+           * it, filing a publication from months ago as this week's social
+           * action. Null and excluded stays the honest answer for history the
+           * column did not exist for.
+           */
+          await tx
+            .update(schema.pours)
+            .set({ firstSharedAt: sql`coalesce(${schema.pours.firstSharedAt}, now())` })
+            .where(and(eq(schema.pours.id, pourId), eq(schema.pours.visibility, "private")));
+          return inserted[0];
+        }
         const raced = await tx.query.pourShares.findFirst({
           where: and(eq(schema.pourShares.pourId, pourId), eq(schema.pourShares.userId, userId)),
         });

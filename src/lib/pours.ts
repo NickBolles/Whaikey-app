@@ -242,6 +242,15 @@ export async function logPour(db: DB, userId: string, input: PourInput): Promise
         id: crypto.randomUUID(), userId, bottleId: parsed.bottleId, userBottleId: userBottle?.id ?? null,
         rating: parsed.rating ?? null, servingStyle: parsed.servingStyle ?? null, amountMl, context: parsed.context ?? null,
         visibility, clientId: parsed.clientId ?? null,
+        // Snapshots, written once and never updated (WP-19). `userBottle` is
+        // the row this pour was logged against, so its relationship here is
+        // what the shelf said AT POUR TIME — before a later purchase can flip
+        // a sample into an owned bottle and rewrite history under the metric.
+        shelfRelationshipAtPour: userBottle?.relationship ?? null,
+        visibilityAtCreation: visibility,
+        // The moment it became visible to anyone else — here if it was logged
+        // that way, otherwise on the first publish (see `updatePourVisibility`).
+        firstSharedAt: visibility === "private" ? null : new Date(),
       })
       .returning();
     if (userBottle?.status === "open" && userBottle.fillLevel != null) {
@@ -436,7 +445,30 @@ export async function updatePourVisibility(
     }
     const rows = await tx
       .update(schema.pours)
-      .set({ visibility })
+      .set({
+        visibility,
+        /**
+         * Stamped on an actual private → visible crossing, and only then.
+         *
+         * Two conditions, both load-bearing. `coalesce` means the FIRST
+         * crossing wins, so re-publishing after a step-back cannot slide the
+         * timestamp into a later window and be counted twice. The `case` on
+         * the CURRENT visibility (inside an UPDATE, `pours.visibility` still
+         * reads the old row) means a pour that was already visible is left
+         * alone: rows written before migration 0037 carry a null here even
+         * when they are public, and without this guard a later switch from
+         * `public` to `friends` — or a replay of the same value — would stamp
+         * `now()` and file a publication from months ago as a social action in
+         * this week's window. Null and excluded is the honest answer for
+         * history the column did not exist for.
+         */
+        firstSharedAt:
+          visibility === "private"
+            ? sql`${schema.pours.firstSharedAt}`
+            : sql`case when ${schema.pours.visibility} = 'private'
+                    then coalesce(${schema.pours.firstSharedAt}, now())
+                    else ${schema.pours.firstSharedAt} end`,
+      })
       .where(and(eq(schema.pours.id, pourId), eq(schema.pours.userId, userId)))
       .returning();
     return rows[0] ?? null;

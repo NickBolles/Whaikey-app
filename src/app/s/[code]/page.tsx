@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { headers } from "next/headers";
 import Link from "next/link";
 import { and, eq } from "drizzle-orm";
 import { Star } from "lucide-react";
@@ -12,6 +13,7 @@ import { getDb } from "@/db";
 import * as schema from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
 import { getPublicPourShare } from "@/lib/pour-sharing";
+import { isAutomatedFetch, recordEvents, shareIdForCode } from "@/lib/observability/analytics";
 import { getSocialNote, getSocialPrefs, listComments } from "@/lib/social";
 import { WishlistCta } from "./wishlist-cta";
 
@@ -41,6 +43,62 @@ export default async function SharedPourPage({ params }: Props) {
   const { code } = await params;
   const share = await getPublicPourShare(getDb(), code);
   if (!share) notFound();
+
+  /**
+   * PLAN-A5, the number that was supposed to gate S2 and never existed.
+   *
+   * Recorded here rather than in `getPublicPourShare`, which is also called by
+   * `opengraph-image.tsx` — every link preview a chat app generates would
+   * otherwise count as somebody reading the note, and the funnel would measure
+   * crawlers. This runs where a person actually landed on the page.
+   *
+   * The row stores the share's **id**, never the code in the URL: a table of
+   * live codes is a table of keys, which is the leak `Referrer-Policy` and the
+   * CSP endpoint's redaction both exist to prevent.
+   */
+  const viewer = await getSessionUser();
+  const shareRow = viewer
+    ? await getDb().query.pourShares.findFirst({ where: eq(schema.pourShares.code, code) })
+    : null;
+  const shareId = shareRow?.id ?? (await shareIdForCode(getDb(), code));
+  /**
+   * The sharer opening their own link is not a reader (PLAN-A5).
+   *
+   * `/sharing` has a "View" button beside every link, and the owner branch
+   * below deliberately renders no comparison — there is nothing to compare a
+   * note against its own author. Counting those as signed-in views put a guaranteed
+   * miss in the denominator of the overlap rate, so the metric would read as
+   * sparse overlap in exact proportion to how often people checked their own
+   * links. The number is about recipients; the owner is not one.
+   */
+  const viewerIsOwner = Boolean(viewer && shareRow?.userId === viewer.id);
+  /**
+   * And a preview crawler is not a reader either (PLAN-A5).
+   *
+   * Posting a link into a chat app makes that app fetch this page for its
+   * Open Graph card, before any human has opened anything — so the shares
+   * that travel furthest inflated `views` the most, and the number would have
+   * grown with unfurls rather than with readers. `isAutomatedFetch` reads the
+   * request's own prefetch headers and user-agent; see its docstring for why
+   * the heuristic errs towards over-counting rather than dropping anyone real.
+   */
+  const automated = isAutomatedFetch(await headers());
+  /**
+   * Decided here, WRITTEN at the bottom of this component.
+   *
+   * Recording on the way in meant a visitor whose page then failed — a viewer
+   * note query, the shelf lookup, the discussion reads — got an error screen
+   * while the funnel counted a successful view. `views` would have included
+   * people who saw nothing, which is the same class of defect as counting a
+   * crawler: the number moving for a reason unrelated to what it names.
+   *
+   * Deferring to after every await narrows that to a failure during React's
+   * own render, which no server-side ordering can cover. The honest fix for
+   * the remainder is the client-confirmed impression already recorded in
+   * `docs/REVIEW_2026-09.md`; this is the part that costs nothing.
+   */
+  const shouldRecordView = !viewerIsOwner && !automated;
+
   const noteParts = [["Nose", share.note.nose], ["Palate", share.note.palate], ["Finish", share.note.finish]].filter((part): part is [string, string] => Boolean(part[1]));
   const leafHeat = Object.fromEntries(Object.entries(share.note.flavorTags ?? {}).map(([id, intensity]) => [id, intensity / 3]));
   const wedgeHeat = Object.fromEntries(Object.entries(rollUpToWedges(share.note.flavorTags ?? {})).map(([id, intensity]) => [id, intensity / 10]));
@@ -48,18 +106,17 @@ export default async function SharedPourPage({ params }: Props) {
   // Viewer-private block: computed only for a signed-in viewer, never shown to
   // (or stored for) the sharer, and never allowed to touch the card above.
   let viewerBlock: React.ReactNode = null;
+  let comparisonRendered = false;
   // The signed-in comment/cheers thread (docs/SOCIAL.md US-9/US-12) — only
   // when the bearer link's pour also clears the ordinary canViewPour check
   // for this viewer (getSocialNote non-null). A friends-visibility pour
   // shared with a link-holding stranger still 404s on the comment/cheers
   // APIs, so the thread never renders for them.
   let discussionBlock: React.ReactNode = null;
-  const viewer = await getSessionUser();
   if (viewer) {
     const db = getDb();
-    const shareRow = await db.query.pourShares.findFirst({ where: eq(schema.pourShares.code, code) });
     const pourId = shareRow?.pourId ?? null;
-    const isOwner = shareRow?.userId === viewer.id;
+    const isOwner = viewerIsOwner;
 
     if (isOwner) {
       viewerBlock = (
@@ -88,6 +145,24 @@ export default async function SharedPourPage({ params }: Props) {
             viewerFlavorTags[leafId] = Math.max(viewerFlavorTags[leafId] ?? 0, intensity);
           }
         }
+        /**
+         * The second step of the funnel: a signed-in viewer who has poured
+         * this bottle themselves, so there is something to compare. The gap
+         * between this and `share_view` IS the sparse-overlap risk S1 was
+         * meant to test.
+         *
+         * `!automated` for the same reason as the view above, and the omission
+         * was worse than a missed filter: `comparisonRate` divides this by
+         * signed-in views, so suppressing the denominator while recording the
+         * numerator let an authenticated prefetch push the rate ABOVE 100%.
+         * That is the identical defect as the earlier `blockRate` finding — a
+         * numerator drawn from a wider population than its denominator — and I
+         * reintroduced it one event later while fixing the first one.
+         */
+        // Same deferral as the view, and for a stronger reason: recording a
+        // comparison whose page then failed would leave the numerator of
+        // `comparisonRate` counting a render nobody received.
+        comparisonRendered = !automated;
         viewerBlock = (
           <div className="flex flex-col gap-2">
             <ShareComparison mine={viewerFlavorTags} theirs={share.note.flavorTags} />
@@ -105,7 +180,13 @@ export default async function SharedPourPage({ params }: Props) {
         const existing = await db.query.userBottles.findFirst({
           where: and(eq(schema.userBottles.userId, viewer.id), eq(schema.userBottles.bottleId, share.bottleId)),
         });
-        viewerBlock = <WishlistCta bottleId={share.bottleId} initialRelationship={existing?.relationship ?? null} />;
+        viewerBlock = (
+          <WishlistCta
+            bottleId={share.bottleId}
+            initialRelationship={existing?.relationship ?? null}
+            fromShareId={shareId}
+          />
+        );
       }
 
       if (socialNote && pourId) {
@@ -155,6 +236,30 @@ export default async function SharedPourPage({ params }: Props) {
       }
     }
   }
+
+  /**
+   * Every query has succeeded by here, so these two describe a page that was
+   * actually assembled. Written together so the funnel cannot end up holding a
+   * comparison without the view it is divided by — the asymmetry that let
+   * `comparisonRate` exceed 100% two rounds ago.
+   */
+  const funnelEvents: Array<{
+    name: "share_view" | "share_comparison_rendered";
+    userId: string | null;
+    shareId: string | null;
+  }> = [];
+  if (shouldRecordView) {
+    funnelEvents.push({ name: "share_view", userId: viewer?.id ?? null, shareId });
+  }
+  if (comparisonRendered && viewer) {
+    funnelEvents.push({ name: "share_comparison_rendered", userId: viewer.id, shareId });
+  }
+  // ONE insert, not two calls. Two calls are adjacent, not atomic: a transient
+  // failure on the view followed by a success on the comparison leaves the
+  // funnel holding a numerator without its denominator. I called them "written
+  // together" a round ago, which was true of their position and not of their
+  // outcome — and position is not the property `comparisonRate` needs.
+  await recordEvents(getDb(), funnelEvents);
 
   return (
     <div className="mx-auto flex max-w-lg flex-col gap-6 px-4 py-12">

@@ -34,6 +34,16 @@ const editableFields = {
 export const userBottleCreateSchema = z.object({
   bottleId: z.string().min(1),
   relationship: z.enum(RELATIONSHIPS),
+  /**
+   * The share link this add came from, for the S1 funnel (PLAN-A5).
+   *
+   * The `pour_shares` row id, never the code — the client is given the id
+   * precisely so the code stays out of a request body that gets logged. It
+   * changes nothing about the write; it only lets `share_wishlist_add` be
+   * attributed, and a bad id fails the foreign key and drops the event rather
+   * than the add.
+   */
+  fromShareId: z.string().min(1).optional(),
   ...editableFields,
 });
 

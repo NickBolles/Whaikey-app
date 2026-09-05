@@ -1,0 +1,1 @@
+ALTER TABLE "reactions" ADD COLUMN "retracted_at" timestamp with time zone;

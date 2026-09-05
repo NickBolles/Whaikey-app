@@ -1,0 +1,189 @@
+import { eq } from "drizzle-orm";
+import type { DB } from "@/db";
+import { schema } from "@/db";
+import type { AnalyticsEventName, Relationship } from "@/db/schema";
+import { reportInBackground } from "./errors";
+
+/**
+ * First-party product events — the S1 share funnel, and nothing else (WP-19).
+ *
+ * **No third-party analytics SDK, on the server or the client.** A pour
+ * timestamp shipped to a vendor is exactly the data `docs/SOCIAL.md` says
+ * never crosses a boundary, and a client SDK would carry page URLs — which on
+ * `/s/<code>` means the share code, a bearer credential. So these rows are
+ * written server-side, into this database, and the only identifier they hold
+ * is the `pour_shares` row id: never the code.
+ *
+ * **Recording must not be able to break the page.** Every function here
+ * swallows its own failures. A share link that 500s because telemetry could
+ * not write would be the measurement destroying the thing it measures.
+ */
+
+/**
+ * Is this request a machine fetching the page rather than a person reading it?
+ *
+ * A share link posted into a chat app is fetched by that app's preview
+ * crawler before any human sees it, and a `/s/<code>` view is recorded by the
+ * Server Component — so the *most successful* shares, the ones posted into
+ * busy group chats, inflated `views` the most. The number PLAN-A5's phase gate
+ * reads would have grown with unfurls rather than with readers.
+ *
+ * Two signals, both from the request itself:
+ *
+ * - **Prefetch/preview headers**, which are the reliable half. A browser or
+ *   platform that is speculatively fetching says so.
+ * - **A user-agent that names itself a bot.** This is a heuristic and cannot
+ *   be complete — that is a property of user agents, not of this list — so it
+ *   is written to be *conservative in the honest direction*: a crawler that
+ *   slips through inflates the count, which is the error we already had, while
+ *   nothing here can discard a real reader. `HeadlessChrome` is deliberately
+ *   absent: Playwright sends it, and dropping it would make the e2e suite
+ *   silently stop exercising the path it is there to exercise.
+ *
+ * The residue is stated rather than hidden: `views` is an upper bound on
+ * readers. `viewsBySignedInUsers` — the denominator of the rate S1 actually
+ * turns on — is unaffected either way, because no crawler is signed in.
+ */
+const AUTOMATED_UA = /bot\b|crawler|spider|facebookexternalhit|slackbot|twitterbot|whatsapp|discordbot|telegrambot|linkedinbot|applebot|skypeuripreview|embedly|iframely|quora link preview|redditbot|pinterest|vkshare|w3c_validator|curl\/|wget\/|python-requests|go-http-client|node-fetch|axios\//i;
+
+export function isAutomatedFetch(headers: {
+  get(name: string): string | null;
+}): boolean {
+  // Chrome, then the older and Safari spellings.
+  const purpose =
+    headers.get("sec-purpose") ?? headers.get("purpose") ?? headers.get("x-purpose") ?? "";
+  if (/prefetch|prerender|preview/i.test(purpose)) return true;
+  if (headers.get("x-moz") === "prefetch") return true;
+  return AUTOMATED_UA.test(headers.get("user-agent") ?? "");
+}
+
+/** Resolve a share code to its row id. The id is safe to store; the code is not. */
+export async function shareIdForCode(db: DB, code: string): Promise<string | null> {
+  try {
+    const row = await db.query.pourShares.findFirst({
+      columns: { id: true },
+      where: eq(schema.pourShares.code, code),
+    });
+    return row?.id ?? null;
+  } catch (err) {
+    // Null here does not fail anything visible — it drops the share id off the
+    // event, so the row still lands and is simply unattributable. That is the
+    // quietest failure in this file: the funnel keeps counting and the counts
+    // stop meaning what their column says.
+    reportInBackground(err, { where: "analytics/shareIdForCode" });
+    return null;
+  }
+}
+
+/**
+ * The share-link conversion, validated and recorded as ONE best-effort step.
+ *
+ * The validation query used to sit in the route, after `upsertUserBottle` had
+ * already committed and outside any guard. A database blip there produced the
+ * worst available outcome: `withErrorHandling` turned it into a 500, so the
+ * UI told the person their bottle had not been added — when it had — and the
+ * retry then found the existing row, so `created` was false and the
+ * conversion was never counted either. A lost metric is a nuisance; a
+ * successful write reported as a failure is a lie to the user.
+ *
+ * That is precisely what this module's contract forbids, so the check lives
+ * here now rather than beside the write: **everything about measuring a
+ * conversion, including the query that decides whether there was one, is
+ * inside the boundary that swallows its own failures.**
+ *
+ * The claim itself is still checked rather than taken. `fromShareId` comes
+ * from the client and the foreign key only proves the id exists — not that
+ * the share is about this bottle, nor that the caller is a recipient. Anyone
+ * holding any share id could otherwise manufacture a conversion in the number
+ * PLAN-A5's phase gate turns on. Resolved against the share's own pour, with
+ * the owner excluded on the same reasoning as the view event.
+ */
+export async function recordShareConversion(
+  db: DB,
+  input: { shareId: string; bottleId: string; userId: string; relationship: Relationship },
+): Promise<void> {
+  try {
+    const [share] = await db
+      .select({ ownerId: schema.pourShares.userId, bottleId: schema.pours.bottleId })
+      .from(schema.pourShares)
+      .innerJoin(schema.pours, eq(schema.pours.id, schema.pourShares.pourId))
+      .where(eq(schema.pourShares.id, input.shareId));
+    if (!share || share.bottleId !== input.bottleId || share.ownerId === input.userId) return;
+
+    // The relationship decides which event it is: `share_wishlist_add` feeds a
+    // funnel field named `wishlistAddsFromShare`, and an `own` or `tried` add
+    // is a real conversion under a different name rather than that one.
+    await recordEvent(
+      db,
+      input.relationship === "wishlist" ? "share_wishlist_add" : "share_shelf_add",
+      { userId: input.userId, shareId: input.shareId },
+    );
+  } catch (err) {
+    console.error("[analytics] failed to record a share conversion", err);
+    reportInBackground(err, { where: "analytics/recordShareConversion" });
+  }
+}
+
+/**
+ * Several events as ONE insert, so a partial failure cannot skew a ratio.
+ *
+ * `recordEvent` swallows its own failure, which is right on its own and wrong
+ * for a pair: writing a view and then a comparison as two calls means a
+ * transient error on the first can be followed by a success on the second,
+ * leaving the funnel holding a numerator without its denominator and
+ * `comparisonRate` free to exceed 100%. I described the two calls as "written
+ * together" in a review reply one round before this was found; together meant
+ * adjacent, not atomic, and adjacency is not the property the ratio needs.
+ *
+ * One multi-row insert: both rows land or neither does. Still best-effort as a
+ * whole, because this module must never break the page it measures.
+ */
+export async function recordEvents(
+  db: DB,
+  events: Array<{ name: AnalyticsEventName; userId?: string | null; shareId?: string | null }>,
+): Promise<void> {
+  if (events.length === 0) return;
+  try {
+    await db.insert(schema.analyticsEvents).values(
+      events.map((e) => ({
+        id: crypto.randomUUID(),
+        name: e.name,
+        userId: e.userId ?? null,
+        // Same reason as `recordEvent`: after deletion the id is gone and only
+        // this says whether a signed-in person was here.
+        bySignedInUser: Boolean(e.userId),
+        shareId: e.shareId ?? null,
+      })),
+    );
+  } catch (err) {
+    console.error(
+      `[analytics] failed to record ${events.map((e) => e.name).join(" + ")}`,
+      err,
+    );
+    reportInBackground(err, {
+      where: "analytics/recordEvents",
+      tags: { events: events.map((e) => e.name).join("+") },
+    });
+  }
+}
+
+export async function recordEvent(
+  db: DB,
+  name: AnalyticsEventName,
+  opts: { userId?: string | null; shareId?: string | null } = {},
+): Promise<void> {
+  try {
+    await db.insert(schema.analyticsEvents).values({
+      id: crypto.randomUUID(),
+      name,
+      userId: opts.userId ?? null,
+      // Recorded now, because after the account is deleted `user_id` is null
+      // and there is no way to tell an anonymous view from a departed one.
+      bySignedInUser: Boolean(opts.userId),
+      shareId: opts.shareId ?? null,
+    });
+  } catch (err) {
+    console.error(`[analytics] failed to record ${name}`, err);
+    reportInBackground(err, { where: "analytics/recordEvent", tags: { event: name } });
+  }
+}
