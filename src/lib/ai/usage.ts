@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, sql } from "drizzle-orm";
+import { and, eq, gte, sql } from "drizzle-orm";
 import type { DB } from "@/db";
 import { schema } from "@/db";
 import type { AiFeature } from "@/db/schema";
@@ -30,32 +30,47 @@ export interface AiUsageInput {
   } | null | undefined;
 }
 
-/**
- * Per-million-token rates, applied at READ time.
- *
- * Deliberately not stored on the row. Prices change, and a dollar figure
- * written into the database becomes a lie the day they do — with no way to
- * correct history, because the tokens it was derived from would be gone. Same
- * rule `docs/COMPETITORS.md` §2.7 sets for bottle valuations: show what is
- * known, never a precision that isn't there.
- *
- * A model absent from this table falls back to the most expensive entry rather
- * than to zero: an unknown model costing nothing is the failure mode that
- * makes a budget alarm silent exactly when a new model is rolled out.
- */
+/** Per-million-token input/output prices for one model over one period. */
 export interface ModelRate {
   input: number;
   output: number;
 }
 
+/** A rate together with the UTC date it took effect (`YYYY-MM-DD`). */
+export interface DatedRate extends ModelRate {
+  from: string;
+}
+
 /**
- * Per-million-token INPUT/OUTPUT rates, applied at READ time.
+ * The date every rate below is anchored to.
+ *
+ * `ai_usage` is introduced by this change, so no usage row can predate the
+ * table — which makes the history **complete by construction** rather than
+ * complete by assertion. Every figure this module has ever produced was
+ * produced from a rate recorded here.
+ */
+const SINCE_FIRST_ROW = "1970-01-01";
+
+/**
+ * Per-million-token INPUT/OUTPUT rates, keyed by model family and **dated**.
  *
  * Deliberately not stored on the row. Prices change, and a dollar figure
  * written into the database becomes a lie the day they do — with no way to
  * correct history, because the tokens it was derived from would be gone. Same
  * rule `docs/COMPETITORS.md` §2.7 sets for bottle valuations: show what is
  * known, never a precision that isn't there.
+ *
+ * Storing tokens is what makes history *correctable*; dating the rates is what
+ * makes it *stable*. Without the dates, editing a price here silently reprices
+ * every row still inside the 90-day retention window, so a report headed "last
+ * 30 days" would state today's price applied to spend that was never billed at
+ * it — the mirror image of the bug that keeping dollars off the row avoids,
+ * and just as wrong.
+ *
+ * **So a price change APPENDS an entry; it never edits one.** Entries are
+ * oldest first, `from` is a UTC date, and pricing picks the entry in effect
+ * when the call was made. Editing a number in place is the one operation this
+ * table cannot survive, because the old rate is then unrecoverable.
  *
  * These are Anthropic's first-party rates. When `OPENROUTER_API_KEY` is set —
  * which `activeAiProvider()` PREFERS — the bill is OpenRouter's and its
@@ -63,19 +78,62 @@ export interface ModelRate {
  * the right order rather than an invoice. `estimatedUsd` is named that way on
  * purpose.
  */
-const RATES: Record<string, ModelRate> = {
-  "claude-opus-5": { input: 5, output: 25 },
-  "claude-sonnet-5": { input: 2, output: 10 },
-  "claude-haiku-4-5": { input: 1, output: 5 },
+let RATES: Record<string, DatedRate[]> = {
+  "claude-opus-5": [{ from: SINCE_FIRST_ROW, input: 5, output: 25 }],
+  "claude-sonnet-5": [{ from: SINCE_FIRST_ROW, input: 2, output: 10 }],
+  "claude-haiku-4-5": [{ from: SINCE_FIRST_ROW, input: 1, output: 5 }],
   // Previous generation, still reachable: `chatModel()` returns
   // `anthropic/claude-sonnet-4` on the OpenRouter path, which normalises here.
-  "claude-sonnet-4-6": { input: 3, output: 15 },
-  "claude-sonnet-4": { input: 3, output: 15 },
+  "claude-sonnet-4-6": [{ from: SINCE_FIRST_ROW, input: 3, output: 15 }],
+  "claude-sonnet-4": [{ from: SINCE_FIRST_ROW, input: 3, output: 15 }],
 };
+
+const DEFAULT_RATES = RATES;
+
+/**
+ * Swap the rate table, for tests only. Returns nothing; call with no argument
+ * to restore.
+ *
+ * The same seam as `setAnthropicForTests` in `src/lib/ai/client.ts`, and for
+ * the same reason: the interesting behaviour here is what happens when a price
+ * CHANGES, and every entry in the real table shares one effective date because
+ * no price has changed yet. Without a way to supply a table that has a second
+ * entry, the dating below would ship with its integration untested — which is
+ * how it would quietly stop being applied. Pricing is an operator estimate
+ * rather than a security boundary, so a test-time swap costs nothing real.
+ */
+export function setRateTableForTests(rates?: Record<string, DatedRate[]>): void {
+  RATES = rates ?? DEFAULT_RATES;
+}
 
 /** Cache reads bill at ~0.1x input; cache writes at ~1.25x. */
 const CACHE_READ_MULTIPLIER = 0.1;
 const CACHE_WRITE_MULTIPLIER = 1.25;
+
+/** Midnight UTC on a `YYYY-MM-DD` date, as milliseconds. */
+function utcMidnight(day: string): number {
+  return Date.parse(`${day}T00:00:00.000Z`);
+}
+
+/**
+ * The entry in effect at `at`, or `undefined` if this model had no price yet.
+ *
+ * `undefined` rather than "the earliest entry" because the two answers differ
+ * exactly where it matters. A model added to the table later did not exist
+ * before its first entry, and lending it a rate backwards puts it into
+ * `dearestRate`'s comparison for dates it could not have been called on —
+ * which reprices every unknown-model row in the archive the moment somebody
+ * adds a dearer model. That is the defect this dating exists to close,
+ * arriving through the fallback instead of through the lookup.
+ */
+function rateAt(entries: DatedRate[], at: Date): ModelRate | undefined {
+  const ms = at.getTime();
+  let chosen: DatedRate | undefined;
+  for (const entry of entries) {
+    if (utcMidnight(entry.from) <= ms) chosen = entry;
+  }
+  return chosen ? { input: chosen.input, output: chosen.output } : undefined;
+}
 
 /**
  * Reduce a deployed model id to the family the rate table is keyed on.
@@ -103,14 +161,27 @@ export function normalizeModelId(model: string): string {
 }
 
 /**
- * The dearest rate in the table — what an unrecognised model is charged.
+ * The dearest rate **in effect at `at`** — what an unrecognised model is charged.
  *
  * Failing free is how a budget alarm goes silent exactly when a new model is
  * rolled out, which is when it is most needed. Computed rather than hardcoded
  * so it cannot drift out of step with the table above.
+ *
+ * Scoped to `at` for the same reason every other lookup here is. Adding a
+ * dearer model tomorrow would otherwise reprice today's unknown-model rows at
+ * a rate that did not exist when the call was made — history moving because
+ * the table grew, which is the defect this dating exists to close, arriving
+ * through the fallback instead of through the family lookup.
  */
-function dearestRate(): ModelRate {
-  return Object.values(RATES).reduce((a, b) => (b.output > a.output ? b : a));
+function dearestRate(at: Date): ModelRate {
+  const live = Object.values(RATES)
+    .map((entries) => rateAt(entries, at))
+    .filter((r): r is ModelRate => r !== undefined);
+  // Before the table's own earliest entry nothing was in effect, which cannot
+  // happen for a real row — `ai_usage` starts with this table — but must still
+  // answer something, and the dearest first-known rate is the safe direction.
+  const pool = live.length > 0 ? live : Object.values(RATES).map((e) => e[0]);
+  return pool.reduce((a, b) => (b.output > a.output ? b : a));
 }
 
 /**
@@ -140,17 +211,26 @@ function isSameFamily(id: string, known: string): boolean {
   return /^\d{8}$/.test(id.slice(known.length + 1));
 }
 
-export function rateFor(model: string): ModelRate {
+/**
+ * The rate for `model` as it stood at `at` (default: now).
+ *
+ * Callers pricing historical rows MUST pass the time the call was made; the
+ * default exists for "what would this cost today" questions, not for reports.
+ */
+export function rateFor(model: string, at: Date = new Date()): ModelRate {
   const id = normalizeModelId(model);
   const exact = RATES[id];
-  if (exact) return exact;
+  if (exact) return rateAt(exact, at) ?? dearestRate(at);
   // Longest first: "claude-sonnet-4-6" must not be answered by
   // "claude-sonnet-4" simply because it was declared earlier.
   const keys = Object.keys(RATES).sort((a, b) => b.length - a.length);
   for (const known of keys) {
-    if (isSameFamily(id, known)) return RATES[known];
+    // A known family with no rate in effect yet is priced as an unknown model
+    // rather than at its own later price: we do not know what it cost then,
+    // and the unknown fallback is the direction that fails loud.
+    if (isSameFamily(id, known)) return rateAt(RATES[known], at) ?? dearestRate(at);
   }
-  return dearestRate();
+  return dearestRate(at);
 }
 
 /** Whether this model was priced from the table or from the fallback. */
@@ -161,11 +241,19 @@ export function isKnownModel(model: string): boolean {
   return Object.keys(RATES).some((known) => isSameFamily(id, known));
 }
 
+/**
+ * Price a bundle of tokens for `model` at the rate in effect at `at`.
+ *
+ * `at` defaults to now for the "what would this cost today" question. Anything
+ * summing rows out of `ai_usage` must pass the time those rows were written,
+ * or a later price change moves a figure that has already been reported.
+ */
 export function usdForTokens(
   model: string,
   tokens: { inputTokens: number; outputTokens: number; cachedInputTokens: number; cacheWriteTokens: number },
+  at: Date = new Date(),
 ): number {
-  const rate = rateFor(model);
+  const rate = rateFor(model, at);
   return (
     (tokens.inputTokens * rate.input +
       tokens.outputTokens * rate.output +
@@ -231,11 +319,45 @@ export interface AiCostRow {
 }
 
 /**
+ * A UTC-day bucket (`YYYY-MM-DD`) for a usage row, used as the pricing epoch.
+ *
+ * Aggregates group on this as well as on the model so each bucket can be
+ * priced at the rate that was in effect while it accrued. Day granularity is
+ * exact rather than approximate here: rate entries carry a UTC **date**, and
+ * these buckets are UTC days, so no bucket can straddle a price change.
+ *
+ * `at time zone 'UTC'` is explicit because `date_trunc` would otherwise use
+ * the session's TimeZone, which differs between the PGlite used in tests and a
+ * deployed Postgres — a report whose totals depend on server configuration.
+ */
+const usageDay = sql<string>`to_char(${schema.aiUsage.createdAt} at time zone 'UTC', 'YYYY-MM-DD')`;
+
+/** Midnight UTC on a bucket returned by `usageDay`. */
+function dayStart(day: string): Date {
+  return new Date(`${day}T00:00:00.000Z`);
+}
+
+export interface AiCostRow {
+  feature: AiFeature;
+  model: string;
+  calls: number;
+  inputTokens: number;
+  outputTokens: number;
+  cachedInputTokens: number;
+  cacheWriteTokens: number;
+  estimatedUsd: number;
+}
+
+/**
  * What AI has cost since `since`, split by feature and model.
  *
  * Split rather than totalled because "AI cost" is not one number and the
  * actionable answer is which feature is expensive — a single figure tells an
  * operator that it is too high and nothing about what to do.
+ *
+ * Grouped by UTC day underneath and folded back afterwards, so each day's
+ * tokens are priced at that day's rate. The returned rows are still one per
+ * (feature, model); the day only decides the price.
  */
 export async function aiCostSince(
   db: DB,
@@ -246,6 +368,7 @@ export async function aiCostSince(
     .select({
       feature: schema.aiUsage.feature,
       model: schema.aiUsage.model,
+      day: usageDay,
       calls: sql<number>`count(*)`,
       inputTokens: sql<number>`sum(${schema.aiUsage.inputTokens})`,
       outputTokens: sql<number>`sum(${schema.aiUsage.outputTokens})`,
@@ -258,26 +381,35 @@ export async function aiCostSince(
         ? and(gte(schema.aiUsage.createdAt, since), eq(schema.aiUsage.userId, opts.userId))
         : gte(schema.aiUsage.createdAt, since),
     )
-    .groupBy(schema.aiUsage.feature, schema.aiUsage.model)
-    // A stable base order only; the meaningful sort is by cost, below, and
-    // cannot be done here because the price table lives in TypeScript.
-    .orderBy(desc(sql`sum(${schema.aiUsage.outputTokens})`));
+    .groupBy(schema.aiUsage.feature, schema.aiUsage.model, usageDay);
 
-  const priced = rows.map((r) => {
+  const byPair = new Map<string, AiCostRow>();
+  for (const r of rows) {
     const tokens = {
       inputTokens: Number(r.inputTokens ?? 0),
       outputTokens: Number(r.outputTokens ?? 0),
       cachedInputTokens: Number(r.cachedInputTokens ?? 0),
       cacheWriteTokens: Number(r.cacheWriteTokens ?? 0),
     };
-    return {
+    const key = `${r.feature}\u0000${r.model}`;
+    const acc = byPair.get(key) ?? {
       feature: r.feature,
       model: r.model,
-      calls: Number(r.calls ?? 0),
-      ...tokens,
-      estimatedUsd: usdForTokens(r.model, tokens),
+      calls: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      cachedInputTokens: 0,
+      cacheWriteTokens: 0,
+      estimatedUsd: 0,
     };
-  });
+    acc.calls += Number(r.calls ?? 0);
+    acc.inputTokens += tokens.inputTokens;
+    acc.outputTokens += tokens.outputTokens;
+    acc.cachedInputTokens += tokens.cachedInputTokens;
+    acc.cacheWriteTokens += tokens.cacheWriteTokens;
+    acc.estimatedUsd += usdForTokens(r.model, tokens, dayStart(r.day));
+    byPair.set(key, acc);
+  }
 
   /**
    * Sorted by what it COSTS, not by how many tokens came out.
@@ -290,10 +422,12 @@ export async function aiCostSince(
    * sit above a materially more expensive Sonnet one, and this list exists
    * precisely to point an operator at the feature worth looking at first.
    *
-   * Sorted in TypeScript because the rates are a TypeScript table; the SQL
-   * `orderBy` above is left as a deterministic tiebreak for equal cost.
+   * Output tokens remain the tiebreak for equal cost, so the order is stable
+   * without depending on the database's grouping order.
    */
-  return priced.sort((a, b) => b.estimatedUsd - a.estimatedUsd);
+  return [...byPair.values()].sort(
+    (a, b) => b.estimatedUsd - a.estimatedUsd || b.outputTokens - a.outputTokens,
+  );
 }
 
 /**
@@ -302,34 +436,59 @@ export async function aiCostSince(
  * The denominator is accounts that actually made a call, not all accounts —
  * dividing by everyone would make the figure fall as the app grew, which is
  * the wrong direction for a budget alarm to move.
+ *
+ * Two aggregates rather than one scan. The earlier shape selected a row per
+ * (user, model) and counted the distinct users in TypeScript, so the work grew
+ * with the user base on a page an operator opens when something is already
+ * wrong. Neither query here returns more than (models x days) rows whatever
+ * the size of the account table, and splitting them is what lets the cost side
+ * be grouped by day and priced at the rate of the day it accrued.
+ *
+ * Both halves keep `user_id is not null`: scheduled catalog enrichment is
+ * nobody's request, so it belongs in neither the numerator nor the denominator
+ * of a per-user figure.
  */
 export async function meanAiCostPerActiveUser(
   db: DB,
   since: Date,
 ): Promise<{ users: number; totalUsd: number; meanUsd: number }> {
-  const rows = await db
-    .select({
-      userId: schema.aiUsage.userId,
-      model: schema.aiUsage.model,
-      inputTokens: sql<number>`sum(${schema.aiUsage.inputTokens})`,
-      outputTokens: sql<number>`sum(${schema.aiUsage.outputTokens})`,
-      cachedInputTokens: sql<number>`sum(${schema.aiUsage.cachedInputTokens})`,
-      cacheWriteTokens: sql<number>`sum(${schema.aiUsage.cacheWriteTokens})`,
-    })
-    .from(schema.aiUsage)
-    .where(and(gte(schema.aiUsage.createdAt, since), sql`${schema.aiUsage.userId} is not null`))
-    .groupBy(schema.aiUsage.userId, schema.aiUsage.model);
+  const attributed = and(
+    gte(schema.aiUsage.createdAt, since),
+    sql`${schema.aiUsage.userId} is not null`,
+  );
 
-  const users = new Set<string>();
+  const [counted, rows] = await Promise.all([
+    db
+      .select({ users: sql<number>`count(distinct ${schema.aiUsage.userId})` })
+      .from(schema.aiUsage)
+      .where(attributed),
+    db
+      .select({
+        model: schema.aiUsage.model,
+        day: usageDay,
+        inputTokens: sql<number>`sum(${schema.aiUsage.inputTokens})`,
+        outputTokens: sql<number>`sum(${schema.aiUsage.outputTokens})`,
+        cachedInputTokens: sql<number>`sum(${schema.aiUsage.cachedInputTokens})`,
+        cacheWriteTokens: sql<number>`sum(${schema.aiUsage.cacheWriteTokens})`,
+      })
+      .from(schema.aiUsage)
+      .where(attributed)
+      .groupBy(schema.aiUsage.model, usageDay),
+  ]);
+
+  const users = Number(counted[0]?.users ?? 0);
   let totalUsd = 0;
   for (const r of rows) {
-    if (r.userId) users.add(r.userId);
-    totalUsd += usdForTokens(r.model, {
-      inputTokens: Number(r.inputTokens ?? 0),
-      outputTokens: Number(r.outputTokens ?? 0),
-      cachedInputTokens: Number(r.cachedInputTokens ?? 0),
-      cacheWriteTokens: Number(r.cacheWriteTokens ?? 0),
-    });
+    totalUsd += usdForTokens(
+      r.model,
+      {
+        inputTokens: Number(r.inputTokens ?? 0),
+        outputTokens: Number(r.outputTokens ?? 0),
+        cachedInputTokens: Number(r.cachedInputTokens ?? 0),
+        cacheWriteTokens: Number(r.cacheWriteTokens ?? 0),
+      },
+      dayStart(r.day),
+    );
   }
-  return { users: users.size, totalUsd, meanUsd: users.size === 0 ? 0 : totalUsd / users.size };
+  return { users, totalUsd, meanUsd: users === 0 ? 0 : totalUsd / users };
 }

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
 import { createTestUser, setupTestDb } from "@/test/helpers";
@@ -9,6 +9,7 @@ import {
   normalizeModelId,
   rateFor,
   recordAiUsage,
+  setRateTableForTests,
   usdForTokens,
 } from "./usage";
 
@@ -280,5 +281,103 @@ describe("reading the cost back", () => {
     // But the total across features still sees it: nobody's bill, still a bill.
     const all = await aiCostSince(db, new Date(Date.now() - 60_000));
     expect(all.some((r) => r.feature === "enrich")).toBe(true);
+  });
+});
+
+
+describe("a price change must not rewrite what past months cost", () => {
+  /**
+   * A table where Sonnet doubled on 2026-06-01 and a dearer model appeared on
+   * the same day. Every entry in the real table shares one effective date
+   * because no price has changed yet, so the behaviour that matters — what
+   * happens the day one does — has no fixture without this.
+   */
+  const CHANGED = {
+    "claude-sonnet-5": [
+      { from: "1970-01-01", input: 2, output: 10 },
+      { from: "2026-06-01", input: 4, output: 20 },
+    ],
+    "claude-opus-5": [{ from: "2026-06-01", input: 5, output: 25 }],
+  };
+
+  const BEFORE = new Date("2026-05-20T12:00:00.000Z");
+  const AFTER = new Date("2026-06-20T12:00:00.000Z");
+
+  beforeEach(() => setRateTableForTests(CHANGED));
+  afterEach(() => setRateTableForTests());
+
+  async function spendOn(userId: string | null, at: Date, model: string, out: number) {
+    await db.insert(schema.aiUsage).values({
+      id: crypto.randomUUID(),
+      userId,
+      feature: "chat",
+      model,
+      inputTokens: 0,
+      outputTokens: out,
+      cachedInputTokens: 0,
+      cacheWriteTokens: 0,
+      createdAt: at,
+    });
+  }
+
+  it("prices a call at the rate in effect when it was made", () => {
+    expect(rateFor("claude-sonnet-5", BEFORE)).toEqual({ input: 2, output: 10 });
+    expect(rateFor("claude-sonnet-5", AFTER)).toEqual({ input: 4, output: 20 });
+  });
+
+  it("charges an unknown model the dearest rate THAT EXISTED THEN", () => {
+    // Opus arrives on 2026-06-01. Before that the dearest thing in the table
+    // is Sonnet at $10/Mtok out; pricing a May call at Opus's $25 would move a
+    // figure that has already been reported, because the table grew.
+    expect(rateFor("model-nobody-priced", BEFORE)).toEqual({ input: 2, output: 10 });
+    expect(rateFor("model-nobody-priced", AFTER)).toEqual({ input: 5, output: 25 });
+  });
+
+  it("sums each UTC day of a report at that day's rate", async () => {
+    const user = await createTestUser(db);
+    await spendOn(user.id, BEFORE, "claude-sonnet-5", 1_000_000);
+    await spendOn(user.id, AFTER, "claude-sonnet-5", 1_000_000);
+
+    const [row] = await aiCostSince(db, new Date("2026-01-01T00:00:00.000Z"));
+    // $10 at May's rate plus $20 at June's. Priced at today's rate throughout
+    // it would read $40 — a report headed "since January" quoting a price that
+    // did not apply for half of it.
+    expect(row.estimatedUsd).toBeCloseTo(30, 9);
+    // And the days fold back into ONE row per feature+model: the day decides
+    // the price, it is not a dimension of the answer.
+    expect(row.calls).toBe(2);
+    expect(row.outputTokens).toBe(2_000_000);
+  });
+
+  it("prices the per-user mean by day too", async () => {
+    const user = await createTestUser(db);
+    await spendOn(user.id, BEFORE, "claude-sonnet-5", 1_000_000);
+    await spendOn(user.id, AFTER, "claude-sonnet-5", 1_000_000);
+    // Nobody's request: still excluded from both halves of a per-user figure.
+    await spendOn(null, AFTER, "claude-sonnet-5", 5_000_000);
+
+    const { users, totalUsd, meanUsd } = await meanAiCostPerActiveUser(
+      db,
+      new Date("2026-01-01T00:00:00.000Z"),
+    );
+    expect(users).toBe(1);
+    expect(totalUsd).toBeCloseTo(30, 9);
+    expect(meanUsd).toBeCloseTo(30, 9);
+  });
+
+  it("counts distinct spenders without reading a row per account", async () => {
+    const a = await createTestUser(db);
+    const b = await createTestUser(db);
+    await spendOn(a.id, AFTER, "claude-sonnet-5", 1_000_000);
+    await spendOn(a.id, AFTER, "claude-opus-5", 1_000_000);
+    await spendOn(b.id, AFTER, "claude-sonnet-5", 1_000_000);
+
+    const { users, totalUsd } = await meanAiCostPerActiveUser(
+      db,
+      new Date("2026-01-01T00:00:00.000Z"),
+    );
+    // Two accounts, three rows, two models: the count is of people, not rows.
+    expect(users).toBe(2);
+    expect(totalUsd).toBeCloseTo(20 + 25 + 20, 9);
   });
 });
