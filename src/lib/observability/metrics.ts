@@ -192,15 +192,30 @@ export async function guardrailMetrics(
       and ma.subject_id = ${schema.userProfiles.userId}
       and ma.action = 'suspend'
   )`;
+  /**
+   * Both rates are counted over the SAME rows, which is the only reason they
+   * can be read as shares of one population.
+   *
+   * `blockRate` used to divide `count(distinct blocker_id)` over the whole
+   * `blocks` table by a denominator the suspension filter had already
+   * narrowed — a numerator drawn from a wider set than its denominator, so the
+   * "rate" could exceed 1 and, more quietly, drifted upward every time an
+   * operator suspended somebody. That was introduced by the fix that added the
+   * exclusion in the first place: it reached the metric the finding named and
+   * left its neighbour on the next line reading from the old population.
+   * Expressed as an `exists` over `user_profiles` instead, the numerator is a
+   * subset of the denominator by construction rather than by care.
+   */
+  const hasBlocked = sql`exists (
+    select 1 from blocks b where b.blocker_id = ${schema.userProfiles.userId}
+  )`;
   const [profileRow] = await db
     .select({
       profiles: sql<number>`count(*) filter (where not ${everSuspended})`,
       off: sql<number>`count(*) filter (where ${schema.userProfiles.socialEnabled} = false and not ${everSuspended})`,
+      blockers: sql<number>`count(*) filter (where ${hasBlocked} and not ${everSuspended})`,
     })
     .from(schema.userProfiles);
-  const [blockerRow] = await db
-    .select({ n: sql<number>`count(distinct ${schema.blocks.blockerId})` })
-    .from(schema.blocks);
 
   const pours = Number(pourRow?.pours ?? 0);
   const activeUsers = Number(pourRow?.users ?? 0);
@@ -235,7 +250,7 @@ export async function guardrailMetrics(
       socialActions === 0 ? null : (reports / socialActions) * 1000,
     profiles,
     socialOffRate: profiles === 0 ? null : Number(profileRow?.off ?? 0) / profiles,
-    blockRate: profiles === 0 ? null : Number(blockerRow?.n ?? 0) / profiles,
+    blockRate: profiles === 0 ? null : Number(profileRow?.blockers ?? 0) / profiles,
   };
 }
 
@@ -247,6 +262,13 @@ export interface ShareFunnel {
   viewsBySignedInUsers: number;
   comparisonsRendered: number;
   wishlistAddsFromShare: number;
+  /**
+   * Adds from a share that went straight onto the shelf as `own` or `tried`.
+   * Kept apart from the wishlist figure rather than folded into it, because
+   * the two say different things about the link: one is "I want this", the
+   * other is "I have this, and now you know we overlap".
+   */
+  shelfAddsFromShare: number;
   /**
    * The PLAN-A5 question in one number: of the signed-in people who opened a
    * share link, what share saw a comparison? A share link viewed by someone
@@ -269,6 +291,7 @@ export async function shareFunnel(
       signedIn: sql<number>`count(*) filter (where ${schema.analyticsEvents.name} = 'share_view' and ${schema.analyticsEvents.userId} is not null)`,
       comparisons: sql<number>`count(*) filter (where ${schema.analyticsEvents.name} = 'share_comparison_rendered')`,
       wishlist: sql<number>`count(*) filter (where ${schema.analyticsEvents.name} = 'share_wishlist_add')`,
+      shelf: sql<number>`count(*) filter (where ${schema.analyticsEvents.name} = 'share_shelf_add')`,
     })
     .from(schema.analyticsEvents)
     .where(
@@ -287,6 +310,7 @@ export async function shareFunnel(
     viewsBySignedInUsers: signedIn,
     comparisonsRendered: comparisons,
     wishlistAddsFromShare: Number(row?.wishlist ?? 0),
+    shelfAddsFromShare: Number(row?.shelf ?? 0),
     comparisonRate: signedIn === 0 ? null : comparisons / signedIn,
   };
 }
@@ -356,7 +380,7 @@ export const TELEMETRY_RETENTION_DAYS = 90;
 export async function sweepTelemetry(
   db: DB,
   now = new Date(),
-): Promise<{ aiUsage: number; analyticsEvents: number }> {
+): Promise<{ aiUsage: number; analyticsEvents: number; retractedCheers: number }> {
   const cutoff = new Date(now.getTime() - TELEMETRY_RETENTION_DAYS * DAY_MS);
   const usage = await db
     .delete(schema.aiUsage)
@@ -366,5 +390,24 @@ export async function sweepTelemetry(
     .delete(schema.analyticsEvents)
     .where(lt(schema.analyticsEvents.createdAt, cutoff))
     .returning({ id: schema.analyticsEvents.id });
-  return { aiUsage: usage.length, analyticsEvents: events.length };
+  /**
+   * And withdrawn cheers, on the same clock.
+   *
+   * A retracted cheer survives its retraction for one reason only — so the
+   * guardrail window it happened in keeps its number — and that reason expires
+   * with the window. Keeping it past then would be holding a social gesture
+   * somebody explicitly took back, which is not a retention the privacy page
+   * should have to explain. Cut on `retracted_at`, not `created_at`: an old
+   * cheer withdrawn yesterday is still inside the window that has to stay
+   * stable.
+   */
+  const cheers = await db
+    .delete(schema.reactions)
+    .where(lt(schema.reactions.retractedAt, cutoff))
+    .returning({ id: schema.reactions.id });
+  return {
+    aiUsage: usage.length,
+    analyticsEvents: events.length,
+    retractedCheers: cheers.length,
+  };
 }

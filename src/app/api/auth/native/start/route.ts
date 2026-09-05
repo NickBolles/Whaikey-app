@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { reportingErrors } from "@/lib/observability/errors";
+import { reportInBackground, reportingErrors } from "@/lib/observability/errors";
 import { isNativeProvider, safeReturnPath, startNativeAuthRequest } from "@/lib/native-auth";
 
 /**
@@ -78,6 +78,17 @@ async function handleGet(request: NextRequest) {
     return NextResponse.redirect(url);
   } catch (err) {
     console.error("[native-auth] failed to start social sign-in", err);
+    /**
+     * Reported here, not by the wrapper.
+     *
+     * `reportingErrors` only sees what escapes, and this catch answers 503
+     * instead of rethrowing — so wrapping the handler bought this route
+     * nothing at all: the one failure it actually has (the provider or the
+     * pending-request write breaking) was swallowed on the way past. A native
+     * sign-in that stops working is invisible from the server side otherwise,
+     * because every device just shows "Sign-in unavailable" and gives up.
+     */
+    reportInBackground(err, { where: "auth/native/start" });
     return NextResponse.json({ error: "Sign-in unavailable" }, { status: 503 });
   }
 }

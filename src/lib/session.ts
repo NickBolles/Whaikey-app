@@ -1,7 +1,7 @@
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { BodyTooLargeError } from "@/lib/body-limit";
-import { captureError } from "@/lib/observability/errors";
+import { reportInBackground } from "@/lib/observability/errors";
 
 export interface SessionUser {
   id: string;
@@ -95,9 +95,12 @@ export async function withErrorHandling<T>(fn: () => Promise<T>): Promise<T | Ne
     // by definition. Deliberately NOT awaited: reporting is best-effort and
     // `captureError` never rejects, so waiting on a third party before
     // answering a request that has already failed would turn a 500 into a slow
-    // 500. The four handled cases above are not reported — a 401, a 403, a 413
-    // are the API working, and paging on them is how an alert gets muted.
-    void captureError(err, { where: "api" });
+    // 500 — but `void` alone let the platform freeze the invocation with the
+    // report still in flight, so `reportInBackground` hands it to `after()`
+    // (i.e. `waitUntil`) instead, which is unawaited AND survives. The four
+    // handled cases above are not reported — a 401, a 403, a 413 are the API
+    // working, and paging on them is how an alert gets muted.
+    reportInBackground(err, { where: "api" });
     return NextResponse.json({ error: "Internal error" }, { status: 500 });
   }
 }

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { BodyTooLargeError, readTextWithinLimit } from "@/lib/body-limit";
-import { captureMessage } from "@/lib/observability/errors";
+import { reportMessageInBackground } from "@/lib/observability/errors";
 
 /**
  * Where the Content-Security-Policy sends its violations (review SEC-H3).
@@ -136,7 +136,7 @@ export async function POST(req: Request) {
     // belt-and-braces rather than duplication: this endpoint is
     // unauthenticated, so its input is hostile by definition and a single
     // guard on a path like that is one refactor away from being none.
-    void captureMessage(`CSP violation: ${violation.directive || "unknown directive"}`, {
+    reportMessageInBackground(`CSP violation: ${violation.directive || "unknown directive"}`, {
       where: "csp-report",
       tags: {
         directive: violation.directive || "unknown",

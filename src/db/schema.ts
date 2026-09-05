@@ -659,6 +659,24 @@ export const reactions = pgTable(
       .references(() => user.id, { onDelete: "cascade" }),
     kind: text("kind").$type<ReactionKind>().notNull().default("cheers"),
     createdAt: createdAt(),
+    /**
+     * Set when the reader took the cheer back.
+     *
+     * Soft, like `comments.deletedAt`, and for the same reason one level up:
+     * a guardrail metric that reports a different number for the same past
+     * week depending on when it is asked is not a measurement. Retraction used
+     * to DELETE the row, so a cheer given and withdrawn inside a window left
+     * nothing behind — and since cheers are the denominator of
+     * `reportsPerThousandSocialActions`, erasing them silently pushed that
+     * rate up. Pours got their snapshot columns (0035) for exactly this, and
+     * comments were already soft-deleted; reactions were the one social action
+     * still evaporating.
+     *
+     * Re-cheering clears this rather than inserting a second row, and keeps
+     * the ORIGINAL `createdAt`: the guardrail counts a reader deciding to
+     * cheer a note, not the number of times they toggled the control.
+     */
+    retractedAt: timestamp("retracted_at", { withTimezone: true, mode: "date" }),
   },
   (t) => [
     uniqueIndex("reactions_pour_user_kind_uq").on(t.pourId, t.userId, t.kind),
@@ -1035,6 +1053,19 @@ export const ANALYTICS_EVENTS = [
   "share_view",
   "share_comparison_rendered",
   "share_wishlist_add",
+  /**
+   * The same conversion, arrived at differently: the recipient put the bottle
+   * on their shelf as `own` or `tried` rather than wishing for it.
+   *
+   * Separate from `share_wishlist_add` because `POST /api/user-bottles` takes
+   * the relationship from the caller and the funnel's field is called
+   * `wishlistAddsFromShare` — so recording an "I already own this" under that
+   * name was a number that said something it did not mean. Dropping those adds
+   * instead would have been the other error: someone who owns the bottle after
+   * following a share link is a stronger outcome than a wishlist entry, not a
+   * non-event.
+   */
+  "share_shelf_add",
 ] as const;
 export type AnalyticsEventName = (typeof ANALYTICS_EVENTS)[number];
 

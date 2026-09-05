@@ -319,11 +319,15 @@ describe("attributing a wishlist add to a share (PLAN-A5)", () => {
     setSessionUser(viewer);
   });
 
-  async function add(bottleId: string, fromShareId?: string) {
+  async function add(
+    bottleId: string,
+    fromShareId?: string,
+    relationship: schema.Relationship = "wishlist",
+  ) {
     return POST(
       jsonRequest("/api/user-bottles", "POST", {
         bottleId,
-        relationship: "wishlist",
+        relationship,
         ...(fromShareId ? { fromShareId } : {}),
       }),
     );
@@ -335,6 +339,17 @@ describe("attributing a wishlist add to a share (PLAN-A5)", () => {
     expect(events).toHaveLength(1);
     expect(events[0].name).toBe("share_wishlist_add");
     expect(events[0].shareId).toBe(shareId);
+  });
+
+  it("does not file an `own` add under the name that says wishlist", async () => {
+    // The share page's button always sends "wishlist", but the endpoint takes
+    // the relationship from the caller — so the funnel's `wishlistAddsFromShare`
+    // was one hand-written request away from counting people who already own
+    // the bottle. Recorded, because it is a real conversion, under its own name.
+    expect((await add(shared.id, shareId, "own")).status).toBe(201);
+    const events = await db.select().from(schema.analyticsEvents);
+    expect(events).toHaveLength(1);
+    expect(events[0].name).toBe("share_shelf_add");
   });
 
   it("refuses to credit a share for a bottle it is not about", async () => {

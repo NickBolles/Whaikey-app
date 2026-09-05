@@ -255,6 +255,99 @@ describe("the guardrail metrics SOCIAL §12 committed to", () => {
     expect(m.socialOffRate).toBeCloseTo(1, 6);
   });
 
+  it("counts blockers out of the same population the rate divides by", async () => {
+    const blocker = await createTestUser(db);
+    const suspendedBlocker = await createTestUser(db);
+    const target = await createTestUser(db);
+    const operator = await createTestUser(db);
+    for (const [u, handle] of [
+      [blocker, "blocker"],
+      [suspendedBlocker, "suspended-blocker"],
+      [target, "target"],
+    ] as const) {
+      await db.insert(schema.userProfiles).values({
+        userId: u.id,
+        handle,
+        displayName: handle,
+        isPublic: true,
+      });
+    }
+    await db.insert(schema.moderationActions).values({
+      id: uid("action"),
+      actorId: operator.id,
+      action: "suspend",
+      subjectType: "profile",
+      subjectId: suspendedBlocker.id,
+      note: "abuse",
+    });
+    for (const b of [blocker, suspendedBlocker]) {
+      await db
+        .insert(schema.blocks)
+        .values({ id: uid("block"), blockerId: b.id, blockedId: target.id });
+    }
+
+    const m = await guardrailMetrics(db);
+    // Two profiles survive the suspension filter; one of them has blocked
+    // somebody. The earlier version counted distinct blockers across the whole
+    // table — including the suspended one, who is not in the denominator — so
+    // this read 2/2 and every suspension pushed it further up.
+    expect(m.profiles).toBe(2);
+    expect(m.blockRate).toBeCloseTo(0.5, 6);
+  });
+
+  it("never reports a block rate above everyone", async () => {
+    // The shape that made the mismatch visible: a blocker with no profile row
+    // at all is outside the denominator entirely, so counting them made a
+    // "share of profiles" exceed 1.
+    const profileless = await createTestUser(db);
+    const target = await createTestUser(db);
+    await db.insert(schema.userProfiles).values({
+      userId: target.id,
+      handle: "target",
+      displayName: "target",
+      isPublic: true,
+    });
+    await db
+      .insert(schema.blocks)
+      .values({ id: uid("block"), blockerId: profileless.id, blockedId: target.id });
+
+    const m = await guardrailMetrics(db);
+    expect(m.blockRate).toBe(0);
+  });
+
+  it("keeps a cheer that was taken back inside the window it happened in", async () => {
+    const author = await createTestUser(db);
+    const reader = await createTestUser(db);
+    const bottle = await createTestBottle(db);
+    const pourId = uid("pour");
+    await db
+      .insert(schema.pours)
+      .values({ id: pourId, userId: author.id, bottleId: bottle.id, visibility: "followers" });
+    await db
+      .insert(schema.reactions)
+      .values({ id: uid("cheer"), pourId, userId: reader.id, kind: "cheers" });
+    await db.insert(schema.reports).values({
+      id: uid("report"),
+      reporterId: reader.id,
+      subjectType: "pour",
+      subjectId: pourId,
+      reason: "other",
+    });
+
+    const before = await guardrailMetrics(db);
+    expect(before.socialActions).toBe(1);
+    expect(before.reportsPerThousandSocialActions).toBeCloseTo(1000, 6);
+
+    // The reader changes their mind. What the UI shows must change; what last
+    // week's guardrail says must not.
+    const { uncheerPour } = await import("@/lib/social");
+    await uncheerPour(db, reader.id, pourId);
+
+    const after = await guardrailMetrics(db);
+    expect(after.socialActions).toBe(1);
+    expect(after.reportsPerThousandSocialActions).toBeCloseTo(1000, 6);
+  });
+
   it("returns zeroes and nulls on an empty database rather than dividing by it", async () => {
     const m = await guardrailMetrics(db);
     expect(m.pours).toBe(0);
@@ -301,6 +394,21 @@ describe("the S1 share funnel (PLAN-A5)", () => {
     expect(f.comparisonRate).toBeCloseTo(0.5, 6);
   });
 
+  it("counts a shelf add from a share separately from a wishlist add", async () => {
+    const owner = await createTestUser(db);
+    const bottle = await createTestBottle(db);
+    const shareId = await shareOf(owner.id, bottle.id);
+    const viewer = await createTestUser(db);
+
+    await recordEvent(db, "share_shelf_add", { userId: viewer.id, shareId });
+
+    const f = await shareFunnel(db);
+    // Not folded in: `wishlistAddsFromShare` is read as "people who wanted the
+    // bottle", and someone who already owns it is a different answer.
+    expect(f.wishlistAddsFromShare).toBe(0);
+    expect(f.shelfAddsFromShare).toBe(1);
+  });
+
   it("says unknown rather than zero when nobody signed in has looked", async () => {
     const f = await shareFunnel(db);
     expect(f.comparisonRate).toBeNull();
@@ -343,9 +451,44 @@ describe("telemetry retention", () => {
     await db.insert(schema.analyticsEvents).values({ id: uid("ev"), name: "share_view" });
 
     const swept = await sweepTelemetry(db);
-    expect(swept).toEqual({ aiUsage: 1, analyticsEvents: 1 });
+    expect(swept).toEqual({ aiUsage: 1, analyticsEvents: 1, retractedCheers: 0 });
     expect(await db.select().from(schema.aiUsage)).toHaveLength(1);
     expect(await db.select().from(schema.analyticsEvents)).toHaveLength(1);
+  });
+
+  it("drops a withdrawn cheer once the window it was kept for has passed", async () => {
+    const author = await createTestUser(db);
+    const reader = await createTestUser(db);
+    const bottle = await createTestBottle(db);
+    const old = new Date(Date.now() - (TELEMETRY_RETENTION_DAYS + 1) * DAY);
+
+    async function cheer(retractedAt: Date | null, createdAt?: Date) {
+      const pourId = uid("pour");
+      await db
+        .insert(schema.pours)
+        .values({ id: pourId, userId: author.id, bottleId: bottle.id, visibility: "public" });
+      await db.insert(schema.reactions).values({
+        id: uid("cheer"),
+        pourId,
+        userId: reader.id,
+        kind: "cheers",
+        ...(createdAt ? { createdAt } : {}),
+        retractedAt,
+      });
+    }
+
+    await cheer(old); // withdrawn long ago — the guardrail no longer needs it
+    await cheer(new Date()); // withdrawn just now — still inside a live window
+    await cheer(null, old); // an OLD cheer that still stands: not telemetry at all
+
+    const swept = await sweepTelemetry(db);
+    expect(swept.retractedCheers).toBe(1);
+    // Cut on `retracted_at`, not `created_at`: a years-old cheer somebody
+    // still stands behind is a social object, and sweeping it would delete a
+    // count the UI is currently rendering.
+    const left = await db.select().from(schema.reactions);
+    expect(left).toHaveLength(2);
+    expect(left.filter((r) => r.retractedAt === null)).toHaveLength(1);
   });
 
   it("enforces the number the Privacy Policy states", () => {

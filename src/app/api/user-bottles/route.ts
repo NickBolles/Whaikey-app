@@ -92,10 +92,16 @@ export async function POST(req: Request) {
         .innerJoin(schema.pours, eq(schema.pours.id, schema.pourShares.pourId))
         .where(eq(schema.pourShares.id, input.fromShareId));
       if (share && share.bottleId === input.bottleId && share.ownerId !== user.id) {
-        await recordEvent(db, "share_wishlist_add", {
-          userId: user.id,
-          shareId: input.fromShareId,
-        });
+        // And the relationship decides which event it is. `share_wishlist_add`
+        // feeds a funnel field named `wishlistAddsFromShare`; this endpoint
+        // takes the relationship from the caller, so an `own` or `tried` add
+        // was being counted under a name that says wishlist. Both are real
+        // conversions and neither is the other one.
+        await recordEvent(
+          db,
+          input.relationship === "wishlist" ? "share_wishlist_add" : "share_shelf_add",
+          { userId: user.id, shareId: input.fromShareId },
+        );
       }
     }
     return NextResponse.json(row, { status: created ? 201 : 200 });

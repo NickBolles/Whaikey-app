@@ -396,7 +396,17 @@ async function execGetPairings(db: DB, userId: string, input: z.infer<typeof bot
   if (!(await getBottle(db, input.bottleId, userId))) {
     return toolError(`No bottle found with id "${input.bottleId}"`);
   }
-  const pairings = await getOrGeneratePairings(db, input.bottleId);
+  /**
+   * `userId` is passed for cost attribution (PLAN-A3), not for visibility —
+   * the check above already did that. Without it a pairing generated because
+   * somebody asked the concierge for one was recorded with `userId: null`,
+   * i.e. as a system job like the catalog enrichment, which took it out of
+   * `meanAiCostPerActiveUser` entirely. The route handler
+   * (`/api/bottles/[id]/pairings`) has always passed it; the tool that reaches
+   * the same generator from chat did not, so the cheaper path was measured and
+   * the paid one was not.
+   */
+  const pairings = await getOrGeneratePairings(db, input.bottleId, undefined, userId);
   if (pairings === null) return toolError(`No bottle found with id "${input.bottleId}"`);
   return {
     pairings: pairings.map((p) => ({

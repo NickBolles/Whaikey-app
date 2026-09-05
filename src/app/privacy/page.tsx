@@ -103,7 +103,10 @@ export default function PrivacyPage() {
             and profile, who you follow and who follows you, the accounts you have blocked, the
             notes you have cheered, the comments you write, and any share links you create. A
             block is kept until you lift it, because being kept is what makes a block hold; the
-            rest go with the thing they are attached to or with the account.
+            rest go with the thing they are attached to or with the account. Taking a cheer back
+            removes it from the note and from every count immediately, and the record that a
+            cheer happened is kept for 90 days after that — long enough that our safety ratios
+            cannot be rewritten after the fact, and no longer.
           </li>
           <li>
             <strong className="text-foreground">A phone number, only if you offer one</strong> — and
@@ -177,11 +180,11 @@ export default function PrivacyPage() {
           rate-limit counters are dropped after a couple of days, and phone lookups are pruned.
         </p>
         <p>
-          The AI meter readings and the three share-link events are kept for 90 days and then
-          deleted. That is the window the numbers are actually read over — a week for the
-          health checks, a month for the sharing ones — and past it they answer nothing anyone is
-          asking. It is swept, not just intended: the same job that prunes everything above does
-          this too.
+          The AI meter readings, the four share-link events, and cheers you have taken back are
+          kept for 90 days and then deleted. That is the window the numbers are actually read
+          over — a week for the health checks, a month for the sharing ones — and past it they
+          answer nothing anyone is asking. It is swept, not just intended: the same job that
+          prunes everything above does this too.
         </p>
         <p>
           Concierge conversations are kept for the life of the account. Nothing prunes them and

@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { reportingErrors } from "@/lib/observability/errors";
+import {
+  reportInBackground,
+  reportMessageInBackground,
+  reportingErrors,
+} from "@/lib/observability/errors";
 import {
   consumeNativeAuthRequest,
   issueNativeAuthCode,
@@ -77,6 +81,15 @@ async function handleGet(request: NextRequest) {
 
   if (!sessionCookie) {
     console.error("[native-auth] signed in but no session cookie named", cookieName);
+    // Not an exception, so nothing would ever have reported it — but it means
+    // Better Auth signed somebody in and the cookie is not on the request,
+    // which is a misconfiguration that breaks native sign-in for everyone at
+    // once and shows up on the device as a generic failure.
+    reportMessageInBackground("native sign-in completed without a session cookie", {
+      where: "auth/native/complete",
+      userId: user.id,
+      tags: { cookieName },
+    });
     return withState({ error: "no_session_cookie" });
   }
 
@@ -90,6 +103,11 @@ async function handleGet(request: NextRequest) {
     return withState({ code });
   } catch (err) {
     console.error("[native-auth] failed to issue exchange code", err);
+    // Same reason as `/start`: this catch answers the app rather than
+    // rethrowing, so `reportingErrors` never sees it. The person is signed in
+    // at this point and still cannot get into the app, which is the worst
+    // failure in the flow to leave unreported.
+    reportInBackground(err, { where: "auth/native/complete", userId: user.id });
     return withState({ error: "exchange_failed" });
   }
 }

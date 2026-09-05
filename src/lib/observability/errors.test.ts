@@ -5,6 +5,8 @@ import {
   captureMessage,
   isErrorMonitoringConfigured,
   redactSensitive,
+  reportInBackground,
+  reportMessageInBackground,
   setErrorReporterForTests,
   type CapturedEvent,
 } from "./errors";
@@ -141,5 +143,44 @@ describe("routes that own their own responses", () => {
     const events = collect();
     await expect(reportingErrors("native/manifest", async () => "ok")).resolves.toBe("ok");
     expect(events).toHaveLength(0);
+  });
+});
+
+/**
+ * `after()` throws outside a request scope, which every one of these tests is.
+ * That is the fallback path, and the thing worth pinning about it is that it
+ * reports ONCE: the obvious spelling of the helper starts the report, lets
+ * `after` throw, and starts it again in the catch.
+ */
+describe("reporting without making the caller wait", () => {
+  it("files an error exactly once when there is no request scope", async () => {
+    const events = collect();
+    reportInBackground(new Error("boom"), { where: "api" });
+    await vi.waitFor(() => expect(events).toHaveLength(1));
+    // Held briefly: a second report would arrive on the next microtask.
+    await new Promise((r) => setTimeout(r, 10));
+    expect(events).toHaveLength(1);
+    expect(events[0].context.where).toBe("api");
+  });
+
+  it("files a message exactly once, redacted the same way", async () => {
+    const events = collect();
+    reportMessageInBackground("CSP violation on https://whaikey.app/s/LEAKY", {
+      where: "csp-report",
+    });
+    await vi.waitFor(() => expect(events).toHaveLength(1));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(events).toHaveLength(1);
+    expect(events[0].message).not.toContain("LEAKY");
+    expect(events[0].level).toBe("warning");
+  });
+
+  it("never throws at the call site, whatever the reporter does", () => {
+    setErrorReporterForTests(() => {
+      throw new Error("the reporter itself is broken");
+    });
+    // The whole point of the seam: a 500 must not become a crash because
+    // monitoring is having a bad day.
+    expect(() => reportInBackground(new Error("boom"))).not.toThrow();
   });
 });

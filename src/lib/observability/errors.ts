@@ -1,3 +1,4 @@
+import { after } from "next/server";
 import type { NodeClient } from "@sentry/node";
 
 /**
@@ -194,6 +195,69 @@ export async function captureMessage(
     sentry.captureMessage(redacted, level, undefined, scope);
   } catch (reportingError) {
     console.error("[observability] failed to report a message", reportingError);
+  }
+}
+
+/**
+ * Report an error without making the caller wait for it.
+ *
+ * `void captureError(...)` is not enough on a serverless platform. The
+ * invocation is frozen the moment the response resolves, and a promise nobody
+ * is holding is exactly what gets frozen mid-flight — so the reports most
+ * worth having, the ones from a 500 that fired once at 3am, were the ones
+ * least likely to arrive. `after()` hands the promise to the platform's
+ * `waitUntil`, which keeps the invocation alive until it settles
+ * (`node_modules/next/dist/docs/01-app/03-api-reference/04-functions/after.md`,
+ * "supporting `after` for serverless platforms"), while still returning the
+ * response immediately.
+ *
+ * `after()` throws when there is no request scope — a unit test calling
+ * `withErrorHandling` directly, a script, a background job — and reporting an
+ * error must never become a second error. Outside a request we fall back to
+ * the fire-and-forget call, which is what those callers had anyway and is
+ * safe there because nothing is about to freeze.
+ */
+export function reportInBackground(err: unknown, context: ErrorContext = {}): void {
+  deferReport(() => captureError(err, context));
+}
+
+/**
+ * `captureMessage`'s half of the same rule.
+ *
+ * Not an afterthought: `/api/csp-report` answers 204 and returns, and it is
+ * unauthenticated, so it is the endpoint most likely to be serving a burst
+ * from a real browser when the invocation is frozen. Splitting the fix across
+ * two functions is how the `void` version of it survived its own review — the
+ * error path got the attention and the message path on the next file over did
+ * not.
+ */
+export function reportMessageInBackground(
+  message: string,
+  context: ErrorContext = {},
+  level: "error" | "warning" = "warning",
+): void {
+  deferReport(() => captureMessage(message, context, level));
+}
+
+/**
+ * Started once, then handed over — not started inside the `try`.
+ *
+ * The obvious spelling, `try { after(start()) } catch { void start() }`, calls
+ * `start()` before `after` can throw and then calls it AGAIN in the catch, so
+ * every report outside a request scope is filed twice. Capturing the promise
+ * first makes the fallback a no-op that simply leaves it running, which is
+ * what a caller with nothing about to freeze wants anyway.
+ */
+function deferReport(start: () => Promise<void>): void {
+  const pending = start();
+  try {
+    after(pending);
+  } catch {
+    // No request scope: a unit test, a script, a job. Nothing will freeze the
+    // process out from under it, so letting it settle unattended is safe —
+    // and both capture functions swallow their own failures, so an unhandled
+    // rejection is not on the table either.
+    void pending;
   }
 }
 
