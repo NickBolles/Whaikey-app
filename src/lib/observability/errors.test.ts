@@ -5,6 +5,7 @@ import {
   captureMessage,
   isErrorMonitoringConfigured,
   redactSensitive,
+  wasAlreadyReported,
   reportInBackground,
   reportMessageInBackground,
   setErrorReporterForTests,
@@ -119,6 +120,21 @@ describe("a database error, which carries the user's own words", () => {
     for (const fragment of ["grandfather", "cellar", "cried", note]) {
       expect(payload).not.toContain(fragment);
     }
+    /**
+     * And explicitly over the STACK, which is the surface this test could not
+     * see when it was first written. `CapturedEvent` had no `stack` field, so
+     * the loop above stringified an object the note was never on and passed
+     * while `err.stack` — whose first line in Node is `<Name>: <message>` —
+     * carried the whole thing to Sentry. An assertion is only as good as the
+     * surface it can reach.
+     */
+    expect(events[0].stack).toBeTruthy();
+    for (const fragment of ["grandfather", "cellar", "cried", note]) {
+      expect(events[0].stack).not.toContain(fragment);
+    }
+    // Frames survive: they are a file, a function and a position, and they are
+    // the reason a report is worth having at all.
+    expect(events[0].stack).toMatch(/\n\s+at\s/);
     // The SQL survives: it is the schema rather than the data, and it is most
     // of what makes the report worth having.
     expect(events[0].message).toContain("insert into tasting_notes");
@@ -207,6 +223,26 @@ describe("routes that own their own responses", () => {
     const events = collect();
     await expect(reportingErrors("native/manifest", async () => "ok")).resolves.toBe("ok");
     expect(events).toHaveLength(0);
+  });
+});
+
+describe("one failure, one report", () => {
+  it("marks what it has filed so the instrumentation hook does not file it again", async () => {
+    const events = collect();
+    const boom = new Error("sweep failed");
+
+    // `reportingErrors` reports and RETHROWS, so the error escapes to Next,
+    // which calls `onRequestError` for route handlers as well as renders.
+    await expect(reportingErrors("cron/sweep", async () => { throw boom; })).rejects.toBe(boom);
+    await vi.waitFor(() => expect(events).toHaveLength(1));
+
+    // That hook asks this before reporting; without it the same failure files
+    // twice and pages twice, which is how an alert gets muted.
+    expect(wasAlreadyReported(boom)).toBe(true);
+    expect(wasAlreadyReported(new Error("a different failure"))).toBe(false);
+    // Non-objects cannot be marked and must not throw the check.
+    expect(wasAlreadyReported("a string")).toBe(false);
+    expect(wasAlreadyReported(null)).toBe(false);
   });
 });
 

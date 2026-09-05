@@ -38,6 +38,15 @@ let testHook: ((event: CapturedEvent) => void) | null = null;
 export interface CapturedEvent {
   kind: "error" | "message";
   message: string;
+  /**
+   * What would actually be transmitted alongside the message.
+   *
+   * Added because its absence hid a leak: a redaction test asserted that no
+   * fragment of a tasting note appeared in this object, and passed, while the
+   * note sat in the stack's first line — a surface the object did not have.
+   * An assertion is only as good as the thing it can see.
+   */
+  stack?: string;
   level: "error" | "warning";
   context: ErrorContext;
 }
@@ -207,15 +216,40 @@ function isDrizzleQueryError(err: unknown): err is Error & DrizzleQueryShape {
 /** Schema-shaped fields only. Never `detail`, which quotes the values. */
 const SAFE_DB_FIELDS = ["code", "constraint", "table", "column", "schema"] as const;
 
+/**
+ * A stack whose header is the SANITISED message.
+ *
+ * `err.stack` in Node is `"<Name>: <message>\n    at …"` — the message is the
+ * first line of it. So copying the original stack onto the sanitised error put
+ * the parameters straight back into the payload, one field over from where
+ * they had just been removed. The redaction was real and the leak was total:
+ * Sentry sends the stack.
+ *
+ * Two things made it survive review. The comment on the copied line said
+ * "frames only; no data rides on a stack", which was simply wrong and said
+ * confidently. And the tests asserted the absence of every fragment over
+ * `CapturedEvent`, which had no `stack` field — so the assertion was correct
+ * and inspected a surface the secret was never on. `CapturedEvent` carries the
+ * stack now, so that class of test covers what is actually transmitted.
+ *
+ * Frames are kept because they are the diagnostic value and carry no data: a
+ * frame is a file, a function and a position. Anything before the first frame
+ * is discarded rather than parsed, since it is the message by construction.
+ */
+function rebuildStack(err: Error, header: string): string {
+  const frames = (err.stack ?? "")
+    .split("\n")
+    .filter((line) => /^\s+at\s/.test(line));
+  return frames.length > 0 ? `${header}\n${frames.join("\n")}` : header;
+}
+
 function sanitizeForReport(err: unknown): { error: unknown; tags: Record<string, string> } {
   if (!isDrizzleQueryError(err)) return { error: err, tags: {} };
 
-  const safe = new Error(
-    `Failed query: ${err.query} — params: [${err.params.length} value(s) withheld]`,
-  );
+  const message = `Failed query: ${err.query} — params: [${err.params.length} value(s) withheld]`;
+  const safe = new Error(message);
   safe.name = err.name;
-  // Frames only; no data rides on a stack.
-  safe.stack = err.stack;
+  safe.stack = rebuildStack(err, `${err.name}: ${message}`);
 
   const tags: Record<string, string> = { db_error: "true" };
   const cause = err.cause;
@@ -228,7 +262,31 @@ function sanitizeForReport(err: unknown): { error: unknown; tags: Record<string,
   return { error: safe, tags };
 }
 
+/**
+ * Errors this module has already filed.
+ *
+ * `onRequestError` receives Route Handler failures as well as Server Component
+ * ones, and `reportingErrors` reports and then RETHROWS — so an error escaping
+ * the cron sweep or a native-auth handler was captured by the wrapper, escaped
+ * to Next, and captured again by the hook: two Sentry events and two pages for
+ * one failure. Filtering by `routeType` instead would have been wrong in the
+ * other direction, because it would drop any route handler that uses neither
+ * wrapper.
+ *
+ * A `WeakSet` because it must not keep errors alive; marking is synchronous,
+ * before the first `await` in `captureError`, so the mark is always in place
+ * by the time a rethrow reaches Next.
+ */
+const alreadyReported = new WeakSet<object>();
+
+/** Has this exact error object already been filed by this module? */
+export function wasAlreadyReported(err: unknown): boolean {
+  return typeof err === "object" && err !== null && alreadyReported.has(err);
+}
+
 export async function captureError(err: unknown, context: ErrorContext = {}): Promise<void> {
+  // Marked synchronously, before any await, so a rethrow cannot outrun it.
+  if (typeof err === "object" && err !== null) alreadyReported.add(err);
   try {
     // Inside the try, deliberately. `String(err)` runs arbitrary user code —
     // `toString` on whatever was thrown — and an earlier version computed it
@@ -250,6 +308,7 @@ export async function captureError(err: unknown, context: ErrorContext = {}): Pr
       message: redactSensitive(
         reportable instanceof Error ? reportable.message : String(reportable),
       ),
+      stack: reportable instanceof Error ? redactSensitive(reportable.stack ?? "") : undefined,
       level: "error",
       context: reported,
     });

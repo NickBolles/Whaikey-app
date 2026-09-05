@@ -16,7 +16,21 @@ import type { Instrumentation } from "next";
  * without a DSN.
  */
 export const onRequestError: Instrumentation.onRequestError = async (err, request, context) => {
-  const { captureError, redactSensitive } = await import("@/lib/observability/errors");
+  const { captureError, redactSensitive, wasAlreadyReported } = await import(
+    "@/lib/observability/errors"
+  );
+
+  /**
+   * This hook gets Route Handler failures too, not only rendering ones — and
+   * `reportingErrors` reports and then rethrows, so an error escaping the cron
+   * sweep or a native-auth handler would arrive here already filed. Two events
+   * and two pages for one failure is how an alert gets muted.
+   *
+   * Filtered by identity rather than by `context.routeType`, because skipping
+   * every `"route"` would silently drop any handler that uses neither wrapper
+   * — trading a duplicate for a hole, which is the worse trade for monitoring.
+   */
+  if (wasAlreadyReported(err)) return;
 
   /**
    * The path is redacted before it becomes a tag. `beforeSend` would catch it
