@@ -21,6 +21,7 @@ function queue(overrides: ReportOverrides = {}) {
           reason: "abuse",
           createdAt: new Date("2026-09-01T00:00:00Z").toISOString(),
           reporterHandle: "ada",
+          reporterDeleted: false,
           ageHours: 1,
           preview: "what it says now",
           reportedPreview: "what was reported",
@@ -56,12 +57,21 @@ describe("ModerationQueue report rows", () => {
   it("does not call a reporter without a handle a deleted account", () => {
     render(queue({ reporterHandle: null }));
 
-    // `reports.reporter_id` is notNull and cascades, so a deleted reporter
-    // takes the report row with it: an open row is never evidence of one.
-    // A null handle means the account never claimed a social profile, which
-    // reporting deliberately allows.
+    // A null handle on a live reporter means the account never claimed a
+    // social profile, which reporting deliberately allows. Deletion is a
+    // separate flag (`reporterDeleted`), not something read off the handle.
     expect(screen.getByText(/reported by/)).toHaveTextContent("an account with no handle");
-    expect(screen.queryByText(/deleted account/)).toBeNull();
+    expect(screen.queryByText(/deleted/)).toBeNull();
+  });
+
+  it("says so when the reporter has since deleted their account", () => {
+    // `reports.reporter_id` is `set null` (WP-11): the complaint stays in the
+    // queue after its reporter leaves, and the row must not pretend the
+    // reporter is a live account without a handle.
+    render(queue({ reporterHandle: null, reporterDeleted: true }));
+    expect(screen.getByText(/reported by/)).toHaveTextContent(
+      "an account that has since been deleted",
+    );
   });
 
   it("names the reporter when there is a handle", () => {

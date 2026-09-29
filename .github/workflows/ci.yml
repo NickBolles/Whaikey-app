@@ -31,13 +31,68 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm lint
-      - run: pnpm test
+      # The full suite (PGlite) with the coverage floor from vitest.config.ts
+      # (review REL-8.7) — same tests as `pnpm test`, plus the ratchet.
+      - run: pnpm test:coverage
       - run: pnpm build
       # Validates capacitor.config.ts and the bundled offline shell. Needs no
       # Xcode, Android SDK, or network (docs/NATIVE_APP.md §5).
       - run: pnpm native:check
         env:
           BETTER_AUTH_SECRET: ci-secret
+
+  # The same unit/route suite against a real Postgres server (review REL-8.2).
+  # PGlite and postgres-js diverge in ways only a real server shows — raw Date
+  # parameters in `sql` templates, `execute()` result shapes, type coercion —
+  # and production runs postgres-js. The lane's first run found four such
+  # 500s that the PGlite suite had been passing (WP-26). Every PR, not
+  # nightly: it takes a few minutes and those bugs ship otherwise.
+  # Mechanics (template DB + one clone per vitest worker): src/test/postgres.ts.
+  unit-postgres:
+    name: unit / route tests (Postgres)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        # Supabase's current major. The suite needs only CREATE DATABASE.
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      WHAIKEY_TEST_POSTGRES_URL: postgres://postgres:postgres@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:postgres
+
+  # Known advisories in production dependencies (review SEC-L9). Its own job
+  # so a newly published advisory reads as exactly that, not as a test
+  # failure. Gate is HIGH and above; each moderate that remains is recorded
+  # with its reason in docs/REVIEW_2026-09.md (SEC-L9 status). Fix a failure
+  # by upgrading — never by adding an ignore without the same written reason.
+  audit:
+    name: dependency audit (prod, high+)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: pnpm audit --prod --audit-level high
 
   # Compiles the Android project on every PR so a broken Gradle change, manifest
   # error, or plugin mismatch is caught here rather than at release time. No
@@ -100,7 +155,13 @@ jobs:
 
   # Functional end-to-end smoke suite (playwright project "functional").
   # Runs inside the Playwright container so the browser + OS deps match the
-  # library version pinned in package.json.
+  # library version pinned in package.json. Retry policy (playwright.config.ts,
+  # review REL-8.5): one retry here because CI=true, none locally; a test that
+  # only passes on retry is annotated "flaky" on the PR by the github reporter.
+  # With CI=true the suite runs against a production build (`next build` +
+  # `next start`), not `next dev`: on Next 16.3.7 the dev server's memory
+  # grows with every route it compiles and took the runner past 13 GB (WP-26).
+  # The visual job below and update-baselines.yml get the same server.
   e2e:
     name: e2e (functional)
     runs-on: ubuntu-latest

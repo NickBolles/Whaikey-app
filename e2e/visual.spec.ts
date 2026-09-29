@@ -488,12 +488,24 @@ test.describe("signed in (demo collector)", () => {
     await expect(page).toHaveScreenshot(shot("note-discussion"), { fullPage: true });
   });
 
-  test("sharing: privacy controls, no shared links yet", async ({ page }) => {
-    await page.goto("/sharing");
-    await expect(page.getByRole("heading", { name: "Sharing", exact: true })).toBeVisible();
-    await expect(page.getByText("No shared links yet")).toBeVisible();
+  // Settings (WP-11) — `/sharing` folded in; the old "sharing" shot is this.
+  test("settings: account, sharing, privacy, preferences and your data", async ({ page }) => {
+    await page.goto("/settings");
+    await expect(page.getByRole("heading", { name: "Settings", exact: true })).toBeVisible();
+    await expect(page.getByText("No shared links yet.")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "How you’re found" })).toBeVisible();
     await settle(page);
-    await expect(page).toHaveScreenshot(shot("sharing"), { fullPage: true });
+    await expect(page).toHaveScreenshot(shot("settings"), { fullPage: true });
+  });
+
+  test("settings: the delete-account confirm, before the word is typed", async ({ page }) => {
+    await page.goto("/settings");
+    await page.getByRole("button", { name: /delete account/i }).click();
+    await expect(page.getByRole("alertdialog", { name: /delete your account/i })).toBeVisible();
+    await settle(page);
+    // Viewport, not full page: the dialog is fixed over the page and a
+    // full-page capture would paint it once per scroll seam.
+    await expect(page).toHaveScreenshot(shot("settings-delete-confirm"));
   });
 
   test("shared pour link: signed-in viewer gets a comparison and discussion", async ({ page }) => {

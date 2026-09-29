@@ -4,7 +4,8 @@ import Link from "next/link";
 import { GlassWater, Lock, Star } from "lucide-react";
 import { getDb } from "@/db";
 import { getSessionUser } from "@/lib/session";
-import { getProfileView, type SocialNote } from "@/lib/social";
+import { getProfileView, getSocialPrefs, type SocialNote } from "@/lib/social";
+import { listPourShares } from "@/lib/pour-sharing";
 import { getPalateMatch } from "@/lib/taste-twins";
 import { getPassport } from "@/lib/passport";
 import { FLAVOR_WHEEL, leafLabel, wedgeForLeaf } from "@/lib/flavor-wheel";
@@ -14,6 +15,7 @@ import { PassportBadgesSection } from "@/components/passport-badges-section";
 import { UserAvatar } from "@/components/user-avatar";
 import { ProfileEditor } from "./profile-editor";
 import { FollowBlockActions } from "./follow-block-actions";
+import { OwnSettingsRow } from "./settings-row";
 
 export const dynamic = "force-dynamic";
 
@@ -45,6 +47,11 @@ export default async function ProfilePage({ params }: Props) {
   // stamped (and so dated); rendering someone else's profile never writes.
   const passport = canSeeContent
     ? await getPassport(getDb(), profile.userId, { stampNewTiers: viewerState.isSelf })
+    : null;
+  // The owner's Sharing · Settings row (WP-11). Read only for the owner:
+  // nobody else is shown how many links someone has out.
+  const ownSharing = viewerState.isSelf && viewer
+    ? await Promise.all([listPourShares(getDb(), viewer.id), getSocialPrefs(getDb(), viewer.id)])
     : null;
 
   return (
@@ -135,6 +142,13 @@ export default async function ProfilePage({ params }: Props) {
                 })}
               </ul>
             </section>
+          )}
+
+          {ownSharing && (
+            <OwnSettingsRow
+              shareCount={ownSharing[0].length}
+              defaultVisibility={ownSharing[1].defaultPourVisibility}
+            />
           )}
 
           {/* The Passport: one badge wall, ordered coarse to fine (countries,

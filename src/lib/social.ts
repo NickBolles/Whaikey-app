@@ -2177,7 +2177,9 @@ export async function softDeleteComment(db: DB, userId: string, commentId: strin
        * hide recorded as lifted. If nothing has removed it yet, this is what
        * removes it.
        */
-      deletedAt: sql`coalesce(${schema.comments.deletedAt}, ${now})`,
+      // `sql.param` with the column as encoder: postgres-js cannot bind a
+      // bare Date in a raw template, which 500'd every delete in production.
+      deletedAt: sql`coalesce(${schema.comments.deletedAt}, ${sql.param(now, schema.comments.deletedAt)})`,
     })
     // Still predicated, for the race the read above cannot close: two
     // withdrawals of the same comment are one withdrawal.

@@ -5,7 +5,7 @@ import {
   randomBytes,
   timingSafeEqual,
 } from "node:crypto";
-import { and, eq, lt, sql } from "drizzle-orm";
+import { and, eq, gt, lt, sql } from "drizzle-orm";
 import { getDb, schema, type DB } from "@/db";
 import { runIndependently, stepsFailed } from "@/lib/independently";
 
@@ -355,7 +355,10 @@ export async function redeemNativeAuthCode(
     .where(
       and(
         eq(schema.nativeAuthCodes.codeHash, hashCode(code)),
-        sql`${schema.nativeAuthCodes.expiresAt} > ${now}`,
+        // Column-aware `gt`, not a raw `sql` template: postgres-js cannot
+        // encode a bare Date parameter (PGlite can), so the raw form failed
+        // every redemption in production. Caught by the Postgres CI lane.
+        gt(schema.nativeAuthCodes.expiresAt, now),
       ),
     )
     .returning();
