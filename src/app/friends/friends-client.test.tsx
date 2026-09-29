@@ -161,7 +161,7 @@ describe("FriendsClient Find friends card (the single social hub)", () => {
       "aria-checked",
       "false",
     );
-    expect(screen.getByRole("link", { name: /privacy & sharing/i })).toHaveAttribute("href", "/sharing");
+    expect(screen.getByRole("link", { name: /privacy & sharing/i })).toHaveAttribute("href", "/settings");
     expect(screen.queryByRole("button", { name: "Show my code" })).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: /handle or phone number to add/i })).not.toBeInTheDocument();
   });

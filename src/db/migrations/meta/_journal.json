@@ -288,6 +288,13 @@
       "when": 1788595795709,
       "tag": "0040_nappy_patriot",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1790706132107,
+      "tag": "0041_good_risque",
+      "breakpoints": true
     }
   ]
 }

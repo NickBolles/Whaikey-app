@@ -20,7 +20,7 @@ export interface PrivacyControlsProps {
 }
 
 /**
- * US-6/US-11 controls, added to /sharing alongside Agent A's shared-links
+ * US-6/US-11 controls, on /settings (folded in from /sharing, WP-11) beside the shared-links
  * list: the default-visibility pref for new pours, an allow-comments toggle,
  * and the step-back switch (POST /api/social/privacy-reset) with its
  * reversible re-enable (PATCH /api/social/profile { socialEnabled }).
