@@ -9,7 +9,15 @@ export default defineConfig({
   testDir: "./e2e",
   globalSetup: "./e2e/global-setup.ts",
   timeout: 30_000,
-  retries: 1,
+  // One retry in CI only (review REL-8.5). Locally a flake must fail loudly —
+  // a retry there is how a real intermittent bug gets learned to be ignored.
+  // In CI a test that passes only on its retry is still reported: the
+  // `github` reporter annotates it as flaky on the PR, so a retry absorbs a
+  // runner hiccup without hiding the test that needed one.
+  retries: process.env.CI ? 1 : 0,
+  reporter: process.env.CI
+    ? [["github"], ["list"], ["html", { open: "never" }]]
+    : "list",
   snapshotPathTemplate: "{testDir}/__screenshots__/{projectName}/{arg}{ext}",
   expect: {
     toHaveScreenshot: {
