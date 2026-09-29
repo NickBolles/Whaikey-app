@@ -5,30 +5,25 @@ import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { GlassWater, Home, MessageCircle, Plus, ScanLine, Search, Users, Wine, X } from "lucide-react";
 import { useScrollLock } from "@/lib/scroll-lock";
+import { TABS as TAB_ROUTES, isChromeless, type TabHref } from "@/lib/app-routes";
 
 // Search lives in the global header and the ＋ quick-actions sheet, not here
 // (2026-08 IA redesign; docs/SOCIAL.md §6.3 amendment covers the Friends slot).
-const TABS = [
-  { href: "/", label: "Home", icon: Home },
-  { href: "/bar", label: "My Bar", icon: Wine },
-  { href: "/friends", label: "Friends", icon: Users },
-  { href: "/chat", label: "Chat", icon: MessageCircle },
-] as const;
+// The destinations themselves live in src/lib/app-routes.ts, which is also
+// what tells the header a route is a tab (wordmark) or not (back button).
+const TAB_ICONS: Record<TabHref, typeof Home> = {
+  "/": Home,
+  "/bar": Wine,
+  "/friends": Users,
+  "/chat": MessageCircle,
+};
+const TABS = TAB_ROUTES.map((tab) => ({ ...tab, icon: TAB_ICONS[tab.href] }));
 
 const QUICK_ACTIONS = [
   { href: "/pour", label: "Log a pour", description: "Choose a bottle, then capture the moment.", icon: GlassWater },
   { href: "/scan", label: "Scan a bottle", description: "Add a bottle to your shelf.", icon: ScanLine },
   { href: "/search", label: "Find a bottle", description: "Browse the whiskey library.", icon: Search },
 ] as const;
-
-/**
- * The age gate is a blocking screen (PLAN.md §9.1): every tab behind it
- * redirects straight back to it, so a nav here is five ways to end up in the
- * same place. Only `/age` — the nav also renders on `/welcome` and `/sign-in`,
- * which the review lists as its own bug and Lane B's to fix, and fixing it
- * here would quietly reflow both of those baselines.
- */
-const HIDDEN_ROUTES = ["/age"];
 
 export function AppNav() {
   const pathname = usePathname();
@@ -37,9 +32,10 @@ export function AppNav() {
   const actionsTriggerRef = useRef<HTMLButtonElement>(null);
   useScrollLock(actionsOpen);
 
-  const hidden = HIDDEN_ROUTES.some(
-    (route) => pathname === route || pathname.startsWith(`${route}/`),
-  );
+  // Same routes the header leaves out (review UX-14): sign-in, the welcome
+  // tour, share pages, the age gate and the update screen. See app-routes.ts
+  // for why each one carries no chrome.
+  const hidden = isChromeless(pathname);
 
   const closeActions = () => {
     actionsTriggerRef.current?.focus();
@@ -103,7 +99,7 @@ export function AppNav() {
           </div>
         </div>
       )}
-      <nav aria-label="Primary" className="sticky bottom-0 z-50 mt-10 border-t border-border-subtle bg-surface/95 backdrop-blur supports-[backdrop-filter]:bg-surface/80">
+      <nav aria-label="Primary" data-app-nav className="sticky bottom-0 z-50 mt-10 border-t border-border-subtle bg-surface/95 backdrop-blur supports-[backdrop-filter]:bg-surface/80">
         <div className="grid grid-cols-5 pb-[env(safe-area-inset-bottom)]">
           {TABS.slice(0, 2).map(({ href, label, icon: Icon }) => <NavLink key={href} href={href} label={label} Icon={Icon} active={href === "/" ? pathname === "/" : pathname.startsWith(href)} />)}
           <button ref={actionsTriggerRef} type="button" onClick={() => setActionsOpen(true)} aria-expanded={actionsOpen} aria-haspopup="dialog" aria-label="Open quick actions" className="relative -mt-5 flex flex-col items-center gap-1 pb-2.5 text-[11px] text-foreground"><span className="flex h-12 w-12 items-center justify-center rounded-full border-4 border-background bg-accent text-background shadow-[0_0_16px_rgba(232,161,60,0.4)]"><Plus size={24} strokeWidth={2.5} aria-hidden /></span>New</button>

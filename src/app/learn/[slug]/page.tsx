@@ -34,14 +34,9 @@ export default async function LessonPage({ params }: { params: Promise<{ slug: s
 
   return (
     <div className="px-4 pt-5 flex flex-col gap-7">
+      {/* Back to Whiskey School is the header's back slot (app-routes.ts). */}
       <header>
-        <Link
-          href="/learn"
-          className="inline-flex items-center gap-1 text-sm text-muted hover:text-foreground transition-colors -ml-1 py-2"
-        >
-          <ChevronLeft size={18} strokeWidth={1.8} aria-hidden /> Whiskey School
-        </Link>
-        <div className="mt-3 flex items-start gap-3">
+        <div className="flex items-start gap-3">
           <span aria-hidden className="text-4xl leading-none drop-shadow-[0_0_16px_rgba(232,161,60,0.2)]">
             {lesson.emoji}
           </span>

@@ -2,11 +2,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 
-vi.mock("next/navigation", () => ({ usePathname: () => "/" }));
+let pathname = "/";
+vi.mock("next/navigation", () => ({ usePathname: () => pathname }));
 
 import { AppNav } from "@/components/app-nav";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  pathname = "/";
+});
 
 describe("AppNav", () => {
   it("keeps primary destinations focused and reveals secondary creation actions on demand", () => {
@@ -47,5 +51,41 @@ describe("AppNav", () => {
     fireEvent.keyDown(document, { key: "Escape" });
     expect(document.body.style.position).toBe("");
     expect(document.body.style.overflow).toBe("");
+  });
+
+  it("marks the current tab, and nothing for a route under none of them", () => {
+    pathname = "/bar";
+    render(<AppNav />);
+    const nav = within(screen.getByRole("navigation", { name: "Primary" }));
+    expect(nav.getByRole("link", { name: /My Bar/ })).toHaveAttribute("aria-current", "page");
+    expect(nav.getByRole("link", { name: /Home/ })).not.toHaveAttribute("aria-current");
+  });
+
+  /**
+   * Review UX-14: the nav rendered on sign-in, the welcome tour and share
+   * pages — five tabs a signed-out visitor to a share link cannot use.
+   */
+  it.each(["/sign-in", "/welcome", "/s/sashalagav16", "/age", "/app-update"])(
+    "renders nothing on the chromeless route %s",
+    (path) => {
+      pathname = path;
+      render(<AppNav />);
+      expect(screen.queryByRole("navigation", { name: "Primary" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Open quick actions" })).not.toBeInTheDocument();
+    },
+  );
+
+  it.each(["/search", "/scan", "/sharing", "/bottles/eagle-rare-10"])(
+    "still renders on %s, which only shares a prefix with a chromeless route",
+    (path) => {
+      pathname = path;
+      render(<AppNav />);
+      expect(screen.getByRole("navigation", { name: "Primary" })).toBeInTheDocument();
+    },
+  );
+
+  it("marks itself so the toast region can sit above it", () => {
+    render(<AppNav />);
+    expect(screen.getByRole("navigation", { name: "Primary" })).toHaveAttribute("data-app-nav");
   });
 });

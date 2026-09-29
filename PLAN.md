@@ -80,7 +80,7 @@ An AI-native whiskey tracking app, inspired by wine apps like **Vivino** (social
 
 ### 2.4 The UX diagnosis
 
-Screens are individually well crafted but the four highest-traffic ones (Home, My Bar, Log a pour, Bottle) are 2–3.5 viewports long with the primary action at the bottom; the nav spends two slots on the thinnest surfaces; there is no back, edit, delete, settings or sign-out; and the same job is drawn several ways. [docs/STORYBOARD.md](./docs/STORYBOARD.md) is the target and [docs/REVIEW_2026-09.md](./docs/REVIEW_2026-09.md) §1 and §7 (Lane B) the order of work.
+Screens are individually well crafted but the four highest-traffic ones (Home, My Bar, Log a pour, Bottle) are 2–3.5 viewports long with the primary action at the bottom; the nav spends two slots on the thinnest surfaces; there is no edit, delete, settings or sign-out; and the same job is drawn several ways. (Back on every non-tab route, the app-level toast with undo, and loading/error/not-found states shipped with WP-6.) [docs/STORYBOARD.md](./docs/STORYBOARD.md) is the target and [docs/REVIEW_2026-09.md](./docs/REVIEW_2026-09.md) §1 and §7 (Lane B) the order of work.
 
 ### 2.5 Do not trust until rewritten
 
@@ -100,7 +100,7 @@ v1 ships to a store when every box is ticked. Nothing on this list is optional a
 - [ ] Search tolerates a misspelling (`pg_trgm`), with a 50-query evaluation set committed.
 - [ ] Pour logging: two taps, works offline on web and native, idempotent on flush.
 - [ ] Bottle page: relationship and log action above the fold; your history; flavor profile; honest price framing (ranges); pairings.
-- [ ] Every non-tab route has back; every mutation has undo or confirm; loading/error/not-found states exist.
+- [ ] Every non-tab route has back; every mutation has undo or confirm; loading/error/not-found states exist. *(Back, loading/error/not-found and the shared toast+undo region: done, WP-6. Undo-or-confirm on every mutation is not: the quick pour is the first adopter, and each remaining mutation gets its undo in the WP that rebuilds its screen — WP-7…WP-11.)*
 
 **Explore**
 - [ ] Passport counters render on My Bar and Explore for a user with no social profile.
@@ -262,7 +262,7 @@ Tracks run in parallel and are named so that "Phase 2" is never ambiguous: **C**
 
 **Lane A (C): stop the bleeding.** ✅ WP-1 offline queue + idempotency · 🟨 WP-2/3 native auth binding and cookie storage — the verified-App-Link callback is still open and is a **store launch gate**, blocked on the bundle id (review SEC-H1 status) · ✅ WP-4 security headers (CSP report-only pending its first production reports) · ✅ WP-5 aggregate leak, body limits, AI timeouts.
 
-**Lane B (C): the focus and polish pass**, in STORYBOARD.md §5 order. WP-6 back/nav/toast/loading · WP-7 pour sheet · WP-8 bottle action bar · WP-9 My Bar shelf-first · WP-10 journal edit/delete + one Share sheet · WP-11 settings, export, delete · WP-12 the new nav (Home · Bar · ＋ · Explore · You), `/passport` with six dimensions and counters on Bar, Home cut to three modules · WP-13 first run · WP-14 shared search/row components · WP-15 share-page CTA.
+**Lane B (C): the focus and polish pass**, in STORYBOARD.md §5 order. ✅ WP-6 back/nav/toast/loading · WP-7 pour sheet · WP-8 bottle action bar · WP-9 My Bar shelf-first · WP-10 journal edit/delete + one Share sheet · WP-11 settings, export, delete · WP-12 the new nav (Home · Bar · ＋ · Explore · You), `/passport` with six dimensions and counters on Bar, Home cut to three modules · WP-13 first run · WP-14 shared search/row components · WP-15 share-page CTA.
 
 **Lane C (L): launch blockers.** ✅ WP-16 user-submitted bottles · ✅ WP-17 age gate · ✅ WP-18 moderation queue, catalog review, corrected store answers, ToS/Privacy, support — **reviewer access is the one part it could not close**, because it is an owner decision (§12) · WP-19 monitoring + the guardrail metric + publish S1/S2 overlap numbers · ✅ WP-20 kill switch, push-token rule, Android backup flag.
 

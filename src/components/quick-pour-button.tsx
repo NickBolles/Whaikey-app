@@ -3,13 +3,19 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { GlassWater } from "lucide-react";
+import { useToast } from "@/components/toast";
 
 /**
  * One tap, one dram: logs a pour of the bottle with zero notes and zero
  * score — the record can always be enriched later from the journal.
+ *
+ * One tap is also one mis-tap, so it confirms with the app toast and its Undo
+ * (docs/STORYBOARD.md §1.2: "log a pour" is the first reversible mutation on
+ * that list). Undo deletes the pour it just made.
  */
 export function QuickPourButton({ bottleId, bottleName }: { bottleId: string; bottleName: string }) {
   const router = useRouter();
+  const toast = useToast();
   const [state, setState] = useState<"idle" | "saving" | "done" | "error">("idle");
 
   async function pour() {
@@ -21,11 +27,30 @@ export function QuickPourButton({ bottleId, bottleName }: { bottleId: string; bo
     }).catch(() => null);
     if (!res?.ok) {
       setState("error");
+      toast.error(`Couldn't log a pour of ${bottleName}. Try again.`);
       setTimeout(() => setState("idle"), 3000);
       return;
     }
+    const pourId = await res
+      .json()
+      .then((body: { pour?: { id?: unknown } }) => (typeof body.pour?.id === "string" ? body.pour.id : null))
+      .catch(() => null);
     setState("done");
     router.refresh();
+    toast.show({
+      message: `Poured ${bottleName}`,
+      tone: "success",
+      // No id back means nothing to aim a delete at; the pour stands, and the
+      // journal is where it can be removed.
+      undo: pourId
+        ? async () => {
+            const undone = await fetch(`/api/pours/${encodeURIComponent(pourId)}`, { method: "DELETE" });
+            if (!undone.ok) throw new Error(`DELETE /api/pours/${pourId} → ${undone.status}`);
+            setState("idle");
+            router.refresh();
+          }
+        : undefined,
+    });
   }
 
   return (

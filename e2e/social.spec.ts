@@ -198,7 +198,8 @@ test.describe("social: signed in as Jordan (the demo user)", () => {
     await page.goto("/add/nobody999");
     await expect(page.getByRole("heading", { name: "No one by that handle" })).toBeVisible();
     await expect(page.getByText("Codes expire when accounts close.")).toBeVisible();
-    await expect(page.getByRole("link", { name: "Back to Friends" })).toBeVisible();
+    // Scoped to main: the header's back slot is also "Back to Friends" here.
+    await expect(page.getByRole("main").getByRole("link", { name: "Back to Friends" })).toBeVisible();
   });
 
   test("/add/sasha shows no price data (money-leak guard)", async ({ page }) => {

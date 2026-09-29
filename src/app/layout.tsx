@@ -11,6 +11,8 @@ import { PATH_HEADER } from "@/proxy";
 import { AppHeader } from "@/components/app-header";
 import { AppNav } from "@/components/app-nav";
 import { NativeShell } from "@/components/native-shell";
+import { NavHistoryTracker } from "@/components/nav-history-tracker";
+import { ToastProvider } from "@/components/toast";
 
 /**
  * Fonts are self-hosted from files committed under `src/app/fonts/`, not fetched
@@ -117,23 +119,32 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
       className={`${geistSans.variable} ${geistMono.variable} ${fraunces.variable} antialiased`}
     >
       <body className="min-h-dvh">
-        {/* The queue lives in per-origin storage, so the flush has to know
-            whose pours it is allowed to send. */}
-        <NativeShell userId={user?.id ?? null} />
-        {bare ? (
-          <div className="mx-auto max-w-2xl min-h-dvh flex flex-col">
-            <main className="flex-1">{children}</main>
-          </div>
-        ) : (
-          <div className="mx-auto max-w-2xl min-h-dvh flex flex-col">
-            <AppHeader
-              user={user ? { name: user.name, image: user.image } : null}
-              profileHandle={profile?.handle ?? null}
-            />
-            <main className="flex-1">{children}</main>
-            <AppNav />
-          </div>
-        )}
+        {/* One toast region for the whole app (docs/STORYBOARD.md §1.2), above
+            everything that might raise one — the native shell's offline
+            flush included — and outliving the navigation that usually
+            follows a mutation. */}
+        <ToastProvider>
+          {/* The queue lives in per-origin storage, so the flush has to know
+              whose pours it is allowed to send. */}
+          <NativeShell userId={user?.id ?? null} />
+          {/* Above the header, which unmounts on chromeless routes and would
+              otherwise miss the pages visited there. */}
+          <NavHistoryTracker />
+          {bare ? (
+            <div className="mx-auto max-w-2xl min-h-dvh flex flex-col">
+              <main className="flex-1">{children}</main>
+            </div>
+          ) : (
+            <div className="mx-auto max-w-2xl min-h-dvh flex flex-col">
+              <AppHeader
+                user={user ? { name: user.name, image: user.image } : null}
+                profileHandle={profile?.handle ?? null}
+              />
+              <main className="flex-1">{children}</main>
+              <AppNav />
+            </div>
+          )}
+        </ToastProvider>
       </body>
     </html>
   );

@@ -48,6 +48,7 @@ vi.mock("@capacitor/browser", () => ({
 }));
 
 import { NativeShell } from "@/components/native-shell";
+import { ToastProvider } from "@/components/toast";
 
 const PENDING_KEY = "whaikey.native-auth.pending.v1";
 const STATE = "the-nonce-this-app-minted";
@@ -94,7 +95,7 @@ function startedSignIn() {
 describe("NativeShell auth callback", () => {
   it("redeems a callback that matches the sign-in this app started", async () => {
     startedSignIn();
-    render(<NativeShell userId={null} />);
+    render(<NativeShell userId={null} />, { wrapper: ToastProvider });
 
     deliverDeepLink("/auth/callback", `whaikey://auth/callback?code=abc123&state=${STATE}`);
 
@@ -106,7 +107,7 @@ describe("NativeShell auth callback", () => {
   });
 
   it("ignores a code pushed at the app when no sign-in was started", async () => {
-    render(<NativeShell userId={null} />);
+    render(<NativeShell userId={null} />, { wrapper: ToastProvider });
 
     deliverDeepLink("/auth/callback", "whaikey://auth/callback?code=attacker-code&state=whatever");
 
@@ -117,7 +118,7 @@ describe("NativeShell auth callback", () => {
 
   it("ignores a code whose state is not the one this app is waiting for", async () => {
     startedSignIn();
-    render(<NativeShell userId={null} />);
+    render(<NativeShell userId={null} />, { wrapper: ToastProvider });
 
     deliverDeepLink(
       "/auth/callback",
@@ -131,7 +132,7 @@ describe("NativeShell auth callback", () => {
   it("ignores a code that carries no state at all", async () => {
     // What an attacker who has never seen our nonce can actually produce.
     startedSignIn();
-    render(<NativeShell userId={null} />);
+    render(<NativeShell userId={null} />, { wrapper: ToastProvider });
 
     deliverDeepLink("/auth/callback", "whaikey://auth/callback?code=attacker-code");
 
@@ -146,7 +147,7 @@ describe("NativeShell auth callback", () => {
    */
   it("leaves the pending sign-in intact when a forged callback is dropped", async () => {
     startedSignIn();
-    render(<NativeShell userId={null} />);
+    render(<NativeShell userId={null} />, { wrapper: ToastProvider });
 
     deliverDeepLink("/auth/callback", "whaikey://auth/callback?code=attacker&state=wrong-nonce");
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -163,7 +164,7 @@ describe("NativeShell auth callback", () => {
 
   it("accepts one callback per sign-in, so a replayed link is inert", async () => {
     startedSignIn();
-    render(<NativeShell userId={null} />);
+    render(<NativeShell userId={null} />, { wrapper: ToastProvider });
     const link = `whaikey://auth/callback?code=abc123&state=${STATE}`;
 
     deliverDeepLink("/auth/callback", link);
@@ -176,7 +177,7 @@ describe("NativeShell auth callback", () => {
 
   it("shows a matched failure at sign-in, with the return target kept", async () => {
     startedSignIn();
-    render(<NativeShell userId={null} />);
+    render(<NativeShell userId={null} />, { wrapper: ToastProvider });
 
     deliverDeepLink(
       "/auth/callback",
@@ -202,7 +203,7 @@ describe("NativeShell auth callback", () => {
       return { value: localStorage.getItem(key) };
     });
     startedSignIn();
-    render(<NativeShell userId={null} />);
+    render(<NativeShell userId={null} />, { wrapper: ToastProvider });
 
     deliverDeepLink("/auth/callback", `whaikey://auth/callback?code=abc123&state=${STATE}`);
 
@@ -212,7 +213,7 @@ describe("NativeShell auth callback", () => {
   });
 
   it("still routes ordinary deep links", async () => {
-    render(<NativeShell userId={null} />);
+    render(<NativeShell userId={null} />, { wrapper: ToastProvider });
     deliverDeepLink("/bottles/123", "whaikey://bottles/123");
     await waitFor(() => expect(router.push).toHaveBeenCalledWith("/bottles/123"));
   });

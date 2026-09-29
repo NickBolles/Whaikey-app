@@ -111,12 +111,11 @@ export function CompareClient({ comparison }: { comparison: BottleComparison }) 
   return (
     <div className="flex flex-col gap-6 px-4 pb-10 pt-5">
       <div>
-        <Link
-          href={`/bottles/${comparison.bottleId}`}
-          className="tap-target font-mono text-[11px] uppercase tracking-[0.14em] text-muted transition-colors hover:text-foreground"
-        >
-          ← {comparison.bottleName}
-        </Link>
+        {/* The bottle is named here and reached by the header's back slot;
+            this used to be a second, smaller back link. */}
+        <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-muted">
+          {comparison.bottleName}
+        </p>
         <h1 className="mt-2 font-display text-[27px] font-semibold leading-tight">
           Your note, compared
         </h1>

@@ -140,6 +140,123 @@ test.describe("signed-out smoke", () => {
   });
 });
 
+/**
+ * The app shell (review WP-6: UX-1, UX-14, UX-12, REL-6.2). Back on every
+ * non-tab route, no chrome on the pages that are not the app yet, a branded
+ * 404, and one toast region with an undo that really reverses the write.
+ */
+test.describe("app shell", () => {
+  test("a deep-linked bottle page has a way out: back to its logical parent", async ({ page }) => {
+    // Review UX-1: in the iOS shell a bottle page reached from a link was a
+    // dead end. Nothing in-app sits behind a fresh load, so back is a link.
+    await page.goto("/bottles/eagle-rare-10");
+    const back = page.getByTestId("header-back");
+    await expect(back).toHaveAccessibleName("Back to Search");
+    await expect(page.getByRole("link", { name: "Whaikey" })).toHaveCount(0);
+    await back.click();
+    await expect(page).toHaveURL(/\/search$/);
+    // A tab route gets the wordmark back instead.
+    await page.goto("/");
+    await expect(page.getByRole("link", { name: "Whaikey" })).toBeVisible();
+    await expect(page.getByTestId("header-back")).toHaveCount(0);
+  });
+
+  test("back names the page you came from and returns to it through history", async ({ page }) => {
+    await page.goto("/");
+    await page.getByRole("link", { name: "Search" }).click();
+    await expect(page).toHaveURL(/\/search$/);
+    await page.getByRole("searchbox").first().fill("lagavulin 16");
+    await page.locator("a[href^='/bottles/']").first().click();
+    await expect(page).toHaveURL(/\/bottles\//);
+
+    const back = page.getByTestId("header-back");
+    await expect(back).toHaveAccessibleName("Back to Search");
+    await back.click();
+    await expect(page).toHaveURL(/\/search/);
+    // History, not a fresh navigation: the trail unwound, so Search's own
+    // back now names the page before it (Home), not the bottle just left.
+    await expect(page.getByTestId("header-back")).toHaveAccessibleName("Back to Home");
+  });
+
+  test("the browser's own back (and so the iOS swipe) keeps the header's label honest", async ({ page }) => {
+    await page.goto("/");
+    await page.getByRole("link", { name: "Search" }).click();
+    await expect(page).toHaveURL(/\/search$/);
+    await expect(page.getByTestId("header-back")).toHaveAccessibleName("Back to Home");
+
+    await page.getByRole("searchbox").first().fill("eagle rare");
+    await page.locator("a[href^='/bottles/']").first().click();
+    await expect(page.getByTestId("header-back")).toHaveAccessibleName("Back to Search");
+
+    await page.goBack();
+    await expect(page).toHaveURL(/\/search/);
+    // Unwound, not pushed: one step back from Search is Home again.
+    await expect(page.getByTestId("header-back")).toHaveAccessibleName("Back to Home");
+  });
+
+  test("sign-in and share pages carry neither header nor nav (review UX-14)", async ({ page }) => {
+    for (const path of ["/sign-in", "/s/sashalagav16"]) {
+      await page.goto(path);
+      await expect(page.getByRole("navigation", { name: "Primary" })).toHaveCount(0);
+      await expect(page.getByRole("banner")).toHaveCount(0);
+    }
+    // And the lookalikes keep theirs: `/s` must not swallow `/search`.
+    await page.goto("/search");
+    await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible();
+  });
+
+  test("an unknown URL gets a branded 404 inside the shell", async ({ page }) => {
+    const response = await page.goto("/definitely-not-a-route");
+    expect(response?.status()).toBe(404);
+    await expect(page.getByRole("heading", { name: "Nothing poured here" })).toBeVisible();
+    // Still the app: back and the nav are the other ways out.
+    await expect(page.getByTestId("header-back")).toHaveAccessibleName("Back to Home");
+    await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible();
+    await page.getByRole("main").getByRole("link", { name: "Back to Home" }).click();
+    await expect(page).toHaveURL(/\/$/);
+  });
+
+  test("a bottle that does not exist says so, and points at the catalog", async ({ page }) => {
+    await page.goto("/bottles/no-such-bottle-anywhere");
+    await expect(page.getByRole("heading", { name: "We can't find that bottle" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Search the catalog" })).toHaveAttribute("href", "/search");
+    // Streamed behind the loading skeleton, so the status can be 200 — the
+    // page must still tell crawlers not to index it.
+    await expect(page.locator('meta[name="robots"][content*="noindex"]').first()).toBeAttached();
+  });
+
+  test("the welcome tour carries no nav either", async ({ page, context, baseURL }) => {
+    await signIn(context, baseURL!, SCAN_SESSION_TOKEN);
+    await page.goto("/welcome");
+    await expect(page.getByRole("button", { name: "Set me up" })).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "Primary" })).toHaveCount(0);
+  });
+
+  test("a quick pour confirms with a toast whose Undo removes that pour", async ({ page, context, baseURL }) => {
+    await signIn(context, baseURL!, SCAN_SESSION_TOKEN);
+    // Give Home's journal a row to quick-pour from (and the account a pour,
+    // so Home does not hand it to the welcome tour). A bottle no other test
+    // touches: a pour shelves its bottle as Tried, and the scan tests below
+    // assert "Added …" wording for theirs.
+    const seeded = await page.request.post("/api/pours", { data: { bottleId: "henry-mckenna-10" } });
+    expect(seeded.ok()).toBe(true);
+
+    await page.goto("/history");
+    const countLine = page.getByText(/\d+ pours? logged/);
+    const before = await countLine.textContent();
+
+    await page.goto("/");
+    await page.getByTestId("quick-pour").first().click();
+    const notifications = page.getByRole("region", { name: "Notifications" });
+    await expect(notifications).toContainText(/Poured /);
+    await notifications.getByRole("button", { name: "Undo" }).click();
+    await expect(notifications).not.toContainText(/Poured /);
+
+    await page.goto("/history");
+    await expect(page.getByText(/\d+ pours? logged/)).toHaveText(before!);
+  });
+});
+
 test.describe("signed-in scan flow", () => {
   test.beforeEach(async ({ context, baseURL }) => {
     await signIn(context, baseURL!, SCAN_SESSION_TOKEN);
@@ -188,7 +305,8 @@ test.describe("signed-in scan flow", () => {
     await expect(page.getByRole("status")).toContainText(/Added Maker's Mark/i);
 
     // ...and back into the pour flow with that bottle already chosen.
-    await page.getByRole("link", { name: "Pour" }).click();
+    // Scoped to main: the header's back slot reads "Back to Log a pour" here.
+    await page.getByRole("main").getByRole("link", { name: "Pour" }).click();
     await expect(page.getByRole("heading", { name: "Rating" })).toBeVisible();
     await expect(page.getByText(/Maker's Mark/i).first()).toBeVisible();
   });

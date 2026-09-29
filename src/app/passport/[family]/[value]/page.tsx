@@ -1,11 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Star } from "lucide-react";
+import { Star } from "lucide-react";
 import { getDb } from "@/db";
 import { PASSPORT_FAMILIES, type PassportFamily } from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
-import { getOwnProfile } from "@/lib/social";
 import { PASSPORT_TIER_SPECS, bottlesForTier, getPassportBadgeDetail, tierSpec } from "@/lib/passport";
 import { PassportBadgeIcon } from "@/components/passport-badge";
 
@@ -53,13 +52,9 @@ export default async function PassportBadgePage({ params }: Props) {
   }
 
   const db = getDb();
-  const [detail, ownProfile] = await Promise.all([
-    getPassportBadgeDetail(db, user.id, family, value),
-    getOwnProfile(db, user.id),
-  ]);
+  const detail = await getPassportBadgeDetail(db, user.id, family, value);
   if (!detail) notFound();
   const { badge, bottles } = detail;
-  const backHref = ownProfile ? `/u/${ownProfile.handle}` : "/";
 
   const heldSpec = tierSpec(badge.heldTier);
   const nextSpec = PASSPORT_TIER_SPECS.find((spec) => badge.metCount < bottlesForTier(spec, badge.catalogTotal));
@@ -68,10 +63,7 @@ export default async function PassportBadgePage({ params }: Props) {
 
   return (
     <div className="mx-auto flex max-w-lg flex-col gap-6 px-4 pb-24 pt-8">
-      <Link href={backHref} className="text-muted hover:text-foreground inline-flex items-center gap-1.5 text-sm transition-colors">
-        <ArrowLeft size={18} strokeWidth={1.8} aria-hidden /> Profile
-      </Link>
-
+      {/* Back to the profile is the header's back slot (app-routes.ts). */}
       <section className="card flex items-center gap-4 p-5">
         <PassportBadgeIcon family={badge.family} value={badge.value} tier={badge.heldTier} size={72} count={badge.metCount} />
         <div className="min-w-0">
