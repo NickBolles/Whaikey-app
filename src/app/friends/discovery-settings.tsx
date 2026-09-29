@@ -14,16 +14,19 @@ interface PhoneSaveResponse {
 /**
  * "How you're found" — the phone-discovery face of the Find friends card
  * (docs/SOCIAL.md §7.2, D8 as amended): save/replace/remove a number plus the
- * never-pre-selected "find me by phone" opt-in, and the pointer to /sharing.
+ * never-pre-selected "find me by phone" opt-in, and the pointer to /settings.
  * Rendered inside the card's tabpanel, so it brings no card chrome of its own;
  * the card keeps it mounted across face switches so saves aren't forgotten.
  */
 export function DiscoveryPanel({
   initialPhoneLast2,
   initialPhoneDiscoverable,
+  showSettingsLink = true,
 }: {
   initialPhoneLast2: string | null;
   initialPhoneDiscoverable: boolean;
+  /** Off where the panel is already inside Settings, so it does not link to itself. */
+  showSettingsLink?: boolean;
 }) {
   const [phoneLast2, setPhoneLast2] = useState(initialPhoneLast2);
   const [discoverable, setDiscoverable] = useState(initialPhoneDiscoverable);
@@ -217,12 +220,14 @@ export function DiscoveryPanel({
         )}
       </div>
 
-      <Link
-        href="/sharing"
-        className="self-start text-sm text-muted transition-colors hover:text-foreground"
-      >
-        Privacy &amp; sharing →
-      </Link>
+      {showSettingsLink && (
+        <Link
+          href="/settings"
+          className="self-start text-sm text-muted transition-colors hover:text-foreground"
+        >
+          Privacy &amp; sharing →
+        </Link>
+      )}
     </div>
   );
 }

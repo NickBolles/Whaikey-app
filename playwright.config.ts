@@ -49,6 +49,11 @@ export default defineConfig({
     env: {
       DATABASE_PATH: DB_PATH,
       BETTER_AUTH_SECRET: "e2e-secret",
+      // Better Auth refuses state-changing calls from an origin other than its
+      // base URL ("Invalid origin"), and the default is :3000 — so without
+      // this, sign-out from the browser was refused on every PW_PORT and the
+      // Settings smoke (WP-11) caught it. Production sets its own.
+      BETTER_AUTH_URL: `http://localhost:${PORT}`,
       NEXT_PUBLIC_OAUTH_CONFIGURED: "false",
       // Keep scan-miss behavior deterministic: never call external UPC APIs.
       WHAIKEY_UPC_LOOKUP: "off",

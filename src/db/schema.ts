@@ -762,9 +762,19 @@ export const reports = pgTable(
     id: id(),
     subjectType: text("subject_type").$type<ReportSubjectType>().notNull(),
     subjectId: text("subject_id").notNull(),
-    reporterId: text("reporter_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
+    /**
+     * Who filed it. Null means exactly one thing: that account has since been
+     * deleted (WP-11) — the write path always has a reporter.
+     *
+     * `set null`, not `cascade`. Cascading meant deleting an account withdrew
+     * every complaint it had filed, including open ones nobody had judged
+     * yet, so the reported content left the queue without an operator ever
+     * looking at it — a person harassed off the app took the evidence of the
+     * harassment with them. The complaint is about somebody else's content and
+     * outlives the person who raised it; what deletion owes the reporter is
+     * that the row stops naming them, which is what detaching the id does.
+     */
+    reporterId: text("reporter_id").references(() => user.id, { onDelete: "set null" }),
     reason: text("reason").notNull(),
     /**
      * Who owned the reported thing when it was reported.
