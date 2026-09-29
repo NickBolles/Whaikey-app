@@ -32,8 +32,8 @@ test.describe("security headers", () => {
     expect(headers["permissions-policy"]).toContain("geolocation=()");
 
     const csp = headers["content-security-policy"] ?? "";
-    // Clickjacking /sharing ("Make everything private", link revocation) is the
-    // concrete attack this closes.
+    // Clickjacking /settings (account deletion, "Make everything private",
+    // link revocation) is the concrete attack this closes.
     expect(csp).toContain("frame-ancestors 'none'");
     expect(csp).toContain("base-uri 'none'");
     // Bottle art is source-owned media on whatever host the catalog found it.

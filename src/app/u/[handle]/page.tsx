@@ -4,7 +4,8 @@ import Link from "next/link";
 import { GlassWater, Lock, Star } from "lucide-react";
 import { getDb } from "@/db";
 import { getSessionUser } from "@/lib/session";
-import { getProfileView, type SocialNote } from "@/lib/social";
+import { getProfileView, getSocialPrefs, type SocialNote } from "@/lib/social";
+import { listPourShares } from "@/lib/pour-sharing";
 import { getPalateMatch } from "@/lib/taste-twins";
 import { getPassport } from "@/lib/passport";
 import { FLAVOR_WHEEL, leafLabel, wedgeForLeaf } from "@/lib/flavor-wheel";
@@ -14,6 +15,7 @@ import { PassportBadgesSection } from "@/components/passport-badges-section";
 import { UserAvatar } from "@/components/user-avatar";
 import { ProfileEditor } from "./profile-editor";
 import { FollowBlockActions } from "./follow-block-actions";
+import { OwnSettingsRow } from "./settings-row";
 
 export const dynamic = "force-dynamic";
 
@@ -36,8 +38,8 @@ export default async function ProfilePage({ params }: Props) {
   // Mirrors getProfileView's own canSeeContent gate (docs/SOCIAL.md US-4): a
   // signed-out viewer never sees content, even for a public profile.
   const canSeeContent = signedIn && (viewerState.isSelf || profile.isPublic || viewerState.followState === "accepted");
-  // Independent of each other, so one round rather than two (review REL-6.3).
-  const [palateMatch, passport] = await Promise.all([
+  // Independent of each other, so one round rather than three (review REL-6.3).
+  const [palateMatch, passport, ownSharing] = await Promise.all([
     // US-16: how closely this person tastes like the viewer. Null — and so
     // absent — unless the viewer follows them and both palates carry enough
     // rated pours to mean something.
@@ -45,6 +47,11 @@ export default async function ProfilePage({ params }: Props) {
     // The owner viewing their own passport is the one moment new tiers get
     // stamped (and so dated); rendering someone else's profile never writes.
     canSeeContent ? getPassport(getDb(), profile.userId, { stampNewTiers: viewerState.isSelf }) : null,
+    // The owner's Sharing · Settings row (WP-11). Read only for the owner:
+    // nobody else is shown how many links someone has out.
+    viewerState.isSelf && viewer
+      ? Promise.all([listPourShares(getDb(), viewer.id), getSocialPrefs(getDb(), viewer.id)])
+      : null,
   ]);
 
   return (
@@ -135,6 +142,13 @@ export default async function ProfilePage({ params }: Props) {
                 })}
               </ul>
             </section>
+          )}
+
+          {ownSharing && (
+            <OwnSettingsRow
+              shareCount={ownSharing[0].length}
+              defaultVisibility={ownSharing[1].defaultPourVisibility}
+            />
           )}
 
           {/* The Passport: one badge wall, ordered coarse to fine (countries,

@@ -94,6 +94,8 @@ export function routeLabel(pathname: string): string | null {
       return "Import";
     case "sharing":
       return "Sharing";
+    case "settings":
+      return "Settings";
     case "terms":
       return "Terms";
     case "privacy":
@@ -156,6 +158,9 @@ export function parentRoute(pathname: string, ctx: ParentContext): ParentRoute {
       return ownProfile ?? HOME;
     case "sharing":
       return ownProfile ?? { href: "/friends", label: "Friends" };
+    case "settings":
+      // Settings lives in the profile (STORYBOARD §2: Profile → Settings).
+      return ownProfile ?? HOME;
     case "u":
     case "add":
     case "notes":

@@ -89,6 +89,12 @@ describe("parentRoute — where back goes with no in-app history", () => {
     });
   });
 
+  it("sends settings back to the profile it lives in", () => {
+    expect(routeLabel("/settings")).toBe("Settings");
+    expect(parentRoute("/settings", SIGNED_IN)).toEqual({ href: "/u/ada", label: "Profile" });
+    expect(parentRoute("/settings", { signedIn: true, profileHandle: null })).toEqual({ href: "/", label: "Home" });
+  });
+
   it("sends social pages to Friends", () => {
     for (const path of ["/u/sasha", "/add/sasha", "/notes/demo-friend-pour-1"]) {
       expect(parentRoute(path, SIGNED_IN)).toEqual({ href: "/friends", label: "Friends" });

@@ -32,7 +32,14 @@ describe("DiscoveryPanel contents", () => {
 
     expect(screen.getByLabelText("Phone number")).toBeInTheDocument();
     expect(screen.getByText(/stored scrambled and never shown to anyone/i)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /privacy & sharing/i })).toHaveAttribute("href", "/sharing");
+    expect(screen.getByRole("link", { name: /privacy & sharing/i })).toHaveAttribute("href", "/settings");
+  });
+
+  it("drops the settings link when it is already inside Settings", () => {
+    render(
+      <DiscoveryPanel initialPhoneLast2={null} initialPhoneDiscoverable={false} showSettingsLink={false} />,
+    );
+    expect(screen.queryByRole("link", { name: /privacy & sharing/i })).toBeNull();
   });
 });
 

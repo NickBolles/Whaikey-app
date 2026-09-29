@@ -13,8 +13,10 @@ export const metadata: Metadata = {
  *
  * Written against the schema rather than from a template — every claim below
  * is checkable in `src/db/schema.ts` — and where something is promised
- * elsewhere but not built (export, deletion) it says so instead of describing
- * a control nobody has.
+ * elsewhere but not built it says so instead of describing a control nobody
+ * has. The export and deletion paragraphs describe `ACCOUNT_DATA` in
+ * `src/lib/account-data.ts`, which is what the button actually does; change
+ * one and the other has to move with it (WP-11).
  */
 export default function PrivacyPage() {
   /**
@@ -124,9 +126,9 @@ export default function PrivacyPage() {
             <strong className="text-foreground">Anything you send us through support</strong> — the
             message itself, the contact address you offer with it, and which platform and app
             version you were on. It is kept so a person can act on it, which means anything you put
-            in a message — including an appeal or a deletion request — is stored with it. Send only
-            what you need us to know. If you were signed in, your account is attached; if you were
-            not, only what you typed is.
+            in a message — including an appeal — is stored with it. Send only what you need us to
+            know. If you were signed in, your account is attached; if you were not, only what you
+            typed is.
           </li>
         </ul>
       </Section>
@@ -141,8 +143,8 @@ export default function PrivacyPage() {
         <p>
           A share link is a bearer credential: anyone holding the URL can open that note until you
           revoke it, which you can do at any time from{" "}
-          <Link href="/sharing" className="text-accent">
-            Sharing
+          <Link href="/settings#sharing" className="text-accent">
+            Settings
           </Link>
           .
         </p>
@@ -212,24 +214,83 @@ export default function PrivacyPage() {
         <p>
           Support messages and moderation records are the exception, and we would rather say so
           than imply otherwise: they are kept indefinitely today. A moderation record is what an
-          appeal gets answered from, so it outlives the decision on purpose. A support message has
-          no such reason — it is kept only because nothing prunes it yet. Ask through{" "}
+          appeal gets answered from, so it outlives the decision on purpose — including when the
+          account it is about is deleted. A support message has no such reason: one you sent while
+          signed in is deleted with your account, and one you sent signed out was never linked to
+          you, so ask through{" "}
           <Link href="/support" className="text-accent">
             support
           </Link>{" "}
-          and we will delete yours.
+          if you want it gone.
         </p>
       </Section>
 
-      <Section title="Getting it out, and getting rid of it">
+      <Section id="getting-it-out" title="Getting it out, and getting rid of it">
         <p>
-          <strong className="text-foreground">Not built yet, and we will not pretend otherwise.</strong>{" "}
-          A one-tap export of everything you have written, and a real account deletion, are both
-          committed to (PLAN.md §9.2) and neither has shipped. In the meantime, ask through{" "}
-          <Link href="/support" className="text-accent">
-            support
-          </Link>{" "}
-          and both will be done by hand. This page will be updated the day they exist.
+          <strong className="text-foreground">Both are buttons in{" "}
+          <Link href="/settings" className="text-accent">
+            Settings
+          </Link>
+          , free, on every account.</strong>
+        </p>
+        <p>
+          <strong className="text-foreground">Export</strong> downloads everything above that is
+          yours — account, sign-in methods and sessions, age answer, shelf, pours and tasting
+          notes, share links, passport, concierge conversations, bottles you proposed, profile,
+          who you follow and who follows you, who you blocked, cheers and comments you gave,
+          reports you filed, support messages, and the AI and share-link records about you — as
+          one JSON file or a zip of spreadsheets. What it leaves out, it names inside the file,
+          with the reason. Three kinds of thing are always left out: credentials (session tokens,
+          sign-in codes, device push tokens, the live share-link codes, the hash of your phone
+          number), because a file travels and a key in it is a way into the account; anything
+          other people wrote, including comments on your notes and what somebody said when they
+          reported you; and who has blocked you, because telling you would undo the block.
+        </p>
+        <p>
+          <strong className="text-foreground">Deleting the account</strong> asks you to type a word
+          to confirm, then happens at once, in one step that either completes or changes nothing.
+          It cannot be undone and there is no grace period. Every device is signed out.
+        </p>
+        <ul className="list-disc pl-5 flex flex-col gap-1.5">
+          <li>
+            <strong className="text-foreground">Deleted:</strong> the account, its sessions and
+            sign-in links, your age answer, your shelf, every pour and tasting note, your share
+            links (they stop opening immediately), passport, concierge conversations, cached
+            recommendation reasons, your profile and settings (the handle becomes available to
+            others), your phone number&rsquo;s hash, follows in both directions, blocks in both
+            directions, device push registrations, rate-limit counters, support messages you sent
+            signed in, and bottles you proposed that were never added to the shared catalog, with
+            the proposals themselves.
+          </li>
+          <li>
+            <strong className="text-foreground">Your words on other people&rsquo;s notes</strong>{" "}
+            — every comment you wrote and every cheer you gave — are deleted outright rather than
+            left as a &ldquo;deleted&rdquo; marker. A reply somebody wrote to one of your comments
+            stays on their thread. Comments and cheers other people left on your notes go with
+            your notes.
+          </li>
+          <li>
+            <strong className="text-foreground">Kept, without your name:</strong> the AI meter
+            readings and share-link events described above (they expire on the same 90 days);
+            reports you filed about other people&rsquo;s content, so a complaint still gets judged
+            after you leave; a bottle you added that is now in the shared catalog, because other
+            people&rsquo;s shelves point at it; and, if you were ever a moderator, the decisions you
+            made.
+          </li>
+          <li>
+            <strong className="text-foreground">Kept as they are:</strong> reports other people
+            filed about something of yours, including their copy of what they reported. They are
+            moderation records, above. Your content itself is deleted.
+          </li>
+          <li>
+            <strong className="text-foreground">Community numbers</strong> — a bottle&rsquo;s
+            average, its flavour consensus — are calculated when they are shown, never stored, so
+            your published pours stop counting the next time anyone looks.
+          </li>
+        </ul>
+        <p>
+          Backups our database host keeps are not rewritten by the button; they expire on the
+          host&rsquo;s own schedule.
         </p>
       </Section>
 
@@ -253,9 +314,9 @@ export default function PrivacyPage() {
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({ id, title, children }: { id?: string; title: string; children: React.ReactNode }) {
   return (
-    <section className="flex flex-col gap-2">
+    <section id={id} className="flex scroll-mt-20 flex-col gap-2">
       <h2 className="font-display text-lg font-semibold text-foreground">{title}</h2>
       {children}
     </section>
