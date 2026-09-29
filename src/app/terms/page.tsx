@@ -108,16 +108,17 @@ export default function TermsPage() {
         <p>
           The service is provided as it is. We do not promise it will be available, that a catalog
           entry is accurate, or that a price is current. Keep your own copy of anything you cannot
-          afford to lose — an export is coming and is not built yet, which is stated plainly here
-          rather than assumed.
+          afford to lose — the export in Settings downloads everything you have written, free,
+          whenever you want it.
         </p>
       </Section>
 
       <Section title="Ending it">
         <p>
-          You can stop using Whaikey at any time. Account deletion is not yet built (PLAN.md §9.2);
-          until it is, ask through support and it will be done by hand. We may end an account that
-          is being used to harm other people, and will say why.
+          You can stop using Whaikey at any time, and delete your account from Settings whenever
+          you choose — at once, with no undo. What that removes and what it keeps is set out in the
+          privacy policy. We may end an account that is being used to harm other people, and will
+          say why.
         </p>
       </Section>
 

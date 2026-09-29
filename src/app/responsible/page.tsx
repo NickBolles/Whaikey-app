@@ -103,12 +103,12 @@ export default function ResponsiblePage() {
         <p className="text-sm text-muted leading-relaxed">
           Your notes and your shelf are private by default. Nothing you log is shared until you
           choose to share it, and what you paid never appears anywhere another person can see.
-          A one-tap export of everything you have written is on the way and is not built yet —
-          this page will say so until it is.{" "}
-          <Link href="/sharing" className="text-accent font-medium">
-            Sharing and privacy
+          Everything you have written can be downloaded, or deleted along with the account, in
+          one tap.{" "}
+          <Link href="/settings" className="text-accent font-medium">
+            Settings
           </Link>{" "}
-          is where every share link lives, and where you can turn all of it off.
+          is where that lives, with every share link and the switch that turns all of it off.
         </p>
         <p className="text-xs text-muted/70">
           <Link href="/privacy" className="text-accent">

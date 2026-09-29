@@ -57,6 +57,13 @@ export interface QueuedReport {
   reason: string;
   createdAt: Date;
   reporterHandle: string | null;
+  /**
+   * The reporter's account has been deleted since (WP-11). Reports survive
+   * their reporter — `reports.reporter_id` is `set null` — so an open row can
+   * now outlive the person who filed it, and "no handle" would describe a
+   * different thing: an account that simply never claimed a profile.
+   */
+  reporterDeleted: boolean;
   /** Hours since it arrived; over `REPORT_SLA_HOURS` is a breach. */
   ageHours: number;
   /** The subject as it reads **now** — which is not necessarily what was reported. */
@@ -164,6 +171,7 @@ async function listOpenReportsIn(
       recordedOwnerId: reports.subjectOwnerId,
       createdAt: reports.createdAt,
       reporterHandle: userProfiles.handle,
+      reporterId: reports.reporterId,
     })
     .from(reports)
     .leftJoin(userProfiles, eq(userProfiles.userId, reports.reporterId))
@@ -575,12 +583,12 @@ async function listOpenReportsIn(
     return sharedWithAnyone(row.subjectId);
   };
 
-  return rows.map(({ subjectSnapshot, recordedOwnerId, ...row }) => {
-    const ownerId = ownerOf({ ...row, subjectSnapshot, recordedOwnerId });
+  return rows.map(({ subjectSnapshot, recordedOwnerId, reporterId, ...row }) => {
+    const ownerId = ownerOf({ ...row, subjectSnapshot, recordedOwnerId, reporterId });
     const profile = ownerId ? profileById.get(ownerId) : undefined;
 
     let preview: string | null = null;
-    const readable = stillReadable({ ...row, subjectSnapshot, recordedOwnerId });
+    const readable = stillReadable({ ...row, subjectSnapshot, recordedOwnerId, reporterId });
     if (!readable) {
       // Nothing to show under "Now", and nothing to compare against either —
       // an unknown is not a difference, the same rule a pre-snapshot report
@@ -619,6 +627,7 @@ async function listOpenReportsIn(
 
     return {
       ...row,
+      reporterDeleted: reporterId == null,
       ageHours: Math.floor((now.getTime() - row.createdAt.getTime()) / 3_600_000),
       preview,
       reportedPreview: subjectSnapshot,

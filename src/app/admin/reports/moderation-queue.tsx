@@ -23,6 +23,7 @@ interface QueuedReportView {
   reason: string;
   createdAt: string;
   reporterHandle: string | null;
+  reporterDeleted: boolean;
   ageHours: number;
   preview: string | null;
   reportedPreview: string | null;
@@ -332,13 +333,18 @@ function ReportRow({
       </div>
 
       <p className="text-xs text-muted">
-        {/* Not "a deleted account": `reports.reporter_id` is notNull and
-            cascades, so a deleted reporter takes the report row with it and an
-            open row is never evidence of one. A null handle means the account
-            never claimed a social profile, which /api/social/reports allows on
-            purpose — reporting is a safety action, not a social one. */}
+        {/* Two different nulls. A report outlives its reporter's account
+            (`reports.reporter_id` is `set null`, WP-11), and that is said as
+            such; a live reporter with no handle is an account that never
+            claimed a social profile, which /api/social/reports allows on
+            purpose — reporting is a safety action, not a social one. Calling
+            the second "deleted" would misdescribe a person who is still here. */}
         reported by{" "}
-        {report.reporterHandle ? `@${report.reporterHandle}` : "an account with no handle"}
+        {report.reporterDeleted
+          ? "an account that has since been deleted"
+          : report.reporterHandle
+            ? `@${report.reporterHandle}`
+            : "an account with no handle"}
         {report.alreadyHidden && report.subjectType !== "profile" && " · already hidden"}
         {report.subjectOwnerSuspended && " · author suspended"}
       </p>

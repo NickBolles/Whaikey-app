@@ -31,6 +31,16 @@ export const GATE_MINOR_SESSION_TOKEN = "e2e-gate-minor-session-token";
  */
 export const OPERATOR_USER_ID = "operator-user";
 export const OPERATOR_SESSION_TOKEN = "e2e-operator-session-token";
+/**
+ * Two accounts that exist to be used up by the Settings smoke (WP-11). One is
+ * exported from and then signed out — which deletes its session row — and the
+ * other is deleted outright, so neither can be the demo collector whose screens
+ * are the visual baselines. Seeded by e2e/account-seed.ts.
+ */
+export const ACCOUNT_USER_ID = "account-user";
+export const ACCOUNT_SESSION_TOKEN = "e2e-account-session-token";
+export const LEAVING_USER_ID = "leaving-user";
+export const LEAVING_SESSION_TOKEN = "e2e-leaving-session-token";
 const SESSION_COOKIE = "better-auth.session_token";
 
 /**

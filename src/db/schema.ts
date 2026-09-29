@@ -204,7 +204,7 @@ export const bottles = pgTable(
     // Catalog search (WP-22): trigram GIN over the normalized name, so a
     // substring `ILIKE` and a `word_similarity` typo match are both index scans
     // rather than a pass over every bottle. Needs the pg_trgm extension
-    // (migration 0041; PGlite loads it in src/db/index.ts).
+    // (migration 0042; PGlite loads it in src/db/index.ts).
     index("bottles_name_trgm_idx").using("gin", sql`${catalogSearchKey(t.name)} gin_trgm_ops`),
     // A distillery-name hit reaches its bottles through this, not a scan.
     index("bottles_distillery_idx").on(t.distilleryId),
@@ -809,9 +809,19 @@ export const reports = pgTable(
     id: id(),
     subjectType: text("subject_type").$type<ReportSubjectType>().notNull(),
     subjectId: text("subject_id").notNull(),
-    reporterId: text("reporter_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
+    /**
+     * Who filed it. Null means exactly one thing: that account has since been
+     * deleted (WP-11) — the write path always has a reporter.
+     *
+     * `set null`, not `cascade`. Cascading meant deleting an account withdrew
+     * every complaint it had filed, including open ones nobody had judged
+     * yet, so the reported content left the queue without an operator ever
+     * looking at it — a person harassed off the app took the evidence of the
+     * harassment with them. The complaint is about somebody else's content and
+     * outlives the person who raised it; what deletion owes the reporter is
+     * that the row stops naming them, which is what detaching the id does.
+     */
+    reporterId: text("reporter_id").references(() => user.id, { onDelete: "set null" }),
     reason: text("reason").notNull(),
     /**
      * Who owned the reported thing when it was reported.

@@ -203,4 +203,18 @@ describe("signOutCompletely", () => {
     expect(signOut).toHaveBeenCalled();
     vi.doUnmock("@/lib/auth-client");
   });
+
+  it("rejects when the server refuses the sign-out, rather than reporting success", async () => {
+    // Better Auth resolves `{ error }` instead of throwing; the caller
+    // navigates away on resolve, so a refusal read as success left a live
+    // session behind a signed-out-looking page.
+    const signOut = vi.fn(async () => ({ data: null, error: { status: 403, message: "Invalid origin" } }));
+    vi.doMock("@/lib/auth-client", () => ({ signOut }));
+    vi.resetModules();
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ unregistered: true })));
+
+    const { signOutCompletely } = await import("@/lib/sign-out");
+    await expect(signOutCompletely()).rejects.toThrow(/Invalid origin/);
+    vi.doUnmock("@/lib/auth-client");
+  });
 });

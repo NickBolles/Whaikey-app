@@ -1,6 +1,6 @@
 {
-  "id": "8f4357e8-2856-4255-ac83-8d651ac868d9",
-  "prevId": "94a2103a-07a0-4946-990b-1341587cb6c3",
+  "id": "4c3f6de5-a963-4a2b-983c-6e9091567ffe",
+  "prevId": "8f4357e8-2856-4255-ac83-8d651ac868d9",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -92,15 +92,15 @@
         "account_user_id_user_id_fk": {
           "name": "account_user_id_user_id_fk",
           "tableFrom": "account",
+          "tableTo": "user",
           "columnsFrom": [
             "user_id"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -161,15 +161,15 @@
         "age_verifications_user_id_user_id_fk": {
           "name": "age_verifications_user_id_user_id_fk",
           "tableFrom": "age_verifications",
+          "tableTo": "user",
           "columnsFrom": [
             "user_id"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -232,24 +232,24 @@
             }
           ],
           "isUnique": true,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "ai_rate_limits_user_id_user_id_fk": {
           "name": "ai_rate_limits_user_id_user_id_fk",
           "tableFrom": "ai_rate_limits",
+          "tableTo": "user",
           "columnsFrom": [
             "user_id"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -353,9 +353,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "ai_usage_created_idx": {
           "name": "ai_usage_created_idx",
@@ -368,24 +368,24 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "ai_usage_user_id_user_id_fk": {
           "name": "ai_usage_user_id_user_id_fk",
           "tableFrom": "ai_usage",
+          "tableTo": "user",
           "columnsFrom": [
             "user_id"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -454,9 +454,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "analytics_events_share_idx": {
           "name": "analytics_events_share_idx",
@@ -469,37 +469,37 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "analytics_events_user_id_user_id_fk": {
           "name": "analytics_events_user_id_user_id_fk",
           "tableFrom": "analytics_events",
+          "tableTo": "user",
           "columnsFrom": [
             "user_id"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         },
         "analytics_events_share_id_pour_shares_id_fk": {
           "name": "analytics_events_share_id_pour_shares_id_fk",
           "tableFrom": "analytics_events",
+          "tableTo": "pour_shares",
           "columnsFrom": [
             "share_id"
           ],
-          "tableTo": "pour_shares",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -555,9 +555,9 @@
             }
           ],
           "isUnique": true,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "blocks_blocked_idx": {
           "name": "blocks_blocked_idx",
@@ -570,37 +570,37 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "blocks_blocker_id_user_id_fk": {
           "name": "blocks_blocker_id_user_id_fk",
           "tableFrom": "blocks",
+          "tableTo": "user",
           "columnsFrom": [
             "blocker_id"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "blocks_blocked_id_user_id_fk": {
           "name": "blocks_blocked_id_user_id_fk",
           "tableFrom": "blocks",
+          "tableTo": "user",
           "columnsFrom": [
             "blocked_id"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -644,9 +644,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "bottle_aliases_alias_idx": {
           "name": "bottle_aliases_alias_idx",
@@ -659,24 +659,39 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
+        },
+        "bottle_aliases_alias_trgm_idx": {
+          "name": "bottle_aliases_alias_trgm_idx",
+          "columns": [
+            {
+              "expression": "lower(regexp_replace(\"alias\", '[''’.-]', '', 'g')) gin_trgm_ops",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "gin",
+          "with": {}
         }
       },
       "foreignKeys": {
         "bottle_aliases_bottle_id_bottles_id_fk": {
           "name": "bottle_aliases_bottle_id_bottles_id_fk",
           "tableFrom": "bottle_aliases",
+          "tableTo": "bottles",
           "columnsFrom": [
             "bottle_id"
           ],
-          "tableTo": "bottles",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -776,9 +791,9 @@
             }
           ],
           "isUnique": true,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "bottle_claims_bottle_idx": {
           "name": "bottle_claims_bottle_idx",
@@ -791,37 +806,37 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "bottle_claims_bottle_id_bottles_id_fk": {
           "name": "bottle_claims_bottle_id_bottles_id_fk",
           "tableFrom": "bottle_claims",
+          "tableTo": "bottles",
           "columnsFrom": [
             "bottle_id"
           ],
-          "tableTo": "bottles",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "bottle_claims_resource_id_bottle_resources_id_fk": {
           "name": "bottle_claims_resource_id_bottle_resources_id_fk",
           "tableFrom": "bottle_claims",
+          "tableTo": "bottle_resources",
           "columnsFrom": [
             "resource_id"
           ],
-          "tableTo": "bottle_resources",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -933,9 +948,9 @@
             }
           ],
           "isUnique": true,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "bottle_media_bottle_idx": {
           "name": "bottle_media_bottle_idx",
@@ -948,37 +963,37 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "bottle_media_bottle_id_bottles_id_fk": {
           "name": "bottle_media_bottle_id_bottles_id_fk",
           "tableFrom": "bottle_media",
+          "tableTo": "bottles",
           "columnsFrom": [
             "bottle_id"
           ],
-          "tableTo": "bottles",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "bottle_media_resource_id_bottle_resources_id_fk": {
           "name": "bottle_media_resource_id_bottle_resources_id_fk",
           "tableFrom": "bottle_media",
+          "tableTo": "bottle_resources",
           "columnsFrom": [
             "resource_id"
           ],
-          "tableTo": "bottle_resources",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1096,9 +1111,9 @@
             }
           ],
           "isUnique": true,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "bottle_resources_bottle_idx": {
           "name": "bottle_resources_bottle_idx",
@@ -1111,9 +1126,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "bottle_resources_source_idx": {
           "name": "bottle_resources_source_idx",
@@ -1126,37 +1141,37 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "bottle_resources_bottle_id_bottles_id_fk": {
           "name": "bottle_resources_bottle_id_bottles_id_fk",
           "tableFrom": "bottle_resources",
+          "tableTo": "bottles",
           "columnsFrom": [
             "bottle_id"
           ],
-          "tableTo": "bottles",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "bottle_resources_source_id_catalog_sources_id_fk": {
           "name": "bottle_resources_source_id_catalog_sources_id_fk",
           "tableFrom": "bottle_resources",
+          "tableTo": "catalog_sources",
           "columnsFrom": [
             "source_id"
           ],
-          "tableTo": "catalog_sources",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "restrict"
+          "onDelete": "restrict",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1255,9 +1270,9 @@
             }
           ],
           "isUnique": true,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "bottle_submissions_state_idx": {
           "name": "bottle_submissions_state_idx",
@@ -1276,9 +1291,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "bottle_submissions_user_idx": {
           "name": "bottle_submissions_user_idx",
@@ -1297,63 +1312,63 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "bottle_submissions_bottle_id_bottles_id_fk": {
           "name": "bottle_submissions_bottle_id_bottles_id_fk",
           "tableFrom": "bottle_submissions",
+          "tableTo": "bottles",
           "columnsFrom": [
             "bottle_id"
           ],
-          "tableTo": "bottles",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "bottle_submissions_submitted_by_user_id_fk": {
           "name": "bottle_submissions_submitted_by_user_id_fk",
           "tableFrom": "bottle_submissions",
+          "tableTo": "user",
           "columnsFrom": [
             "submitted_by"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "bottle_submissions_reviewed_by_user_id_fk": {
           "name": "bottle_submissions_reviewed_by_user_id_fk",
           "tableFrom": "bottle_submissions",
+          "tableTo": "user",
           "columnsFrom": [
             "reviewed_by"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         },
         "bottle_submissions_duplicate_of_bottle_id_bottles_id_fk": {
           "name": "bottle_submissions_duplicate_of_bottle_id_bottles_id_fk",
           "tableFrom": "bottle_submissions",
+          "tableTo": "bottles",
           "columnsFrom": [
             "duplicate_of_bottle_id"
           ],
-          "tableTo": "bottles",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1429,9 +1444,9 @@
             }
           ],
           "isUnique": true,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "bottle_upcs_upc_idx": {
           "name": "bottle_upcs_upc_idx",
@@ -1444,24 +1459,24 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "bottle_upcs_bottle_id_bottles_id_fk": {
           "name": "bottle_upcs_bottle_id_bottles_id_fk",
           "tableFrom": "bottle_upcs",
+          "tableTo": "bottles",
           "columnsFrom": [
             "bottle_id"
           ],
-          "tableTo": "bottles",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1536,9 +1551,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "bottle_verifications_bottle_url_uq": {
           "name": "bottle_verifications_bottle_url_uq",
@@ -1557,24 +1572,24 @@
             }
           ],
           "isUnique": true,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "bottle_verifications_bottle_id_bottles_id_fk": {
           "name": "bottle_verifications_bottle_id_bottles_id_fk",
           "tableFrom": "bottle_verifications",
+          "tableTo": "bottles",
           "columnsFrom": [
             "bottle_id"
           ],
-          "tableTo": "bottles",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1733,9 +1748,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "bottles_name_idx": {
           "name": "bottles_name_idx",
@@ -1748,37 +1763,130 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
+        },
+        "bottles_name_trgm_idx": {
+          "name": "bottles_name_trgm_idx",
+          "columns": [
+            {
+              "expression": "lower(regexp_replace(\"name\", '[''’.-]', '', 'g')) gin_trgm_ops",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "gin",
+          "with": {}
+        },
+        "bottles_distillery_idx": {
+          "name": "bottles_distillery_idx",
+          "columns": [
+            {
+              "expression": "distillery_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "bottles_status_country_idx": {
+          "name": "bottles_status_country_idx",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "country",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "bottles_status_region_idx": {
+          "name": "bottles_status_region_idx",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "region",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "bottles_status_category_idx": {
+          "name": "bottles_status_category_idx",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "category",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
         "bottles_distillery_id_distilleries_id_fk": {
           "name": "bottles_distillery_id_distilleries_id_fk",
           "tableFrom": "bottles",
+          "tableTo": "distilleries",
           "columnsFrom": [
             "distillery_id"
           ],
-          "tableTo": "distilleries",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "bottles_submitted_by_user_id_fk": {
           "name": "bottles_submitted_by_user_id_fk",
           "tableFrom": "bottles",
+          "tableTo": "user",
           "columnsFrom": [
             "submitted_by"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1858,6 +1966,51 @@
       "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.catalog_totals": {
+      "name": "catalog_totals",
+      "schema": "",
+      "columns": {
+        "family": {
+          "name": "family",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "value": {
+          "name": "value",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "total": {
+          "name": "total",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "refreshed_at": {
+          "name": "refreshed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "catalog_totals_family_value_pk": {
+          "name": "catalog_totals_family_value_pk",
+          "columns": [
+            "family",
+            "value"
+          ]
+        }
+      },
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
@@ -1946,9 +2099,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "catalog_verification_attempts_bottle_idx": {
           "name": "catalog_verification_attempts_bottle_idx",
@@ -1961,37 +2114,37 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "catalog_verification_attempts_run_id_catalog_verification_runs_id_fk": {
           "name": "catalog_verification_attempts_run_id_catalog_verification_runs_id_fk",
           "tableFrom": "catalog_verification_attempts",
+          "tableTo": "catalog_verification_runs",
           "columnsFrom": [
             "run_id"
           ],
-          "tableTo": "catalog_verification_runs",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "catalog_verification_attempts_bottle_id_bottles_id_fk": {
           "name": "catalog_verification_attempts_bottle_id_bottles_id_fk",
           "tableFrom": "catalog_verification_attempts",
+          "tableTo": "bottles",
           "columnsFrom": [
             "bottle_id"
           ],
-          "tableTo": "bottles",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -2109,9 +2262,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {},
@@ -2243,9 +2396,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "catalog_verification_work_lease_run_idx": {
           "name": "catalog_verification_work_lease_run_idx",
@@ -2258,37 +2411,37 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "catalog_verification_work_bottle_id_bottles_id_fk": {
           "name": "catalog_verification_work_bottle_id_bottles_id_fk",
           "tableFrom": "catalog_verification_work",
+          "tableTo": "bottles",
           "columnsFrom": [
             "bottle_id"
           ],
-          "tableTo": "bottles",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "catalog_verification_work_lease_run_id_catalog_verification_runs_id_fk": {
           "name": "catalog_verification_work_lease_run_id_catalog_verification_runs_id_fk",
           "tableFrom": "catalog_verification_work",
+          "tableTo": "catalog_verification_runs",
           "columnsFrom": [
             "lease_run_id"
           ],
-          "tableTo": "catalog_verification_runs",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -2350,24 +2503,24 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "chat_messages_session_id_chat_sessions_id_fk": {
           "name": "chat_messages_session_id_chat_sessions_id_fk",
           "tableFrom": "chat_messages",
+          "tableTo": "chat_sessions",
           "columnsFrom": [
             "session_id"
           ],
-          "tableTo": "chat_sessions",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -2423,24 +2576,24 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "chat_sessions_user_id_user_id_fk": {
           "name": "chat_sessions_user_id_user_id_fk",
           "tableFrom": "chat_sessions",
+          "tableTo": "user",
           "columnsFrom": [
             "user_id"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -2520,37 +2673,37 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "comments_pour_id_pours_id_fk": {
           "name": "comments_pour_id_pours_id_fk",
           "tableFrom": "comments",
+          "tableTo": "pours",
           "columnsFrom": [
             "pour_id"
           ],
-          "tableTo": "pours",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "comments_user_id_user_id_fk": {
           "name": "comments_user_id_user_id_fk",
           "tableFrom": "comments",
+          "tableTo": "user",
           "columnsFrom": [
             "user_id"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -2636,24 +2789,24 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "critic_notes_bottle_id_bottles_id_fk": {
           "name": "critic_notes_bottle_id_bottles_id_fk",
           "tableFrom": "critic_notes",
+          "tableTo": "bottles",
           "columnsFrom": [
             "bottle_id"
           ],
-          "tableTo": "bottles",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -2709,7 +2862,23 @@
           "notNull": true
         }
       },
-      "indexes": {},
+      "indexes": {
+        "distilleries_name_trgm_idx": {
+          "name": "distilleries_name_trgm_idx",
+          "columns": [
+            {
+              "expression": "lower(regexp_replace(\"name\", '[''’.-]', '', 'g')) gin_trgm_ops",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "gin",
+          "with": {}
+        }
+      },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
@@ -2782,24 +2951,24 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "feedback_user_id_user_id_fk": {
           "name": "feedback_user_id_user_id_fk",
           "tableFrom": "feedback",
+          "tableTo": "user",
           "columnsFrom": [
             "user_id"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -2861,9 +3030,9 @@
             }
           ],
           "isUnique": true,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "follows_followee_idx": {
           "name": "follows_followee_idx",
@@ -2876,37 +3045,37 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "follows_follower_id_user_id_fk": {
           "name": "follows_follower_id_user_id_fk",
           "tableFrom": "follows",
+          "tableTo": "user",
           "columnsFrom": [
             "follower_id"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "follows_followee_id_user_id_fk": {
           "name": "follows_followee_id_user_id_fk",
           "tableFrom": "follows",
+          "tableTo": "user",
           "columnsFrom": [
             "followee_id"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -2998,9 +3167,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "moderation_actions_created_idx": {
           "name": "moderation_actions_created_idx",
@@ -3013,9 +3182,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "moderation_actions_seq_idx": {
           "name": "moderation_actions_seq_idx",
@@ -3028,37 +3197,37 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "moderation_actions_actor_id_user_id_fk": {
           "name": "moderation_actions_actor_id_user_id_fk",
           "tableFrom": "moderation_actions",
+          "tableTo": "user",
           "columnsFrom": [
             "actor_id"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         },
         "moderation_actions_report_id_reports_id_fk": {
           "name": "moderation_actions_report_id_reports_id_fk",
           "tableFrom": "moderation_actions",
+          "tableTo": "reports",
           "columnsFrom": [
             "report_id"
           ],
-          "tableTo": "reports",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -3138,34 +3307,34 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "native_auth_codes_user_id_user_id_fk": {
           "name": "native_auth_codes_user_id_user_id_fk",
           "tableFrom": "native_auth_codes",
+          "tableTo": "user",
           "columnsFrom": [
             "user_id"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "native_auth_codes_code_hash_unique": {
           "name": "native_auth_codes_code_hash_unique",
+          "nullsNotDistinct": false,
           "columns": [
             "code_hash"
-          ],
-          "nullsNotDistinct": false
+          ]
         }
       },
       "policies": {},
@@ -3225,9 +3394,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {},
@@ -3265,15 +3434,15 @@
         "pairing_generation_locks_bottle_id_bottles_id_fk": {
           "name": "pairing_generation_locks_bottle_id_bottles_id_fk",
           "tableFrom": "pairing_generation_locks",
+          "tableTo": "bottles",
           "columnsFrom": [
             "bottle_id"
           ],
-          "tableTo": "bottles",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -3342,24 +3511,24 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "pairings_bottle_id_bottles_id_fk": {
           "name": "pairings_bottle_id_bottles_id_fk",
           "tableFrom": "pairings",
+          "tableTo": "bottles",
           "columnsFrom": [
             "bottle_id"
           ],
-          "tableTo": "bottles",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -3439,9 +3608,9 @@
             }
           ],
           "isUnique": true,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "passport_tiers_user_idx": {
           "name": "passport_tiers_user_idx",
@@ -3454,24 +3623,24 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "passport_tiers_user_id_user_id_fk": {
           "name": "passport_tiers_user_id_user_id_fk",
           "tableFrom": "passport_tiers",
+          "tableTo": "user",
           "columnsFrom": [
             "user_id"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -3515,9 +3684,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "phone_lookups_created_at_idx": {
           "name": "phone_lookups_created_at_idx",
@@ -3530,24 +3699,24 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "phone_lookups_user_id_user_id_fk": {
           "name": "phone_lookups_user_id_user_id_fk",
           "tableFrom": "phone_lookups",
+          "tableTo": "user",
           "columnsFrom": [
             "user_id"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -3615,54 +3784,54 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "pour_shares_pour_id_pours_id_fk": {
           "name": "pour_shares_pour_id_pours_id_fk",
           "tableFrom": "pour_shares",
+          "tableTo": "pours",
           "columnsFrom": [
             "pour_id"
           ],
-          "tableTo": "pours",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "pour_shares_user_id_user_id_fk": {
           "name": "pour_shares_user_id_user_id_fk",
           "tableFrom": "pour_shares",
+          "tableTo": "user",
           "columnsFrom": [
             "user_id"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "pour_shares_pour_id_unique": {
           "name": "pour_shares_pour_id_unique",
+          "nullsNotDistinct": false,
           "columns": [
             "pour_id"
-          ],
-          "nullsNotDistinct": false
+          ]
         },
         "pour_shares_code_unique": {
           "name": "pour_shares_code_unique",
+          "nullsNotDistinct": false,
           "columns": [
             "code"
-          ],
-          "nullsNotDistinct": false
+          ]
         }
       },
       "policies": {},
@@ -3771,9 +3940,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "pours_bottle_idx": {
           "name": "pours_bottle_idx",
@@ -3786,9 +3955,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "pours_user_client_idx": {
           "name": "pours_user_client_idx",
@@ -3807,50 +3976,50 @@
             }
           ],
           "isUnique": true,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "pours_user_id_user_id_fk": {
           "name": "pours_user_id_user_id_fk",
           "tableFrom": "pours",
+          "tableTo": "user",
           "columnsFrom": [
             "user_id"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "pours_bottle_id_bottles_id_fk": {
           "name": "pours_bottle_id_bottles_id_fk",
           "tableFrom": "pours",
+          "tableTo": "bottles",
           "columnsFrom": [
             "bottle_id"
           ],
-          "tableTo": "bottles",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "pours_user_bottle_id_user_bottles_id_fk": {
           "name": "pours_user_bottle_id_user_bottles_id_fk",
           "tableFrom": "pours",
+          "tableTo": "user_bottles",
           "columnsFrom": [
             "user_bottle_id"
           ],
-          "tableTo": "user_bottles",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -3906,24 +4075,24 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "price_history_bottle_id_bottles_id_fk": {
           "name": "price_history_bottle_id_bottles_id_fk",
           "tableFrom": "price_history",
+          "tableTo": "bottles",
           "columnsFrom": [
             "bottle_id"
           ],
-          "tableTo": "bottles",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -3985,34 +4154,34 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "push_devices_user_id_user_id_fk": {
           "name": "push_devices_user_id_user_id_fk",
           "tableFrom": "push_devices",
+          "tableTo": "user",
           "columnsFrom": [
             "user_id"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "push_devices_token_unique": {
           "name": "push_devices_token_unique",
+          "nullsNotDistinct": false,
           "columns": [
             "token"
-          ],
-          "nullsNotDistinct": false
+          ]
         }
       },
       "policies": {},
@@ -4085,9 +4254,9 @@
             }
           ],
           "isUnique": true,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "reactions_pour_idx": {
           "name": "reactions_pour_idx",
@@ -4100,37 +4269,37 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "reactions_pour_id_pours_id_fk": {
           "name": "reactions_pour_id_pours_id_fk",
           "tableFrom": "reactions",
+          "tableTo": "pours",
           "columnsFrom": [
             "pour_id"
           ],
-          "tableTo": "pours",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "reactions_user_id_user_id_fk": {
           "name": "reactions_user_id_user_id_fk",
           "tableFrom": "reactions",
+          "tableTo": "user",
           "columnsFrom": [
             "user_id"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -4204,9 +4373,9 @@
             }
           ],
           "isUnique": true,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "rec_explanations_user_idx": {
           "name": "rec_explanations_user_idx",
@@ -4219,37 +4388,37 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "rec_explanations_user_id_user_id_fk": {
           "name": "rec_explanations_user_id_user_id_fk",
           "tableFrom": "rec_explanations",
+          "tableTo": "user",
           "columnsFrom": [
             "user_id"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "rec_explanations_bottle_id_bottles_id_fk": {
           "name": "rec_explanations_bottle_id_bottles_id_fk",
           "tableFrom": "rec_explanations",
+          "tableTo": "bottles",
           "columnsFrom": [
             "bottle_id"
           ],
-          "tableTo": "bottles",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -4330,24 +4499,24 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "reports_reporter_id_user_id_fk": {
           "name": "reports_reporter_id_user_id_fk",
           "tableFrom": "reports",
+          "tableTo": "user",
           "columnsFrom": [
             "reporter_id"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -4414,25 +4583,25 @@
         "session_user_id_user_id_fk": {
           "name": "session_user_id_user_id_fk",
           "tableFrom": "session",
+          "tableTo": "user",
           "columnsFrom": [
             "user_id"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "session_token_unique": {
           "name": "session_token_unique",
+          "nullsNotDistinct": false,
           "columns": [
             "token"
-          ],
-          "nullsNotDistinct": false
+          ]
         }
       },
       "policies": {},
@@ -4504,25 +4673,25 @@
         "tasting_notes_pour_id_pours_id_fk": {
           "name": "tasting_notes_pour_id_pours_id_fk",
           "tableFrom": "tasting_notes",
+          "tableTo": "pours",
           "columnsFrom": [
             "pour_id"
           ],
-          "tableTo": "pours",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "tasting_notes_pour_id_unique": {
           "name": "tasting_notes_pour_id_unique",
+          "nullsNotDistinct": false,
           "columns": [
             "pour_id"
-          ],
-          "nullsNotDistinct": false
+          ]
         }
       },
       "policies": {},
@@ -4589,10 +4758,10 @@
       "uniqueConstraints": {
         "user_email_unique": {
           "name": "user_email_unique",
+          "nullsNotDistinct": false,
           "columns": [
             "email"
-          ],
-          "nullsNotDistinct": false
+          ]
         }
       },
       "policies": {},
@@ -4713,9 +4882,9 @@
             }
           ],
           "isUnique": true,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "user_bottles_user_idx": {
           "name": "user_bottles_user_idx",
@@ -4728,37 +4897,37 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "user_bottles_user_id_user_id_fk": {
           "name": "user_bottles_user_id_user_id_fk",
           "tableFrom": "user_bottles",
+          "tableTo": "user",
           "columnsFrom": [
             "user_id"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "user_bottles_bottle_id_bottles_id_fk": {
           "name": "user_bottles_bottle_id_bottles_id_fk",
           "tableFrom": "user_bottles",
+          "tableTo": "bottles",
           "columnsFrom": [
             "bottle_id"
           ],
-          "tableTo": "bottles",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -4877,32 +5046,32 @@
         "user_profiles_user_id_user_id_fk": {
           "name": "user_profiles_user_id_user_id_fk",
           "tableFrom": "user_profiles",
+          "tableTo": "user",
           "columnsFrom": [
             "user_id"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "user_profiles_handle_unique": {
           "name": "user_profiles_handle_unique",
+          "nullsNotDistinct": false,
           "columns": [
             "handle"
-          ],
-          "nullsNotDistinct": false
+          ]
         },
         "user_profiles_phone_hash_unique": {
           "name": "user_profiles_phone_hash_unique",
+          "nullsNotDistinct": false,
           "columns": [
             "phone_hash"
-          ],
-          "nullsNotDistinct": false
+          ]
         }
       },
       "policies": {},
@@ -4957,15 +5126,15 @@
         "user_social_prefs_user_id_user_id_fk": {
           "name": "user_social_prefs_user_id_user_id_fk",
           "tableFrom": "user_social_prefs",
+          "tableTo": "user",
           "columnsFrom": [
             "user_id"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -5026,10 +5195,10 @@
   },
   "enums": {},
   "schemas": {},
-  "views": {},
   "sequences": {},
   "roles": {},
   "policies": {},
+  "views": {},
   "_meta": {
     "columns": {},
     "schemas": {},

@@ -40,6 +40,17 @@ export async function signOutCompletely(): Promise<SignOutResult> {
     );
   }
 
-  await signOut();
+  /**
+   * Better Auth's client does not throw when sign-out is refused — it resolves
+   * with `{ error }` (an origin it does not trust, a server error). Every
+   * caller navigates away on resolve, so reading that as success sent people
+   * to a signed-out-looking page with the session still live: the one outcome
+   * the button's own comment says is worst, on a shared device especially.
+   * Found by the WP-11 e2e, whose server's origin Better Auth did not trust.
+   */
+  const result = await signOut();
+  if (result?.error) {
+    throw new Error(`sign-out refused: ${result.error.message ?? result.error.status ?? "unknown"}`);
+  }
   return { pushReleased };
 }
