@@ -1,9 +1,10 @@
 import { sql } from "drizzle-orm";
 import { vi } from "vitest";
-import { createDb, setDb, type DB } from "@/db";
+import { closeDb, createDb, setDb, type DB } from "@/db";
 import { migrateDb } from "@/db/migrate";
 import * as schema from "@/db/schema";
 import type { SessionUser } from "@/lib/session";
+import { cloneWorkerDatabase, testPostgresUrl } from "./postgres";
 
 let counter = 0;
 export function uid(prefix: string): string {
@@ -23,14 +24,19 @@ async function schemaReady(db: DB): Promise<boolean> {
   return Boolean(list[0]?.t);
 }
 
+// One TRUNCATE naming every table, not one per table: each CASCADE re-walks
+// the foreign keys, which is cheap in PGlite and very much not on a real
+// server (the Postgres lane).
 async function truncateAll(db: DB): Promise<void> {
   await db.execute(sql`
     DO $$
-    DECLARE r RECORD;
+    DECLARE tables TEXT;
     BEGIN
-      FOR r IN (SELECT tablename FROM pg_tables WHERE schemaname = 'public') LOOP
-        EXECUTE 'TRUNCATE TABLE ' || quote_ident(r.tablename) || ' RESTART IDENTITY CASCADE';
-      END LOOP;
+      SELECT string_agg(quote_ident(tablename), ', ') INTO tables
+        FROM pg_tables WHERE schemaname = 'public';
+      IF tables IS NOT NULL THEN
+        EXECUTE 'TRUNCATE TABLE ' || tables || ' RESTART IDENTITY CASCADE';
+      END IF;
     END $$;
   `);
 }
@@ -49,9 +55,17 @@ export async function setupTestDb(): Promise<DB> {
   if (sharedDb && (await schemaReady(sharedDb))) {
     await truncateAll(sharedDb);
   } else {
-    const db = createDb(":memory:");
-    await migrateDb(db, ":memory:");
-    sharedDb = db;
+    const postgresUrl = testPostgresUrl();
+    if (postgresUrl) {
+      // Postgres lane (REL-8.2): a per-worker clone of the migrated template,
+      // through postgres-js exactly as production connects.
+      if (sharedDb) await closeDb(sharedDb);
+      sharedDb = createDb(await cloneWorkerDatabase(postgresUrl));
+    } else {
+      const db = createDb(":memory:");
+      await migrateDb(db, ":memory:");
+      sharedDb = db;
+    }
   }
   setDb(sharedDb);
   return sharedDb;
