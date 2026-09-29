@@ -49,12 +49,20 @@ function createLocalDb(url: string): DB {
   // the Next.js serverless build (production never takes this branch).
   const { PGlite } = nodeRequire("@electric-sql/pglite") as typeof import("@electric-sql/pglite");
   const { drizzle } = nodeRequire("drizzle-orm/pglite") as typeof import("drizzle-orm/pglite");
+  // Contrib modules are opt-in in PGlite: without this, the migration's
+  // CREATE EXTENSION pg_trgm fails with "extension is not available", and
+  // catalog search's trigram indexes and typo fallback have nothing to run on.
+  const { pg_trgm } = nodeRequire(
+    "@electric-sql/pglite/contrib/pg_trgm",
+  ) as typeof import("@electric-sql/pglite/contrib/pg_trgm");
 
   const dataDir = url === ":memory:" ? undefined : url.replace(/^file:/, "");
   if (dataDir) {
     fs.mkdirSync(path.dirname(dataDir), { recursive: true });
   }
-  const client = new PGlite(dataDir);
+  // The options-object form: `new PGlite(undefined, options)` — the in-memory
+  // case — silently drops the options, extensions included.
+  const client = new PGlite({ dataDir, extensions: { pg_trgm } });
   return drizzle(client, { schema }) as unknown as DB;
 }
 

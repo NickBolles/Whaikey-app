@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import type { DB } from "@/db";
 import { passportTiers, pours, userBottles } from "@/db/schema";
+import { refreshCatalogTotals } from "@/lib/catalog-totals";
 import { createTestBottle, createTestUser, setupTestDb, uid } from "@/test/helpers";
 import {
   PASSPORT_TIER_SPECS,
@@ -134,8 +135,11 @@ describe("getPassport", () => {
     expect(islay?.achievedAt[3]).toBeInstanceOf(Date);
 
     // The catalog quintuples: 6 of 30 clears 10% but not 25%, so the current
-    // share collapses to Copper II — the held tier does not move.
+    // share collapses to Copper II — the held tier does not move. Catalog
+    // growth arrives through ingest or promotion, and both recount the cached
+    // denominators (src/lib/catalog-totals.ts); raw inserts have to say so.
     await seedIslay(24);
+    await refreshCatalogTotals(db);
     passport = await getPassport(db, userId, { stampNewTiers: true });
     islay = passport.regions.find((r) => r.value === "Islay");
     expect(islay?.currentTier).toBe(2);

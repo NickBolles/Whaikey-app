@@ -13,6 +13,7 @@ import {
   type WhiskeyCategory,
 } from "@/db/schema";
 import { upsertUserBottle } from "@/lib/bar";
+import { refreshCatalogTotals } from "@/lib/catalog-totals";
 import { searchBottles, type BottleSearchResult } from "@/lib/search";
 
 /**
@@ -373,7 +374,7 @@ export async function approveSubmission(
   note?: string,
   now = new Date(),
 ): Promise<{ bottleId: string }> {
-  return db.transaction(async (tx) => {
+  const approved = await db.transaction(async (tx) => {
     const [row] = await tx
       .update(bottleSubmissions)
       .set({
@@ -397,6 +398,11 @@ export async function approveSubmission(
     if (row.upc) await publishSubmissionUpc(tx, row.bottleId, row.upc);
     return { bottleId: row.bottleId };
   });
+  // A promotion grows the verified catalog by one, so the passport
+  // denominators are recounted now rather than an hour from now — after the
+  // commit, so the recount sees the bottle (src/lib/catalog-totals.ts).
+  await refreshCatalogTotals(db);
+  return approved;
 }
 
 /**

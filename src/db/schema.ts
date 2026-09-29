@@ -1,3 +1,4 @@
+import { sql, type SQL } from "drizzle-orm";
 import {
   bigserial,
   pgTable,
@@ -9,6 +10,8 @@ import {
   jsonb,
   uniqueIndex,
   index,
+  primaryKey,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 
 const id = () => text("id").primaryKey();
@@ -108,15 +111,36 @@ export const WHISKEY_CATEGORIES = [
 ] as const;
 export type WhiskeyCategory = (typeof WHISKEY_CATEGORIES)[number];
 
-export const distilleries = pgTable("distilleries", {
-  id: id(),
-  name: text("name").notNull(),
-  country: text("country").notNull(),
-  region: text("region"),
-  founded: integer("founded"),
-  description: text("description"),
-  createdAt: createdAt(),
-});
+/**
+ * The form catalog search compares against (review REL-6.1, WP-22): lowercased,
+ * with apostrophes, periods and hyphens removed, so "makers mark" meets
+ * "Maker's Mark", "tullamore dew" meets "Tullamore D.E.W." and "granddad" meets
+ * "Grand-Dad". `src/lib/search.ts` normalizes the query with the same rule.
+ *
+ * One definition because it is two things at once: the expression the trigram
+ * indexes below are built on, and the expression search filters on. Postgres
+ * only uses an expression index when the query repeats the expression exactly,
+ * so a second copy that drifted by one character would silently turn every
+ * search back into a sequential scan. The pattern is part of the SQL text, not
+ * a bound parameter, for the same reason — an index cannot match a `$1`.
+ */
+export function catalogSearchKey(column: AnyPgColumn | SQL): SQL {
+  return sql`lower(regexp_replace(${column}, '[''’.-]', '', 'g'))`;
+}
+
+export const distilleries = pgTable(
+  "distilleries",
+  {
+    id: id(),
+    name: text("name").notNull(),
+    country: text("country").notNull(),
+    region: text("region"),
+    founded: integer("founded"),
+    description: text("description"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("distilleries_name_trgm_idx").using("gin", sql`${catalogSearchKey(t.name)} gin_trgm_ops`)],
+);
 
 /**
  * flavorProfile: JSON object mapping the 8 core flavor-wheel wedges to 0-10
@@ -174,7 +198,26 @@ export const bottles = pgTable(
     submittedBy: text("submitted_by").references(() => user.id, { onDelete: "set null" }),
     createdAt: createdAt(),
   },
-  (t) => [index("bottles_category_idx").on(t.category), index("bottles_name_idx").on(t.name)],
+  (t) => [
+    index("bottles_category_idx").on(t.category),
+    index("bottles_name_idx").on(t.name),
+    // Catalog search (WP-22): trigram GIN over the normalized name, so a
+    // substring `ILIKE` and a `word_similarity` typo match are both index scans
+    // rather than a pass over every bottle. Needs the pg_trgm extension
+    // (migration 0041; PGlite loads it in src/db/index.ts).
+    index("bottles_name_trgm_idx").using("gin", sql`${catalogSearchKey(t.name)} gin_trgm_ops`),
+    // A distillery-name hit reaches its bottles through this, not a scan.
+    index("bottles_distillery_idx").on(t.distilleryId),
+    // WP-21 (REL-1.2): every shared-catalog read filters on status first —
+    // discovery, the passport denominators and their refresh. Imported rows
+    // are expected to outnumber verified ones many times over once the
+    // COLA/state feeds run, so these keep the verified slice cheap to reach.
+    // No separate `(status)` index: any of these serves a status-only filter
+    // from its leading column, and a fourth copy would only slow ingest.
+    index("bottles_status_country_idx").on(t.status, t.country),
+    index("bottles_status_region_idx").on(t.status, t.region),
+    index("bottles_status_category_idx").on(t.status, t.category),
+  ],
 );
 
 /**
@@ -241,7 +284,11 @@ export const bottleAliases = pgTable(
       .references(() => bottles.id, { onDelete: "cascade" }),
     alias: text("alias").notNull(),
   },
-  (t) => [index("bottle_aliases_bottle_idx").on(t.bottleId), index("bottle_aliases_alias_idx").on(t.alias)],
+  (t) => [
+    index("bottle_aliases_bottle_idx").on(t.bottleId),
+    index("bottle_aliases_alias_idx").on(t.alias),
+    index("bottle_aliases_alias_trgm_idx").using("gin", sql`${catalogSearchKey(t.alias)} gin_trgm_ops`),
+  ],
 );
 
 // "verified": a GTIN read off a cited retail product during source-backed
@@ -1220,6 +1267,32 @@ export const passportTiers = pgTable(
     uniqueIndex("passport_tiers_user_badge_tier_uq").on(t.userId, t.family, t.value, t.tier),
     index("passport_tiers_user_idx").on(t.userId),
   ],
+);
+
+/**
+ * Passport denominators, cached (review REL-2.6, WP-21): how many verified
+ * catalog bottles carry each country, region and style, plus one `all` row for
+ * the verified catalog as a whole (value `""`).
+ *
+ * Derived data, never edited by hand — `refreshCatalogTotals` in
+ * src/lib/catalog-totals.ts replaces every row in one transaction, and that
+ * module states the refresh rule. `refreshedAt` is the same on every row of a
+ * refresh; readers treat the table as stale once it passes the maximum age,
+ * which is what bounds how wrong a total can be when a write path did not
+ * refresh it.
+ */
+export const CATALOG_TOTAL_FAMILIES = ["all", "country", "region", "style"] as const;
+export type CatalogTotalFamily = (typeof CATALOG_TOTAL_FAMILIES)[number];
+
+export const catalogTotals = pgTable(
+  "catalog_totals",
+  {
+    family: text("family").$type<CatalogTotalFamily>().notNull(),
+    value: text("value").notNull(),
+    total: integer("total").notNull(),
+    refreshedAt: timestamp("refreshed_at", { withTimezone: true, mode: "date" }).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.family, t.value] })],
 );
 
 export const priceHistory = pgTable(
