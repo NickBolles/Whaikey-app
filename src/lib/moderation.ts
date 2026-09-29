@@ -7,6 +7,7 @@ import {
   inArray,
   isNotNull,
   isNull,
+  lt,
   notExists,
   or,
   sql,
@@ -1816,7 +1817,9 @@ async function listSuspendedAccountsIn(
              * same as seen, which is the argument the report queue above makes
              * about its own ordering.
              */
-            sql`(${userProfiles.suspendedAt}, ${userProfiles.userId}) > (${options.after.at}, ${options.after.userId})`,
+            // The Date goes through the column's encoder: postgres-js cannot
+            // bind a bare Date inside a raw `sql` template (PGlite can).
+            sql`(${userProfiles.suspendedAt}, ${userProfiles.userId}) > (${sql.param(options.after.at, userProfiles.suspendedAt)}, ${options.after.userId})`,
           )
         : isNotNull(userProfiles.suspendedAt),
     )
@@ -1863,7 +1866,7 @@ export async function countBreachedReports(db: DB, now = new Date()): Promise<nu
   const [row] = await db
     .select({ n: sql<number>`count(*)` })
     .from(reports)
-    .where(and(eq(reports.state, "open"), sql`${reports.createdAt} < ${cutoff}`));
+    .where(and(eq(reports.state, "open"), lt(reports.createdAt, cutoff)));
   return Number(row?.n ?? 0);
 }
 
