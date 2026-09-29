@@ -33,7 +33,7 @@
  *            API returns names only; value is European name coverage and
  *            sold-at-retail evidence, with conservative name-cue categories.
  *   enrich — fills flavor-wheel profiles for bottles without one
- *            (imported/user-submitted), making them recommendable. Bottles
+ *            (imported/user-submitted); discovery recommends them once verified. Bottles
  *            with enough user tasting notes are rolled up directly (no AI);
  *            the rest go to the model with description + user-note context
  *            and web search to discover published tasting notes (requires
