@@ -113,7 +113,9 @@ export function setDb(db: DB | undefined): void {
  */
 export async function closeDb(db: DB): Promise<void> {
   const client = (db as unknown as { $client?: unknown }).$client;
-  if (!client || typeof client !== "object") return;
+  // postgres-js's client is the `sql` tagged-template FUNCTION, so an
+  // object-only check skipped it and never closed a production connection.
+  if (!client || (typeof client !== "object" && typeof client !== "function")) return;
   const closable = client as { end?: () => Promise<unknown>; close?: () => Promise<unknown> };
   if (typeof closable.end === "function") await closable.end();
   else if (typeof closable.close === "function") await closable.close();

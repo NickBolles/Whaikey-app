@@ -5,11 +5,31 @@ const PORT = Number(process.env.PW_PORT ?? 3111);
 const DB_PATH = `./data/e2e-${PORT}.db`;
 process.env.PW_DB_PATH = DB_PATH;
 
+// CI serves the PRODUCTION build (`next build` + `next start`); local runs keep
+// `next dev` for its fast edit loop. Two reasons, both learned the hard way:
+//   - `next dev` compiles each route on first visit, and under Next 16.3.7 the
+//     server keeps that memory — the suite took it past 13 GB and the runner
+//     killed it mid-run (WP-26). A built server compiles nothing.
+//   - On-demand compiles were also the source of the cold-start flakes that
+//     used to hide behind an unconditional retry (review REL-8.5).
+// It also tests what ships: the production CSP, without dev's `unsafe-eval`.
+// PW_DEV_SERVER=1 forces `next dev` in CI; PW_PROD_SERVER=1 forces a build locally.
+const PROD_SERVER =
+  process.env.PW_PROD_SERVER === "1" || (!!process.env.CI && process.env.PW_DEV_SERVER !== "1");
+
 export default defineConfig({
   testDir: "./e2e",
   globalSetup: "./e2e/global-setup.ts",
   timeout: 30_000,
-  retries: 1,
+  // One retry in CI only (review REL-8.5). Locally a flake must fail loudly —
+  // a retry there is how a real intermittent bug gets learned to be ignored.
+  // In CI a test that passes only on its retry is still reported: the
+  // `github` reporter annotates it as flaky on the PR, so a retry absorbs a
+  // runner hiccup without hiding the test that needed one.
+  retries: process.env.CI ? 1 : 0,
+  reporter: process.env.CI
+    ? [["github"], ["list"], ["html", { open: "never" }]]
+    : "list",
   snapshotPathTemplate: "{testDir}/__screenshots__/{projectName}/{arg}{ext}",
   expect: {
     toHaveScreenshot: {
@@ -43,7 +63,9 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: `pnpm dev --port ${PORT}`,
+    command: PROD_SERVER
+      ? `pnpm exec next build && pnpm exec next start --port ${PORT}`
+      : `pnpm dev --port ${PORT}`,
     port: PORT,
     reuseExistingServer: !process.env.CI,
     env: {
@@ -71,6 +93,7 @@ export default defineConfig({
       // everybody else. Left UNSET would only ever prove the 404.
       WHAIKEY_OPERATOR_IDS: "operator-user",
     },
-    timeout: 120_000,
+    // A production build takes a couple of minutes on a CI runner.
+    timeout: PROD_SERVER ? 360_000 : 120_000,
   },
 });

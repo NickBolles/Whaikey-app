@@ -207,7 +207,7 @@ Rules that hold across the model:
 ### 4.4 Environments, deployment & operations
 
 - **Environments:** local (PGlite, `file:./data/whaikey`), Vercel preview (signed-out only; Google redirect URI is fixed to production), production (Supabase pooler). **Missing:** a staging environment with real Postgres where social features can be exercised — on the roadmap (track L).
-- **Deploy:** Vercel builds on every push; `scripts/build.mjs` runs `pnpm db:push` then `next build`. Migrations therefore land **before** the build succeeds; schema changes must be backward compatible with the previous release (expand/contract) until the migration step moves post-build.
+- **Deploy:** Vercel builds on every push; `scripts/build.mjs` runs `next build` then, on production only, `pnpm db:push` (WP-26). A failed build no longer touches the schema, and a failed migration fails the deploy before promotion (the batch is one transaction). The previous release still serves against the new schema until promotion completes, so schema changes must stay backward compatible with it: expand/contract — add first, drop or rename in a later deploy.
 - **Migrations:** generated only via `pnpm db:generate` (custom backfills via `--custom`); never hand-edited. Nothing yet verifies that production's migration state matches `main` while scheduled catalog workflows write to production — a drift check is on the v1 line (§3, Observable).
 - **Backups & restore:** rely on Supabase point-in-time recovery; a documented restore drill is required before launch.
 - **Secrets:** `BETTER_AUTH_SECRET` (fails closed in production), `WHAIKEY_PHONE_KEY` (**never rotate** — stored phone hashes only match under the same key; key versioning is the eventual fix), OAuth client secrets, `OPENROUTER_API_KEY` / `ANTHROPIC_API_KEY`, the `catalog-production` environment's `DATABASE_URL` on the self-hosted runner, and a persisted Claude Code subscription login on that runner. One inventory with rotation notes lives in README §Deployment; keep it there.
@@ -266,7 +266,7 @@ Tracks run in parallel and are named so that "Phase 2" is never ambiguous: **C**
 
 **Lane C (L): launch blockers.** ✅ WP-16 user-submitted bottles · ✅ WP-17 age gate · ✅ WP-18 moderation queue, catalog review, corrected store answers, ToS/Privacy, support — **reviewer access is the one part it could not close**, because it is an owner decision (§12) · WP-19 monitoring + the guardrail metric + publish S1/S2 overlap numbers · ✅ WP-20 kill switch, push-token rule, Android backup flag.
 
-**Lane D (C/K): scale before the catalog grows.** ✅ WP-21 bounded discovery + indexes + cached totals · ✅ WP-22 trigram search + evaluation set · WP-23 bounded palate reads · WP-24 batched ingest and atomic finalize · WP-25 money/timezones/dates/budgets/TTLs · WP-26 Postgres CI lane and route tests.
+**Lane D (C/K): scale before the catalog grows.** ✅ WP-21 bounded discovery + indexes + cached totals · ✅ WP-22 trigram search + evaluation set · WP-23 bounded palate reads · WP-24 batched ingest and atomic finalize · WP-25 money/timezones/dates/budgets/TTLs · ✅ WP-26 Postgres CI lane and route tests (the lane's first run found four production 500s; review WP-26 status).
 
 ### 5.3 Then
 
@@ -463,7 +463,7 @@ Enforced as mechanic bans in review (SOCIAL §3.1; §1's never-build list), veri
 | AI evaluation | Extraction accuracy against the 55 leaves; scan match rate; pairing sanity; enrichment correctness; every user correction stored as eval data | A committed eval set run on model or prompt change |
 | Search quality | Recall@5 on a 50-query set incl. misspellings and slang | `src/lib/search.eval.ts` in CI |
 | Catalog quality | Coverage by category/country; % with flavor profile, image, verified status; duplicate rate; scan resolution rate | Printed by `pnpm ingest --stats`; tracked per sync run |
-| Testing | Unit on PGlite + a Postgres service-container lane; route tests for every handler; visual baselines CI-canonical | CI |
+| Testing | Unit on PGlite + a Postgres service-container lane; route tests for every handler; visual baselines CI-canonical | CI: `unit` (PGlite + coverage floor), `unit-postgres` (same suite on `postgres:17`), `audit` (prod, high+); every `route.ts` but Better Auth's catch-all imported by a test ✅ WP-26 |
 | Localization | v1 English; units (ml/oz) and currency per user; strings separable | Settings; schema `currency` column with money |
 
 ---
