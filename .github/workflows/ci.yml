@@ -158,6 +158,10 @@ jobs:
   # library version pinned in package.json. Retry policy (playwright.config.ts,
   # review REL-8.5): one retry here because CI=true, none locally; a test that
   # only passes on retry is annotated "flaky" on the PR by the github reporter.
+  # With CI=true the suite runs against a production build (`next build` +
+  # `next start`), not `next dev`: on Next 16.3.7 the dev server's memory
+  # grows with every route it compiles and took the runner past 13 GB (WP-26).
+  # The visual job below and update-baselines.yml get the same server.
   e2e:
     name: e2e (functional)
     runs-on: ubuntu-latest
