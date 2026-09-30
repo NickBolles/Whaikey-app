@@ -33,7 +33,7 @@
  *            API returns names only; value is European name coverage and
  *            sold-at-retail evidence, with conservative name-cue categories.
  *   enrich — fills flavor-wheel profiles for bottles without one
- *            (imported/user-submitted), making them recommendable. Bottles
+ *            (imported/user-submitted); discovery recommends them once verified. Bottles
  *            with enough user tasting notes are rolled up directly (no AI);
  *            the rest go to the model with description + user-note context
  *            and web search to discover published tasting notes (requires
@@ -42,8 +42,9 @@
  *            hosted web search, so --no-web is implied there.
  */
 import { readFile, writeFile } from "node:fs/promises";
-import { createDb, resolveDbUrl } from "../src/db";
+import { createDb, resolveDbUrl, type DB } from "../src/db";
 import { migrateDb } from "../src/db/migrate";
+import { refreshCatalogTotals } from "../src/lib/catalog-totals";
 import {
   countBottles,
   COLA_FULL_HISTORY_START,
@@ -71,11 +72,15 @@ function arg(name: string): string | undefined {
 }
 const hasFlag = (name: string): boolean => process.argv.includes(`--${name}`);
 
+/** Held so the run's end can refresh the passport denominators (below). */
+let ingestDb: DB | undefined;
+
 async function main(): Promise<void> {
   const source = process.argv[2];
   const dryRun = hasFlag("dry-run");
   const url = resolveDbUrl();
   const db = createDb(url);
+  ingestDb = db;
   await migrateDb(db, url);
 
   if (source === "resources") {
@@ -199,6 +204,13 @@ function printReport(
 }
 
 main()
+  // Every source can change the verified catalog (resource manifests promote
+  // bottles; prune and sync reshape it), so the cached passport denominators
+  // are recounted once the run is over — the refresh rule in
+  // src/lib/catalog-totals.ts. One grouped scan; cheap next to any ingest.
+  .then(async () => {
+    if (ingestDb && !hasFlag("dry-run")) await refreshCatalogTotals(ingestDb);
+  })
   .then(() => process.exit(process.exitCode ?? 0))
   .catch((err) => {
     console.error(err);

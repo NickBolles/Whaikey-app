@@ -63,11 +63,11 @@ An AI-native whiskey tracking app, inspired by wine apps like **Vivino** (social
 
 ### 2.2 Live but weaker than it reads
 
-- **Search** is `ILIKE` substring over name/distillery/alias with query + category filters. It does not tolerate misspellings and has no supporting trigram index.
 - **"Est. value"** is a user-typed field falling back to catalog average price, shown as a point number.
 - **Voice notes** are browser dictation (Web Speech), unreliable in an iOS WebView; there is no audio upload.
 - **Passport** counts 3 of 6 dimensions and is reachable only from a claimed social profile; no counters on My Bar.
 - **Learn progress** lives in localStorage.
+- **Search** is typo-tolerant and index-backed (WP-22): trigram GIN indexes on normalized name/distillery/alias, a `word_similarity` fallback with phonetic variants below every exact hit, and a 50-query evaluation set (`src/lib/search.eval.ts`, Recall@5 1.00, floor 0.98 in `pnpm test`). Weaker than it reads in one place: the concierge and label-scan lookups (`searchBottlesLike`) get the indexes but not the typo pass.
 - **User-submitted bottles** are added instantly and usable instantly, but stay private to their submitter until an operator promotes them at `/admin/submissions`. A submission is excluded from passport badges and never teaches the barcode scanner until it is promoted — and with one operator, the queue's throughput is one person's attention, which is the real limit now rather than the missing screen.
 - **Moderation is one operator and one deploy.** `WHAIKEY_OPERATOR_IDS` is an env allowlist, so granting access is a deploy and there is no second pair of eyes on a decision. Appeals have a record to be answered from and no route to arrive on except `/support`.
 - **The policy pages are shells until the owner fills them in.** The text is written; the entity, jurisdiction and contact are not, and the pages say so rather than looking finished.
@@ -99,7 +99,7 @@ v1 ships to a store when every box is ticked. Nothing on this list is optional a
 
 **Core loop**
 - [ ] Any bottle a user can hold resolves: scan or search hits the catalog, **or "add this bottle" creates a private bottle usable immediately** (review queue for global visibility). Catalog-miss dead-end rate = 0.
-- [ ] Search tolerates a misspelling (`pg_trgm`), with a 50-query evaluation set committed.
+- [x] Search tolerates a misspelling (`pg_trgm`), with a 50-query evaluation set committed. *(WP-22: Recall@5 1.00 on the set, 0.76 before.)*
 - [ ] Pour logging: two taps, works offline on web and native, idempotent on flush.
 - [ ] Bottle page: relationship and log action above the fold; your history; flavor profile; honest price framing (ranges); pairings.
 - [ ] Every non-tab route has back; every mutation has undo or confirm; loading/error/not-found states exist.
@@ -139,7 +139,7 @@ v1 ships to a store when every box is ticked. Nothing on this list is optional a
 - **App:** Next.js 16 App Router (TypeScript, Tailwind v4) on Vercel, wrapped by **Capacitor** for iOS/Android. The native shell loads the deployed site over HTTPS rather than a static export, so server components and cookie auth are unchanged. The React Native decision, tripwires and native architecture are in [docs/NATIVE_APP.md](./docs/NATIVE_APP.md).
 - **Backend:** route handlers under `src/app/api` (`runtime = "nodejs"`, never edge). Drizzle over Postgres — Supabase (pooler URL) in production, PGlite in-process locally and in tests; the driver is chosen from the connection string in `src/db/index.ts`. **Better Auth**, social login only (Google, optional Apple).
 - **AI layer:** `src/lib/ai/client.ts` selects the provider at runtime — **OpenRouter** when `OPENROUTER_API_KEY` is set, Anthropic direct otherwise; both speak the Messages API. Two model roles, `chatModel()` (chat, pairings, rec explanations) and `fastModel()` (extraction, label scan), each overridable by `WHAIKEY_CHAT_MODEL` / `WHAIKEY_FAST_MODEL`. **Model ids live in code, not here.** On the OpenRouter path prompt caching and hosted web search are unavailable. Missing keys ⇒ routes return 503 and the UI hides AI affordances; the manual loop never blocks. The catalog verification lane runs separately on an authenticated Claude Code subscription (`src/lib/ingest/verification-queue.ts`).
-- **Search:** today, Postgres `ILIKE` substring over name/distillery/aliases (`src/lib/search.ts`). Planned: `pg_trgm` GIN indexes and `similarity()` for misspellings (§3). Embeddings/pgvector are **not** planned until a committed search evaluation shows substring + trigram is the bottleneck.
+- **Search:** Postgres `pg_trgm` over normalized name/distillery/aliases (`src/lib/search.ts`): index-driven substring match, then a `word_similarity` typo fallback ranked below it; measured by `src/lib/search.eval.ts` (§10). Embeddings/pgvector are **not** planned until a committed search evaluation shows substring + trigram is the bottleneck.
 - **Analytics / monitoring:** `src/lib/observability/` (WP-19) — Sentry via `@sentry/node` behind `SENTRY_DSN` (server only), AI token accounting, §12 guardrail SQL, and a three-event share funnel. No third-party product analytics and no RUM yet (§10).
 
 ### 4.2 High-level architecture
@@ -268,7 +268,7 @@ Tracks run in parallel and are named so that "Phase 2" is never ambiguous: **C**
 
 **Lane C (L): launch blockers.** ✅ WP-16 user-submitted bottles · ✅ WP-17 age gate · ✅ WP-18 moderation queue, catalog review, corrected store answers, ToS/Privacy, support — **reviewer access is the one part it could not close**, because it is an owner decision (§12) · ✅ WP-19 monitoring + the guardrail metrics + AI cost accounting — the S1/S2 overlap numbers are instrumented and publish once they have readings · ✅ WP-20 kill switch, push-token rule, Android backup flag.
 
-**Lane D (C/K): scale before the catalog grows.** WP-21 bounded discovery + indexes + cached totals · WP-22 trigram search + evaluation set · WP-23 bounded palate reads · WP-24 batched ingest and atomic finalize · WP-25 money/timezones/dates/budgets/TTLs · ✅ WP-26 Postgres CI lane and route tests (the lane's first run found four production 500s; review WP-26 status).
+**Lane D (C/K): scale before the catalog grows.** ✅ WP-21 bounded discovery + indexes + cached totals · ✅ WP-22 trigram search + evaluation set · WP-23 bounded palate reads · WP-24 batched ingest and atomic finalize · WP-25 money/timezones/dates/budgets/TTLs · ✅ WP-26 Postgres CI lane and route tests (the lane's first run found four production 500s; review WP-26 status).
 
 ### 5.3 Then
 

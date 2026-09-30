@@ -21,22 +21,22 @@
  * urge drinking more or faster — "finish before it fades" is about avoiding
  * waste, never about consumption.
  */
-import { and, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, ne, notInArray, sql, type SQL } from "drizzle-orm";
 import type { DB } from "@/db";
-import { bottles, distilleries, pours, userBottles } from "@/db/schema";
+import type { AnyPgColumn } from "drizzle-orm/pg-core";
+import { bottles, distilleries, pours, userBottles, type PassportFamily } from "@/db/schema";
 import { catalogVisibleTo } from "@/lib/catalog-visibility";
-import { FLAVOR_WHEEL } from "@/lib/flavor-wheel";
+import { FLAVOR_WHEEL, WEDGE_IDS } from "@/lib/flavor-wheel";
 import {
   cosineSimilarity,
   tasteMatchPercent,
   topWedges,
-  priceInBand,
   type PalateProfileResult,
   type PalateVector,
   type PriceBand,
 } from "@/lib/palate";
 import { getUserPalate, getUserPriceBand } from "@/lib/palate-store";
-import { getPassport } from "@/lib/passport";
+import { getPassport, type Passport, type PassportBadge } from "@/lib/passport";
 import { badgeProgressFor, type BadgeProgress } from "@/lib/passport-progress";
 import {
   getTasteTwins,
@@ -294,18 +294,138 @@ interface ScoredBottle {
   userBottleId?: string | null;
 }
 
-async function discoveryCandidates(
+/**
+ * How many discovery candidates SQL hands back, best pre-endorsement score
+ * first (review REL-2.1).
+ *
+ * The bound is exact, not a heuristic, as long as it is at least
+ * ENDORSEMENT_LOOKUP_LIMIT: SQL orders by the same score the loop below would
+ * compute — palate cosine plus the passport bonus — and a twin endorsement can
+ * only lift a bottle inside the top ENDORSEMENT_LOOKUP_LIMIT. Anything ranked
+ * below that is outscored by at least that many bottles whatever the
+ * endorsements say, so it can never reach a list of MAX_RECOMMENDATIONS. The
+ * margin above 40 only absorbs float ties at the cut.
+ */
+export const DISCOVERY_CANDIDATE_LIMIT = 100;
+
+/** Wedge ids go into the SQL text as literals; they are constants, and checked. */
+const WEDGE_SQL_IDS = WEDGE_IDS.map((id) => {
+  if (!/^[a-z]+$/.test(id)) throw new Error(`unexpected wedge id ${id}`);
+  return id;
+});
+
+/** A bottle's intensity on one wedge, 0 when absent or not a number (as `?? 0` reads it). */
+function wedgeValue(id: string): SQL {
+  const key = sql.raw(`'${id}'`);
+  return sql`(CASE WHEN jsonb_typeof(${bottles.flavorProfile} -> ${key}) = 'number'
+    THEN (${bottles.flavorProfile} ->> ${key})::float8 ELSE 0 END)`;
+}
+
+/**
+ * The passport stamps that would earn a discovery bonus, by family: values the
+ * user holds no badge for at all (any unmet stamp opens a badge, so these earn
+ * PASSPORT_NEW_BADGE_BONUS), and held values one distinct bottle short of
+ * their next tier (PASSPORT_NEXT_TIER_BONUS). Derived with the same
+ * `badgeProgressFor` the loop uses, one stamp at a time, so SQL's ordering
+ * score cannot drift from the score the loop assigns.
+ */
+function passportBonusStamps(passport: Passport) {
+  const families: Array<[PassportFamily, PassportBadge[]]> = [
+    ["country", passport.countries],
+    ["region", passport.regions],
+    ["style", passport.styles],
+  ];
+  const out = {} as Record<PassportFamily, { held: string[]; nearTier: string[] }>;
+  for (const [family, badges] of families) {
+    const held = badges.map((b) => b.value);
+    const nearTier = held.filter((value) => {
+      const stamp = {
+        country: family === "country" ? value : null,
+        region: family === "region" ? value : null,
+        category: family === "style" ? value : "",
+      };
+      return passportBonus(badgeProgressFor(passport, stamp)) === PASSPORT_NEXT_TIER_BONUS;
+    });
+    out[family] = { held, nearTier };
+  }
+  return out;
+}
+
+/**
+ * Discovery candidates, filtered, scored and cut in SQL (review REL-2.1).
+ *
+ * This used to select every visible bottle and filter in JS — price band,
+ * profile present, not already on the shelf — which on a COLA-scale catalog
+ * was the whole table per Home render. Now:
+ *
+ * - **The pool is the verified catalog plus the viewer's own submissions** —
+ *   the catalog the passport counts against, so the rail can no longer
+ *   recommend an unvetted import that no badge denominator includes; and the
+ *   submitter's own bottles, which WP-16 promises they see everywhere they
+ *   would see any other. `catalogVisibleTo` is the visibility contract and
+ *   stays on this read like every other; the status test only removes
+ *   imports.
+ * - **Filters** — profile present, not on the user's shelf in any relationship,
+ *   inside the price band (an unpriced bottle passes, as `priceInBand` has it).
+ * - **Order** — cosine similarity to the palate over the eight wedges, plus
+ *   the passport bonus, i.e. exactly the score the caller ranks by before
+ *   endorsements, then `LIMIT DISCOVERY_CANDIDATE_LIMIT`.
+ *
+ * The returned `score` is recomputed with `cosineSimilarity` so it is
+ * bit-for-bit the number the rest of this module has always used; SQL only
+ * chooses which rows come back.
+ */
+export async function discoveryCandidates(
   db: DB,
   userId: string,
   palate: PalateProfileResult,
   band: PriceBand | null,
+  passport: Passport,
+  limit: number = DISCOVERY_CANDIDATE_LIMIT,
 ): Promise<ScoredBottle[]> {
-  const owned = await db
-    .select({ bottleId: userBottles.bottleId })
-    .from(userBottles)
-    .where(eq(userBottles.userId, userId));
-  const ownedSet = new Set(owned.map((o) => o.bottleId));
+  const weights = WEDGE_SQL_IDS.map((id) => [id, palate.vector[id] ?? 0] as const);
+  if (!weights.some(([, w]) => w !== 0)) return [];
 
+  const dot = sql.join(
+    weights.filter(([, w]) => w !== 0).map(([id, w]) => sql`${w}::float8 * ${wedgeValue(id)}`),
+    sql` + `,
+  );
+  const magnitude = sql`sqrt(${sql.join(WEDGE_SQL_IDS.map((id) => sql`power(${wedgeValue(id)}, 2)`), sql` + `)})`;
+  const palateMagnitude = Math.sqrt(weights.reduce((sum, [, w]) => sum + w * w, 0));
+
+  const stamps = passportBonusStamps(passport);
+  // `notInArray`/`inArray` rather than a hand-written list: both render an
+  // empty array as the right constant, and a user with no passport has one.
+  const unmet = (column: AnyPgColumn, values: string[]) =>
+    sql`(${column} IS NOT NULL AND ${notInArray(sql`${column}`, values)})`;
+  const near = (column: AnyPgColumn, values: string[]) => inArray(sql`${column}`, values);
+  const bonus = sql`(CASE
+    WHEN ${unmet(bottles.country, stamps.country.held)} OR ${unmet(bottles.region, stamps.region.held)}
+      OR ${unmet(bottles.category, stamps.style.held)} THEN ${PASSPORT_NEW_BADGE_BONUS}::float8
+    WHEN ${near(bottles.country, stamps.country.nearTier)} OR ${near(bottles.region, stamps.region.nearTier)}
+      OR ${near(bottles.category, stamps.style.nearTier)} THEN ${PASSPORT_NEXT_TIER_BONUS}::float8
+    ELSE 0 END)`;
+
+  const conditions: SQL[] = [
+    // Discovery recommends from the shared catalog — never somebody else's
+    // pending submission (review PLAN-A1).
+    catalogVisibleTo(userId),
+    ne(bottles.status, "imported"),
+    isNotNull(bottles.flavorProfile),
+    sql`NOT EXISTS (
+      SELECT 1 FROM ${userBottles}
+      WHERE ${userBottles.userId} = ${userId} AND ${userBottles.bottleId} = ${bottles.id}
+    )`,
+    sql`${magnitude} > 0`,
+    sql`(${dot}) > 0`,
+  ];
+  if (band) {
+    conditions.push(
+      sql`(${bottles.avgPrice} IS NULL OR ${bottles.avgPrice} BETWEEN ${band.min} AND ${band.max})`,
+    );
+  }
+
+  const orderScore = sql`((${dot}) / (${palateMagnitude}::float8 * ${magnitude}) + ${bonus})`;
   const rows = await db
     .select({
       bottleId: bottles.id,
@@ -320,17 +440,16 @@ async function discoveryCandidates(
     })
     .from(bottles)
     .leftJoin(distilleries, eq(bottles.distilleryId, distilleries.id))
-    // Discovery recommends from the shared catalog plus this user's own
-    // submissions — never somebody else's pending one (review PLAN-A1).
-    .where(catalogVisibleTo(userId));
+    .where(and(...conditions))
+    .orderBy(desc(orderScore), asc(bottles.name))
+    .limit(limit);
 
   const scored: ScoredBottle[] = [];
   for (const b of rows) {
-    if (ownedSet.has(b.bottleId)) continue;
-    if (!b.flavorProfile || Object.keys(b.flavorProfile).length === 0) continue;
-    if (!priceInBand(b.avgPrice, band)) continue;
-    const score = cosineSimilarity(palate.vector, b.flavorProfile);
-    if (score <= 0) continue;
+    const score = cosineSimilarity(palate.vector, b.flavorProfile ?? {});
+    // `!(score > 0)` rather than `score <= 0`: a non-numeric profile value
+    // makes the cosine NaN, which the old filter let through to the sort.
+    if (!(score > 0)) continue;
     scored.push({ ...b, score });
   }
   return scored;
@@ -421,12 +540,13 @@ export async function recommendBottles(
     scored = candidates;
     ctx = { band, recentCategories };
   } else {
-    scored = await discoveryCandidates(db, userId, palate, band);
-    ctx = { band };
     // Read-only: the rail must never stamp a tier the drinker has not reached.
     // Every candidate here is outside the user's bar, so none of them is
     // already met and the hook is honest about what meeting it would move.
+    // Read first, because SQL ranks candidates by the bonus it implies.
     const passport = await getPassport(db, userId);
+    scored = await discoveryCandidates(db, userId, palate, band, passport);
+    ctx = { band };
     for (const candidate of scored) {
       const progress = badgeProgressFor(passport, candidate);
       if (!progress) continue;

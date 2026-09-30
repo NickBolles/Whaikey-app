@@ -295,6 +295,20 @@
       "when": 1790706132107,
       "tag": "0041_good_risque",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1790720520299,
+      "tag": "0042_enable_pg_trgm",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1790720521706,
+      "tag": "0043_search_and_catalog_indexes",
+      "breakpoints": true
     }
   ]
 }

@@ -1,0 +1,13 @@
+-- Trigram matching for catalog search (review REL-6.1, WP-22).
+--
+-- pg_trgm backs the GIN indexes in the next migration and the
+-- word_similarity() typo fallback in src/lib/search.ts. It ships with
+-- Postgres contrib, is on Supabase's allow-list, and is loaded explicitly into
+-- PGlite (src/db/index.ts) — PGlite refuses CREATE EXTENSION for a contrib
+-- module it was not constructed with, which is the failure to look for if a
+-- local database built before this change will not migrate.
+--
+-- IF NOT EXISTS because hosted Postgres may already have it enabled, possibly
+-- in another schema (Supabase uses `extensions`, which is on its default
+-- search_path). Creating it is idempotent and takes no table locks.
+CREATE EXTENSION IF NOT EXISTS pg_trgm;

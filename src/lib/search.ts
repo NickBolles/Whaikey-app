@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, ne, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, ne, notInArray, sql, type SQL } from "drizzle-orm";
 import type { DB } from "@/db";
 import { catalogVisibleTo } from "@/lib/catalog-visibility";
 import {
@@ -7,6 +7,7 @@ import {
   bottleMedia,
   bottleResources,
   bottles,
+  catalogSearchKey,
   catalogSources,
   distilleries,
   pairings,
@@ -51,14 +52,110 @@ export interface SearchOptions {
 }
 
 const DEFAULT_LIMIT = 20;
-/** How many candidates we pull from SQL before ranking in JS. */
+/** How many exact-pass candidates we pull from SQL before the final sort. */
 const CANDIDATE_LIMIT = 100;
-/** Prefix length used by the typo-tolerance fallback. */
-const PREFIX_LEN = 4;
+/**
+ * The typo fallback runs only when the exact pass cannot fill this many
+ * results. Five, because that is what the evaluation set scores (Recall@5 —
+ * src/lib/search.eval.ts) and roughly what fits above the keyboard: when five
+ * real hits exist, a misspelling is not what is standing between the user and
+ * their bottle, and a second round trip on every keystroke buys nothing.
+ */
+const FUZZY_TRIGGER = 5;
+/**
+ * `word_similarity` floor for a token to count as a fuzzy hit. Similarity is
+ * shared trigrams over all trigrams, so one dropped letter in a short name
+ * costs a lot: "arbeg" against "ardbeg" is 4/9 = 0.44. Swept against the
+ * evaluation set and a held-out list: 0.5 loses "arbeg 10", 0.3 starts
+ * answering "vodka" with Seagram's V.O.; 0.4 keeps both right. Re-run
+ * `pnpm tsx src/lib/search.eval.ts` after changing it.
+ */
+export const FUZZY_THRESHOLD = 0.4;
+/** Tokens shorter than this have no trigram worth comparing; they must match exactly. */
+const MIN_FUZZY_TOKEN = 3;
+/** Original spelling plus at most this many phonetic variants per token. */
+const MAX_VARIANTS = 4;
+/**
+ * A resemblance to the distillery counts for a little less than one to the
+ * bottle's own name or alias. Only ever a tie-breaker between fuzzy hits: it
+ * is why "yamazakki 12" puts Yamazaki 12 above Hakushu 12, whose distillery is
+ * "Suntory (Yamazaki & Hakushu)".
+ */
+const DISTILLERY_WEIGHT = 0.9;
 
 /** Escape LIKE wildcards so user input is treated literally. */
 export function escapeLike(s: string): string {
   return s.replace(/[\\%_]/g, (c) => `\\${c}`);
+}
+
+/**
+ * The query-side twin of `catalogSearchKey` (src/db/schema.ts): lowercase,
+ * drop apostrophes, periods and hyphens, collapse whitespace. Both sides have
+ * to agree character for character, or "maker's" and "makers" stop meeting.
+ */
+export function normalizeSearchText(s: string): string {
+  return s.toLowerCase().replace(/['’.-]/g, "").replace(/\s+/g, " ").trim();
+}
+
+/** Words that follow an age and say nothing a name can match: "12 year old", "16yr". */
+const AGE_WORDS = new Set(["y", "yo", "yr", "yrs", "year", "years", "old"]);
+
+/**
+ * Split a normalized query into tokens, folding age statements the way people
+ * type them onto the way catalogs print them: "10yr" → "10", and "year",
+ * "yrs", "yo", "old" are dropped when they follow a number. "Eagle Rare 10 Year"
+ * still matches — dropping "year" from a query never loses a hit, while keeping
+ * it loses every "Talisker 10" typed as "talisker 10 year".
+ */
+export function searchTokens(query: string): string[] {
+  const out: string[] = [];
+  for (const raw of normalizeSearchText(query).split(" ")) {
+    if (!raw) continue;
+    const age = /^(\d+)(?:y|yo|yr|yrs|year|years)$/.exec(raw);
+    if (age) {
+      out.push(age[1]);
+      continue;
+    }
+    const prev = out[out.length - 1];
+    if (AGE_WORDS.has(raw) && prev !== undefined && (/^\d+$/.test(prev) || AGE_WORDS.has(prev))) continue;
+    out.push(raw);
+  }
+  return out;
+}
+
+/**
+ * The misspellings trigrams cannot see. Trigram similarity forgives a dropped
+ * or doubled letter ("glenfidich", "lagavulinn") but not a respelled sound:
+ * "lafroig" shares three trigrams with "laphroaig" (similarity 0.25), while
+ * its ph-variant "laphroig" shares seven (0.78). So each fuzzy token is also
+ * tried with the few English sound-spellings enthusiasts actually trade —
+ * f/ph, y/ie, k/c/ck, doubled letters — and scores its best variant. Query-side
+ * only: the catalog is indexed once, as written.
+ */
+const PHONETIC_SWAPS: Array<[RegExp, string]> = [
+  [/ph/g, "f"],
+  [/f/g, "ph"],
+  [/(.)\1/g, "$1"],
+  [/ie/g, "y"],
+  [/y/g, "ie"],
+  [/ck/g, "k"],
+  [/k/g, "c"],
+  [/c/g, "k"],
+];
+
+export function tokenVariants(token: string): string[] {
+  const out = [token];
+  for (const [pattern, replacement] of PHONETIC_SWAPS) {
+    if (out.length > MAX_VARIANTS) break;
+    const variant = token.replace(pattern, replacement);
+    if (!out.includes(variant)) out.push(variant);
+  }
+  return out;
+}
+
+/** A token worth comparing by trigram: long enough, and not just an age or a proof. */
+function isFuzzyToken(token: string): boolean {
+  return token.length >= MIN_FUZZY_TOKEN && /[a-z]/.test(token);
 }
 
 const resultColumns = {
@@ -74,71 +171,237 @@ const resultColumns = {
   flavorProfile: bottles.flavorProfile,
 };
 
+const nameKey = catalogSearchKey(bottles.name);
+const distilleryKey = catalogSearchKey(distilleries.name);
+const aliasKey = catalogSearchKey(bottleAliases.alias);
+
 /**
- * A token matches a bottle when it appears (case-insensitively) in the bottle
- * name, the distillery name, or any of the bottle's aliases. Postgres LIKE is
- * case-sensitive, so we use ILIKE to keep the search case-insensitive.
+ * Ids of the bottles a token substring-matches through any of its three doors:
+ * the bottle's name, its distillery's name, or one of its aliases.
+ *
+ * Written as a UNION of three single-table scans rather than one `OR` across a
+ * join because that is what lets Postgres use the trigram indexes (REL-6.1): an
+ * `OR` spanning `bottles`, `distilleries` and a correlated `EXISTS` can only be
+ * evaluated row by row, which was a pass over the whole catalog per keystroke.
+ * Every subquery repeats `catalogSearchKey` exactly, for the index to apply.
+ *
+ * Id sets are consumed as `= ANY(ARRAY(…))` rather than `IN (…)`, here and by
+ * the callers. The planner cannot estimate how many rows a trigram match will
+ * return and guesses high, and with `IN` it then hash-joins against a
+ * sequential scan of the whole bottles table to look up a few hundred ids —
+ * measured at 100k bottles, that scan was a third of the query. An array it
+ * probes through the primary key (or `bottles_distillery_idx`) one id at a
+ * time, which is what a few hundred ids want.
  */
-function tokenCondition(token: string): SQL {
+function exactIds(token: string): SQL {
   const pattern = `%${escapeLike(token)}%`;
   return sql`(
-    ${bottles.name} ILIKE ${pattern} ESCAPE '\\'
-    OR COALESCE(${distilleries.name}, '') ILIKE ${pattern} ESCAPE '\\'
+    SELECT ${bottles.id} FROM ${bottles} WHERE ${nameKey} LIKE ${pattern} ESCAPE '\\'
+    UNION
+    SELECT ${bottles.id} FROM ${bottles} WHERE ${bottles.distilleryId} = ANY(ARRAY(
+      SELECT ${distilleries.id} FROM ${distilleries} WHERE ${distilleryKey} LIKE ${pattern} ESCAPE '\\'
+    ))
+    UNION
+    SELECT ${bottleAliases.bottleId} FROM ${bottleAliases} WHERE ${aliasKey} LIKE ${pattern} ESCAPE '\\'
+  )`;
+}
+
+/**
+ * The same three doors as a row predicate, for a token too short to carry a
+ * trigram ("10", "sr", "jd"): the index cannot narrow on it, so it filters the
+ * rows the longer tokens found instead of producing a candidate set of its own.
+ */
+function exactCondition(token: string): SQL {
+  const pattern = `%${escapeLike(token)}%`;
+  return sql`(
+    ${nameKey} LIKE ${pattern} ESCAPE '\\'
+    OR COALESCE(${distilleryKey}, '') LIKE ${pattern} ESCAPE '\\'
     OR EXISTS (
       SELECT 1 FROM ${bottleAliases}
       WHERE ${bottleAliases.bottleId} = ${bottles.id}
-        AND ${bottleAliases.alias} ILIKE ${pattern} ESCAPE '\\'
+        AND ${aliasKey} LIKE ${pattern} ESCAPE '\\'
     )
   )`;
 }
 
-async function fetchCandidates(
-  db: DB,
-  tokens: string[],
-  category?: WhiskeyCategory,
-  viewerId?: string,
-): Promise<BottleSearchResult[]> {
-  const conditions: SQL[] = tokens.map(tokenCondition);
-  if (category) conditions.push(eq(bottles.category, category));
-  conditions.push(catalogVisibleTo(viewerId));
-  return db
-    .select(resultColumns)
-    .from(bottles)
-    .leftJoin(distilleries, eq(bottles.distilleryId, distilleries.id))
-    .where(and(...conditions))
-    .orderBy(asc(bottles.name))
-    .limit(CANDIDATE_LIMIT);
+/**
+ * Every token must match somewhere. Tokens long enough for the index each
+ * produce an id set and the sets are intersected; short tokens filter the
+ * result. A query made only of short tokens falls back to filtering rows.
+ */
+function allTokensMatch(tokens: string[]): SQL {
+  const indexed = tokens.filter((t) => t.length >= MIN_FUZZY_TOKEN);
+  const filtered = tokens.filter((t) => t.length < MIN_FUZZY_TOKEN);
+  const parts: SQL[] = filtered.map(exactCondition);
+  if (indexed.length > 0) {
+    parts.unshift(sql`${bottles.id} = ANY(ARRAY(${sql.join(indexed.map(exactIds), sql` INTERSECT `)}))`);
+  }
+  return and(...parts)!;
 }
 
 /**
  * Rank buckets: exact name match (0), name starts with the query (1), name
- * contains the query as a substring (2), everything else — alias or
- * distillery hits, or tokens spread across fields (3).
+ * contains the query (2), everything else — alias or distillery hits, or tokens
+ * spread across fields (3). Computed in SQL so the candidate `LIMIT` keeps the
+ * best matches rather than the alphabetically first ones: in a large catalog
+ * "glen" has far more than a hundred hits, and cutting those by name before
+ * ranking could drop the exact one.
  */
-function rankOf(name: string, q: string): number {
-  const n = name.toLowerCase();
-  if (n === q) return 0;
-  if (n.startsWith(q)) return 1;
-  if (n.includes(q)) return 2;
-  return 3;
+function rankExpr(q: string): SQL<number> {
+  const escaped = escapeLike(q);
+  return sql<number>`CASE
+    WHEN ${nameKey} = ${q} THEN 0
+    WHEN ${nameKey} LIKE ${`${escaped}%`} ESCAPE '\\' THEN 1
+    WHEN ${nameKey} LIKE ${`%${escaped}%`} ESCAPE '\\' THEN 2
+    ELSE 3
+  END`;
+}
+
+function baseConditions(category: WhiskeyCategory | undefined, viewerId: string | undefined): SQL[] {
+  const conditions: SQL[] = [catalogVisibleTo(viewerId)];
+  if (category) conditions.push(eq(bottles.category, category));
+  return conditions;
+}
+
+type Ranked = BottleSearchResult & { score: number };
+
+function stripScore(row: Ranked): BottleSearchResult {
+  const out: Partial<Ranked> = { ...row };
+  delete out.score;
+  return out as BottleSearchResult;
+}
+
+async function exactMatches(
+  db: DB,
+  tokens: string[],
+  q: string,
+  category?: WhiskeyCategory,
+  viewerId?: string,
+): Promise<Ranked[]> {
+  const rank = rankExpr(q);
+  return db
+    .select({ ...resultColumns, score: rank })
+    .from(bottles)
+    .leftJoin(distilleries, eq(bottles.distilleryId, distilleries.id))
+    .where(and(allTokensMatch(tokens), ...baseConditions(category, viewerId)))
+    .orderBy(rank, asc(bottles.name))
+    .limit(CANDIDATE_LIMIT);
 }
 
 /**
- * Search the public bottle catalog.
+ * The best `word_similarity` any variant of a token reaches against a bottle's
+ * name, its distillery or one of its aliases — or 1 when the token is a plain
+ * substring of one of them, so a fuzzy result that also contains a token
+ * exactly is never scored below one that merely resembles it.
+ */
+function tokenScore(token: string): SQL {
+  const variants = tokenVariants(token);
+  const perVariant = variants.map(
+    (v) => sql`GREATEST(
+      word_similarity(${v}, ${nameKey}),
+      ${DISTILLERY_WEIGHT}::float8 * word_similarity(${v}, COALESCE(${distilleryKey}, '')),
+      COALESCE((
+        SELECT max(word_similarity(${v}, ${aliasKey})) FROM ${bottleAliases}
+        WHERE ${bottleAliases.bottleId} = ${bottles.id}
+      ), 0)
+    )`,
+  );
+  return sql`GREATEST(CASE WHEN ${exactCondition(token)} THEN 1 ELSE 0 END, ${sql.join(perVariant, sql`, `)})`;
+}
+
+/**
+ * Ids a token reaches by resemblance: `<%` is pg_trgm's word-similarity
+ * operator, true when some run of words in the right-hand text is at least
+ * `pg_trgm.word_similarity_threshold` similar to the token — and, unlike the
+ * `word_similarity()` function, answerable from the GIN indexes. A token's
+ * exact hits are included, so "lafroig 10" can take "10" from a name while
+ * "lafroig" resembles the distillery.
+ */
+function fuzzyIds(token: string): SQL {
+  const variants = tokenVariants(token);
+  const anyVariant = (key: SQL) => sql.join(variants.map((v) => sql`${v} <% ${key}`), sql` OR `);
+  return sql`(
+    SELECT ${bottles.id} FROM ${bottles} WHERE ${anyVariant(nameKey)}
+    UNION
+    SELECT ${bottles.id} FROM ${bottles} WHERE ${bottles.distilleryId} = ANY(ARRAY(
+      SELECT ${distilleries.id} FROM ${distilleries} WHERE ${anyVariant(distilleryKey)}
+    ))
+    UNION
+    SELECT ${bottleAliases.bottleId} FROM ${bottleAliases} WHERE ${anyVariant(aliasKey)}
+    UNION
+    ${exactIds(token)}
+  )`;
+}
+
+/**
+ * The typo pass. Every token long enough to carry trigrams must resemble
+ * something (index-assisted through `fuzzyIds`); every shorter token — an age,
+ * a proof, "sr" — must still match exactly, because "lagavulin 61" is not a
+ * misspelling of anything we can know. Scored by the mean of each token's best
+ * similarity and returned below every exact hit.
  *
- * - Case-insensitive substring match against bottle name, distillery name and
- *   bottle aliases (so "ECBP" finds Elijah Craig Barrel Proof).
- * - Tolerant token matching: the query is split on whitespace and every token
- *   must match somewhere, so "eagle 10" finds "Eagle Rare 10".
- * - Typo tolerance (best effort): if a query yields zero results, we retry
- *   with each token trimmed to its first 4 characters, so trailing-character
- *   typos like "lagavulinn" still surface Lagavulin. Limitation: this only
- *   recovers typos occurring AFTER the 4th character — a typo inside the
- *   first 4 characters (e.g. "lafroig" for Laphroaig, prefix "lafr") only
- *   matches when an alias happens to share that prefix. Real fuzzy matching
- *   (edit distance / trigrams) is out of scope for this substring-search path.
- * - Ranking: exact-name matches first, then startsWith, then contains, then
- *   alias/distillery-only matches; ties break alphabetically.
+ * The similarity threshold is a session setting in pg_trgm, so it is set with
+ * `set_config(…, true)` — scoped to this transaction, which is what keeps it
+ * safe behind a transaction-mode pooler that hands the connection to someone
+ * else the moment we commit.
+ */
+async function fuzzyMatches(
+  db: DB,
+  tokens: string[],
+  exclude: string[],
+  limit: number,
+  category?: WhiskeyCategory,
+  viewerId?: string,
+): Promise<Ranked[]> {
+  const fuzzy = tokens.filter(isFuzzyToken);
+  if (fuzzy.length === 0) return [];
+  const strict = tokens.filter((t) => !isFuzzyToken(t));
+
+  const score = sql<number>`((${sql.join(fuzzy.map(tokenScore), sql` + `)}) / ${fuzzy.length}::float8)`;
+  const conditions: SQL[] = [
+    sql`${bottles.id} = ANY(ARRAY(${sql.join(fuzzy.map(fuzzyIds), sql` INTERSECT `)}))`,
+    ...strict.map(exactCondition),
+    ...baseConditions(category, viewerId),
+  ];
+  if (exclude.length > 0) conditions.push(notInArray(bottles.id, exclude));
+
+  return db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT set_config('pg_trgm.word_similarity_threshold', ${String(FUZZY_THRESHOLD)}, true)`,
+    );
+    const rows = await tx
+      .select({ ...resultColumns, score })
+      .from(bottles)
+      .leftJoin(distilleries, eq(bottles.distilleryId, distilleries.id))
+      .where(and(...conditions))
+      .orderBy(desc(score), asc(bottles.name))
+      .limit(limit);
+    // postgres-js hands float8 back as a number already; PGlite may not.
+    return rows.map((r) => ({ ...r, score: Number(r.score) }));
+  });
+}
+
+/**
+ * Search the bottle catalog.
+ *
+ * - **Exact pass.** Case-, apostrophe- and punctuation-insensitive substring
+ *   match against bottle name, distillery name and aliases ("ECBP" finds
+ *   Elijah Craig Barrel Proof; "makers mark" finds Maker's Mark). The query is
+ *   split on whitespace and every token must match somewhere, so "eagle 10"
+ *   finds "Eagle Rare 10 Year". Age statements are folded ("16yr", "12 year
+ *   old"). Ranked exact name > prefix > contains > alias/distillery/spread, then
+ *   alphabetically.
+ * - **Typo pass (review REL-6.1, WP-22).** When the exact pass finds fewer
+ *   than five bottles, tokens of three or more letters are matched by trigram
+ *   word-similarity with a few phonetic variants, so "lafroig", "glenfidich 12"
+ *   and "johnny walker blue" resolve. Fuzzy results always rank below exact
+ *   ones: a bottle you spelled correctly never loses its place to one that
+ *   merely looks like your query.
+ * - **Indexes.** Both passes are answered from trigram GIN indexes on the
+ *   normalized name, distillery and alias (`catalogSearchKey`), so the cost
+ *   follows the number of matches rather than the size of the catalog.
+ *
+ * Measured by the committed evaluation set in `src/lib/search.eval.ts`.
  *
  * An empty/blank query returns "popular" bottles (alphabetical, limited) so
  * the search page has content before the user types. No auth required.
@@ -149,33 +412,34 @@ export async function searchBottles(
   opts: SearchOptions = {},
 ): Promise<BottleSearchResult[]> {
   const { category, limit = DEFAULT_LIMIT, viewerId } = opts;
-  const q = query.trim().toLowerCase();
-  const tokens = q.split(/\s+/).filter(Boolean);
+  const tokens = searchTokens(query);
 
   if (tokens.length === 0) {
     return db
       .select(resultColumns)
       .from(bottles)
       .leftJoin(distilleries, eq(bottles.distilleryId, distilleries.id))
-      .where(and(catalogVisibleTo(viewerId), category ? eq(bottles.category, category) : undefined))
+      .where(and(...baseConditions(category, viewerId)))
       .orderBy(asc(bottles.name))
       .limit(limit);
   }
 
-  let rows = await fetchCandidates(db, tokens, category, viewerId);
+  const q = tokens.join(" ");
+  const exact = (await exactMatches(db, tokens, q, category, viewerId))
+    .sort((a, b) => a.score - b.score || a.name.localeCompare(b.name))
+    .slice(0, limit);
 
-  if (rows.length === 0) {
-    const trimmed = tokens.map((t) => t.slice(0, PREFIX_LEN));
-    if (trimmed.some((t, i) => t !== tokens[i])) {
-      rows = await fetchCandidates(db, trimmed, category, viewerId);
-    }
-  }
+  if (exact.length >= Math.min(limit, FUZZY_TRIGGER)) return exact.map(stripScore);
 
-  return rows
-    .map((row) => ({ row, rank: rankOf(row.name, q) }))
-    .sort((a, b) => a.rank - b.rank || a.row.name.localeCompare(b.row.name))
-    .slice(0, limit)
-    .map((r) => r.row);
+  const fuzzy = await fuzzyMatches(
+    db,
+    tokens,
+    exact.map((r) => r.id),
+    limit - exact.length,
+    category,
+    viewerId,
+  );
+  return [...exact, ...fuzzy].map(stripScore);
 }
 
 export interface BottleDetail {

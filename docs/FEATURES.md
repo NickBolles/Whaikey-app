@@ -23,7 +23,7 @@ Companion to [PLAN.md](../PLAN.md). This document specifies every feature area i
 ## 2. Bottle Identification & Database
 
 ### 2.1 Search (🟢 Phase 1)
-- Instant-as-you-type, < 100 ms, tolerant of misspellings ("lafroig" → Laphroaig) via Postgres trigram + FTS. **Status (2026-09): not there yet** — `src/lib/search.ts` is an `ILIKE` substring match over name/distillery/alias with no trigram index; typo tolerance is planned via `pg_trgm` (PLAN.md §3, review WP-22).
+- Instant-as-you-type, < 100 ms, tolerant of misspellings ("lafroig" → Laphroaig) via Postgres trigram + FTS. **Status (2026-09): shipped via trigram, no FTS yet** (review WP-22) — "lafroig" finds Laphroaig; scored by `src/lib/search.eval.ts` (Recall@5 1.00 on 50 queries). FTS was not added because the evaluation shows no need for it.
 - Understands abbreviations and enthusiast slang: "weller sr" → W.L. Weller Special Reserve; "ECBP" → Elijah Craig Barrel Proof (alias table on bottles).
 - Filters: category (bourbon/scotch/rye/irish/japanese/world), region, age, ABV, price band, cask type.
 - **Semantic search (🟡):** "smoky but sweet under $70" → embedding search over flavor profiles.

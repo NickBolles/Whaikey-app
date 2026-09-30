@@ -1,5 +1,4 @@
-import { and, eq, inArray, ne, sql } from "drizzle-orm";
-import type { PgColumn } from "drizzle-orm/pg-core";
+import { and, eq, inArray, ne } from "drizzle-orm";
 import type { DB } from "@/db";
 import {
   bottles,
@@ -10,6 +9,7 @@ import {
   type WhiskeyCategory,
 } from "@/db/schema";
 import { categoryLabel } from "@/components/category-chip";
+import { getCatalogTotals } from "@/lib/catalog-totals";
 import { PASSPORT_TIER_SPECS, tierForCount } from "@/lib/passport-tiers";
 
 export type { PassportFamily } from "@/db/schema";
@@ -104,29 +104,15 @@ async function listMetBottles(db: DB, userId: string): Promise<MetBottleRow[]> {
  * Denominators: distinct verified bottles per country/region/style. Imported
  * bottles awaiting verification (src/db/schema.ts) stay out — thousands of
  * unvetted label rows would silently deflate everyone's percentages.
+ *
+ * Read from the `catalog_totals` cache (review REL-2.6): getPassport sits on
+ * Home's recommendation path (src/lib/recommend.ts) as well as the profile,
+ * and grouping the verified catalog three ways per page load was the cost of
+ * a number that changes when the catalog does. src/lib/catalog-totals.ts
+ * states when it is refreshed.
  */
 async function catalogTotals(db: DB): Promise<Record<PassportFamily, Map<string, number>>> {
-  // Grouped in SQL rather than counted in JS: getPassport sits on Home's
-  // recommendation path (src/lib/recommend.ts) as well as the profile, and
-  // pulling three columns of every verified bottle to tally them here made
-  // that an O(catalog) scan per page load.
-  const totalsFor = async (column: PgColumn) => {
-    const rows = await db
-      .select({ value: sql<string | null>`${column}`, count: sql<number>`count(*)` })
-      .from(bottles)
-      .where(eq(bottles.status, "verified"))
-      .groupBy(column);
-    const map = new Map<string, number>();
-    for (const row of rows) {
-      if (row.value) map.set(row.value, Number(row.count));
-    }
-    return map;
-  };
-  const [country, region, style] = await Promise.all([
-    totalsFor(bottles.country),
-    totalsFor(bottles.region),
-    totalsFor(bottles.category),
-  ]);
+  const { country, region, style } = await getCatalogTotals(db);
   return { country, region, style };
 }
 

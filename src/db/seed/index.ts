@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import type { DB } from "../index";
+import { refreshCatalogTotals } from "../../lib/catalog-totals";
 import { bottleAliases, bottles, bottleUpcs, distilleries } from "../schema";
 import {
   SEED_BOTTLES,
@@ -159,6 +160,11 @@ export async function seedDatabase(db: DB): Promise<SeedResult> {
   for (const batch of chunk(upcRows, CHUNK_SIZE)) {
     await db.insert(bottleUpcs).values(batch).onConflictDoNothing();
   }
+
+  // The seed is a catalog write like any other: recount the passport
+  // denominators now rather than leave a fresh database's first hour on
+  // numbers from before it (src/lib/catalog-totals.ts).
+  await refreshCatalogTotals(db);
 
   return {
     distilleries: SEED_DISTILLERIES.length,

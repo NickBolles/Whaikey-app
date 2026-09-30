@@ -140,6 +140,10 @@ const INVENTORY: Record<string, Verdict> = {
   bottle_upcs: { notPersonal: "Barcodes against catalog rows." },
   critic_notes: { notPersonal: "Published critic notes, sourced and attributed." },
   price_history: { notPersonal: "Observed market prices for a bottle." },
+  catalog_totals: {
+    notPersonal:
+      "family, value, total, refreshed_at: counts of verified catalog bottles per country, region and style; no user column, and nothing a person logs is counted.",
+  },
   bottle_verifications: { notPersonal: "Catalog QA state." },
   catalog_sources: { notPersonal: "Where catalog data came from." },
   bottle_resources: { notPersonal: "Links attached to catalog rows." },
