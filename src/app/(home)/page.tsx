@@ -56,43 +56,52 @@ export default async function HomePage() {
   if (!user) return <SignedOutHero />;
 
   const db = getDb();
-
-  // First-run handoff: the /welcome tour owns brand-new accounts. The cookie
-  // (set by /welcome on finish or skip) short-circuits the DB check.
   const cookieStore = await cookies();
-  if (!cookieStore.get(ONBOARDING_COOKIE) && (await needsOnboarding(db, user.id))) {
-    redirect("/welcome");
-  }
 
+  // One round of independent reads instead of a serial waterfall (review
+  // REL-6.3): the onboarding check, the month in review, the last pours and
+  // the social graph all ask the database separate questions.
+  //
+  // First-run handoff: the /welcome tour owns brand-new accounts. The cookie
+  // (set by /welcome on finish or skip) short-circuits the DB check. Running
+  // the check alongside the rest costs a brand-new account one set of reads
+  // it will not see, once; waiting on it first cost everyone else a round
+  // trip on every visit.
+  //
   // The dashboard's month-in-review also carries the shelf total and lifetime
   // pour count, so the hero reuses them instead of re-counting.
-  const dashboard = await getDashboard(db, user.id, appNow());
-
-  const recentPours = await db
-    .select({
-      id: schema.pours.id,
-      rating: schema.pours.rating,
-      createdAt: schema.pours.createdAt,
-      bottleName: schema.bottles.name,
-      bottleId: schema.bottles.id,
-    })
-    .from(schema.pours)
-    .innerJoin(schema.bottles, eq(schema.pours.bottleId, schema.bottles.id))
-    .where(eq(schema.pours.userId, user.id))
-    .orderBy(desc(schema.pours.createdAt))
-    .limit(3);
-
+  //
   // US-7: the "From your friends" Home module (docs/SOCIAL.md §7.3). A profile
   // and at least one accepted follow are prerequisites for the graph to have
   // anything to show — checked separately from the feed query so the empty
-  // states can tell "no friends yet" apart from "friends, quiet week".
-  const [ownProfile, following] = await Promise.all([
+  // states can tell "no friends yet" apart from "friends, quiet week". The
+  // feed itself gates on accepted follows too (it returns nothing without
+  // one), so it rides the same round rather than waiting on `following`.
+  const [onboarding, dashboard, recentPours, ownProfile, following, friendFeed] = await Promise.all([
+    cookieStore.get(ONBOARDING_COOKIE) ? false : needsOnboarding(db, user.id),
+    getDashboard(db, user.id, appNow()),
+    db
+      .select({
+        id: schema.pours.id,
+        rating: schema.pours.rating,
+        createdAt: schema.pours.createdAt,
+        bottleName: schema.bottles.name,
+        bottleId: schema.bottles.id,
+      })
+      .from(schema.pours)
+      .innerJoin(schema.bottles, eq(schema.pours.bottleId, schema.bottles.id))
+      .where(eq(schema.pours.userId, user.id))
+      .orderBy(desc(schema.pours.createdAt))
+      .limit(3),
     getOwnProfile(db, user.id),
     listFollowing(db, user.id),
+    getFriendFeed(db, user.id, { limit: 3 }),
   ]);
+  if (onboarding) redirect("/welcome");
+
   const hasProfile = Boolean(ownProfile?.socialEnabled);
   const hasFollows = following.some((f) => f.state === "accepted");
-  const friendFeedRaw = hasFollows ? await getFriendFeed(db, user.id, { limit: 3 }) : [];
+  const friendFeedRaw = hasFollows ? friendFeed : [];
   // US-16: matches for exactly the authors on screen. Ranking the whole graph
   // and keeping a top slice would drop the chip from a recent note whenever
   // its author sat outside that slice — the feed picks by recency, not by

@@ -29,30 +29,30 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 }
 
 export default async function ProfilePage({ params }: Props) {
-  const { handle } = await params;
-  const viewer = await getSessionUser();
+  const [{ handle }, viewer] = await Promise.all([params, getSessionUser()]);
   const view = await getProfileView(getDb(), viewer?.id ?? null, handle);
   if (!view) notFound();
 
   const { profile, palate, recentNotes, viewerState } = view;
   const signedIn = Boolean(viewer);
-  // US-16: how closely this person tastes like the viewer. Null — and so
-  // absent — unless the viewer follows them and both palates carry enough
-  // rated pours to mean something.
-  const palateMatch = await getPalateMatch(getDb(), viewer?.id ?? null, profile.userId);
   // Mirrors getProfileView's own canSeeContent gate (docs/SOCIAL.md US-4): a
   // signed-out viewer never sees content, even for a public profile.
   const canSeeContent = signedIn && (viewerState.isSelf || profile.isPublic || viewerState.followState === "accepted");
-  // The owner viewing their own passport is the one moment new tiers get
-  // stamped (and so dated); rendering someone else's profile never writes.
-  const passport = canSeeContent
-    ? await getPassport(getDb(), profile.userId, { stampNewTiers: viewerState.isSelf })
-    : null;
-  // The owner's Sharing · Settings row (WP-11). Read only for the owner:
-  // nobody else is shown how many links someone has out.
-  const ownSharing = viewerState.isSelf && viewer
-    ? await Promise.all([listPourShares(getDb(), viewer.id), getSocialPrefs(getDb(), viewer.id)])
-    : null;
+  // Independent of each other, so one round rather than three (review REL-6.3).
+  const [palateMatch, passport, ownSharing] = await Promise.all([
+    // US-16: how closely this person tastes like the viewer. Null — and so
+    // absent — unless the viewer follows them and both palates carry enough
+    // rated pours to mean something.
+    getPalateMatch(getDb(), viewer?.id ?? null, profile.userId),
+    // The owner viewing their own passport is the one moment new tiers get
+    // stamped (and so dated); rendering someone else's profile never writes.
+    canSeeContent ? getPassport(getDb(), profile.userId, { stampNewTiers: viewerState.isSelf }) : null,
+    // The owner's Sharing · Settings row (WP-11). Read only for the owner:
+    // nobody else is shown how many links someone has out.
+    viewerState.isSelf && viewer
+      ? Promise.all([listPourShares(getDb(), viewer.id), getSocialPrefs(getDb(), viewer.id)])
+      : null,
+  ]);
 
   return (
     <div className="mx-auto flex max-w-lg flex-col gap-6 px-4 pb-24 pt-8">

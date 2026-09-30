@@ -57,20 +57,35 @@ export default async function BottleDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  const { id } = await params;
-  const user = await getSessionUser();
-  const detail = await getBottleDetail(getDb(), id, user?.id);
+  // Params and session are independent; so, once the bottle is known, are
+  // the submission status and everything personal (review REL-6.3).
+  const [{ id }, user] = await Promise.all([params, getSessionUser()]);
+  const db = getDb();
+  const detail = await getBottleDetail(db, id, user?.id);
   if (!detail) notFound();
 
   const { bottle, distillery, communityStats, userBottle, pairings, resources, media } = detail;
 
-  // Only the submitter of a bottle still outside the shared catalog sees where
-  // its review got to; `catalogVisibleTo` already guarantees nobody else can
-  // reach this page for it.
-  const submission =
+  const [submission, personal] = await Promise.all([
+    // Only the submitter of a bottle still outside the shared catalog sees
+    // where its review got to; `catalogVisibleTo` already guarantees nobody
+    // else can reach this page for it.
     user && bottle.status === "user_submitted"
-      ? await getSubmissionForBottle(getDb(), bottle.id, user.id)
-      : null;
+      ? getSubmissionForBottle(db, bottle.id, user.id)
+      : null,
+    user
+      ? Promise.all([
+          getUserPalate(db, user.id),
+          db
+            .select({ flavorTags: schema.tastingNotes.flavorTags })
+            .from(schema.tastingNotes)
+            .innerJoin(schema.pours, eq(schema.tastingNotes.pourId, schema.pours.id))
+            .where(and(eq(schema.pours.userId, user.id), eq(schema.pours.bottleId, bottle.id))),
+          getFriendNotesForBottle(db, user.id, bottle.id),
+          listPours(db, user.id, { bottleId: bottle.id, limit: 200 }),
+        ])
+      : null,
+  ]);
 
   // Personal taste-match: cosine similarity of the signed palate vs this
   // bottle's flavor profile. Null (hidden) for signed-out users, users with no
@@ -82,20 +97,9 @@ export default async function BottleDetailPage({
   let sameDram: { viewerTags: Record<string, number> | null; friends: SameDramFriendNote[]; hasViewerNotes: boolean } | null = null;
   // The viewer's full pour history on this bottle, for the Your Pours section.
   let yourPours: YourPourItem[] = [];
-  if (user) {
-    const db = getDb();
-    const palate = await getUserPalate(db, user.id);
+  if (personal) {
+    const [palate, viewerNoteRows, friendNotes, viewerPours] = personal;
     match = tasteMatchPercent(palate.vector, bottle.flavorProfile, palate.sampleSize);
-
-    const [viewerNoteRows, friendNotes, viewerPours] = await Promise.all([
-      db
-        .select({ flavorTags: schema.tastingNotes.flavorTags })
-        .from(schema.tastingNotes)
-        .innerJoin(schema.pours, eq(schema.tastingNotes.pourId, schema.pours.id))
-        .where(and(eq(schema.pours.userId, user.id), eq(schema.pours.bottleId, bottle.id))),
-      getFriendNotesForBottle(db, user.id, bottle.id),
-      listPours(db, user.id, { bottleId: bottle.id, limit: 200 }),
-    ]);
 
     yourPours = viewerPours.map((p) => ({
       id: p.id,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { applyStatusBarStyle, configureKeyboard, hideSplash } from "@/lib/native/app-chrome";
 import { exitApp, onBackButton, onDeepLink, onResume } from "@/lib/native/app-lifecycle";
@@ -16,6 +16,7 @@ import {
 import type { AuthCallback } from "@/lib/native/auth";
 import { checkShellVersion, type ShellVersionCheck } from "@/lib/native/manifest";
 import { ShellUpdateRequired } from "@/components/shell-update-required";
+import { useToast } from "@/components/toast";
 import { isNativeApp } from "@/lib/native/platform";
 import { refreshPushRegistration } from "@/lib/native/push";
 import { flushPourQueue, isOnline } from "@/lib/native/offline-queue";
@@ -33,6 +34,11 @@ import { flushPourQueue, isOnline } from "@/lib/native/offline-queue";
  */
 const SPLASH_CHECK_TIMEOUT_MS = 3_000;
 
+/** "1 pour" / "3 pours". */
+function pluralPours(count: number): string {
+  return `${count} pour${count === 1 ? "" : "s"}`;
+}
+
 export function NativeShell({ userId }: { userId?: string | null }) {
   const router = useRouter();
   const [outdated, setOutdated] = useState<ShellVersionCheck | null>(null);
@@ -47,6 +53,8 @@ export function NativeShell({ userId }: { userId?: string | null }) {
    * start.
    */
   const [checking, setChecking] = useState(false);
+  const toast = useToast();
+  const unclaimedShown = useRef(0);
 
   /**
    * Both directions. A floor raised by mistake and then lowered again — which
@@ -67,22 +75,35 @@ export function NativeShell({ userId }: { userId?: string | null }) {
     // per session, so a pour queued by one person must not be sent while
     // someone else is signed in on the same browser.
     const { synced, discarded, unclaimed } = await flushPourQueue(userId ?? undefined);
-    if (synced > 0) router.refresh();
-    // Neither of these can be shown yet — there is no app-level toast until
-    // WP-6 — but neither is lost either: a rejected pour is quarantined rather
-    // than deleted, and an unclaimed one stays queued. Logged so the gap is
-    // visible in a session replay rather than only in this comment.
+    if (synced > 0) {
+      router.refresh();
+      // "Saved on your phone" was a promise; this is it being kept.
+      toast.show({ message: `Synced ${pluralPours(synced)} logged offline.`, tone: "success" });
+    }
+    // Neither of these is lost — a rejected pour is quarantined rather than
+    // deleted, and an unclaimed one stays queued — but until WP-6 neither was
+    // said out loud either, which left "Saved on your phone" not quite honest
+    // (review REL-4.1 status). There is still no recovery surface to link to,
+    // so the toast says where they are; the warning keeps them visible in a
+    // session replay.
     if (discarded.length > 0) {
       console.warn(
         `[pours] ${discarded.length} queued pour(s) the server kept rejecting are in quarantine, awaiting a recovery surface`,
       );
+      toast.error(`${pluralPours(discarded.length)} logged offline couldn't be saved. They're kept on this device.`);
     }
     if (unclaimed > 0) {
       console.warn(
         `[pours] ${unclaimed} queued pour(s) predate author tracking and cannot be attributed; held for their author`,
       );
+      // Every flush reports the same held pours again (they stay queued), so
+      // say it once per count rather than on every trip back to the tab.
+      if (unclaimedShown.current !== unclaimed) {
+        unclaimedShown.current = unclaimed;
+        toast.show(`${pluralPours(unclaimed)} logged offline on this device ${unclaimed === 1 ? "is" : "are"} waiting for the account that logged ${unclaimed === 1 ? "it" : "them"}.`);
+      }
     }
-  }, [router, userId]);
+  }, [router, toast, userId]);
 
   /**
    * Every platform, not just the device. A PWA on a phone hits the same dead
