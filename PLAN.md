@@ -41,7 +41,7 @@ An AI-native whiskey tracking app, inspired by wine apps like **Vivino** (social
 
 ## 2. Current state — read this before writing code
 
-**As of 2026-09-03, HEAD `6dfb4ff`.** Whaikey is a Next.js 16 App Router web app on Vercel, wrapped by Capacitor for iOS/Android, with Drizzle over Postgres (Supabase in production; PGlite locally and in tests), Better Auth (Google/Apple only), and an Anthropic-Messages-compatible AI client that prefers OpenRouter when configured. 24 page routes, 34 API route files, 55 tables, 22 migrations, 134 unit-test files (1,288 tests), 41 mobile visual baselines, 7 GitHub workflows. `pnpm typecheck && pnpm lint && pnpm test && pnpm build` is green.
+**As of 2026-09-29, HEAD `7931dea`** (Lane A and Lane C done bar owner decisions; Lane B has WP-11, Lane D has WP-26). Whaikey is a Next.js 16 App Router web app on Vercel, wrapped by Capacitor for iOS/Android, with Drizzle over Postgres (Supabase in production; PGlite locally and in tests), Better Auth (Google/Apple only), and an Anthropic-Messages-compatible AI client that prefers OpenRouter when configured. 33 page routes, 52 API route files, 46 tables, 42 migrations, 179 unit-test files, 50 mobile visual baselines, 7 GitHub workflows. `pnpm typecheck && pnpm lint && pnpm test && pnpm build` is green.
 
 ### 2.1 Live and solid
 
@@ -58,6 +58,7 @@ An AI-native whiskey tracking app, inspired by wine apps like **Vivino** (social
 - **Age gate:** date of birth + market at first authenticated use, per-market minimum, answered once (§9.1); `/responsible` is the resources page it links to.
 - **Native version floor:** `/api/native/manifest` serves `minShellVersion`; the shell shows "Update Whaikey" below it, and raising it is the kill switch for a bad deploy (WP-20, docs/NATIVE_APP.md §2.2).
 - **Moderation and review (WP-18):** an env-allowlisted operator role, `/admin/reports` for reported comments, pours and profiles (hide / suspend / reinstate / dismiss, every action with a reason and an append-only trail, a 72-hour target the queue counts breaches against), and `/admin/submissions` — the far end of the WP-16 submission path, where a bottle is promoted into the shared catalog, declined with a reason its submitter can read, or marked a duplicate.
+- **Observability (WP-19):** Sentry (`@sentry/node`, server only) behind `SENTRY_DSN` with payload redaction on the way out; per-call AI token accounting at all eight model call sites, priced at read time (`ai_usage`); SOCIAL.md §12's guardrails computed as SQL over existing tables (`src/lib/observability/metrics.ts`); the S1 share funnel instrumented with three events (`analytics_events`); both telemetry tables swept after 90 days.
 - **Policy and support surfaces (WP-18):** `/terms`, `/privacy` and `/support` with an in-app feedback box that works signed out. All three are ungated. The legal entity, jurisdiction, contact address and effective date come from the environment, and until all four are set both policy pages say in the open that they are not finished, naming only the ones actually missing (§9.3).
 
 ### 2.2 Live but weaker than it reads
@@ -70,11 +71,12 @@ An AI-native whiskey tracking app, inspired by wine apps like **Vivino** (social
 - **User-submitted bottles** are added instantly and usable instantly, but stay private to their submitter until an operator promotes them at `/admin/submissions`. A submission is excluded from passport badges and never teaches the barcode scanner until it is promoted — and with one operator, the queue's throughput is one person's attention, which is the real limit now rather than the missing screen.
 - **Moderation is one operator and one deploy.** `WHAIKEY_OPERATOR_IDS` is an env allowlist, so granting access is a deploy and there is no second pair of eyes on a decision. Appeals have a record to be answered from and no route to arrive on except `/support`.
 - **The policy pages are shells until the owner fills them in.** The text is written; the entity, jurisdiction and contact are not, and the pages say so rather than looking finished.
+- **Error monitoring is off until the owner sets `SENTRY_DSN`**, and even then it is server-only: no browser errors, no source-mapped stacks, no tracing (WP-19). The S1 overlap numbers are instrumented and **not yet published** — they have no readings yet.
 - **Community consensus** is live at `/bottles/[id]/compare` ahead of the jurisdiction review SOCIAL.md §14 makes its precondition.
 
 ### 2.3 Not built, and load-bearing
 
-- **No billing or entitlements, no analytics, no error monitoring.** Terms, Privacy and a moderation queue landed in WP-18. Export, hard account deletion, sign-out and a Settings page landed in WP-11 (`/settings`, `GET /api/account/export`, `DELETE /api/account`; `/sharing` folds into Settings and redirects), and the Privacy Policy now describes deletion as a button. Still missing from Settings: a units switch (pour sizes are ml everywhere; the pour sheet and journal have to read a preference before a switch means anything) and any notification to switch on — nothing is sent yet.
+- **No billing or entitlements, no performance measurement (search / scan-to-shelved p95).** Terms, Privacy and a moderation queue landed in WP-18; error monitoring and the §12 metrics in WP-19. Export, hard account deletion, sign-out and a Settings page landed in WP-11 (`/settings`, `GET /api/account/export`, `DELETE /api/account`; `/sharing` folds into Settings and redirects), and the Privacy Policy now describes deletion as a button. Still missing from Settings: a units switch (pour sizes are ml everywhere; the pour sheet and journal have to read a preference before a switch means anything) and any notification to switch on — nothing is sent yet.
 - No clubs, blind flights, samples, distillery visits, passport diffing, palate share card, flights/blind mode, 100-point rating mode, similar-bottles rail, chat tools `log_pour_draft` / `recommend_bottles` / `get_price_info`.
 - No reviewer demo account (the app is social-login-only).
 
@@ -118,8 +120,8 @@ v1 ships to a store when every box is ticked. Nothing on this list is optional a
 - [x] Support URL and an in-app feedback path (WP-18: `/support`, `POST /api/feedback`, working signed out).
 
 **Observable**
-- [ ] Error monitoring in production.
-- [ ] Analytics sufficient to compute SOCIAL.md §12's cohort-adjusted pours-per-active-user metric and per-user AI cost.
+- [ ] Error monitoring in production. **Built in WP-19; unticked until the owner sets `SENTRY_DSN` in production (§12).**
+- [x] Analytics sufficient to compute SOCIAL.md §12's cohort-adjusted pours-per-active-user metric and per-user AI cost (WP-19: `guardrailMetrics`, `ai_usage`). The one §12 guardrail not computed — sessions with no pour — waits on the app-open decision in §12.
 - [ ] Search p95 and scan-to-shelved p95 measured (CI or RUM), with NATIVE_APP.md §1.4's tripwires wired to real numbers.
 
 **Shippable**
@@ -138,7 +140,7 @@ v1 ships to a store when every box is ticked. Nothing on this list is optional a
 - **Backend:** route handlers under `src/app/api` (`runtime = "nodejs"`, never edge). Drizzle over Postgres — Supabase (pooler URL) in production, PGlite in-process locally and in tests; the driver is chosen from the connection string in `src/db/index.ts`. **Better Auth**, social login only (Google, optional Apple).
 - **AI layer:** `src/lib/ai/client.ts` selects the provider at runtime — **OpenRouter** when `OPENROUTER_API_KEY` is set, Anthropic direct otherwise; both speak the Messages API. Two model roles, `chatModel()` (chat, pairings, rec explanations) and `fastModel()` (extraction, label scan), each overridable by `WHAIKEY_CHAT_MODEL` / `WHAIKEY_FAST_MODEL`. **Model ids live in code, not here.** On the OpenRouter path prompt caching and hosted web search are unavailable. Missing keys ⇒ routes return 503 and the UI hides AI affordances; the manual loop never blocks. The catalog verification lane runs separately on an authenticated Claude Code subscription (`src/lib/ingest/verification-queue.ts`).
 - **Search:** today, Postgres `ILIKE` substring over name/distillery/aliases (`src/lib/search.ts`). Planned: `pg_trgm` GIN indexes and `similarity()` for misspellings (§3). Embeddings/pgvector are **not** planned until a committed search evaluation shows substring + trigram is the bottleneck.
-- **Analytics / monitoring:** not adopted yet (§10). Sentry and a minimal event set are on the v1 line.
+- **Analytics / monitoring:** `src/lib/observability/` (WP-19) — Sentry via `@sentry/node` behind `SENTRY_DSN` (server only), AI token accounting, §12 guardrail SQL, and a three-event share funnel. No third-party product analytics and no RUM yet (§10).
 
 ### 4.2 High-level architecture
 
@@ -256,15 +258,15 @@ Tracks run in parallel and are named so that "Phase 2" is never ambiguous: **C**
 | 2026-Q2 | Next.js scaffold, PGlite/Postgres parity, Better Auth social login, seed catalog, search, bottle detail, My Bar with spend, pour log with wheel and half-stars, journal, flavor wheel input/viz/heat map, AI chat + extraction + pairings + recommendations, label and UPC scan, CSV import |
 | 2026-07 | Native shell (N0–N2): capability layer, device-code auth, offline queue, push-token registration, CI compiles; fonts pinned after a CI outage; Whiskey School |
 | 2026-08 | Social S1 (share revocation, comparison on the link), S2 (profiles, follows, visibility, friends module, Same Dram, cheers, blocks, privacy reset), most of S3 (comments, reports, taste twins, phone/QR discovery); onboarding wizard and Home/My Bar/Friends redesign; source-backed catalog pipeline, verification queue, origin model; passport tiers and crests; scan sharpening |
-| 2026-09 | This review: STORYBOARD.md, refreshed plan. Then Lane A (WP-1…5: offline flush, native-auth binding, security headers, aggregate/body/AI guards) and Lane C (WP-16 submissions, WP-17 age gate, WP-18 moderation + policies + support, WP-20 version floor) |
+| 2026-09 | This review: STORYBOARD.md, refreshed plan. Then Lane A (WP-1…5: offline flush, native-auth binding, security headers, aggregate/body/AI guards) and Lane C (WP-16 submissions, WP-17 age gate, WP-18 moderation + policies + support, WP-19 monitoring + metrics + AI cost, WP-20 version floor), then WP-11 (settings, export, deletion) and WP-26 (Postgres CI lane, route tests, audit gate) |
 
 ### 5.2 Now — two lanes, in parallel
 
 **Lane A (C): stop the bleeding.** ✅ WP-1 offline queue + idempotency · 🟨 WP-2/3 native auth binding and cookie storage — the verified-App-Link callback is still open and is a **store launch gate**, blocked on the bundle id (review SEC-H1 status) · ✅ WP-4 security headers (CSP report-only pending its first production reports) · ✅ WP-5 aggregate leak, body limits, AI timeouts.
 
-**Lane B (C): the focus and polish pass**, in STORYBOARD.md §5 order. ✅ WP-6 back/nav/toast/loading · WP-7 pour sheet · WP-8 bottle action bar · WP-9 My Bar shelf-first · WP-10 journal edit/delete + one Share sheet · WP-11 settings, export, delete · WP-12 the new nav (Home · Bar · ＋ · Explore · You), `/passport` with six dimensions and counters on Bar, Home cut to three modules · WP-13 first run · WP-14 shared search/row components · WP-15 share-page CTA.
+**Lane B (C): the focus and polish pass**, in STORYBOARD.md §5 order. ✅ WP-6 back/nav/toast/loading · WP-7 pour sheet · WP-8 bottle action bar · WP-9 My Bar shelf-first · WP-10 journal edit/delete + one Share sheet · 🟨 WP-11 settings, export, delete (units switch and notifications deferred) · WP-12 the new nav (Home · Bar · ＋ · Explore · You), `/passport` with six dimensions and counters on Bar, Home cut to three modules · WP-13 first run · WP-14 shared search/row components · WP-15 share-page CTA.
 
-**Lane C (L): launch blockers.** ✅ WP-16 user-submitted bottles · ✅ WP-17 age gate · ✅ WP-18 moderation queue, catalog review, corrected store answers, ToS/Privacy, support — **reviewer access is the one part it could not close**, because it is an owner decision (§12) · WP-19 monitoring + the guardrail metric + publish S1/S2 overlap numbers · ✅ WP-20 kill switch, push-token rule, Android backup flag.
+**Lane C (L): launch blockers.** ✅ WP-16 user-submitted bottles · ✅ WP-17 age gate · ✅ WP-18 moderation queue, catalog review, corrected store answers, ToS/Privacy, support — **reviewer access is the one part it could not close**, because it is an owner decision (§12) · ✅ WP-19 monitoring + the guardrail metrics + AI cost accounting — the S1/S2 overlap numbers are instrumented and publish once they have readings · ✅ WP-20 kill switch, push-token rule, Android backup flag.
 
 **Lane D (C/K): scale before the catalog grows.** WP-21 bounded discovery + indexes + cached totals · WP-22 trigram search + evaluation set · WP-23 bounded palate reads · WP-24 batched ingest and atomic finalize · WP-25 money/timezones/dates/budgets/TTLs · ✅ WP-26 Postgres CI lane and route tests (the lane's first run found four production 500s; review WP-26 status).
 
