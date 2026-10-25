@@ -15,8 +15,11 @@ export interface ClaimView {
   lastAt: string;
 }
 
-/** Operator table for pending barcode claims; plain like the other admin tools. */
-export function BarcodeClaims({ claims }: { claims: ClaimView[] }) {
+/**
+ * Operator table for barcode claims; plain like the other admin tools.
+ * `published` lists live crowd mappings: reject only (withdraws the mapping).
+ */
+export function BarcodeClaims({ claims, published = false }: { claims: ClaimView[]; published?: boolean }) {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -43,7 +46,8 @@ export function BarcodeClaims({ claims }: { claims: ClaimView[] }) {
     }
   }
 
-  if (claims.length === 0) return <p className="text-xs text-muted">No pending claims.</p>;
+  if (claims.length === 0)
+    return <p className="text-xs text-muted">{published ? "No crowd-published barcodes." : "No pending claims."}</p>;
   return (
     <>
       {error && (
@@ -81,14 +85,16 @@ export function BarcodeClaims({ claims }: { claims: ClaimView[] }) {
                 <td className="py-1 pr-3 text-right tabular-nums">{c.competing || "–"}</td>
                 <td className="py-1 pr-3 text-right tabular-nums">{c.lastAt.slice(0, 10)}</td>
                 <td className="py-1 text-right whitespace-nowrap">
-                  <button
-                    type="button"
-                    disabled={busy === key}
-                    onClick={() => act("approve", c)}
-                    className="tap-target px-2 text-accent hover:underline disabled:opacity-50"
-                  >
-                    Approve
-                  </button>
+                  {!published && (
+                    <button
+                      type="button"
+                      disabled={busy === key}
+                      onClick={() => act("approve", c)}
+                      className="tap-target px-2 text-accent hover:underline disabled:opacity-50"
+                    >
+                      Approve
+                    </button>
+                  )}
                   <button
                     type="button"
                     disabled={busy === key}

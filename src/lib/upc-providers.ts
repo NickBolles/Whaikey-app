@@ -391,6 +391,15 @@ export async function lookupExternalUpc(db: DB, upc: string, deps: LookupDeps = 
       continue;
     }
 
+    if (res.status === 401 || res.status === 403) {
+      // A bad key or revoked access says nothing about the barcode: back the
+      // provider off and do NOT cache a miss, or every barcode looked up while
+      // the key was broken would skip this provider for the cache TTL.
+      await recordResult(db, def.id, now, res.status, true).catch(() => {});
+      trace.push({ provider: def.id, outcome: "error" });
+      continue;
+    }
+
     let name: string | null = null;
     if (res.ok) {
       try {
@@ -402,7 +411,8 @@ export async function lookupExternalUpc(db: DB, upc: string, deps: LookupDeps = 
         continue;
       }
     }
-    // 2xx-without-item and 400/404 are both "this provider does not know it".
+    // 2xx-without-item and 400/404 are both "this provider does not know it"
+    // (401/403 were handled above as provider faults).
     await Promise.all([
       writeCache(db, def, upc, name, now),
       recordResult(db, def.id, now, res.status, false),

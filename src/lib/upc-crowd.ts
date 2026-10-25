@@ -192,10 +192,20 @@ export async function teachBarcode(
     .where(and(eq(upcConfirmations.upc, upc), eq(upcConfirmations.userId, actor.id)))
     .limit(1);
 
+  if (previous?.status === "rejected") {
+    // An operator ruled this account's claim on this barcode wrong. The
+    // rejected row is the moderation record — it keeps the account out of
+    // `isTrustedTeacher` — so it is never overwritten by a later claim, for
+    // the same bottle or a different one. The shelf add still happens.
+    return existing
+      ? { state: "strengthened", confirmations: existing.confirmedCount, required, mapping: existing, taught: false }
+      : { state: "pending", confirmations: 0, required, mapping: null, taught: false };
+  }
+
   if (existing) {
     // Already known. One confirmation per account, so re-scanning your own
     // bottle every week does not inflate the count others are ordered by.
-    if (previous?.bottleId === bottleId && previous.status !== "rejected") {
+    if (previous?.bottleId === bottleId) {
       return { state: "strengthened", confirmations: existing.confirmedCount, required, mapping: existing, taught: false };
     }
     await db
@@ -216,10 +226,6 @@ export async function teachBarcode(
   const sameClaim = previous?.bottleId === bottleId && previous.status === "pending";
   if (!sameClaim && (await pendingClaimsToday(db, actor.id, now)) >= PENDING_CLAIMS_PER_DAY) {
     return { state: "rate_limited", confirmations: 0, required, mapping: null, taught: false };
-  }
-  if (previous?.status === "rejected" && previous.bottleId === bottleId) {
-    // An operator already ruled this exact claim wrong; repeating it changes nothing.
-    return { state: "pending", confirmations: 0, required, mapping: null, taught: false };
   }
 
   await db
@@ -282,6 +288,13 @@ export async function communitySuggestions(db: DB, upc: string, viewerId?: strin
       ),
     )
     .groupBy(schema.bottles.id, schema.distilleries.name)
+    // Order before limiting, so the viewer's own claim and the leading
+    // suggestion are never cut by an arbitrary group order.
+    .orderBy(
+      sql`bool_or(${upcConfirmations.userId} = ${viewerId ?? ""}) desc`,
+      sql`count(*) desc`,
+      schema.bottles.name,
+    )
     .limit(5);
   return rows
     .map((r) => ({ ...r, votes: Number(r.votes), mine: Boolean(r.mine) }))
@@ -304,6 +317,23 @@ export interface PendingBarcode {
 }
 
 export async function listPendingBarcodes(db: DB, now = new Date(), limit = 100): Promise<PendingBarcode[]> {
+  return listBarcodeClaims(db, "pending", now, limit);
+}
+
+/**
+ * Claims the crowd (or an operator) already published, newest first, so an
+ * operator can still find and reject a wrong live mapping.
+ */
+export async function listPromotedBarcodes(db: DB, now = new Date(), limit = 50): Promise<PendingBarcode[]> {
+  return listBarcodeClaims(db, "promoted", now, limit);
+}
+
+async function listBarcodeClaims(
+  db: DB,
+  status: "pending" | "promoted",
+  now: Date,
+  limit: number,
+): Promise<PendingBarcode[]> {
   const cutoff = new Date(now.getTime() - MIN_ACCOUNT_AGE_DAYS * DAY_MS);
   const rows = await db
     .select({
@@ -319,9 +349,13 @@ export async function listPendingBarcodes(db: DB, now = new Date(), limit = 100)
     .innerJoin(schema.bottles, eq(schema.bottles.id, upcConfirmations.bottleId))
     .innerJoin(schema.user, eq(schema.user.id, upcConfirmations.userId))
     .leftJoin(schema.userProfiles, eq(schema.userProfiles.userId, upcConfirmations.userId))
-    .where(eq(upcConfirmations.status, "pending"))
+    .where(eq(upcConfirmations.status, status))
     .groupBy(upcConfirmations.upc, upcConfirmations.bottleId, schema.bottles.name)
-    .orderBy(sql`count(*) desc`, sql`max(${upcConfirmations.updatedAt}) desc`)
+    .orderBy(
+      ...(status === "pending"
+        ? [sql`count(*) desc`, sql`max(${upcConfirmations.updatedAt}) desc`]
+        : [sql`max(${upcConfirmations.updatedAt}) desc`]),
+    )
     .limit(limit);
   const upcs = [...new Set(rows.map((r) => r.upc))];
   const perUpc = new Map<string, number>();

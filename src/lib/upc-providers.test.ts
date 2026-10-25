@@ -83,6 +83,17 @@ describe("provider order and parsing", () => {
     expect(r.trace.filter((t) => t.outcome === "error")).toHaveLength(2);
   });
 
+  it("treats 401/403 as a provider fault, never a cached miss", async () => {
+    for (const status of [401, 403]) {
+      const f = fake(async () => new Response("denied", { status }));
+      const r = await lookupExternalUpc(db, UPC, { fetch: f, env: { WHAIKEY_OPENFOODFACTS: "off" }, now: () => NOW });
+      expect(r.product).toBeNull();
+      // The first is a fault; the provider is then backed off.
+      expect(r.trace.find((t) => t.provider === "upcitemdb")?.outcome).toMatch(/^(error|backoff)$/);
+    }
+    expect(await db.select().from(upcLookupCache)).toHaveLength(0);
+  });
+
   it("treats an HTML 200 (parked domain) as a provider fault, not a cached miss", async () => {
     const f = fake(async () => new Response("<html>parked</html>", { status: 200 }));
     await lookupExternalUpc(db, UPC, { fetch: f, env: { WHAIKEY_OPENFOODFACTS: "off" }, now: () => NOW });

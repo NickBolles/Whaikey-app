@@ -10,6 +10,7 @@ import {
   communitySuggestions,
   isTrustedTeacher,
   listPendingBarcodes,
+  listPromotedBarcodes,
   rejectBarcodeClaim,
   shouldPromote,
   teachBarcode,
@@ -244,10 +245,48 @@ describe("operator moderation", () => {
     expect(again.confirmations).toBe(0);
   });
 
+  it("a rejected account cannot clear its rejection by claiming another bottle", async () => {
+    const wrong = await createTestBottle(db, { name: "Wrong" });
+    const right = await createTestBottle(db, { name: "Right" });
+    const a = await veteran();
+    await teachBarcode(db, a, UPC, wrong.id, { now: NOW });
+    await rejectBarcodeClaim(db, UPC, wrong.id);
+    const r = await teachBarcode(db, a, UPC, right.id, { now: NOW });
+    expect(r.state).toBe("pending");
+    const [row] = await db.select().from(schema.upcConfirmations).where(eq(schema.upcConfirmations.userId, a.id));
+    expect(row).toMatchObject({ bottleId: wrong.id, status: "rejected" });
+  });
+
+  it("published claims stay listed for operator rejection", async () => {
+    const bottle = await createTestBottle(db, { name: "Live" });
+    await teachBarcode(db, await veteran(), UPC, bottle.id, { now: NOW });
+    await teachBarcode(db, await veteran(), UPC, bottle.id, { now: NOW });
+    expect(await listPendingBarcodes(db, NOW)).toHaveLength(0);
+    const live = await listPromotedBarcodes(db, NOW);
+    expect(live).toHaveLength(1);
+    expect(live[0]).toMatchObject({ upc: UPC, bottleId: bottle.id, votes: 2 });
+  });
+
   it("reject never deletes seed/import mappings", async () => {
     const bottle = await createTestBottle(db);
     await db.insert(schema.bottleUpcs).values({ id: uid("m"), upc: UPC, bottleId: bottle.id, source: "bc", confirmedCount: 0 });
     await rejectBarcodeClaim(db, UPC, bottle.id);
     expect(await resolveUpc(db, UPC)).toHaveLength(1);
+  });
+});
+
+describe("communitySuggestions ordering", () => {
+  it("keeps the viewer's own claim even with more than five competing claims", async () => {
+    const viewer = await newcomer();
+    for (let i = 0; i < 6; i++) {
+      const b = await createTestBottle(db, { name: `Other ${i}` });
+      await teachBarcode(db, await newcomer(), UPC, b.id, { now: NOW });
+      await teachBarcode(db, await newcomer(), UPC, b.id, { now: NOW });
+    }
+    const mine = await createTestBottle(db, { name: "Zz Mine" });
+    await teachBarcode(db, viewer, UPC, mine.id, { now: NOW });
+    const list = await communitySuggestions(db, UPC, viewer.id);
+    expect(list).toHaveLength(5);
+    expect(list[0]).toMatchObject({ id: mine.id, mine: true });
   });
 });

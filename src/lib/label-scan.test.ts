@@ -98,3 +98,17 @@ describe("ocrGuess", () => {
     expect(ocrGuess(OCR)).toBe("LAGAVULIN 16 YEARS");
   });
 });
+
+describe("identifyLabel when the AI request drops", () => {
+  it("returns the OCR candidates instead of failing", async () => {
+    const f = router({
+      "/api/scan/label-text": () => Response.json({ confident: false, candidates: [bottle("lag16")] }),
+      "/api/scan-label": () => {
+        throw new TypeError("fetch failed");
+      },
+    });
+    const r = await identifyLabel("data:image/jpeg;base64,QUJD", "image/jpeg", { fetch: f, recognize: async () => OCR });
+    expect(r).toMatchObject({ via: "ocr", aiUnavailable: null });
+    expect(r.candidates.map((c) => c.id)).toEqual(["lag16"]);
+  });
+});

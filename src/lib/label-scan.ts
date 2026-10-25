@@ -76,7 +76,15 @@ export async function identifyLabel(
   }
 
   const base64 = dataUrl.split(",", 2)[1] ?? dataUrl;
-  const res = await post(f, "/api/scan-label", { imageBase64: base64, mediaType });
+  let res: Response;
+  try {
+    res = await post(f, "/api/scan-label", { imageBase64: base64, mediaType });
+  } catch (err) {
+    // A dropped connection on the AI read must not throw away the choices
+    // the free OCR pass already found; the person can still pick one.
+    if (ocrCandidates.length > 0) return { via: "ocr", candidates: ocrCandidates, guess: ocrText, aiUnavailable: null };
+    throw err;
+  }
   if (res.status === 503 || res.status === 429) {
     return {
       via: "ocr",

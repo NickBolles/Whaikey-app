@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { getDb } from "@/db";
 import { getSessionUser } from "@/lib/session";
 import { isOperator } from "@/lib/operator";
-import { listPendingBarcodes, upcConfirmationsRequired } from "@/lib/upc-crowd";
+import { listPendingBarcodes, listPromotedBarcodes, upcConfirmationsRequired } from "@/lib/upc-crowd";
 import { BarcodeClaims } from "./barcode-claims";
 
 export const dynamic = "force-dynamic";
@@ -16,7 +16,10 @@ export const dynamic = "force-dynamic";
 export default async function AdminBarcodeClaimsPage() {
   const user = await getSessionUser();
   if (!isOperator(user)) notFound();
-  const claims = await listPendingBarcodes(getDb());
+  const db = getDb();
+  const [claims, published] = await Promise.all([listPendingBarcodes(db), listPromotedBarcodes(db)]);
+  const view = (list: typeof claims) =>
+    list.map((c) => ({ ...c, firstAt: c.firstAt.toISOString(), lastAt: c.lastAt.toISOString() }));
   return (
     <div className="px-3 py-4 max-w-4xl mx-auto w-full flex flex-col gap-3 text-sm">
       <header className="flex flex-wrap items-baseline justify-between gap-2">
@@ -34,9 +37,10 @@ export default async function AdminBarcodeClaimsPage() {
         A claim publishes on its own at {upcConfirmationsRequired()} eligible confirmations (accounts older than 7
         days, not suspended) with a 2:1 lead over any competing claim. Approve to publish now; reject to withdraw it.
       </p>
-      <BarcodeClaims
-        claims={claims.map((c) => ({ ...c, firstAt: c.firstAt.toISOString(), lastAt: c.lastAt.toISOString() }))}
-      />
+      <BarcodeClaims claims={view(claims)} />
+      <h2 className="font-display text-base font-semibold mt-2">Published by the crowd</h2>
+      <p className="text-xs text-muted">Live mappings from confirmed claims, newest first. Reject withdraws a wrong one.</p>
+      <BarcodeClaims claims={view(published)} published />
     </div>
   );
 }
