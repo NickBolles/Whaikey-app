@@ -15,6 +15,21 @@
  * Pure and framework-free so the 3-tap rule can be unit tested.
  */
 
+import { isValidUpc, normalizeUpc } from "@/lib/upc";
+
+/**
+ * A detection worth looking up: digits only, then a valid GTIN. The server's
+ * normalizer strips non-digits, so a Code 128 serial like `LOT080244002145`
+ * would otherwise resolve to a real UPC and auto-pick an unrelated bottle —
+ * the same filter the full scanner and the native wrapper apply.
+ */
+export function productCode(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!/^\d+$/.test(trimmed)) return null;
+  const code = normalizeUpc(trimmed);
+  return code && isValidUpc(code) ? code : null;
+}
+
 export interface ScanBottle {
   id: string;
   name: string;

@@ -7,7 +7,7 @@ import { isNativeApp } from "@/lib/native/platform";
 import { startNativeScan, type NativeScanSession } from "@/lib/native/barcode";
 import { haptic } from "@/lib/native/haptics";
 import { identifyLabel } from "@/lib/label-scan";
-import { bottleMeta, decideScan, type ScanBottle, type ScanDecision, type UpcLookup } from "./scan-decision";
+import { bottleMeta, decideScan, productCode, type ScanBottle, type ScanDecision, type UpcLookup } from "./scan-decision";
 
 /** D16: the camera pauses itself after ~2 minutes of logging. */
 export const CAMERA_AUTO_PAUSE_MS = 120_000;
@@ -106,7 +106,7 @@ export function PourScanSlot({
 
   const resolveBarcode = useCallback(
     async (raw: string) => {
-      const code = raw.trim();
+      const code = productCode(raw);
       if (!code || seenRef.current.has(code) || busyRef.current) return;
       seenRef.current.add(code);
       busyRef.current = true;

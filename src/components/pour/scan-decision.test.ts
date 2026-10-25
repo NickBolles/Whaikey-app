@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bottleMeta, decideScan } from "./scan-decision";
+import { bottleMeta, decideScan, productCode } from "./scan-decision";
 
 const blantons = { id: "blantons", name: "Blanton's Original", distillery: "Buffalo Trace", region: "Kentucky", abv: 46.5 };
 const gold = { id: "blantons-gold", name: "Blanton's Gold" };
@@ -43,5 +43,20 @@ describe("bottleMeta", () => {
     expect(bottleMeta(blantons)).toBe("Buffalo Trace · Kentucky · 46.5%");
     expect(bottleMeta({ ageYears: 16, abv: 43 })).toBe("16y · 43%");
     expect(bottleMeta({})).toBe("");
+  });
+});
+
+describe("productCode", () => {
+  it("accepts a valid GTIN and normalizes its padding", () => {
+    expect(productCode("080244003302")).toBe("080244003302");
+    expect(productCode(" 0080244003302 ")).toBe("080244003302");
+  });
+
+  it("rejects a non-numeric Code 128 payload that merely contains a UPC", () => {
+    expect(productCode("LOT080244002145")).toBeNull();
+  });
+
+  it("rejects a bad check digit", () => {
+    expect(productCode("080244003303")).toBeNull();
   });
 });
