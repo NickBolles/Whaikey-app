@@ -47,7 +47,7 @@ export function InboxList({ items: initial, hasUnread, pageSize }: { items: Inbo
     if (!last || busy) return;
     setBusy(true);
     try {
-      const res = await fetch(`/api/notifications?before=${encodeURIComponent(last.createdAt)}`);
+      const res = await fetch(`/api/notifications?before=${encodeURIComponent(`${last.createdAt}~${last.id}`)}`);
       const json = (await res.json()) as { items: InboxItemJson[] };
       setItems((prev) => [...prev, ...json.items.filter((i) => !prev.some((p) => p.id === i.id))]);
       setMore(json.items.length > 0);

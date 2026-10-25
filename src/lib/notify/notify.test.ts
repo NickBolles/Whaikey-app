@@ -202,9 +202,15 @@ describe("friend tasted digest", () => {
     const tasted = inbox.filter((i) => i.category === "friend_tasted");
     expect(tasted.map((i) => i.text)).toEqual(["@friend_d shared a note on Test Islay 10 from your shelf"]);
     expect(await listInbox(db, stranger.id)).toEqual([]);
+    // A pending push for it is suppressed at send time once the note goes private.
+    const [pending] = await db
+      .insert(schema.notifications)
+      .values({ id: uid("n"), userId: owner.id, actorId: friend.id, category: "friend_tasted", subjectId: (await db.select().from(schema.pours).where(eq(schema.pours.userId, friend.id)))[0].id, dedupeKey: "pending-ft", pushState: "pending" })
+      .returning();
     // The note going private takes the notification (which names the bottle) with it.
     await db.update(schema.pours).set({ visibility: "private" }).where(eq(schema.pours.userId, friend.id));
     expect((await listInbox(db, owner.id)).filter((i) => i.category === "friend_tasted")).toEqual([]);
+    expect(await deliverNotification(db, pending.id)).toBe("none");
   });
 });
 

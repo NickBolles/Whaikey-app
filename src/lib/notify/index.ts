@@ -1,5 +1,5 @@
 import { after } from "next/server";
-import { and, desc, eq, gt, inArray, isNull, lt, lte, ne, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
@@ -228,6 +228,13 @@ export async function deliverNotification(db: DB, notificationId: string): Promi
   const settings = await getNotificationSettings(db, claimed.userId);
   if (!settings.pushEnabled || !settings.groups[groupFor(claimed.category).key as NotificationGroupKey]) return suppress("none");
   if (inQuietHours(settings, new Date())) return suppress("quiet");
+  // …and the subject: a note that went private or was deleted since must not
+  // reach a lock screen any more than it may stay in the inbox.
+  const stillVisible = await db
+    .select({ id: schema.notifications.id })
+    .from(schema.notifications)
+    .where(and(eq(schema.notifications.id, claimed.id), subjectVisibleSql(claimed.userId)));
+  if (stillVisible.length === 0) return suppress("none");
   const copy = renderNotification({
     category: claimed.category,
     actorHandle,
@@ -317,7 +324,7 @@ function subjectVisibleSql(viewerId: string) {
 export async function listInbox(
   db: DB,
   userId: string,
-  opts: { limit?: number; before?: Date } = {},
+  opts: { limit?: number; before?: { createdAt: Date; id: string } } = {},
 ): Promise<InboxItem[]> {
   const limit = Math.min(Math.max(opts.limit ?? 30, 1), 100);
   const rows = await db
@@ -338,7 +345,12 @@ export async function listInbox(
       and(
         eq(schema.notifications.userId, userId),
         actorVisibleSql(userId),
-        opts.before ? lt(schema.notifications.createdAt, opts.before) : undefined,
+        opts.before
+          ? or(
+              lt(schema.notifications.createdAt, opts.before.createdAt),
+              and(eq(schema.notifications.createdAt, opts.before.createdAt), lt(schema.notifications.id, opts.before.id)),
+            )
+          : undefined,
       ),
     )
     .orderBy(desc(schema.notifications.createdAt), desc(schema.notifications.id))

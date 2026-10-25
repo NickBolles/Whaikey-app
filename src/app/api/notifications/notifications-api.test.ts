@@ -55,6 +55,7 @@ describe("/api/notifications, /api/feed", () => {
 
   it("400s on a bad before or cursor", async () => {
     expect((await GET(jsonRequest("/api/notifications?before=junk", "GET"))).status).toBe(400);
+    expect((await GET(jsonRequest("/api/notifications?before=2026-10-01T00:00:00.000Z", "GET"))).status).toBe(400);
     expect((await FEED(jsonRequest("/api/feed?cursor=junk", "GET"))).status).toBe(400);
   });
 
@@ -69,6 +70,19 @@ describe("/api/notifications, /api/feed", () => {
     );
     expect(ok.status).toBe(200);
     expect(await ok.json()).toMatchObject({ quietStart: 1320, quietEnd: 420, timeZone: "Europe/London", groups: { cheers: false, comments: true, follows: true } });
+  });
+
+  it("pages the inbox by timestamp and id without skipping ties", async () => {
+    const same = new Date("2026-10-01T00:00:00Z");
+    for (const k of ["a", "b", "c"]) {
+      await notify(db, { recipientId: me.id, actorId: other.id, category: "comment", subjectId: k, dedupeKey: k }, same);
+    }
+    const first = await (await GET(jsonRequest("/api/notifications", "GET"))).json();
+    const seen = new Set<string>(first.items.map((i: { id: string }) => i.id));
+    const last = first.items[first.items.length - 1];
+    const rest = await (await GET(jsonRequest(`/api/notifications?before=${encodeURIComponent(`${last.createdAt}~${last.id}`)}`, "GET"))).json();
+    expect(rest.items).toHaveLength(0);
+    expect(seen.size).toBe(3);
   });
 
   it("returns an empty feed page with no cursor for someone who follows nobody", async () => {
