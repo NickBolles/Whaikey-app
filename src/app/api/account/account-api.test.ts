@@ -208,6 +208,36 @@ async function seedFootprint(db: DB, subject: schema.User, counterpart: schema.U
   ]);
   await db.insert(schema.notificationSettings).values({ userId: subject.id, groups: { cheers: false }, quietStart: 1320, quietEnd: 420, timeZone: "UTC" });
 
+  // --- Clubs and tasting nights (social M2)
+  const clubId = uid("club");
+  await db.insert(schema.clubs).values({ id: clubId, name: `${tag} Club`, createdBy: subject.id });
+  await db.insert(schema.clubMembers).values([
+    { clubId, userId: subject.id, role: "owner" },
+    { clubId, userId: counterpart.id, role: "member" },
+  ]);
+  await db.insert(schema.clubInvites).values({ code: uid("inv").slice(-12), clubId, createdBy: subject.id, expiresAt: new Date("2030-01-01T00:00:00Z") });
+  const hosted = uid("flt");
+  const theirsFlight = uid("flt");
+  await db.insert(schema.flights).values([
+    { id: hosted, hostId: subject.id, title: `${tag} night`, joinCode: uid("jc").slice(-12) },
+    { id: theirsFlight, hostId: counterpart.id, title: `${tag} their night`, joinCode: uid("jc").slice(-12) },
+  ]);
+  await db.insert(schema.flightBottles).values([
+    { flightId: hosted, slot: "A", bottleId: catalog.id },
+    { flightId: theirsFlight, slot: "A", bottleId: catalog.id },
+  ]);
+  const mySeat = uid("seat");
+  const theirSeatAtMine = uid("seat");
+  await db.insert(schema.flightParticipants).values([
+    { id: mySeat, flightId: theirsFlight, userId: subject.id },
+    { id: uid("seat"), flightId: hosted, userId: subject.id },
+    { id: theirSeatAtMine, flightId: hosted, userId: counterpart.id },
+  ]);
+  await db.insert(schema.flightEntries).values([
+    { id: uid("fe"), participantId: mySeat, flightId: theirsFlight, slot: "A", rating: 4, note: `${tag} my flight note` },
+    { id: uid("fe"), participantId: theirSeatAtMine, flightId: hosted, slot: "A", rating: 3 },
+  ]);
+
   // --- AI and telemetry
   await db.insert(schema.aiRateLimits).values({ userId: subject.id, window: "day", windowStart: at, count: 3 });
   await db.insert(schema.aiUsage).values({ id: uid("ai"), userId: subject.id, feature: "chat", model: "m", inputTokens: 10 });

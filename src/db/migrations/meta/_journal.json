@@ -330,6 +330,13 @@
       "when": 1792958383801,
       "tag": "0046_social_notifications",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1792962519571,
+      "tag": "0047_social_clubs_flights",
+      "breakpoints": true
     }
   ]
 }

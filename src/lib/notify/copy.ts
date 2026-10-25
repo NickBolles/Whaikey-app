@@ -121,7 +121,7 @@ export function renderNotification(input: CopyInput): RenderedCopy {
     }
     case "flight": {
       const title = str(d.flightTitle, "a tasting night");
-      const link = `/flights/${input.subjectId}`;
+      const link = `/f/${input.subjectId}`;
       if (d.event === "invite") return { text: `${who} invited you to ${title}`, deepLink: link };
       if (d.event === "revealed") return { text: `The bottles in ${title} are revealed`, deepLink: link };
       return { text: `${title} has an update`, deepLink: link };

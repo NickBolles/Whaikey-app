@@ -466,6 +466,28 @@ test.describe("signed in (demo collector)", () => {
     await expect(page).toHaveScreenshot(shot("friends-feed"), { fullPage: true });
   });
 
+  test("clubs: Jordan's club and tasting nights", async ({ page }) => {
+    await page.goto("/clubs");
+    await expect(page.getByRole("link", { name: /Tuesday Drams/ })).toBeVisible();
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("clubs"), { fullPage: true });
+  });
+
+  test("club: members, nights and the club shelf", async ({ page }) => {
+    await page.goto("/clubs/demo-club-1");
+    await expect(page.getByRole("heading", { name: "Tuesday Drams" })).toBeVisible();
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("club"), { fullPage: true });
+  });
+
+  test("tasting night: revealed blind flight results", async ({ page }) => {
+    await page.goto("/f/demonight1");
+    await expect(page.getByRole("heading", { name: "Islay night" })).toBeVisible();
+    await expect(page.getByText("Lagavulin 16")).toBeVisible();
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("flight-revealed"), { fullPage: true, mask: [page.getByRole("img", { name: /QR code/ })] });
+  });
+
   test("friends: following, followers, and a mutual", async ({ page }) => {
     await page.goto("/friends/people");
     // exact: the redesigned page adds a "Find friends" h2 alongside the h1.

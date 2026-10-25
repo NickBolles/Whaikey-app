@@ -376,3 +376,40 @@ test.describe("social: phone discovery settings", () => {
 // as-Sasha session cannot be minted. Revocation is exercised at the unit/API
 // level instead (see src/app/api/pours/[id]/share/share-api.test.ts and
 // src/app/api/social/follows/**/*.test.ts).
+
+// The M2 install loop (docs/SOCIAL.md D20; roadmap M2 exit): a signed-out
+// guest goes from the host's link to rating a glass to the reveal.
+test.describe("tasting night: guest link → rate → reveal", () => {
+  test("a signed-out guest joins after the age check, rates blind, and sees the reveal", async ({ browser, baseURL }) => {
+    const hostCtx = await browser.newContext();
+    await signIn(hostCtx, baseURL!, DEMO_SESSION_TOKEN);
+    const created = await hostCtx.request.post(`${baseURL}/api/flights`, {
+      data: { title: "E2E blind night", blind: true, bottleIds: ["lagavulin-16", "highland-park-12", "eagle-rare-10"] },
+    });
+    expect(created.status()).toBe(201);
+    const { path, joinCode } = (await created.json()) as { path: string; joinCode: string };
+
+    const guestCtx = await browser.newContext();
+    const guest = await guestCtx.newPage();
+    await guest.goto(path);
+    await expect(guest.getByRole("heading", { name: "E2E blind night" })).toBeVisible();
+    // Blind: no bottle names before the reveal.
+    await expect(guest.getByText("Lagavulin 16")).toHaveCount(0);
+    await guest.getByLabel("First name").fill("Pat");
+    await guest.getByLabel("Date of birth").fill("1990-05-05");
+    await guest.getByRole("button", { name: "Join the tasting" }).click();
+    await expect(guest.getByText(/You’re a guest|You're a guest/)).toBeVisible({ timeout: 15000 });
+
+    await guest.getByRole("radiogroup", { name: "Rating for glass A" }).getByRole("radio", { name: "4 stars" }).click();
+    await expect(guest.getByText("Saved — hidden until the reveal.").first()).toBeVisible();
+
+    const revealed = await hostCtx.request.post(`${baseURL}/api/flights/${joinCode}/state`, { data: { to: "revealed" } });
+    expect(revealed.status()).toBe(200);
+
+    await guest.reload();
+    await expect(guest.getByText("Lagavulin 16")).toBeVisible();
+    await expect(guest.getByText("★ 4").first()).toBeVisible();
+    await hostCtx.close();
+    await guestCtx.close();
+  });
+});
