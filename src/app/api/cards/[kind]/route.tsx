@@ -7,7 +7,7 @@ import { CARD_FORMATS, CARD_KINDS, verifyCard, type CardFormat, type CardKind } 
 import { getPalateCard } from "@/lib/social";
 import { leafLabel } from "@/lib/flavor-wheel";
 import { getWrapped, wrappedAvailable } from "@/lib/wrapped";
-import { getFlightView, visibleFlightByCode } from "@/lib/flights";
+import { findTaster, getFlightView, visibleFlightByCode } from "@/lib/flights";
 
 export const runtime = "nodejs";
 
@@ -113,9 +113,13 @@ export async function GET(req: Request, ctx: { params: Promise<{ kind: string }>
       };
     }
   } else if (kind === "flight") {
-    const flight = await visibleFlightByCode(db, subject, null);
-    if (!flight || flight.state === "open") return notFound();
-    const view = await getFlightView(db, flight, flight.hostId, { participantId: "", userId: flight.hostId, guest: false });
+    // Rendered as the taster who minted it (their seat, their blocks), and only
+    // while they still hold that seat and can still see the flight.
+    const flight = await visibleFlightByCode(db, subject, extra || null);
+    if (!flight || flight.state === "open" || !extra) return notFound();
+    const seat = await findTaster(db, flight.id, { userId: extra });
+    if (!seat) return notFound();
+    const view = await getFlightView(db, flight, extra, seat);
     card = {
       format,
       eyebrow: view.blind ? "WHAIKEY · BLIND TASTING RESULTS" : "WHAIKEY · TASTING NIGHT",

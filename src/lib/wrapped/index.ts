@@ -1,4 +1,4 @@
-import { and, eq, gte, inArray, lt, ne } from "drizzle-orm";
+import { and, eq, gte, inArray, lt, ne, sql } from "drizzle-orm";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
 import { leafLabel } from "@/lib/flavor-wheel";
@@ -64,8 +64,10 @@ async function metEvents(db: DB, userId: string, before: Date): Promise<Met[]> {
       .from(schema.pours)
       .innerJoin(schema.bottles, eq(schema.bottles.id, schema.pours.bottleId))
       .where(and(eq(schema.pours.userId, userId), lt(schema.pours.createdAt, before), ne(schema.bottles.status, "user_submitted"))),
+    // A shelf row is dated by its purchase date when there is one: a bottle
+    // wishlisted years ago and bought this year was met this year.
     db
-      .select({ ...cols, at: schema.userBottles.createdAt })
+      .select({ ...cols, at: sql<Date>`coalesce(${schema.userBottles.purchaseDate}, ${schema.userBottles.createdAt})`.mapWith(schema.userBottles.createdAt) })
       .from(schema.userBottles)
       .innerJoin(schema.bottles, eq(schema.bottles.id, schema.userBottles.bottleId))
       .where(

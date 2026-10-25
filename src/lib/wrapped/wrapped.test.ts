@@ -46,6 +46,10 @@ describe("Wrapped", () => {
     expect(w.descriptors).toEqual(["Brine / seaweed", "Earthy peat"]);
     expect(w.bestNewFind).toMatchObject({ name: "Kentucky", rating: 4.5 });
     // No field anywhere counts pours: twenty pours of Kentucky are one discovery.
+    // A bottle shelved long ago but bought this year counts as met this year.
+    const bought = await createTestBottle(db, { name: "Bought", country: "Japan" });
+    await db.insert(schema.userBottles).values({ id: uid("ub"), userId: me.id, bottleId: bought.id, relationship: "own", createdAt: old, purchaseDate: t });
+    expect((await getWrapped(db, me.id, 2026)).discovered.countries).toEqual(["Japan", "United States"]);
     expect(JSON.stringify(w)).not.toMatch(/"(pours|pourCount|ml|amount|nights|spend|price)"/i);
   });
 });

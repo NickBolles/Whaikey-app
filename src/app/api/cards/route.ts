@@ -37,6 +37,8 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "not_found" }, { status: 404 });
       }
       subject = flight.joinCode;
+      // Rendered as the person who shared it: their blocks shape the results.
+      extra = user.id;
     }
     const story = cardPath(input.kind, subject, extra, "story");
     const link = cardPath(input.kind, subject, extra, "link");
