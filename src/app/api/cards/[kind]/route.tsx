@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import * as schema from "@/db/schema";
-import { CARD_FORMATS, CARD_KINDS, verifyCard, type CardFormat, type CardKind } from "@/lib/cards";
+import { CARD_FORMATS, CARD_KINDS, cardEpoch, cardOwner, verifyCard, type CardFormat, type CardKind } from "@/lib/cards";
 import { getPalateCard } from "@/lib/social";
 import { leafLabel } from "@/lib/flavor-wheel";
 import { getWrapped, wrappedAvailable } from "@/lib/wrapped";
@@ -68,9 +68,13 @@ export async function GET(req: Request, ctx: { params: Promise<{ kind: string }>
   const format = (url.searchParams.get("f") ?? "link") as CardFormat;
   const notFound = () => NextResponse.json({ error: "not_found" }, { status: 404 });
   if (!(CARD_KINDS as readonly string[]).includes(kind) || !(format in CARD_FORMATS)) return notFound();
-  if (!verifyCard(kind as CardKind, subject, extra, url.searchParams.get("sig"))) return notFound();
-
   const db = getDb();
+  const owner = cardOwner(kind as CardKind, subject, extra);
+  if (!owner || !verifyCard(kind as CardKind, subject, extra, url.searchParams.get("sig"), await cardEpoch(db, owner))) return notFound();
+  // Every card stops rendering while its owner is suspended or stepped back.
+  const ownerProfile = await db.query.userProfiles.findFirst({ where: eq(schema.userProfiles.userId, owner) });
+  if (!ownerProfile || !ownerProfile.socialEnabled || ownerProfile.suspendedAt) return notFound();
+
   let card: Parameters<typeof Card>[0] | null = null;
 
   if (kind === "palate" || kind === "passport" || kind === "wrapped") {

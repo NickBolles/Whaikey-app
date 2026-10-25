@@ -147,6 +147,7 @@ const INVENTORY: Record<string, Verdict> = {
   flight_entries: { disclosed: "Tasting nights", sharedWith: ["flights", "flight_bottles", "flight_participants"] },
   challenges: { disclosed: "Challenges and the friend board", sharedWith: ["challenge_participants", "breadth_board_opt_ins"] },
   challenge_participants: { disclosed: "Challenges and the friend board", sharedWith: ["challenges", "breadth_board_opt_ins"] },
+  share_card_keys: { disclosed: "Share cards" },
   breadth_board_opt_ins: { disclosed: "Challenges and the friend board", sharedWith: ["challenges", "challenge_participants"] },
 
   // --- Catalog: about bottles, not about people ---

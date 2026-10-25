@@ -39,6 +39,7 @@ import {
   recExplanations,
   reports,
   session,
+  shareCardKeys,
   tastingNotes,
   upcConfirmations,
   user,
@@ -1225,6 +1226,20 @@ export const ACCOUNT_DATA: readonly DataSlice[] = [
       columns: ["optedInAt"],
       rows: (db, userId) =>
         db.select({ optedInAt: breadthBoardOptIns.optedInAt }).from(breadthBoardOptIns).where(eq(breadthBoardOptIns.userId, userId)),
+    },
+  },
+
+  {
+    key: "share_card_key",
+    table: shareCardKeys,
+    description: "How many times you have revoked all your share-card links, and when you last did.",
+    onDelete: "deleted",
+    why: "Your setting; with the account gone every card link stops opening anyway.",
+    where: (_db, userId) => eq(shareCardKeys.userId, userId),
+    export: {
+      columns: ["epoch", "rotatedAt"],
+      rows: (db, userId) =>
+        db.select({ epoch: shareCardKeys.epoch, rotatedAt: shareCardKeys.rotatedAt }).from(shareCardKeys).where(eq(shareCardKeys.userId, userId)),
     },
   },
 ];

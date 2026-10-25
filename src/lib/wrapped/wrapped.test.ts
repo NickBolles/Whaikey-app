@@ -8,7 +8,8 @@ vi.mock("@/lib/session", async () => mockSessionModule());
 
 import { createProfile } from "@/lib/social";
 import { getWrapped, wrappedAvailable } from "@/lib/wrapped";
-import { cardPath, signCard, verifyCard } from "@/lib/cards";
+import { cardPath, revokeAllCards, signCard, verifyCard } from "@/lib/cards";
+import { makeEverythingPrivate } from "@/lib/social";
 import { POST as MINT } from "@/app/api/cards/route";
 import { GET as CARD } from "@/app/api/cards/[kind]/route";
 
@@ -90,5 +91,15 @@ describe("share cards", () => {
     const good = await CARD(new Request(`http://localhost${link}`), { params: Promise.resolve({ kind: "passport" }) });
     expect(good.status).toBe(200);
     expect(good.headers.get("content-type")).toContain("image/png");
+
+    // Revoking kills every link already shared, and a fresh mint works again.
+    await revokeAllCards(db, me.id);
+    expect((await CARD(new Request(`http://localhost${link}`), { params: Promise.resolve({ kind: "passport" }) })).status).toBe(404);
+    const fresh = (await (await MINT(jsonRequest("/api/cards", "POST", { kind: "passport" }))).json()) as { link: string };
+    expect((await CARD(new Request(`http://localhost${fresh.link}`), { params: Promise.resolve({ kind: "passport" }) })).status).toBe(200);
+    // "Make everything private" revokes too — and re-enabling social does not revive them.
+    await makeEverythingPrivate(db, me.id);
+    await db.update(schema.userProfiles).set({ socialEnabled: true }).where(eq(schema.userProfiles.userId, me.id));
+    expect((await CARD(new Request(`http://localhost${fresh.link}`), { params: Promise.resolve({ kind: "passport" }) })).status).toBe(404);
   });
 });

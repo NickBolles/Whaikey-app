@@ -74,7 +74,7 @@ async function metEvents(db: DB, userId: string, before: Date): Promise<Met[]> {
         and(
           eq(schema.userBottles.userId, userId),
           inArray(schema.userBottles.relationship, ["own", "tried"]),
-          lt(schema.userBottles.createdAt, before),
+          sql`coalesce(${schema.userBottles.purchaseDate}, ${schema.userBottles.createdAt}) < ${before.toISOString()}::timestamptz`,
           ne(schema.bottles.status, "user_submitted"),
         ),
       ),

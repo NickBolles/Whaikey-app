@@ -15,6 +15,7 @@ import { DiscoveryPanel } from "@/app/friends/discovery-settings";
 import { SharedLinksList } from "./shared-links-list";
 import { PrivacyControls } from "./privacy-controls";
 import { NotificationsCard } from "./notifications-card";
+import { RevokeCardsButton } from "@/components/social/revoke-cards-button";
 import { getNotificationSettings } from "@/lib/notify";
 import { isPushConfigured } from "@/lib/push/send";
 import { YourData } from "./your-data";
@@ -198,6 +199,7 @@ export default async function SettingsPage() {
             }))}
           />
         )}
+        <RevokeCardsButton />
       </section>
 
       {/* --- Privacy ------------------------------------------------------- */}

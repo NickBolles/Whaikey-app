@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { requireUser, withErrorHandling } from "@/lib/session";
-import { cardPath } from "@/lib/cards";
+import { cardEpoch, cardPath } from "@/lib/cards";
 import { findTaster, visibleFlightByCode } from "@/lib/flights";
 import { wrappedAvailable } from "@/lib/wrapped";
 
@@ -40,8 +40,9 @@ export async function POST(req: Request) {
       // Rendered as the person who shared it: their blocks shape the results.
       extra = user.id;
     }
-    const story = cardPath(input.kind, subject, extra, "story");
-    const link = cardPath(input.kind, subject, extra, "link");
+    const epoch = await cardEpoch(getDb(), user.id);
+    const story = cardPath(input.kind, subject, extra, "story", epoch);
+    const link = cardPath(input.kind, subject, extra, "link", epoch);
     if (!story || !link) return NextResponse.json({ error: "unavailable" }, { status: 503 });
     return NextResponse.json({ story, link });
   });
