@@ -17,6 +17,13 @@ const bodySchema = z.object({
   bottleId: z.string().min(1),
   /** When set, also add the bottle to the user's shelf in the same round trip. */
   relationship: z.enum(RELATIONSHIPS).optional(),
+  /**
+   * True when the client shelved the only own-DB match without asking the
+   * person. The mapping and shelf write still happen, but scan telemetry does
+   * not count it as a confirmation: nobody checked the bottle, so it is no
+   * evidence that our top match was right.
+   */
+  auto: z.boolean().optional(),
 });
 
 /**
@@ -78,13 +85,15 @@ export async function POST(request: Request) {
       upc && bottle.status !== "user_submitted"
         ? await confirmUpcMapping(db, upc, input.bottleId)
         : null;
-    await recordScanEvent(db, {
-      // No barcode means the bottle was picked from a label read or a search.
-      kind: upc ? "barcode" : "label",
-      outcome: "confirmed",
-      source: upc ? (confirmRank != null ? "own" : "none") : "none",
-      confirmRank,
-    });
+    if (!input.auto) {
+      await recordScanEvent(db, {
+        // No barcode means the bottle was picked from a label read or a search.
+        kind: upc ? "barcode" : "label",
+        outcome: "confirmed",
+        source: upc ? (confirmRank != null ? "own" : "none") : "none",
+        confirmRank,
+      });
+    }
 
     let userBottle: schema.UserBottle | null = null;
     let created = false;

@@ -276,7 +276,7 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
 
   /** Record the confirmation (crowdsourcing the mapping) and shelve the bottle. */
   const confirmAdd = useCallback(
-    async (itemId: string, upc: string | null, bottle: BottleSearchResult) => {
+    async (itemId: string, upc: string | null, bottle: BottleSearchResult, opts: { auto?: boolean } = {}) => {
       patchItem(itemId, { status: "resolving" });
       try {
         const res = await fetch("/api/scan/confirm", {
@@ -286,6 +286,8 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
             ...(upc ? { upc } : {}),
             bottleId: bottle.id,
             relationship: relationshipRef.current,
+            // The only match, shelved without asking: not a confirmation.
+            ...(opts.auto ? { auto: true } : {}),
           }),
         });
         if (!res.ok) throw new Error(`confirm failed (${res.status})`);
@@ -334,7 +336,7 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
         const data = (await res.json()) as ScanResponse;
 
         if (data.matches.length === 1) {
-          await confirmAdd(itemId, data.upc, data.matches[0]);
+          await confirmAdd(itemId, data.upc, data.matches[0], { auto: true });
           return;
         }
         if (data.matches.length > 1) {
