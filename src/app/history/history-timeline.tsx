@@ -62,6 +62,7 @@ function PourRow({ pour }: { pour: TimelinePour }) {
   const toast = useToast();
   const [menuOpen, setMenuOpen] = useState(false);
   const [hidden, setHidden] = useState(false);
+  const [visibility, setVisibility] = useState<PourVisibility>(pour.visibility);
   const snippet = noteSnippet(pour.note);
   const tags = pour.note?.flavorTags ? Object.entries(pour.note.flavorTags) : [];
   const shownTags = tags.slice(0, 3);
@@ -113,7 +114,7 @@ function PourRow({ pour }: { pour: TimelinePour }) {
             )}
           </div>
           <div className="mt-0.5 text-xs text-muted">
-            {[pour.servingStyle, pour.amountMl != null ? `${pour.amountMl} ml` : null, time, VISIBILITY_WORD[pour.visibility]]
+            {[pour.servingStyle, pour.amountMl != null ? `${pour.amountMl} ml` : null, time, VISIBILITY_WORD[visibility]]
               .filter(Boolean)
               .join(" · ")}
           </div>
@@ -149,7 +150,7 @@ function PourRow({ pour }: { pour: TimelinePour }) {
       {/* Row ⋯ (STORYBOARD D9): sharing and visibility moved in here so a row
           is one line of identity plus one of meta, not a stack of controls. */}
       <div id={menuId} hidden={!menuOpen} className="mt-2 flex flex-col gap-2 rounded-lg border border-border bg-surface p-2.5">
-        <VisibilityControl pourId={pour.id} visibility={pour.visibility} />
+        <VisibilityControl pourId={pour.id} visibility={visibility} onChange={setVisibility} />
         <div className="flex flex-wrap items-center gap-2">
           <PourShareButton pourId={pour.id} bottleName={pour.bottleName} />
           <Link href={`/history?bottleId=${encodeURIComponent(pour.bottleId)}`} className="btn-secondary flex min-h-11 items-center px-3 text-sm">

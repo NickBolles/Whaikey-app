@@ -507,7 +507,10 @@ test.describe("flavor wheel touch gesture", () => {
     await page.getByRole("button", { name: /Add notes/ }).click();
 
     const wheel = page.getByRole("application", { name: "Flavor wheel" });
-    await wheel.scrollIntoViewIfNeeded();
+    // Centred, not merely "if needed": the pour sheet's sticky Save bar
+    // covers the bottom of the viewport, and a touch there lands on it.
+    const centre = () => wheel.evaluate((el) => el.scrollIntoView({ block: "center" }));
+    await centre();
     const box = (await wheel.boundingBox())!;
     const unit = box.width / 340; // the wheel's viewBox is 340 wide
     const cx = box.x + box.width / 2;
@@ -538,7 +541,7 @@ test.describe("flavor wheel touch gesture", () => {
 
     // Hold first, and the wheel takes the touch over: the sweep registers and
     // the page stays exactly where it was.
-    await wheel.scrollIntoViewIfNeeded();
+    await centre();
     const held = (await wheel.boundingBox())!;
     const holdFrom = { x: held.x + held.width / 2, y: held.y + held.height / 2 + 85 * unit };
     const holdTo = { x: holdFrom.x, y: held.y + held.height / 2 + 155 * unit };

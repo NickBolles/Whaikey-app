@@ -19,6 +19,11 @@ export interface PourDraft {
   finish: string;
   flavorTags: Record<string, number>;
   companions: string;
+  /**
+   * Only when the user picked it in the sheet. A draft marked "Only me" must
+   * come back "Only me", never widened to the account default on reopen.
+   */
+  visibility?: "private" | "friends" | "followers" | "public" | null;
   savedAt: number;
 }
 

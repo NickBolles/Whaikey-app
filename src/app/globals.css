@@ -252,6 +252,13 @@ html.native-scanning .card-viewfinder {
   box-shadow: none;
 }
 
+/* The pour sheet's compact viewfinder (src/components/pour/scan-slot.tsx)
+   sits inside the sheet, so the sheet's own fill would hide the camera; its
+   cards and controls keep their opaque backgrounds, as on the scan screen. */
+html.native-scanning [data-pour-sheet] {
+  background: transparent;
+}
+
 /* Friend-QR scanning happens on the dense /friends page, where opaque cards
    would cover the whole camera preview. While the QR session is live, hide the
    app (visibility, so layout and scroll survive) and let QrScanButton's portal

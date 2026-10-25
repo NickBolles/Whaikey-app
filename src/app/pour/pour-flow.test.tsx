@@ -162,4 +162,20 @@ describe("PourFlow — draft (notes before the bottle)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Discard" }));
     expect(window.localStorage.length).toBe(0);
   });
+
+  it("a draft marked Only me comes back Only me, even when the account default is wider", async () => {
+    stubFetch(async (url) => (String(url).includes("/api/social/prefs") ? ok({ defaultPourVisibility: "public" }) : ok({})));
+    const first = renderFlow();
+    await act(async () => {});
+    fireEvent.click(screen.getByRole("button", { name: /Add notes/ }));
+    fireEvent.click(within(screen.getByRole("group", { name: "Who can see this" })).getByRole("button", { name: "Only me" }));
+    fireEvent.change(screen.getByPlaceholderText("What do you smell?"), { target: { value: "Private thoughts" } });
+    // Closed at once: the unmount flush, not the debounce, has to keep it.
+    first.unmount();
+
+    renderFlow();
+    await act(async () => {});
+    expect(screen.getByPlaceholderText("What do you smell?")).toHaveValue("Private thoughts");
+    expect(screen.getByText(/Only me can see/)).toBeInTheDocument();
+  });
 });

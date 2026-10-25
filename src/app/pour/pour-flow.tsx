@@ -76,11 +76,15 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
   // loads (owner decision on D19 is pending: do not widen the default here).
   const [visibility, setVisibility] = useState<PourVisibility>("private");
   const visibilityDirtyRef = useRef(false);
+  const [visibilityChosen, setVisibilityChosen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [draftRestored, setDraftRestored] = useState(false);
   const clientIdRef = useRef<string | null>(null);
   const hydratedRef = useRef(false);
+  // Set once the pour is saved or discarded, so the unmount flush below
+  // cannot write the draft back.
+  const finishedRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -112,6 +116,12 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
     setFinish(draft.finish);
     setFlavorTags(draft.flavorTags ?? {});
     setCompanions(draft.companions);
+    if (draft.visibility) {
+      // An explicit choice outranks the account default arriving later.
+      visibilityDirtyRef.current = true;
+      setVisibilityChosen(true);
+      setVisibility(draft.visibility);
+    }
     if (draft.freeform || draft.nose || draft.palate || draft.finish || Object.keys(draft.flavorTags ?? {}).length > 0) setDetailOpen(true);
     setDraftRestored(true);
     /* eslint-enable react-hooks/set-state-in-effect */
@@ -119,11 +129,24 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
 
   const draftContent = { bottle, rating, servingStyle, amountMl, freeform, nose, palate, finish, flavorTags, companions };
   const hasContent = hasDraftContent({ ...draftContent, bottle: bottle && bottle.id !== initialBottle?.id ? bottle : null });
+  const draftVisibility = visibilityChosen ? visibility : null;
+  // The latest fields, for the flush on close/unmount: the debounced write
+  // below can still be pending when the sheet goes away.
+  const latestDraftRef = useRef({ ...draftContent, visibility: draftVisibility });
   useEffect(() => {
-    if (!hydratedRef.current) return;
-    const t = setTimeout(() => saveDraft(userId, { bottle, rating, servingStyle, amountMl, freeform, nose, palate, finish, flavorTags, companions }), 300);
+    latestDraftRef.current = { bottle, rating, servingStyle, amountMl, freeform, nose, palate, finish, flavorTags, companions, visibility: draftVisibility };
+    if (!hydratedRef.current || finishedRef.current) return;
+    const t = setTimeout(() => saveDraft(userId, latestDraftRef.current), 300);
     return () => clearTimeout(t);
-  }, [userId, bottle, rating, servingStyle, amountMl, freeform, nose, palate, finish, flavorTags, companions]);
+  }, [userId, bottle, rating, servingStyle, amountMl, freeform, nose, palate, finish, flavorTags, companions, draftVisibility]);
+  useEffect(
+    () => () => {
+      // Only ever adds: an empty flush would erase a stored draft (and React's
+      // dev double-mount runs this before the restore has landed).
+      if (hydratedRef.current && !finishedRef.current && hasDraftContent(latestDraftRef.current)) saveDraft(userId, latestDraftRef.current);
+    },
+    [userId],
+  );
 
   function leave() {
     const prev = previousPath();
@@ -201,6 +224,7 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
         .then((body: { pour?: { id?: unknown } }) => (typeof body.pour?.id === "string" ? body.pour.id : null))
         .catch(() => null);
       clientIdRef.current = null;
+      finishedRef.current = true;
       clearDraft(userId);
       toast.show({
         message: `Poured ${bottle.name}${rating != null ? ` · ★${rating.toFixed(1)}` : ""}`,
@@ -222,6 +246,7 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
       if (err instanceof TypeError) {
         await enqueuePour({ body: payload, bottleName: bottle.name, userId });
         clientIdRef.current = null;
+        finishedRef.current = true;
         clearDraft(userId);
         toast.show({ message: `Saved ${bottle.name} on your phone — it syncs when you’re back online.` });
         leave();
@@ -234,13 +259,14 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
   };
 
   function discard() {
+    finishedRef.current = true;
     clearDraft(userId);
     leave();
   }
 
   return (
     <div className="mx-auto flex min-h-[calc(100dvh-4rem)] max-w-lg flex-col">
-      <div className="flex-1 bg-background px-3 pt-2 pb-4">
+      <div data-pour-sheet className="flex-1 bg-background px-3 pt-2 pb-4">
         <div aria-hidden className="mx-auto mb-2 h-1 w-9 rounded-full bg-border" />
         <header className="flex min-h-11 items-center justify-between gap-2">
           <h1 className="font-display text-[20px] font-semibold leading-tight">Log a pour</h1>
@@ -403,6 +429,7 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
                 value={visibility}
                 onChange={(value) => {
                   visibilityDirtyRef.current = true;
+                  setVisibilityChosen(true);
                   setVisibility(value);
                 }}
                 idPrefix="pour-visibility"

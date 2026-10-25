@@ -10,7 +10,11 @@ vi.mock("@/components/pour-share-button", () => ({
 const refresh = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh, push: vi.fn() }) }));
 vi.mock("@/components/visibility-control", () => ({
-  VisibilityControl: () => <div>visibility</div>,
+  VisibilityControl: ({ onChange }: { onChange?: (v: string) => void }) => (
+    <button type="button" onClick={() => onChange?.("public")}>
+      make public
+    </button>
+  ),
 }));
 
 import { ToastProvider } from "@/components/toast";
@@ -76,6 +80,14 @@ describe("HistoryTimeline", () => {
     expect(more).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByRole("button", { name: "Share Shareable Rye" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "All pours of this bottle" })).toHaveAttribute("href", "/history?bottleId=b1");
+  });
+
+  it("the row's meta line follows a visibility change made in its menu", () => {
+    render(<HistoryTimeline pours={[pour({ bottleName: "Open Rye" })]} />);
+    expect(screen.getByText(/only me/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "More for Open Rye" }));
+    fireEvent.click(screen.getByRole("button", { name: "make public" }));
+    expect(screen.getByText(/· public/)).toBeInTheDocument();
   });
 
   it("delete hides the row at once and only sends the DELETE when Undo was not pressed", async () => {
