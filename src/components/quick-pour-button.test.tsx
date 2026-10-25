@@ -53,7 +53,7 @@ describe("QuickPourButton", () => {
       fireEvent.click(undo);
     });
 
-    expect(fetchMock).toHaveBeenLastCalledWith("/api/pours/pour-123", { method: "DELETE" });
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/pours/pour-123?undo=1", { method: "DELETE" });
     expect(notifications().queryByText("Poured Eagle Rare 10 Year")).not.toBeInTheDocument();
     expect(screen.getByTestId("quick-pour")).toHaveTextContent("Pour");
     expect(screen.getByTestId("quick-pour")).toBeEnabled();

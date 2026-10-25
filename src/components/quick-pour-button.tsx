@@ -44,7 +44,7 @@ export function QuickPourButton({ bottleId, bottleName }: { bottleId: string; bo
       // journal is where it can be removed.
       undo: pourId
         ? async () => {
-            const undone = await fetch(`/api/pours/${encodeURIComponent(pourId)}`, { method: "DELETE" });
+            const undone = await fetch(`/api/pours/${encodeURIComponent(pourId)}?undo=1`, { method: "DELETE" });
             if (!undone.ok) throw new Error(`DELETE /api/pours/${pourId} → ${undone.status}`);
             setState("idle");
             router.refresh();

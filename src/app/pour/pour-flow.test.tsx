@@ -84,7 +84,7 @@ describe("PourFlow — the 3-tap path", () => {
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: /undo/i }));
     });
-    expect(fetchMock.mock.calls.some(([u, i]) => String(u) === "/api/pours/p1" && i?.method === "DELETE")).toBe(true);
+    expect(fetchMock.mock.calls.some(([u, i]) => String(u) === "/api/pours/p1?undo=1" && i?.method === "DELETE")).toBe(true);
   });
 
   it("an exact barcode fills the slot with no confirm step, says so, and offers Not it?", async () => {

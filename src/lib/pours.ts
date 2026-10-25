@@ -503,13 +503,40 @@ export async function updatePourVisibility(
  * pour's owner — a comment on your note is not yours — so they need a
  * correlated update, read before the cascade takes them.
  */
-export async function deletePour(db: DB, userId: string, pourId: string): Promise<boolean> {
+export async function deletePour(
+  db: DB,
+  userId: string,
+  pourId: string,
+  /**
+   * `restoreFill`: this delete is the Undo of a pour just logged, so the fill
+   * decrement that pour applied to an open bottle is put back too. A journal
+   * delete of an old pour leaves the bottle alone — that whiskey is gone.
+   * Capped at 100; a pour that hit the 0 floor may restore slightly more than
+   * it took, which only ever errs toward "more left".
+   */
+  opts: { restoreFill?: boolean } = {},
+): Promise<boolean> {
   const deleted = await db.transaction(async (tx) => {
     const own = await tx
-      .select({ id: schema.pours.id })
+      .select({ id: schema.pours.id, userBottleId: schema.pours.userBottleId, amountMl: schema.pours.amountMl })
       .from(schema.pours)
       .where(and(eq(schema.pours.id, pourId), eq(schema.pours.userId, userId)));
     if (own.length === 0) return false;
+
+    const [pour] = own;
+    if (opts.restoreFill && pour.userBottleId && pour.amountMl != null) {
+      await tx
+        .update(schema.userBottles)
+        .set({ fillLevel: sql`least(100, ${schema.userBottles.fillLevel} + ${fillDecrementFor(pour.amountMl)})`, updatedAt: new Date() })
+        .where(
+          and(
+            eq(schema.userBottles.id, pour.userBottleId),
+            eq(schema.userBottles.userId, userId),
+            eq(schema.userBottles.status, "open"),
+            isNotNull(schema.userBottles.fillLevel),
+          ),
+        );
+    }
 
     // Never overwrite a recorded owner: `is null` only, the same condition
     // migration 0030 uses, so a re-derivation can never replace a fact.

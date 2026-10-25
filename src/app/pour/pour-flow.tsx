@@ -235,7 +235,7 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
         tone: "success",
         undo: pourId
           ? async () => {
-              const undone = await fetch(`/api/pours/${encodeURIComponent(pourId)}`, { method: "DELETE" });
+              const undone = await fetch(`/api/pours/${encodeURIComponent(pourId)}?undo=1`, { method: "DELETE" });
               if (!undone.ok) throw new Error(`DELETE /api/pours/${pourId} → ${undone.status}`);
               router.refresh();
             }

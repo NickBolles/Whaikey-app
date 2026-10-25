@@ -83,11 +83,14 @@ export async function PATCH(req: Request, ctx: Ctx) {
   });
 }
 
-export async function DELETE(_req: Request, ctx: Ctx) {
+export async function DELETE(req: Request, ctx: Ctx) {
   return withErrorHandling(async () => {
     const user = await requireUser();
     const { id } = await ctx.params;
-    const deleted = await deletePour(getDb(), user.id, id);
+    // `?undo=1`: the toast's Undo of a pour just logged also gives back the
+    // fill it took from an open bottle (src/lib/pours.ts deletePour).
+    const restoreFill = new URL(req.url).searchParams.get("undo") === "1";
+    const deleted = await deletePour(getDb(), user.id, id, { restoreFill });
     if (!deleted) {
       return NextResponse.json({ error: "Pour not found" }, { status: 404 });
     }
