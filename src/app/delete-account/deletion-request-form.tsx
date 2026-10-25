@@ -70,7 +70,7 @@ export function DeletionRequestForm() {
         value={email}
         onChange={(e) => setEmail(e.target.value)}
         maxLength={200}
-        className="w-full rounded-xl border border-border-subtle bg-surface py-3 px-4 text-foreground placeholder:text-muted transition-colors focus:outline-none focus:border-accent/70"
+        className="w-full rounded-lg border border-border-subtle bg-surface min-h-11 py-2 px-3 text-foreground placeholder:text-muted transition-colors focus:outline-none focus:border-accent/70"
         placeholder="you@example.com"
         required
       />

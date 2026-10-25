@@ -37,9 +37,9 @@ export default async function DeleteAccountPage() {
   const developer = entity ?? "the Whaikey developer";
 
   return (
-    <div className="px-4 py-8 max-w-2xl mx-auto w-full flex flex-col gap-8">
-      <header className="flex flex-col gap-2">
-        <h1 className="font-display text-3xl font-semibold tracking-tight">
+    <div className="px-3 py-4 max-w-2xl mx-auto w-full flex flex-col gap-3">
+      <header className="flex flex-col gap-1">
+        <h1 className="font-display text-[22px] leading-tight font-semibold tracking-tight">
           Delete your Whaikey account
         </h1>
         <p className="text-muted leading-relaxed">
@@ -65,7 +65,7 @@ export default async function DeleteAccountPage() {
         </p>
       </section>
 
-      <section className="card flex flex-col gap-3 p-5" aria-labelledby="web-heading">
+      <section className="card flex flex-col gap-2 p-3" aria-labelledby="web-heading">
         <h2 id="web-heading" className="font-display text-lg font-semibold">
           On the web
         </h2>
@@ -89,7 +89,7 @@ export default async function DeleteAccountPage() {
             >
               Sign in to delete
             </Link>
-            <div className="border-t border-border-subtle pt-4 flex flex-col gap-2">
+            <div className="border-t border-border-subtle pt-3 flex flex-col gap-2">
               <h3 className="text-sm font-medium">Can&rsquo;t sign in any more?</h3>
               <p className="text-xs text-muted leading-relaxed">
                 Send a request with the email address your account uses. We will write to that
