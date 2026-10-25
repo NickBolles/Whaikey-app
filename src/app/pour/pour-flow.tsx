@@ -313,7 +313,7 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
                 Change
               </button>
             </div>
-            {pickedVia && pickedVia.via !== "recent" && <ShelfQuickActions bottle={bottle} />}
+            {pickedVia && pickedVia.via !== "recent" && <ShelfQuickActions key={bottle.id} bottle={bottle} />}
             {notItOpen && (
               <div className="flex flex-wrap gap-1.5" role="group" aria-label="Other bottles with this barcode">
                 {(pickedVia?.alternatives ?? []).map((alt) => (
@@ -477,7 +477,8 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
 /**
  * ＋ is also "what is this bottle?" (STORYBOARD D6): a scanned or searched
  * bottle can go on the shelf or the wishlist, or open its page, without
- * leaving the sheet or logging anything. A new shelf row confirms with Undo.
+ * leaving the sheet or logging anything. Every change confirms with Undo: a
+ * new row is deleted, a re-filed one gets its previous relationship back.
  */
 function ShelfQuickActions({ bottle }: { bottle: ScanBottle }) {
   const toast = useToast();
@@ -488,7 +489,19 @@ function ShelfQuickActions({ bottle }: { bottle: ScanBottle }) {
   async function add(relationship: "own" | "wishlist") {
     if (busy) return;
     setBusy(relationship);
+    const where = relationship === "own" ? "your bar" : "your wishlist";
     try {
+      // What the shelf says now, so Undo can put it back: re-filing an owned
+      // bottle as wishlist must be as reversible as adding a new one.
+      const current = await fetch("/api/user-bottles")
+        .then((r) => (r.ok ? r.json() : []))
+        .then((rows: Array<{ bottleId?: string; relationship?: string }>) => rows.find((r) => r.bottleId === bottle.id)?.relationship ?? null)
+        .catch(() => null);
+      if (current === relationship) {
+        setDone(relationship);
+        toast.show({ message: `${bottle.name} is already in ${where}` });
+        return;
+      }
       const res = await fetch("/api/user-bottles", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -497,21 +510,32 @@ function ShelfQuickActions({ bottle }: { bottle: ScanBottle }) {
       if (!res.ok) throw new Error(String(res.status));
       const row = (await res.json().catch(() => null)) as { id?: string } | null;
       setDone(relationship);
-      const where = relationship === "own" ? "your bar" : "your wishlist";
+      const undo =
+        res.status === 201 && row?.id
+          ? async () => {
+              const undone = await fetch(`/api/user-bottles/${encodeURIComponent(row.id!)}`, { method: "DELETE" });
+              if (!undone.ok) throw new Error(String(undone.status));
+            }
+          : current
+            ? async () => {
+                const undone = await fetch("/api/user-bottles", {
+                  method: "POST",
+                  headers: { "content-type": "application/json" },
+                  body: JSON.stringify({ bottleId: bottle.id, relationship: current }),
+                });
+                if (!undone.ok) throw new Error(String(undone.status));
+              }
+            : undefined;
       toast.show({
         message: `Added ${bottle.name} to ${where}`,
         tone: "success",
-        // Only a row this tap created can be taken back; re-filing a bottle
-        // that was already on the shelf is not undone into deleting it.
-        undo:
-          res.status === 201 && row?.id
-            ? async () => {
-                const undone = await fetch(`/api/user-bottles/${encodeURIComponent(row.id!)}`, { method: "DELETE" });
-                if (!undone.ok) throw new Error(String(undone.status));
-                setDone(null);
-                router.refresh();
-              }
-            : undefined,
+        undo: undo
+          ? async () => {
+              await undo();
+              setDone(null);
+              router.refresh();
+            }
+          : undefined,
       });
     } catch {
       toast.error(`Couldn't add ${bottle.name}. Try again.`);

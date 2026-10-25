@@ -121,6 +121,35 @@ describe("PourFlow — the 3-tap path", () => {
     const post = fetchMock.mock.calls.find(([u, i]) => u === "/api/user-bottles" && i?.method === "POST");
     expect(JSON.parse(String(post?.[1]?.body))).toEqual({ bottleId: "blantons", relationship: "own" });
     expect(screen.getByText(/Added Blanton's Original to your bar/)).toBeInTheDocument();
+
+    // Not it? → another release: the shelf state belongs to the first bottle.
+    fireEvent.click(screen.getByRole("button", { name: /Not it\?/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Blanton's Gold" }));
+    expect(screen.getByRole("button", { name: "Add to bar" })).toBeEnabled();
+  });
+
+  it("re-filing an owned bottle as wishlist can be undone back to owned", async () => {
+    const fetchMock = stubFetch(async (url, init) => {
+      if (String(url) === "/api/user-bottles" && !init?.method) return ok([{ bottleId: "blantons", relationship: "own" }]);
+      if (String(url) === "/api/user-bottles" && init?.method === "POST") return { ok: true, status: 200, json: async () => ({ id: "ub1" }) } as Response;
+      return ok({});
+    });
+    renderFlow();
+    await act(async () => {});
+    fireEvent.click(screen.getByRole("button", { name: "fake barcode hit" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Wishlist" }));
+    });
+    const toastText = screen.getByText(/Added Blanton's Original to your wishlist/);
+    const toastRow = toastText.closest("li") ?? toastText.parentElement!;
+    await act(async () => {
+      fireEvent.click(within(toastRow as HTMLElement).getByRole("button", { name: /undo/i }));
+    });
+    const posts = fetchMock.mock.calls.filter(([u, i]) => u === "/api/user-bottles" && i?.method === "POST").map(([, i]) => JSON.parse(String(i?.body)));
+    expect(posts).toEqual([
+      { bottleId: "blantons", relationship: "wishlist" },
+      { bottleId: "blantons", relationship: "own" },
+    ]);
   });
 
   it("an unrated pour saves (rating is optional) and goes Home with no in-app history", async () => {
