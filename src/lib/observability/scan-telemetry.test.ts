@@ -72,6 +72,23 @@ describe("scanMetrics", () => {
     expect(m.barcode.bySource[0]).toEqual({ source: "own", outcome: "matched", count: 6 });
   });
 
+  it("splits label scans by the path that answered: on-device OCR vs the AI read", async () => {
+    await seed([
+      [{ kind: "label", outcome: "candidates", source: "ocr", resultCount: 1, latencyMs: 80 }, 6],
+      // Not-confident on-device reads: handed to the AI, counted once under it.
+      [{ kind: "label", outcome: "deferred", source: "ocr", latencyMs: 90 }, 4],
+      [{ kind: "label", outcome: "candidates", source: "ai", resultCount: 2, latencyMs: 2500 }, 3],
+      [{ kind: "label", outcome: "miss", source: "ai", latencyMs: 3000 }, 1],
+      [{ kind: "label", outcome: "confirmed", source: "ocr" }, 5],
+    ]);
+    const m = await scanMetrics(db, { until: later() });
+    expect(m.label).toMatchObject({ attempts: 10, ocrResolved: 6, ocrDeferred: 4, aiCalls: 4, confirmed: 5 });
+    expect(m.label.ocrResolvedRate).toBeCloseTo(0.6);
+    expect(m.label.aiShare).toBeCloseTo(0.4);
+    // Deferred reads are not answers anyone waited for: excluded from latency.
+    expect(m.label.latencyP50Ms).toBe(80);
+  });
+
   it("returns nulls rather than 0% when nothing was scanned", async () => {
     const m = await scanMetrics(db, { until: later() });
     expect(m.barcode).toMatchObject({ attempts: 0, ownHitRate: null, resolutionRate: null, latencyP50Ms: null });

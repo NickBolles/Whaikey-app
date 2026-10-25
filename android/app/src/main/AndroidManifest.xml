@@ -74,11 +74,13 @@
           Download the MLKit barcode model through Google Play services on first
           run rather than bundling it, which keeps the APK small
           (docs/NATIVE_APP.md §6.2). The scanner installs it on demand too; this
-          just lets Play get a head start.
+          just lets Play get a head start. "ocr" is the text-recognition model
+          behind on-device label reading (WhaikeyOcrPlugin.kt), fetched the same
+          way so the first label scan is not the one that waits for it.
         -->
         <meta-data
             android:name="com.google.mlkit.vision.DEPENDENCIES"
-            android:value="barcode_ui" />
+            android:value="barcode_ui,ocr" />
     </application>
 
     <!-- Permissions -->
