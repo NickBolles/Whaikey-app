@@ -69,8 +69,14 @@ export default async function AdminScanPage({ searchParams }: { searchParams: Pr
               {d}d
             </Link>
           ))}
+          <Link href="/admin/reports" className="text-accent hover:underline">
+            Reports →
+          </Link>
           <Link href="/admin/submissions" className="text-accent hover:underline">
             Submissions →
+          </Link>
+          <Link href="/admin/feedback" className="text-accent hover:underline">
+            Feedback →
           </Link>
         </nav>
       </header>

@@ -41,6 +41,9 @@ export default async function AdminFeedbackPage() {
           <Link href="/admin/submissions" className="text-accent hover:underline">
             Submitted bottles →
           </Link>
+          <Link href="/admin/scan" className="text-accent hover:underline">
+            Scan &amp; coverage →
+          </Link>
         </nav>
       </header>
 
