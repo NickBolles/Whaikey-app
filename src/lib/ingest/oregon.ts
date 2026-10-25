@@ -132,6 +132,37 @@ export function oregonRowsToCandidates(rows: OregonRow[]): OregonAdapterResult {
   return { scanned: rows.length, candidates: [...bySlug.values()].map((w) => w.candidate) };
 }
 
+/**
+ * Map an export record onto `OregonRow`, whatever its header spelling.
+ *
+ * The Socrata export renamed its headers from `AsOfDate`/`PricePerBottle` to
+ * the display names `As Of Date`/`Price Per Bottle` in Sept 2026. Nothing
+ * failed: every row simply had no `AsOfDate`, `latestAsOfDate` returned null,
+ * and the adapter filtered all 7,493 rows away, reporting "0 candidates" on
+ * every weekly run. Keys are compared with whitespace, underscores and case
+ * removed, so either spelling (and a snake_case API variant) lands in the
+ * same field.
+ */
+export function normalizeOregonRecord(record: Record<string, string>): OregonRow {
+  const byKey = new Map<string, string>();
+  for (const [key, value] of Object.entries(record)) {
+    byKey.set(key.replace(/[\s_]+/g, "").toLowerCase(), value);
+  }
+  const get = (key: string) => byKey.get(key.toLowerCase());
+  return {
+    AsOfDate: get("AsOfDate"),
+    Description: get("Description"),
+    Category: get("Category"),
+    Size: get("Size"),
+    Age: get("Age"),
+    Proof: get("Proof"),
+    PricePerBottle: get("PricePerBottle"),
+  };
+}
+
+/** Columns the adapter cannot work without; checked so a rename fails loudly. */
+const REQUIRED_OREGON_COLUMNS = ["AsOfDate", "Description", "Category"] as const;
+
 /** Download and parse the live Oregon pricing export. */
 export async function fetchOregonCandidates(
   fetchImpl: typeof fetch = fetch,
@@ -140,6 +171,14 @@ export async function fetchOregonCandidates(
   if (!res.ok) {
     throw new Error(`Oregon pricing download failed: HTTP ${res.status} from ${OREGON_PRICING_URL}`);
   }
-  const records = parseCsvRecords(await res.text()) as OregonRow[];
-  return oregonRowsToCandidates(records);
+  const records = parseCsvRecords(await res.text());
+  const rows = records.map(normalizeOregonRecord);
+  if (rows.length > 0) {
+    const missing = REQUIRED_OREGON_COLUMNS.filter((c) => rows.every((r) => !r[c]));
+    if (missing.length > 0) {
+      const seen = Object.keys(records[0] ?? {}).join(", ");
+      throw new Error(`Oregon pricing export is missing column(s) ${missing.join(", ")}; headers were: ${seen}`);
+    }
+  }
+  return oregonRowsToCandidates(rows);
 }

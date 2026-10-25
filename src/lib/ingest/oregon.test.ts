@@ -1,5 +1,8 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  normalizeOregonRecord,
   OREGON_PRICING_URL,
   fetchOregonCandidates,
   latestAsOfDate,
@@ -118,5 +121,40 @@ describe("fetchOregonCandidates", () => {
   it("throws with the source URL on HTTP failure", async () => {
     const fetchImpl = (async () => new Response("nope", { status: 503 })) as typeof fetch;
     await expect(fetchOregonCandidates(fetchImpl)).rejects.toThrow(/503/);
+  });
+});
+
+describe("Oregon export header drift (catalog-sync regression, Sept 2026)", () => {
+  // A verbatim slice of the live export as of 2026-10-25: display-name headers
+  // ("As Of Date", "Price Per Bottle"), two monthly snapshots, a vodka and a
+  // flavored whiskey that must be filtered out.
+  const fixture = readFileSync(join(__dirname, "fixtures", "oregon-pricing-2026-11.csv"), "utf8");
+  const fetchFixture = (async () => new Response(fixture, { status: 200 })) as unknown as typeof fetch;
+
+  it("reads the renamed headers and yields candidates from the latest month", async () => {
+    const { scanned, candidates } = await fetchOregonCandidates(fetchFixture);
+    expect(scanned).toBe(9);
+    // 5 whiskeys in 11/01/2026; vodka, flavored and the 08/01 rows are dropped.
+    expect(candidates).toHaveLength(5);
+    expect(candidates.map((c) => c.name)).toContain("1792 Bottle In Bond Bourbon Ksbw");
+    expect(candidates.some((c) => /blackberry|vodka|old grand dad|ezra/i.test(c.name))).toBe(false);
+    expect(candidates.find((c) => /full proof/i.test(c.name))).toMatchObject({
+      category: "bourbon",
+      ageYears: 8,
+      abv: 62.5,
+      avgPrice: 51.95,
+    });
+  });
+
+  it("maps either header spelling onto the same row", () => {
+    const legacy = normalizeOregonRecord({ AsOfDate: "07/01/2026", PricePerBottle: "$1", Description: "X" });
+    const display = normalizeOregonRecord({ "As Of Date": "07/01/2026", "Price Per Bottle": "$1", Description: "X" });
+    expect(display).toEqual(legacy);
+  });
+
+  it("fails loudly instead of returning 0 candidates when a required column disappears", async () => {
+    const csv = ['"Date","Description","Category"', '"07/01/2026","EAGLE RARE","DOMESTIC WHISKEY"'].join("\n");
+    const fetchImpl = (async () => new Response(csv, { status: 200 })) as unknown as typeof fetch;
+    await expect(fetchOregonCandidates(fetchImpl)).rejects.toThrow(/missing column\(s\) AsOfDate/);
   });
 });

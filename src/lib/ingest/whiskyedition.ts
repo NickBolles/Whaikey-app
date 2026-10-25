@@ -1,6 +1,6 @@
 import type { WhiskeyCategory } from "@/db/schema";
 import { cleanProductName, looksFlavored, slugify } from "./normalize";
-import type { CatalogCandidate } from "./types";
+import { readJsonResponse, type CatalogCandidate } from "./types";
 
 /**
  * WHISKY:EDITION review-catalog ingest (docs/SOURCING_AT_SCALE.md §3.2).
@@ -128,7 +128,10 @@ export async function fetchWhiskyEditionCandidates(
     if (!res.ok) {
       throw new Error(`WHISKY:EDITION download failed: HTTP ${res.status} from ${url}`);
     }
-    const data = (await res.json()) as WhiskyEditionPage;
+    // The domain lapsed in Sept 2026 and now serves a parking page with HTTP
+    // 200; readJsonResponse turns that into a SourceUnavailableError (the
+    // source is reported degraded) instead of a bare JSON SyntaxError.
+    const data = (await readJsonResponse(res, "whiskyedition", url)) as WhiskyEditionPage;
     const items = data.items ?? [];
     reviews.push(...items);
     const perPage = data.per_page ?? items.length;
