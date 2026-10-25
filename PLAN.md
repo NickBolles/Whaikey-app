@@ -46,7 +46,7 @@ An AI-native whiskey tracking app, inspired by wine apps like **Vivino** (social
 ### 2.1 Live and solid
 
 - **Core loop:** search → bottle detail → own/tried/wishlist → pour log with half-star ratings, nose/palate/finish, flavor-wheel tags with intensity → journal. My Bar carries fill level, spend, cost-per-pour, lifecycle statuses and a library flavor heat map with three lenses (mine / label / compare).
-- **Identification:** dual-mode camera (barcode loop + label shutter), on-device framing guidance, live label ID, async capture queue with undo, crowdsourced UPC → bottle map, CSV/competitor import with AI column mapping.
+- **Identification:** dual-mode camera (barcode loop + label shutter), on-device framing guidance, live label ID, async capture queue with undo, crowdsourced UPC → bottle map, CSV/competitor import with AI column mapping. Label photos in the native apps are read on the device first (Apple Vision / ML Kit → `src/lib/label-match.ts` fuzzy match), and the AI vision read runs only when that match is not confident. Unknown barcodes become pending crowd claims that publish at 2 independent eligible confirmations, a trusted confirmer or operator approval (`/admin/catalog/barcodes`). External UPC lookups are cached, budgeted per day and backed off (`src/lib/upc-providers.ts`).
 - **Flavor contract:** `src/lib/flavor-wheel.ts` — 8 wedges, 55 leaves — shared by bottle profiles, notes, the wheel UI, calibration and AI extraction.
 - **AI (optional everywhere):** chat with streaming and 7 tools, note extraction from dictated/typed text, label scan, pairings (food/cigar/cocktail, cached), explained recommendations (discovery + tonight) that degrade to deterministic reasons with no key.
 - **Social S1–S2 and most of S3:** share links with revocation, comparison on the link, profiles as palate cards, follow/approve/block, per-pour visibility (default Only me), "From your friends" Home module, Same Dram, cheers, comments + reports, taste twins, phone (HMAC) and QR discovery, one-tap "make everything private".
@@ -223,9 +223,9 @@ There is no single whiskey API; the catalog is assembled in layers, mostly free 
 | Layer | Launch sources (free) | Paid upgrades (when funded) |
 |---|---|---|
 | **Bottle catalog** | TTB COLA registry, Iowa Liquor Products, Oregon/Utah/BC/Systembolaget/Vinmonopolet catalogs, WHISKY:EDITION (CC BY 4.0 — attribution surface required), Wikidata distilleries | COLA Cloud API, Whiskybase *licensing conversation* (never scraping) |
-| **Barcodes** | Own DB first (crowdsourced confirmations); UPCitemdb trial; Open Food Facts fallback (ODbL — never merged) | UPCitemdb Dev |
+| **Barcodes** | Own DB first (crowd-verified confirmations), then pending crowd claims; UPCitemdb trial under a 95/day budget with a permanent cache and backoff; Open Food Facts fallback (ODbL — cached 30 days, never merged) | UPCitemdb Dev |
 | **Prices/valuation** | Iowa monthly price data, control-state price books, auction-trend APIs, affiliate feeds | Wine-Searcher, Whiskystats |
-| **Label scanning** | Barcode-first → OCR text match → vision model | Visual matching seeded with COLA label images |
+| **Label scanning** | Barcode-first → on-device OCR text match (native apps) → vision model only below the confidence threshold | Visual matching seeded with COLA label images |
 
 Principles: every third-party lookup converts into a first-party record; every feed has a fallback; the legal checklist (COLA image posture, ODbL isolation, CC BY attribution, feed ToS) is **one checklist with owners and dates** in §9.5 and clears before launch. The pipeline's steady-state cost (scheduled syncs + enrichment of new rows) needs a budget and an alarm (track K).
 
@@ -274,7 +274,7 @@ Tracks run in parallel and are named so that "Phase 2" is never ambiguous: **C**
 
 - **C:** collection value done honestly (range + trend + source label), price-history surfacing, `/stats` (private pours-over-time stays private), palate share card, similar-bottles rail, the three missing chat tools, native voice recording (the signature feature on the platform that matters).
 - **N:** store launch — closed test, screenshots, store records, credentials (NATIVE_APP.md N4).
-- **S:** re-open S3's remainder (clubs, blind flights, samples, passport diffing) **only after** the S1/S2 overlap numbers SOCIAL.md §15 promised are published and clear §12's targets. Flights are the strongest acquisition argument in the doc set and are judged on that evidence.
+- **S:** ~~re-open S3's remainder only after the S1/S2 overlap numbers are published~~ — **superseded 2026-10 (owner decision, SOCIAL.md D15):** the S3 remainder and the M2 social set — Friends-tab feed, clubs, blind flights / tasting nights with guest view, breadth challenges, friend breadth boards, notifications with a sender, share-out cards, shelf/wishlist sharing, Wrapped — are open now. §3.1 bans and the read-path invariant are unchanged; samples stay out pending a legal read.
 - **Monetization:** entitlements + billing (§6.6) after beta usage data.
 - **Later:** distillery visits (needs geolocation in the shell), club passports, S4 community scale (after the jurisdiction review), Wrapped, widgets, price alerts, gift mode.
 
@@ -282,12 +282,13 @@ Tracks run in parallel and are named so that "Phase 2" is never ambiguous: **C**
 
 | Frozen | Unfreezes when |
 |---|---|
-| Clubs, blind flights, samples, passport diffing, club passports, distillery visits | S1/S2 overlap and SOCIAL §12 metrics published and healthy; Lane C complete |
+| ~~Clubs, blind flights, passport diffing, club passports~~ | **Unfrozen 2026-10** (SOCIAL.md D15) — with challenges, friend breadth boards, the Friends-tab feed, notifications and Wrapped |
+| Samples / bottle shares, distillery visits | Samples: a legal read on facilitating alcohol transfers between users. Visits: geolocation in the shell (D14) |
 | S4 community consensus and public discovery (and the community segment already live on `/bottles/[id]/compare` is a §12 decision) | Jurisdiction review done |
 | New Whiskey School content, AI personalisation, Pro gating of lessons | Progress persisted server-side; v1 line closed |
 | Catalog pipeline feature work (batch API migration, new sources) | Steady-state cost model and budget alarm exist; maintenance and cost control only until then |
 | pgvector / embeddings / semantic search | Committed search evaluation shows substring + trigram is the bottleneck |
-| Wrapped, widgets, price alerts, gift mode, infinity bottles, store picks, 100-point mode | v1 line closed |
+| Widgets, price alerts, gift mode, infinity bottles, store picks, 100-point mode | v1 line closed (Wrapped unfrozen 2026-10, SOCIAL D19) |
 
 **Structural invariant on every social release:** nothing becomes visible to a second user until the visibility model and block checks are enforced on the read path that serves it (SOCIAL.md §13). Consumption guardrails are enforced as mechanic bans in review and verified by the cohort-adjusted metric (SOCIAL.md §12), which must exist before the next social release.
 
@@ -492,7 +493,10 @@ Supersedes the old open-questions list; SOCIAL.md §14's decision table is incor
 | Palate card provenance (review SEC-M7) | **Open** | Preferred: social projections exclude "Only me" pours; else state the aggregation in SOCIAL §7.1 and the UI |
 | Community segment on `/bottles/[id]/compare` before the jurisdiction review | **Open** | Keep behind a flag, or roll back until reviewed |
 | Whiskey School progress server-side | **Recommended: yes** | One day of work; needed for any gating or passport tie-in |
-| Social phase gating | **Decided:** no S3 remainder or S4 until S1/S2 overlap numbers are published and §12 metrics exist. **Half met (WP-19):** the §12 metrics now exist — `src/lib/observability/metrics.ts` computes them, and most needed no new data collection because `pours`, `user_bottles`, `reports`, `blocks` and `user_profiles` already held the answers; nobody had written the queries. The S1 overlap numbers are **instrumented and not yet published**, because on the day the instrument ships it has no readings. The gate stays shut until they are | SOCIAL.md §15 |
+| Social phase gating | **Superseded 2026-10 (owner decision; SOCIAL.md D15):** the S3 remainder and the M2 social set are unfrozen without the overlap gate, because the gate measures users that only exist after launch and the owner wants social to be the retention loop. S4 still waits for the jurisdiction review. §3.1 bans and the read-path invariant are unchanged; §12 metrics become post-launch monitors that can pull a specific mechanic. *Previous text, kept for the record:* no S3 remainder or S4 until S1/S2 overlap numbers are published and §12 metrics exist. **Half met (WP-19):** the §12 metrics now exist — `src/lib/observability/metrics.ts` computes them, and most needed no new data collection because `pours`, `user_bottles`, `reports`, `blocks` and `user_profiles` already held the answers; nobody had written the queries. The S1 overlap numbers are **instrumented and not yet published**, because on the day the instrument ships it has no readings. The gate stays shut until they are | SOCIAL.md §15 |
 | Error monitoring DSN | **Open — owner** | `SENTRY_DSN` is unset, so nothing is reported and `/privacy` does not name Sentry. The code ships either way; setting it turns both on together |
 | An app-open event, for §12's "share of sessions with no pour logged" | **Open — owner** | The one §12 guardrail WP-19 does not compute. It needs a record that somebody opened the app and read, and nothing records reads — building it means a behavioural timeline of when a person opens a drinking app, which is a new and sensitive category on a product whose first promise is that the journal is private. Deliberately not estimated from a proxy: a guardrail nobody validated is worse than a blank. Needs a Privacy Policy entry if adopted |
-| Whole-shelf sharing timing; jurisdiction checklist before S4 | **Open** (SOCIAL §14) | As before |
+| Whole-shelf sharing timing; jurisdiction checklist before S4 | Shelf sharing **decided 2026-10** (SOCIAL D21: opt-in, friends-only, prices stripped); jurisdiction checklist still **open** (SOCIAL Q2) | As before |
+| UI density | **Decided 2026-10 (owner):** compact, dense, premium. DESIGN.md's Density section replaces the roomy rhythm (rules 1, 4, 6); recipes and baselines change in one Track B PR | DESIGN.md |
+| Import / export | **Decided 2026-10 (owner):** import and export everywhere — every user-owned object (shelf, journal, wishlist, clubs, flights, challenges, notifications) is in the account export, and list surfaces offer CSV out; named importers (Distiller, Whiskybase collection, template) on the Bar | `ACCOUNT_DATA` is the enforcement point |
+| Default pour visibility for new accounts | **Open — owner** (SOCIAL Q3): SOCIAL D2 says Only me, STORYBOARD D19 says Friends, code ships `private` | Decide before WP-7 |

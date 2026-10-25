@@ -309,6 +309,20 @@
       "when": 1790720521706,
       "tag": "0043_search_and_catalog_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1792939262304,
+      "tag": "0044_scan_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1792942387115,
+      "tag": "0045_upc_crowd_and_provider_cache",
+      "breakpoints": true
     }
   ]
 }

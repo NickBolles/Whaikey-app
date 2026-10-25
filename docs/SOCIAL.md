@@ -6,6 +6,14 @@ Companion to [PLAN.md](../PLAN.md), [FEATURES.md](./FEATURES.md) and [COMPETITOR
 
 **TL;DR:** Strava's magic isn't the feed — it's that everyone runs the *same segment*, so comparison is meaningful and identity is earned. In whiskey the shared course is **the bottle**, and the thing being compared is **your palate**, not your consumption. That single substitution gives us a social product that is genuinely differentiated *and* structurally compatible with our responsible-drinking guardrails, because it rewards discernment and breadth rather than volume and frequency. Everything below follows from it.
 
+> **Amendment 2026-10 — the social unfreeze (owner direction).** The owner's direction for launch is *"social should be a sticky Strava for whiskey."* The freeze on the S3 remainder (PLAN §5.4, §14 below) was gated on S1/S2 overlap numbers that cannot exist before there are users, so it is **lifted by owner decision D15**. What this changes and what it does not, in one place:
+>
+> **Unfrozen, buildable now (M2):** the **feed as the Friends tab's main content** (rich comparison cards; Home keeps its 3-item module — D10 amended), **clubs** (§7.8), **blind flights / tasting nights** with a 24-hour guest view (§7.9, D20), **breadth challenges** (§7.12, D16), **friend breadth boards** (§7.13, D17), **notifications with a real sender** (§7.5, D18), **share-out cards** for palate/passport/flight/Wrapped (§7.10), **shelf and wishlist sharing** (Q1 resolved, D21), and **Wrapped / Year in Review** framed by breadth (§7.14, D19). Every new social object is **exportable** (owner: import/export everywhere) and every new user-owned table gets an `ACCOUNT_DATA` entry.
+>
+> **Unchanged, still binding:** every §3.1 ban — no streaks; no metric counting pours, volume, ABV or consecutive days displayed to another user, ranked or badged; no leaderboard sorted by a consumption quantity (including note/rating counts, §3.3); no pour-nudging or "you haven't logged" notifications; no time-of-day, venue-frequency or strength achievements; no "who's drinking now" presence. Also unchanged: visibility is per object and the system never raises it on existing data (D2), money never in a social projection, the read-path invariant (§13: nothing reaches a second user until visibility + block checks are enforced on the path that serves it), D11 `noindex`, D13 no venue tagging, and the S4 jurisdiction gate (Q2). The §12 metrics stay — as post-launch monitors that can pull a mechanic, not as pre-build gates.
+>
+> **The test for every new mechanic is still the one in §3.2:** *can someone win this by drinking less of more?* Challenges and boards enforce it in code (a rule-kind lint test; distinct-count and saturating keys only), and notification templates are checked against a banned-copy list.
+
 **How to read this doc:** §1–§4 are the argument. §5 (user stories) and §6 (pages & flow) are what we're building and where it lives. §7 details each feature. §8–§12 are the operating rules. §13 is the phase plan, §14 the decisions, §15 the risks — and **§16 is the agent-ready build spec for S1**, which is implementable today with zero open decisions.
 
 ---
@@ -202,6 +210,8 @@ With a realistic early graph (~4 friends), the feed produces **~2 items a week**
 
 > **Amended 2026-08 (owner decision):** during the app-wide UX redesign the owner promoted **`/friends` to a tab-bar slot** (Search folded into the ＋ quick-actions sheet and the new global header, freeing the slot). This is *not* the tripwire firing: the tab opens **follow management and discovery** — requests, following, followers, find-people — not a feed. The comparison stream itself remains a Home module, sparse-first as above, and the data tripwire still governs any future promotion of the *feed*.
 
+> **Amended 2026-10 (owner decision D15):** the **feed is promoted to the Friends tab** without waiting for the tripwire, because the tripwire measures a graph that only exists after launch and the owner wants social to be a destination. Shape: people controls in the header (STORYBOARD D15/Q4), then the full chronological feed of rich cards (§7.3); Home keeps the sparse 3-item module. The sparse-first rule still applies — the Friends tab's empty and low-volume states lead with the invite loop (share-page CTA, QR, flight invite) and the user's open challenges, never a blank list.
+
 One more flow rule, restated from §7.3 because it's structural: **there is no composer anywhere.** Sharing is a property of the pour you already logged (log sheet, history row, bottle page). The moment a "create post" button exists, we're building a feed product, and we said we wouldn't.
 
 ---
@@ -224,7 +234,7 @@ One more flow rule, restated from §7.3 because it's structural: **there is no c
 - Every add path — handle, phone, QR — lands on the same confirm screen (`/add/[handle]`): identity preview first, then an explicit Follow tap. Nothing follows on lookup alone.
 - Blocking is first-class from day one of the graph, enforced on every read path in both directions. (Reporting ships with comments in S3 — see §11 for why.)
 
-### 7.3 The stream — a Home module, not a feed product (S2)
+### 7.3 The stream — a Home module and the Friends tab (S2; tab added 2026-10, D15)
 
 The feed is where most social products go generic. Ours is constrained by one rule: **a card is only interesting if it lets you compare.** So the card is not "Nick drank a thing":
 
@@ -245,7 +255,7 @@ The feed is where most social products go generic. Ours is constrained by one ru
 - **Content = the pour you already logged**, surfaced by a visibility flag. No separate composer, ever.
 - The "you tasted this too" line is computed from your own tasting notes on the same bottle. If you haven't tried it, the line becomes the discovery hook instead: *"3 of your friends' notes on this — 82% palate match with you"* → wishlist in one tap.
 - **Chronological** with a light relevance boost (bottles you own/wishlist/have tried rank up). No engagement-optimised ranking — we are not fighting for time-on-app, and an algorithmic drinking feed is a bad object to have built.
-- Lives on Home (§6.3). Empty and low-volume states matter more than the full state: with 4 friends this stream has ~2 items a week, and it must feel calm rather than dead. Design it for the sparse case first (DESIGN.md rules apply).
+- Lives on Home as a 3-item module and, since D15, as the main content of the Friends tab (§6.3). Kinds beyond pours/notes, all from projections: a bottle shelved (no price/value/fill), a passport crest earned, a challenge completed, a flight hosted, a club joined. Still no composer. Empty and low-volume states matter more than the full state: with 4 friends this stream has ~2 items a week, and it must feel calm rather than dead. Design it for the sparse case first (DESIGN.md rules apply).
 
 ### 7.4 Same Dram — the signature surface (S2, the marquee)
 
@@ -259,6 +269,9 @@ The bottle page gains a comparison view: **you vs. the producer vs. your friends
 - **De-risked in S1:** the two-person version of this comparison ships on the share page first (US-1), with no graph — so we learn whether note overlap is common enough to carry the surface before building profiles and follows around it (§15, sparse overlap).
 
 ### 7.5 Reactions, comments & notifications (Cheers S2 · comments S3)
+
+> **Amended 2026-10 (D18):** notifications get a real sender (FCM/APNs; PLAN §5) and an in-app inbox. Allowed categories: new follower / request, cheer or comment on your note, a friend tasted a bottle you own or wishlisted (batched, ≤ 1/day), club and flight events, challenge invites and completions. Per-category preferences plus quiet hours. A banned-copy test rejects templates that suggest pouring or reference logging cadence ("pour", "drink now", "streak", "haven't logged", "don't break").
+
 
 - One-tap positive reaction: **"Cheers"** (§14 D4). Positive-only; there is no dislike. Ships with the graph in S2 — it's a day of work and it makes the first social release feel alive.
 - Comments (S3): threaded on a note, plain text, mentions with `@handle`, edit window, soft delete. Comments arrive with the report flow (§11) — conversation and moderation ship together.
@@ -313,6 +326,25 @@ Already specified in PLAN.md §2.8 and FEATURES.md §4.5; social makes it real. 
 The existing backlog item (2 oz samples, who owes whom) is a *social* feature and a good one: it's whiskey's actual social behaviour, it's utility rather than vanity, and it rewards generosity instead of consumption. Track sample swaps between friends, link a sample to the pour logged from it, and let the giver see the note the receiver wrote. **"Someone tasted the sample you sent and here's what they got"** is the warmest notification this app could send.
 
 ---
+
+### 7.12 Challenges — breadth only (added 2026-10, D16)
+
+Strava's monthly challenges are joinable goals with a badge at the end; ours count **distinct things met in a window**, never amounts.
+
+- Curated monthly (global) and club-scoped. Rule kinds are a closed list: `distinct_distilleries_in_region`, `distinct_countries`, `distinct_cask_types`, `distinct_descriptors`, `visit_distilleries` (destinations, per D14). Progress is `count(distinct …)` over the user's pours and `tried` shelf rows in the window; a repeat pour counts for nothing and a 15 ml sample counts the same as a bottle.
+- Joining is explicit; progress is visible to friends only if the user's visibility allows it; completion stamps a crest (passport art).
+- **Banned shapes, spelled out:** "log N pours", "N nights this month", "try N whiskies this week" (a per-period consumption quota), any "strength" or "age" escalation, any time-of-day rule. A unit test enumerates every rule kind and fails unless it is distinct-based and saturating.
+
+### 7.13 Friend breadth boards (added 2026-10, D17)
+
+Rivalry with friends is encouraged (§3.2); ranking by consumption is banned (§3.1.3). A board satisfies both only like this:
+
+- **Friends-only and opt-in per user**; hidden until at least 3 friends have opted in; a season window (e.g. a quarter).
+- Sort keys are **only** distinct regions, distinct distilleries or distinct descriptors — bounded sets, never counts of pours, notes or ratings (§3.3). Ties show as ties. No global or public board, ever.
+
+### 7.14 Wrapped / Year in Review (added 2026-10, D19)
+
+`/wrapped/[year]`: countries, regions, distilleries and descriptors discovered; best new find; how your palate moved; your taste twin; flights attended. **No counts of pours, ml, nights, or spend**, and nothing about time of day. Private by default; shareable as a card (§7.10).
 
 ## 8. Privacy model
 
@@ -429,6 +461,8 @@ The re-slicing rule (changed from the first draft): **every phase ships a loop a
 | **S3 — Conversation & groups** | Comments + reports, clubs + shared shelf, blind flights (can lead the phase — no club dependency), samples, taste twins in recommendations, passport badges + friend diffing. | US-12..16, US-18/19 | *A tasting club can run a night on Whaikey, and a friend's palate improves your recs.* |
 | **S4 — Community scale** | Community flavor consensus, crowdsourced availability, moderation tooling, public discovery, jurisdiction review. | US-17 | *Aggregates get good enough to be a reason to join.* |
 
+> **Amended 2026-10 (D15):** the S3 remainder — clubs, blind flights, passport diffing, club passports — plus the 2026-10 additions (§7.12–7.14, feed tab, notifications, shelf/wishlist sharing) is **open now** as roadmap M2, without waiting for published S1/S2 overlap numbers. S4 is unchanged: community consensus and public discovery still wait for the jurisdiction review (Q2). Samples / bottle shares (§7.11) stay out of M2 pending a legal read on facilitating alcohol transfers between users.
+
 **Sequencing rule, stated structurally rather than as a phase gate.** The first draft said "S1 ships fully before S2 opens." The real invariant is narrower: **nothing becomes visible to a second user until the visibility model and block checks are enforced on the read path that serves it.** Within S2 that means schema + projection functions land before any UI renders another person's data — ordinary dependency ordering. A phase-level freeze on top of that adds ceremony, not safety. (S1 needs no gate at all: it extends an existing bearer-token surface and shows the viewer only their own data.)
 
 ---
@@ -455,12 +489,20 @@ The first draft left 14 questions open "for a human call before S1 code." Under 
 | D12 | Edited shared notes | Link shows current state with an "edited" marker; deletion revokes. Never a stale public copy. |
 | D13 | Venue/bar tagging | Not building it — the mechanic most implicated in the Untappd critique, and it buys us little. Reopen only with a concrete user need. **Unchanged by D14:** a bar is still never a place we count. |
 | D14 | Distillery visits + device location | **Building it, as a future item (owner decision, 2026-08).** Distillery *visits* become a passport dimension with badges (US-20, FEATURES.md §11.8) — distinct destinations only, never frequency, never a bar, never proximity-triggered. Device location is permitted solely to confirm a check-in: foreground-only, on-tap, coarse, platform-permission-gated, storing only `(distilleryId, date)` (§8.3). Manual entry always works, so declining the permission costs nothing. |
+| D15 | Social unfreeze (owner decision, 2026-10) | **The S3 remainder and the M2 social set are unfrozen** without the S1/S2 overlap gate (PLAN §5.4, §12). §3.1 bans, D2 private-by-default, the read-path invariant (§13) and the S4 jurisdiction gate are unchanged. **D10 amended again:** the full feed is the Friends tab's main content (§6.3); Home keeps the 3-item module. |
+| D16 | Challenges | **Breadth only** (§7.12): a closed list of distinct-count rule kinds, enforced by a unit test; crest on completion; friends see progress only through normal visibility. |
+| D17 | Friend breadth boards | **Friends-only, opt-in, ≥ 3 opted-in friends, season window**, sorted only by distinct regions/distilleries/descriptors; ties shown as ties; no public board (§7.13). |
+| D18 | Notifications | **Sender + inbox + per-category prefs + quiet hours** (§7.5 note); banned-copy test on templates; never a pour nudge or a cadence reminder. |
+| D19 | Wrapped | **Breadth-framed, private by default, shareable as a card** (§7.14); no pour, volume, nights or spend counts. |
+| D20 | Flight guests | A guest joins by link/QR and may **view and rate for 24 hours without an account**; notes are kept only if they create one. Guest entries are deleted at 24 h otherwise. |
+| D21 | Shelf and wishlist sharing (resolves Q1) | **Opt-in, friends-only by default, revocable**, projection strips price, value, fill level and purchase data. A public shelf link is a separate opt-in, like pour shares. |
 
 ### Still open (genuinely)
 
 | # | Question | Current lean |
 |---|---|---|
-| Q1 | Whole-shelf sharing — when, and to whom? | S3, friends-only, opt-in per bottle, prices stripped. The most-requested collector feature and the most dangerous to defaults; wants a human look at the actual S2 privacy telemetry first. |
+| ~~Q1~~ | ~~Whole-shelf sharing — when, and to whom?~~ | **Resolved 2026-10 as D21** (owner direction): opt-in, friends-only by default, prices/value/fill stripped. |
+| Q3 | Default visibility for **new** pours: D2 here says *Only me*; STORYBOARD D19 (2026-09 owner review) says *Friends* for new accounts; the code still ships `private`. | **Owner call before WP-7 ships.** Lean: Friends for new accounts (a feed needs content), with the first-run screen stating it and one tap to change; never applied retroactively. |
 | Q2 | Jurisdiction rules for user-generated alcohol content in launch markets | Checklist review before S4 public discovery (§11). |
 
 **Research still open:** whether Whiskey Social / DramIt's feeds actually retain users or are ghost towns (the honest failure mode for whiskey social — the category may simply be less social than beer); and whether club-level blind flights work over distance or need co-location. The third research question from the first draft — how much bottle overlap two users need before comparison is interesting — is no longer a desk question: **S1 measures it directly** (§12), which is the main reason S1 is scoped the way it is.

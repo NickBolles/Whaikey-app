@@ -44,3 +44,54 @@ export interface IngestReport {
   /** True when the run made no writes. */
   dryRun: boolean;
 }
+
+/**
+ * The source answered, but not with its data: a parked domain, a maintenance
+ * page, a login wall, an HTML error page served with HTTP 200.
+ *
+ * Separate from a plain `Error` because the right response is different. A
+ * parser bug or a schema change in OUR code should fail the sync loudly; a
+ * third party taking its API offline is not something a rerun or a code fix
+ * on our side can repair, so the CLI reports the source as `degraded`, the
+ * workflow stays green-with-warning and opens an issue, and the rest of the
+ * catalog keeps syncing. WHISKY:EDITION's domain lapsing into a STRATO
+ * "Domain not available" page is the case that motivated it: seven weekly
+ * runs went red for a reason nobody on this side could change.
+ */
+export class SourceUnavailableError extends Error {
+  constructor(
+    readonly source: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "SourceUnavailableError";
+  }
+}
+
+/**
+ * Read a JSON body, or explain what came back instead.
+ *
+ * `res.json()` on an HTML page throws `Unexpected token '<'`, which names
+ * neither the source nor what the page was. This checks the content type and
+ * the first byte, and puts the page's <title> into the message, so the log
+ * says "WHISKY:EDITION returned HTML (STRATO - Domain not available)".
+ */
+export async function readJsonResponse(res: Response, source: string, url: string): Promise<unknown> {
+  const text = await res.text();
+  const type = res.headers.get("content-type") ?? "";
+  const trimmed = text.trimStart();
+  const looksJson = trimmed.startsWith("{") || trimmed.startsWith("[");
+  if (!looksJson || /text\/html/i.test(type)) {
+    const title = trimmed.match(/<title[^>]*>([^<]*)<\/title>/i)?.[1]?.trim();
+    const what = /<html|<!doctype/i.test(trimmed.slice(0, 200)) ? "HTML" : `non-JSON (${type || "no content type"})`;
+    throw new SourceUnavailableError(
+      source,
+      `${source} returned ${what} instead of JSON from ${url}${title ? ` (${title})` : ""}`,
+    );
+  }
+  try {
+    return JSON.parse(text);
+  } catch (err) {
+    throw new SourceUnavailableError(source, `${source} returned malformed JSON from ${url}: ${(err as Error).message}`);
+  }
+}

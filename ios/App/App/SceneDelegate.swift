@@ -41,5 +41,7 @@ class AppBridgeViewController: CAPBridgeViewController {
         // App-target plugins are not discovered by `cap sync`; register them here.
         // Native Sign in with Apple (src/lib/native/apple-sign-in.ts).
         bridge?.registerPluginInstance(WhaikeyAppleSignInPlugin())
+        // On-device label OCR (src/lib/native/ocr.ts).
+        bridge?.registerPluginInstance(WhaikeyOcrPlugin())
     }
 }

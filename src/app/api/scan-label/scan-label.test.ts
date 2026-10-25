@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type * as schema from "@/db/schema";
-import type { DB } from "@/db";
+import { type DB, schema as dbSchema } from "@/db";
 import {
   createTestBottle,
   createTestUser,
@@ -160,5 +160,12 @@ describe("POST /api/scan-label", () => {
       messages: Array<{ content: Array<{ type: string }> }>;
     };
     expect(call.messages[0].content[0].type).toBe("image");
+
+    // One anonymous telemetry row: no image, no extracted text, no user.
+    const events = await db.select().from(dbSchema.scanEvents);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ kind: "label", outcome: "candidates", source: "ai", upc: null });
+    expect(JSON.stringify(events[0])).not.toMatch(/Eagle|iVBOR/);
+    expect(JSON.stringify(events[0])).not.toContain(user.id);
   });
 });

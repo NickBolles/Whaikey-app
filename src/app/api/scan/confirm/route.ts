@@ -6,7 +6,9 @@ import { RELATIONSHIPS } from "@/db/schema";
 import { requireUser, withErrorHandling } from "@/lib/session";
 import { upsertUserBottle } from "@/lib/bar";
 import { canViewBottle } from "@/lib/catalog-visibility";
-import { confirmUpcMapping, isValidUpc, normalizeUpc } from "@/lib/scan";
+import { isValidUpc, normalizeUpc, resolveUpc } from "@/lib/scan";
+import { teachBarcode, type TeachResult } from "@/lib/upc-crowd";
+import { recordScanEvent } from "@/lib/observability/scan-telemetry";
 
 export const runtime = "nodejs";
 
@@ -16,16 +18,34 @@ const bodySchema = z.object({
   bottleId: z.string().min(1),
   /** When set, also add the bottle to the user's shelf in the same round trip. */
   relationship: z.enum(RELATIONSHIPS).optional(),
+  /**
+   * For barcode-less confirmations: which reader produced the pick — the
+   * free on-device label read ("ocr"), the paid AI read ("ai"), or a search.
+   * Telemetry only; lets /admin/scan show which path resolved label scans.
+   */
+  via: z.enum(["ocr", "ai", "search"]).optional(),
+  /**
+   * True when the client shelved the only own-DB match without asking the
+   * person. The shelf write still happens, but nobody checked the bottle: it
+   * is neither a barcode vote (no teach/strengthen) nor a confirmation in
+   * scan telemetry, so it is no evidence that our top match was right.
+   */
+  auto: z.boolean().optional(),
 });
 
 /**
  * POST /api/scan/confirm {upc?, bottleId, relationship?}
  *
  * The moment a scan becomes first-party data: records the user's
- * confirmation that this barcode is this bottle (creating or strengthening
- * the crowdsourced mapping — later scanners resolve instantly), and
- * optionally adds the bottle to their bar in the same call so rapid batch
- * scanning is one request per bottle.
+ * confirmation that this barcode is this bottle, and optionally adds the
+ * bottle to their bar in the same call so rapid batch scanning is one
+ * request per bottle.
+ *
+ * A confirmation of a barcode we already map strengthens that mapping (once
+ * per account). A confirmation of an unknown pairing is a **pending claim**
+ * (src/lib/upc-crowd.ts): it answers other people's scans only once enough
+ * independent accounts agree, a trusted account confirms, or an operator
+ * approves. `teach` in the response says which happened.
  */
 export async function POST(request: Request) {
   return withErrorHandling(async () => {
@@ -56,16 +76,45 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Bottle not found" }, { status: 404 });
     }
 
+    const ownMatches = upc ? await resolveUpc(db, upc) : [];
+
     /**
      * A confirmation teaches every future scanner, so it may only be recorded
      * against a bottle everyone can see. Confirming your own submission still
      * puts it on your shelf below; the barcode is held on the submission and
      * published when the bottle is (`publishSubmissionUpc`).
      */
-    const mapping =
-      upc && bottle.status !== "user_submitted"
-        ? await confirmUpcMapping(db, upc, input.bottleId)
+    // Where the confirmed bottle stood in our own answer for this barcode,
+    // read BEFORE the confirmation changes the ordering: 0 means the top
+    // match was right, null means our table did not offer it at all.
+    const confirmRank = upc
+      ? (() => {
+          const i = ownMatches.findIndex((m) => m.id === input.bottleId);
+          return i >= 0 ? i : null;
+        })()
+      : null;
+    const teach: TeachResult | null =
+      upc && !input.auto && bottle.status !== "user_submitted"
+        ? await teachBarcode(db, user, upc, input.bottleId)
         : null;
+    const mapping = teach?.mapping ?? null;
+    if (!input.auto) {
+      await recordScanEvent(db, {
+        // No barcode means the bottle was picked from a label read or a search.
+        kind: upc ? "barcode" : "label",
+        outcome: "confirmed",
+        source: upc
+          ? confirmRank != null
+            ? "own"
+            : "none"
+          : input.via === "ocr"
+            ? "ocr"
+            : input.via === "ai"
+              ? "ai"
+              : "none",
+        confirmRank,
+      });
+    }
 
     let userBottle: schema.UserBottle | null = null;
     let created = false;
@@ -81,6 +130,12 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         mapping,
+        teach: teach && {
+          state: teach.state,
+          confirmations: teach.confirmations,
+          required: teach.required,
+          taught: teach.taught,
+        },
         userBottle,
         bottle: { id: bottle.id, name: bottle.name, category: bottle.category },
       },

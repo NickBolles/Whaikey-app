@@ -1747,3 +1747,180 @@ export type AnalyticsEvent = typeof analyticsEvents.$inferSelect;
 export type ChatSession = typeof chatSessions.$inferSelect;
 export type ChatMessage = typeof chatMessages.$inferSelect;
 export type RecExplanation = typeof recExplanations.$inferSelect;
+
+// ── Track A: catalog and scan ───────────────────────────────────────────────
+// Tables owned by the catalog/scan track (whiskey-build-tracks.md, Track A).
+// Other tracks add their own fenced section rather than editing this one.
+
+export const SCAN_KINDS = ["barcode", "label"] as const;
+export type ScanKind = (typeof SCAN_KINDS)[number];
+
+/**
+ * - `matched`    our own barcode table knew it (barcode only)
+ * - `candidates` no own mapping, but an external lookup (barcode) or the AI
+ *                label read (label) produced catalog candidates to pick from
+ * - `miss`       nothing to offer — the person has to search or add the bottle
+ * - `confirmed`  the person confirmed which bottle it was (POST /api/scan/confirm)
+ * - `deferred`   the free on-device label read was not confident enough, so the
+ *                client handed the photo to the paid AI read (label only). Not
+ *                an attempt of its own — the AI row that follows is.
+ */
+export const SCAN_OUTCOMES = ["matched", "candidates", "miss", "confirmed", "deferred"] as const;
+export type ScanOutcome = (typeof SCAN_OUTCOMES)[number];
+
+/** Where a resolution came from: own DB, crowd votes, an external UPC provider, on-device OCR, the AI label read, or nothing. */
+export const SCAN_SOURCES = [
+  "own",
+  /** Pending crowd confirmations not yet promoted to `bottle_upcs` (barcode). */
+  "community",
+  "whiskyapi",
+  "upcitemdb",
+  "openfoodfacts",
+  /** On-device text recognition (iOS Vision / Android ML Kit) + catalog fuzzy match (label). */
+  "ocr",
+  "ai",
+  "none",
+] as const;
+export type ScanSource = (typeof SCAN_SOURCES)[number];
+
+/**
+ * Scan funnel telemetry (M0.5): how often a barcode resolves, from where, and
+ * whether the answer was the one the person confirmed. The roadmap's M1 exit
+ * line ("scan hit rate ≥ 85%") is unmeasurable without it.
+ *
+ * **Deliberately not about anyone.** No user id, no session, no IP, no photo,
+ * no label text — the questions this answers are about the catalog ("which
+ * barcodes do we not know?"), not about people, so nothing here can be joined
+ * back to an account. That also keeps it out of export/deletion
+ * (account-data.ts NOT_LINKED) while still being disclosed on /privacy.
+ *
+ * `upc` is the PRODUCT's barcode, and is stored only when we did not already
+ * have it mapped (`candidates` / `miss`): that is the coverage-gap list an
+ * operator works from. A barcode we already know is never written here.
+ * Swept with the rest of the telemetry after TELEMETRY_RETENTION_DAYS.
+ */
+export const scanEvents = pgTable(
+  "scan_events",
+  {
+    id: id(),
+    kind: text("kind").$type<ScanKind>().notNull(),
+    outcome: text("outcome").$type<ScanOutcome>().notNull(),
+    source: text("source").$type<ScanSource>().notNull(),
+    /** Only for unmapped barcodes (outcome `candidates` | `miss`). */
+    upc: text("upc"),
+    /** Matches + candidates shown to the person. */
+    resultCount: integer("result_count").notNull().default(0),
+    /**
+     * For `confirmed` barcode scans: the confirmed bottle's position in our
+     * own matches (0 = the top answer was right), or null when the person
+     * picked a bottle our table did not offer for that barcode.
+     */
+    confirmRank: integer("confirm_rank"),
+    /** Server-side resolution time. */
+    latencyMs: integer("latency_ms"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("scan_events_created_idx").on(t.createdAt),
+    index("scan_events_upc_idx").on(t.upc),
+  ],
+);
+export type ScanEvent = typeof scanEvents.$inferSelect;
+
+/**
+ * One person's claim that barcode `upc` is bottle `bottleId` (M1 "teach the
+ * scanner"). A claim is **not** a catalog mapping: `bottle_upcs` is what every
+ * other scanner resolves against, so a barcode reaches it only when
+ * `UPC_CONFIRMATIONS_REQUIRED` independent, eligible accounts agree, a trusted
+ * account confirms, or an operator approves (src/lib/upc-crowd.ts).
+ *
+ * One row per (upc, user): changing your mind moves your vote rather than
+ * adding a second one, so nobody can out-vote the crowd alone.
+ *
+ * `status`:
+ * - `pending`  counted toward promotion
+ * - `promoted` the mapping it voted for is in `bottle_upcs`
+ * - `agreed`   confirmed a barcode that was already mapped; strengthens the
+ *              mapping but is no track record (it earns no trust)
+ * - `rejected` an operator ruled the claim wrong; it no longer counts, and it
+ *              counts against the account's trust
+ */
+export const UPC_CONFIRMATION_STATUSES = ["pending", "promoted", "agreed", "rejected"] as const;
+export type UpcConfirmationStatus = (typeof UPC_CONFIRMATION_STATUSES)[number];
+
+export const upcConfirmations = pgTable(
+  "upc_confirmations",
+  {
+    id: id(),
+    upc: text("upc").notNull(),
+    bottleId: text("bottle_id")
+      .notNull()
+      .references(() => bottles.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    status: text("status").$type<UpcConfirmationStatus>().notNull().default("pending"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("upc_confirmations_upc_user_uq").on(t.upc, t.userId),
+    index("upc_confirmations_upc_idx").on(t.upc),
+    index("upc_confirmations_user_updated_idx").on(t.userId, t.updatedAt),
+    index("upc_confirmations_status_idx").on(t.status),
+  ],
+);
+export type UpcConfirmation = typeof upcConfirmations.$inferSelect;
+
+export const UPC_PROVIDERS = ["whiskyapi", "upcitemdb", "openfoodfacts"] as const;
+export type UpcProvider = (typeof UPC_PROVIDERS)[number];
+
+/**
+ * What an external barcode provider answered, kept so the same barcode never
+ * spends a second request (UPCitemdb's trial allows 100/day per IP).
+ *
+ * Isolated by design: rows are **never** merged into `bottles` or
+ * `bottle_upcs` — a provider's product title is only ever used to fuzzy-search
+ * our own catalog, exactly as when it was fetched live. That keeps Open Food
+ * Facts' ODbL and provider ToS out of the first-party catalog.
+ *
+ * `found = false` is a cached miss (re-asked after `expiresAt`); a hit has no
+ * expiry unless the provider's terms need one (src/lib/upc-providers.ts).
+ */
+export const upcLookupCache = pgTable(
+  "upc_lookup_cache",
+  {
+    provider: text("provider").$type<UpcProvider>().notNull(),
+    upc: text("upc").notNull(),
+    found: boolean("found").notNull(),
+    productName: text("product_name"),
+    fetchedAt: timestamp("fetched_at", { withTimezone: true, mode: "date" }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }),
+  },
+  (t) => [primaryKey({ columns: [t.provider, t.upc] })],
+);
+export type UpcLookupCacheRow = typeof upcLookupCache.$inferSelect;
+
+/**
+ * Per-provider request budget for one UTC day plus the current backoff, so a
+ * capped free tier degrades to "skip the provider" instead of failing scans.
+ * `minuteStart`/`minuteCount` carry the per-minute limit (UPCitemdb trial: 6).
+ */
+export const upcProviderUsage = pgTable(
+  "upc_provider_usage",
+  {
+    provider: text("provider").$type<UpcProvider>().notNull(),
+    /** UTC day, "YYYY-MM-DD". */
+    day: text("day").notNull(),
+    requests: integer("requests").notNull().default(0),
+    minuteStart: timestamp("minute_start", { withTimezone: true, mode: "date" }),
+    minuteCount: integer("minute_count").notNull().default(0),
+    /** Consecutive throttles/errors; drives the exponential backoff. */
+    failures: integer("failures").notNull().default(0),
+    backoffUntil: timestamp("backoff_until", { withTimezone: true, mode: "date" }),
+    lastStatus: integer("last_status"),
+    updatedAt: updatedAt(),
+  },
+  (t) => [primaryKey({ columns: [t.provider, t.day] })],
+);
+export type UpcProviderUsage = typeof upcProviderUsage.$inferSelect;

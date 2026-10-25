@@ -27,6 +27,7 @@ import type { BottleSearchResult } from "@/lib/ai/tools";
 import { CategoryChip, categoryLabel } from "@/components/category-chip";
 import { haptic } from "@/lib/native/haptics";
 import { isNativeApp } from "@/lib/native/platform";
+import { identifyLabel, type LabelVia } from "@/lib/label-scan";
 import { originLabel } from "@/lib/origin";
 import {
   isNativeTorchAvailable,
@@ -218,6 +219,8 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
   const streamRef = useRef<MediaStream | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const fileForItemRef = useRef<string | null>(null);
+  /** Which label reader identified each queue item (on-device OCR or the AI), for confirm telemetry. */
+  const labelViaRef = useRef<Map<string, LabelVia>>(new Map());
   const lastCodeRef = useRef<{ code: string; at: number } | null>(null);
   const lastDetectionAtRef = useRef<number | null>(null);
   const lockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -276,20 +279,25 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
 
   /** Record the confirmation (crowdsourcing the mapping) and shelve the bottle. */
   const confirmAdd = useCallback(
-    async (itemId: string, upc: string | null, bottle: BottleSearchResult) => {
+    async (itemId: string, upc: string | null, bottle: BottleSearchResult, opts: { auto?: boolean } = {}) => {
       patchItem(itemId, { status: "resolving" });
       try {
         const res = await fetch("/api/scan/confirm", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
-            ...(upc ? { upc } : {}),
+            ...(upc ? { upc } : { via: labelViaRef.current.get(itemId) ?? "search" }),
             bottleId: bottle.id,
             relationship: relationshipRef.current,
+            // The only match, shelved without asking: not a confirmation.
+            ...(opts.auto ? { auto: true } : {}),
           }),
         });
         if (!res.ok) throw new Error(`confirm failed (${res.status})`);
-        const data = (await res.json()) as { userBottle: { id: string } | null };
+        const data = (await res.json()) as {
+          userBottle: { id: string } | null;
+          teach?: { state: string; confirmations: number; required: number; taught: boolean } | null;
+        };
         const updated = res.status !== 201;
         patchItem(itemId, {
           status: "added",
@@ -304,7 +312,16 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
         });
         setReviewId((cur) => (cur === itemId ? null : cur));
         haptic("success");
-        showToast(updated ? `${bottle.name} — shelf updated` : `Added ${bottle.name}`);
+        const teach = data.teach;
+        showToast(
+          teach?.taught
+            ? `You taught Whaikey this barcode — ${bottle.name}`
+            : teach?.state === "pending"
+              ? `Added ${bottle.name} — barcode saved for review`
+              : updated
+                ? `${bottle.name} — shelf updated`
+                : `Added ${bottle.name}`,
+        );
       } catch {
         // Keep the picked bottle on the item: Retry then re-confirms it
         // directly — vital for live suggestions, which have no upc or photo
@@ -334,7 +351,7 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
         const data = (await res.json()) as ScanResponse;
 
         if (data.matches.length === 1) {
-          await confirmAdd(itemId, data.upc, data.matches[0]);
+          await confirmAdd(itemId, data.upc, data.matches[0], { auto: true });
           return;
         }
         if (data.matches.length > 1) {
@@ -369,38 +386,33 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
     [confirmAdd, patchItem],
   );
 
-  /** Background resolution for a label-photo item. */
+  /**
+   * Background resolution for a label-photo item: the phone's own text
+   * recognition first (free), the AI read only when that is not confident
+   * (src/lib/label-scan.ts). On the web it is the AI read, as before.
+   */
   const processLabelItem = useCallback(
     async (itemId: string, dataUrl: string, mediaType: string) => {
       try {
-        const base64 = dataUrl.split(",", 2)[1] ?? "";
-        const res = await fetch("/api/scan-label", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ imageBase64: base64, mediaType }),
-        });
-        if (res.status === 503) {
+        const result = await identifyLabel(dataUrl, mediaType);
+        labelViaRef.current.set(itemId, result.via);
+        if (result.candidates.length === 0 && result.aiUnavailable) {
           patchItem(itemId, {
             status: "review",
             title: "Find your bottle",
-            subtitle: "AI label reading isn't configured — search the catalog instead.",
+            subtitle:
+              result.aiUnavailable === "unconfigured"
+                ? "AI label reading isn't configured — search the catalog instead."
+                : "AI label reading is paused for now — search the catalog instead.",
             options: [],
           });
           return;
         }
-        if (!res.ok) throw new Error(`label scan failed (${res.status})`);
-        const data = (await res.json()) as {
-          extracted: { brandGuess: string | null; expressionGuess: string | null };
-          candidates: BottleSearchResult[];
-        };
-        const guess = [data.extracted.brandGuess, data.extracted.expressionGuess]
-          .filter(Boolean)
-          .join(" ");
         patchItem(itemId, {
           status: "review",
-          title: data.candidates.length > 0 ? "Is it one of these?" : "New one on us 🥃",
-          subtitle: guess ? `The label reads “${guess}”.` : "Couldn't read much off that label.",
-          options: data.candidates,
+          title: result.candidates.length > 0 ? "Is it one of these?" : "New one on us 🥃",
+          subtitle: result.guess ? `The label reads “${result.guess}”.` : "Couldn't read much off that label.",
+          options: result.candidates,
         });
       } catch {
         patchItem(itemId, { status: "failed", subtitle: "Couldn't read that photo — tap to retry." });
@@ -641,6 +653,7 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
       };
       setItems((prev) => [item, ...prev]);
       setLiveSuggest(null);
+      labelViaRef.current.set(item.id, "ai");
       void confirmAdd(item.id, null, bottle);
     },
     [confirmAdd],

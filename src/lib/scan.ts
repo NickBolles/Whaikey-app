@@ -6,11 +6,12 @@ import { searchBottlesLike, type BottleSearchResult } from "@/lib/ai/tools";
 /**
  * Barcode (UPC/EAN) resolution for the scan flow — docs/DATA_SOURCES.md §3.
  *
- * Resolution order: own DB first (seeded + user-confirmed mappings), then a
- * transient external lookup (UPCitemdb trial → Open Food Facts) whose result
- * is only used to fuzzy-match our own catalog — external data is never
- * persisted (ODbL isolation). The user's confirmation is what creates the
- * durable upc→bottle mapping, so every scan grows first-party data.
+ * Resolution order: own DB first (seeded + crowd-verified mappings), then
+ * pending crowd claims (src/lib/upc-crowd.ts), then an external lookup
+ * (src/lib/upc-providers.ts: cached, budgeted, backed off) whose result is
+ * only used to fuzzy-match our own catalog — provider data is never merged
+ * into the catalog (ODbL isolation). Confirmations become a durable
+ * upc→bottle mapping once enough independent people agree.
  */
 
 // GTIN normalization & validation live in src/lib/upc.ts (client-safe, no DB
@@ -82,119 +83,16 @@ export async function confirmUpcMapping(
 // Transient external lookup (fallback when our DB misses)
 // ---------------------------------------------------------------------------
 
-const EXTERNAL_TIMEOUT_MS = 3000;
-
-export interface ExternalUpcProduct {
-  /** Product name as reported by the external source. */
-  name: string;
-  provider: "whiskyapi" | "upcitemdb" | "openfoodfacts";
-}
+/**
+ * The provider registry (whisky API → UPCitemdb → Open Food Facts) with its
+ * permanent cache, daily budget and backoff lives in src/lib/upc-providers.ts;
+ * re-exported so the scan route keeps a single entry point.
+ */
+export { lookupExternalUpc, type ExternalUpcProduct } from "@/lib/upc-providers";
 
 /** External lookups are on unless explicitly disabled (or in unit tests without a fetch mock). */
 export function isExternalLookupEnabled(): boolean {
   return process.env.WHAIKEY_UPC_LOOKUP !== "off";
-}
-
-async function fetchJson(url: string): Promise<unknown> {
-  const res = await fetch(url, {
-    signal: AbortSignal.timeout(EXTERNAL_TIMEOUT_MS),
-    headers: { accept: "application/json" },
-  });
-  if (!res.ok) return null;
-  return res.json();
-}
-
-/**
- * Optional whiskey-specialized UPC provider, tried before the generic ones
- * (docs/SOURCING_AT_SCALE.md §3.2). Configured entirely by env so a licensed
- * whiskey API (e.g. WhiskyDB's per-license endpoint) can be plugged in
- * without a code change:
- *
- *   WHAIKEY_WHISKY_UPC_URL — URL template containing "{upc}"
- *   WHAIKEY_WHISKY_UPC_KEY — optional key, sent as an "API-Key" header
- *
- * Unset ⇒ the provider is skipped. The response is treated tolerantly: the
- * first entry of an `items`/`results`/`data`/`spirits` array (or the body
- * itself), reading `name`/`full_name`/`title`. Like the other providers the
- * result is transient — used only to fuzzy-match our own catalog.
- */
-function whiskyUpcProviderConfig(): { url: string; key?: string } | null {
-  const template = process.env.WHAIKEY_WHISKY_UPC_URL;
-  if (!template || !template.includes("{upc}")) return null;
-  return { url: template, key: process.env.WHAIKEY_WHISKY_UPC_KEY || undefined };
-}
-
-function extractProductName(payload: unknown): string | null {
-  if (!payload || typeof payload !== "object") return null;
-  const body = payload as Record<string, unknown>;
-  const list = ["items", "results", "data", "spirits"]
-    .map((k) => body[k])
-    .find((v): v is unknown[] => Array.isArray(v));
-  const first = (list ? list[0] : payload) as Record<string, unknown> | undefined;
-  if (!first || typeof first !== "object") return null;
-  const name = [first.name, first.full_name, first.title].find(
-    (v): v is string => typeof v === "string" && v.trim().length > 0,
-  );
-  return name?.trim() ?? null;
-}
-
-async function lookupWhiskyApi(upc: string): Promise<ExternalUpcProduct | null> {
-  const config = whiskyUpcProviderConfig();
-  if (!config) return null;
-  try {
-    const res = await fetch(config.url.replace("{upc}", encodeURIComponent(upc)), {
-      signal: AbortSignal.timeout(EXTERNAL_TIMEOUT_MS),
-      headers: {
-        accept: "application/json",
-        ...(config.key ? { "API-Key": config.key } : {}),
-      },
-    });
-    if (!res.ok) return null;
-    const name = extractProductName(await res.json());
-    return name ? { name, provider: "whiskyapi" } : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Look up a UPC against external sources, best effort: a configured
- * whiskey-specialized provider first (spirits-aware data beats generic
- * catalogs), then UPCitemdb's trial endpoint (best liquor coverage per
- * docs/DATA_SOURCES.md), then Open Food Facts. Returns the product name
- * only — used transiently to search our catalog, never stored (ODbL +
- * API-ToS compliance). Any network error, timeout, or miss returns null;
- * scanning must degrade gracefully.
- */
-export async function lookupExternalUpc(upc: string): Promise<ExternalUpcProduct | null> {
-  const whisky = await lookupWhiskyApi(upc);
-  if (whisky) return whisky;
-
-  try {
-    const data = (await fetchJson(
-      `https://api.upcitemdb.com/prod/trial/lookup?upc=${encodeURIComponent(upc)}`,
-    )) as { items?: Array<{ title?: string; brand?: string }> } | null;
-    const item = data?.items?.[0];
-    const title = item?.title?.trim();
-    if (title) return { name: title, provider: "upcitemdb" };
-  } catch {
-    // fall through to the next provider
-  }
-
-  try {
-    const data = (await fetchJson(
-      `https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(upc)}.json?fields=product_name,brands`,
-    )) as { product?: { product_name?: string; brands?: string } } | null;
-    const name = [data?.product?.brands, data?.product?.product_name]
-      .map((s) => s?.trim())
-      .filter(Boolean)
-      .join(" ");
-    if (name) return { name, provider: "openfoodfacts" };
-  } catch {
-    // both providers failed — that's fine
-  }
-
-  return null;
 }
 
 /**

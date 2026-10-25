@@ -28,6 +28,7 @@ import {
   reports,
   session,
   tastingNotes,
+  upcConfirmations,
   user,
   userBottles,
   userProfiles,
@@ -498,6 +499,32 @@ export const ACCOUNT_DATA: readonly DataSlice[] = [
     },
   },
   {
+    key: "barcode_confirmations",
+    table: upcConfirmations,
+    description: "Barcodes you confirmed belong to a bottle, and whether each was accepted.",
+    onDelete: "deleted",
+    why:
+      "Your claim, keyed to your account. An accepted barcode lives on in bottle_upcs, which has no user column, so deleting the claim takes nothing from other people's scans.",
+    where: (_db, userId) => eq(upcConfirmations.userId, userId),
+    export: {
+      columns: ["upc", "bottleId", "bottleName", "status", "createdAt", "updatedAt"],
+      rows: (db, userId) =>
+        db
+          .select({
+            upc: upcConfirmations.upc,
+            bottleId: upcConfirmations.bottleId,
+            bottleName: bottles.name,
+            status: upcConfirmations.status,
+            createdAt: upcConfirmations.createdAt,
+            updatedAt: upcConfirmations.updatedAt,
+          })
+          .from(upcConfirmations)
+          .innerJoin(bottles, eq(bottles.id, upcConfirmations.bottleId))
+          .where(eq(upcConfirmations.userId, userId))
+          .orderBy(upcConfirmations.createdAt, upcConfirmations.id),
+    },
+  },
+  {
     key: "pending_bottles",
     table: bottles,
     description: "Bottles you added that were never promoted into the shared catalog.",
@@ -915,6 +942,11 @@ export const NOT_LINKED: Readonly<Record<string, string>> = {
   distilleries: "Catalog reference data; no user column.",
   bottle_aliases: "Alternative names for catalog bottles; no user column.",
   bottle_upcs: "Barcode → bottle map; no user column (a submitted barcode lives on bottle_submissions until promoted).",
+  upc_lookup_cache:
+    "A barcode provider's answer keyed by (provider, barcode): product title, found flag, fetch/expiry times; no user, session or IP column.",
+  upc_provider_usage: "Per-provider request counters and backoff per UTC day; no user column.",
+  scan_events:
+    "Scan outcomes (kind, outcome, source, counts, latency, and a product barcode only when it was not already mapped); no user, session or IP column, so no row can be attributed to an account.",
   critic_notes: "Published critic notes; no user column.",
   price_history: "Observed market prices; no user column.",
   catalog_totals: "Counts of verified catalog bottles per country, region and style; no user column, and nothing a person logs is counted.",

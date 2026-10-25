@@ -78,6 +78,13 @@ export default function PrivacyPage() {
             reason if it was declined. Declining takes nothing off your own shelf.
           </li>
           <li>
+            <strong className="text-foreground">Barcodes you confirm</strong> — which bottle you said
+            a barcode belongs to, and whether it has been accepted. A barcode only starts answering
+            other people&rsquo;s scans once enough people agree or a moderator checks it. Your
+            confirmation is deleted with your account; an accepted barcode stays in the catalog
+            without your name on it.
+          </li>
+          <li>
             <strong className="text-foreground">Why the app suggested something</strong> — the
             one-line reason behind a recommendation is cached against your account so the same
             suggestion reads the same way twice. It is written from your own journal and says
@@ -98,6 +105,13 @@ export default function PrivacyPage() {
             just the fact that somebody was signed in. Enough to tell whether sharing works at
             all, and deliberately not a record of what you read: nothing about pages you visit
             anywhere else in the app is recorded.
+          </li>
+          <li>
+            <strong className="text-foreground">How scanning went</strong> — whether a scan was recognised
+            (barcode or label), where the answer came from, how long it took, and whether the bottle
+            you confirmed was the one we suggested. Not attached to you: no account, device or
+            address is stored with it, nor any photo or label text. When we did not know a
+            barcode, the product&rsquo;s barcode number is kept so we can add that bottle.
           </li>
           <li>
             <strong className="text-foreground">Your age answer</strong> — the date of birth and
@@ -159,6 +173,18 @@ export default function PrivacyPage() {
             to be processed. Only what that request needs is sent.
           </li>
           <li>
+            <strong className="text-foreground">Reading a label</strong> — in the iPhone and
+            Android apps, a label photo is first read on your phone by the operating system&rsquo;s
+            own text recognition; only the words it found are sent to us to search the catalog, and
+            they are not stored. The photo goes to the AI provider only when that read was not good
+            enough to name the bottle.
+          </li>
+          <li>
+            <strong className="text-foreground">Barcode lookups</strong> — when we do not know a
+            barcode, the barcode number alone (nothing about you) may be looked up with UPCitemdb or
+            Open Food Facts, and their answer is kept so the same barcode is never looked up twice.
+          </li>
+          <li>
             <strong className="text-foreground">Hosting and the database</strong> — the servers
             that run the app and store the rows above.
           </li>
@@ -185,8 +211,8 @@ export default function PrivacyPage() {
           rate-limit counters are dropped after a couple of days, and phone lookups are pruned.
         </p>
         <p>
-          The AI meter readings, the four share-link events, and cheers you have taken back are
-          kept for 90 days and then deleted. That is the window the numbers are actually read
+          The AI meter readings, the four share-link events, scan outcomes, and cheers you have
+          taken back are kept for 90 days and then deleted. That is the window the numbers are actually read
           over — a week for the health checks, a month for the sharing ones — and past it they
           answer nothing anyone is asking. It is swept, not just intended: the same job that
           prunes everything above does this too.

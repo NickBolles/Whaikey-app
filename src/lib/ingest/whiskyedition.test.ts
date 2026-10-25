@@ -7,6 +7,7 @@ import {
   whiskyEditionReviewsToCandidates,
   type WhiskyEditionReview,
 } from "./whiskyedition";
+import { SourceUnavailableError } from "./types";
 
 const review = (over: Partial<WhiskyEditionReview> & { metadata?: WhiskyEditionReview["metadata"] }): WhiskyEditionReview => ({
   name: "Ledaig 5 Years (2020/2025) - James Eadie",
@@ -111,5 +112,25 @@ describe("fetchWhiskyEditionCandidates", () => {
   it("throws on HTTP failure", async () => {
     const fetchImpl = (async () => new Response("down", { status: 500 })) as typeof fetch;
     await expect(fetchWhiskyEditionCandidates(fetchImpl)).rejects.toThrow(/500/);
+  });
+});
+
+describe("fetchWhiskyEditionCandidates when the source is gone", () => {
+  // What thewhiskyedition.com serves since its domain lapsed (Sept 2026):
+  // a hosting provider's parking page, with HTTP 200.
+  const parked = `<!DOCTYPE html>\n<html><head><title>STRATO - Domain not available</title></head><body></body></html>`;
+
+  it("raises SourceUnavailableError naming the page instead of a JSON SyntaxError", async () => {
+    const fetchImpl = (async () =>
+      new Response(parked, { status: 200, headers: { "content-type": "text/html" } })) as unknown as typeof fetch;
+    const err = await fetchWhiskyEditionCandidates(fetchImpl).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(SourceUnavailableError);
+    expect((err as Error).message).toMatch(/returned HTML.*STRATO - Domain not available/);
+  });
+
+  it("treats a JSON content-type with an HTML body as unavailable too", async () => {
+    const fetchImpl = (async () =>
+      new Response(parked, { status: 200, headers: { "content-type": "application/json" } })) as unknown as typeof fetch;
+    await expect(fetchWhiskyEditionCandidates(fetchImpl)).rejects.toBeInstanceOf(SourceUnavailableError);
   });
 });

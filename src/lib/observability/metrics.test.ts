@@ -683,7 +683,7 @@ describe("telemetry retention", () => {
     await db.insert(schema.analyticsEvents).values({ id: uid("ev"), name: "share_view" });
 
     const swept = await sweepTelemetry(db);
-    expect(swept).toEqual({ aiUsage: 1, analyticsEvents: 1, retractedCheers: 0 });
+    expect(swept).toEqual({ aiUsage: 1, analyticsEvents: 1, retractedCheers: 0, scanEvents: 0 });
     expect(await db.select().from(schema.aiUsage)).toHaveLength(1);
     expect(await db.select().from(schema.analyticsEvents)).toHaveLength(1);
   });
