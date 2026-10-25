@@ -140,9 +140,13 @@ describe("challenges and crests", () => {
     // Their own view counts private pours too: 2 countries → crest.
     expect((await listCrests(db, friend.id)).map((c) => c.title)).toEqual(["Two countries"]);
     expect((await listInbox(db, friend.id)).map((n) => n.text)).toContain("You completed Two countries — new crest on your passport");
-    // The owner sees the friend's progress from shared notes only (1, not 2) and the crest.
+    // The owner sees the friend's progress from shared notes only (1, not 2) —
+    // and so not complete, though the friend's own crest rests on a private pour.
     const card = (await listChallenges(db, owner.id, after)).find((c) => c.slug === ch.slug)!;
-    expect(card.friends).toEqual([{ handle: "fr_cc", count: 1, completed: true }]);
+    expect(card.friends).toEqual([{ handle: "fr_cc", count: 1, completed: false }]);
+    // A suspended viewer reads nobody's progress.
+    await db.update(schema.userProfiles).set({ suspendedAt: new Date() }).where(eq(schema.userProfiles.userId, owner.id));
+    expect((await listChallenges(db, owner.id, after)).find((c) => c.slug === ch.slug)!.friends).toEqual([]);
     // A crest, once earned, cannot be left.
     expect(await leaveChallenge(db, friend.id, ch.slug)).toBe(false);
   });

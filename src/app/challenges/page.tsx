@@ -4,6 +4,7 @@ import { getDb } from "@/db";
 import { getSessionUser } from "@/lib/session";
 import { BOARD_KEYS, getBoard, listChallenges, listCrests, type BoardKey } from "@/lib/challenges";
 import { unreadCount } from "@/lib/notify";
+import { appNow } from "@/lib/clock";
 import { SocialTabs } from "@/components/social/social-tabs";
 import { BoardOptIn, JoinChallengeButton } from "@/components/social/challenge-client";
 
@@ -22,10 +23,11 @@ export default async function ChallengesPage({ searchParams }: { searchParams: P
   const { board: boardParam } = await searchParams;
   const key: BoardKey = (BOARD_KEYS as readonly string[]).includes(boardParam ?? "") ? (boardParam as BoardKey) : "regions";
   const db = getDb();
+  const now = appNow();
   const [cards, crests, board, unread] = await Promise.all([
-    listChallenges(db, user.id),
+    listChallenges(db, user.id, now),
     listCrests(db, user.id),
-    getBoard(db, user.id, key),
+    getBoard(db, user.id, key, now),
     unreadCount(db, user.id),
   ]);
 

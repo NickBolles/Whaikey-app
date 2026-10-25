@@ -7,6 +7,7 @@ import { MAX_TARGET, RULE_KINDS, RULE_KIND_IDS, progressFor, type MetRow, type R
 
 import { getRole } from "@/lib/clubs";
 import { notify } from "@/lib/notify";
+import { isSuspended } from "@/lib/social";
 
 export { MAX_TARGET, RULE_KINDS, RULE_KIND_IDS, progressFor, type MetRow, type RuleKind, type RuleKindId } from "./kinds";
 
@@ -217,11 +218,13 @@ export interface ChallengeCard {
   joined: boolean;
   completedAt: Date | null;
   progress: { count: number; target: number };
-  /** Mutual friends who joined: their completion and progress from their *shared* notes only. */
+  /** Mutual friends who joined: progress and completion, both from their *shared* notes only. */
   friends: Array<{ handle: string; count: number; completed: boolean }>;
 }
 
 async function mutualFriendIds(db: DB, userId: string): Promise<string[]> {
+  // A suspended account keeps its own challenges but reads nobody else's.
+  if (await isSuspended(db, userId)) return [];
   const rows = await db
     .select({ id: schema.follows.followeeId })
     .from(schema.follows)
@@ -277,7 +280,9 @@ export async function listChallenges(db: DB, userId: string, now = new Date()): 
     const friendCards: ChallengeCard["friends"] = [];
     for (const f of friendRows) {
       const p = progressFor(c.rule, await metRows(db, f.userId, c.startsAt, now, true));
-      friendCards.push({ handle: handles.get(f.userId) ?? "", count: p.count, completed: f.completedAt != null });
+      // "Completed" as a friend sees it is derived from the same shared notes
+      // as the count — the stored crest may rest on private pours.
+      friendCards.push({ handle: handles.get(f.userId) ?? "", count: p.count, completed: p.count >= p.target });
     }
     cards.push({
       slug: c.slug,

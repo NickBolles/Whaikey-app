@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getDb } from "@/db";
 import { requireUser, withErrorHandling } from "@/lib/session";
 import { joinChallenge, leaveChallenge } from "@/lib/challenges";
+import { appNow } from "@/lib/clock";
 
 type Ctx = { params: Promise<{ slug: string }> };
 
@@ -10,7 +11,7 @@ export async function POST(_req: Request, ctx: Ctx) {
   return withErrorHandling(async () => {
     const user = await requireUser();
     const { slug } = await ctx.params;
-    if (!(await joinChallenge(getDb(), user.id, slug))) return NextResponse.json({ error: "not_found" }, { status: 404 });
+    if (!(await joinChallenge(getDb(), user.id, slug, appNow()))) return NextResponse.json({ error: "not_found" }, { status: 404 });
     return NextResponse.json({ joined: true });
   });
 }
