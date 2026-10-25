@@ -1,13 +1,30 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getDb } from "@/db";
-import { requireUser, withErrorHandling } from "@/lib/session";
-import { flightByCode, setFlightState } from "@/lib/flights";
+import { getSessionUser, requireUser, withErrorHandling } from "@/lib/session";
+import { flightByCode, setFlightState, visibleFlightByCode } from "@/lib/flights";
 
 const schema = z.object({ to: z.enum(["revealed", "closed"]) }).strict();
 
+type Ctx = { params: Promise<{ code: string }> };
+
+/**
+ * GET — the flight's state, polled by everyone at the table so the host's
+ * reveal reaches every phone without a manual reload. Holding the code is
+ * holding the invite; nothing but the state is returned.
+ */
+export async function GET(_req: Request, ctx: Ctx) {
+  return withErrorHandling(async () => {
+    const { code } = await ctx.params;
+    const user = await getSessionUser();
+    const flight = await visibleFlightByCode(getDb(), code, user?.id ?? null);
+    if (!flight) return NextResponse.json({ error: "not_found" }, { status: 404 });
+    return NextResponse.json({ state: flight.state }, { headers: { "cache-control": "no-store" } });
+  });
+}
+
 /** POST /api/flights/[code]/state { to } — the host reveals for everyone (C4), or closes the night. */
-export async function POST(req: Request, ctx: { params: Promise<{ code: string }> }) {
+export async function POST(req: Request, ctx: Ctx) {
   return withErrorHandling(async () => {
     const user = await requireUser();
     const { code } = await ctx.params;

@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { and, asc, eq, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, lt, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
@@ -68,10 +68,12 @@ export const hashGuestToken = (token: string) => createHash("sha256").update(tok
 
 export async function createFlight(db: DB, hostId: string, input: z.infer<typeof flightCreateSchema>) {
   if (input.clubId && (await getRole(db, input.clubId, hostId)) == null) throw new FlightClubError();
+  // Catalog bottles only: a pending submission is visible to its submitter
+  // alone, and would put a stranger's private entry on everyone's table.
   const found = await db
     .select({ id: schema.bottles.id })
     .from(schema.bottles)
-    .where(inArray(schema.bottles.id, input.bottleIds));
+    .where(and(inArray(schema.bottles.id, input.bottleIds), ne(schema.bottles.status, "user_submitted")));
   if (found.length !== input.bottleIds.length) return null;
   const flight = await db.transaction(async (tx) => {
     const [row] = await tx
@@ -114,6 +116,29 @@ export async function createFlight(db: DB, hostId: string, input: z.infer<typeof
 export async function flightByCode(db: DB, code: string) {
   if (!/^[a-z0-9]{6,16}$/.test(code)) return null;
   return (await db.query.flights.findFirst({ where: eq(schema.flights.joinCode, code) })) ?? null;
+}
+
+/**
+ * The host-side read-path check (SOCIAL §13): a flight is reachable only while
+ * its host is socially present and unsuspended, and never across a block
+ * between host and viewer. The host always reaches their own.
+ */
+export async function flightVisibleTo(db: DB, flight: schema.Flight, viewerUserId: string | null): Promise<boolean> {
+  if (viewerUserId === flight.hostId) return true;
+  const host = await db.query.userProfiles.findFirst({
+    columns: { socialEnabled: true, suspendedAt: true },
+    where: eq(schema.userProfiles.userId, flight.hostId),
+  });
+  if (!host || !host.socialEnabled || host.suspendedAt != null) return false;
+  if (viewerUserId && (await blockedEither(db, flight.hostId, viewerUserId))) return false;
+  return true;
+}
+
+/** `flightByCode` plus `flightVisibleTo` — what every route and page should use. */
+export async function visibleFlightByCode(db: DB, code: string, viewerUserId: string | null) {
+  const flight = await flightByCode(db, code);
+  if (!flight || !(await flightVisibleTo(db, flight, viewerUserId))) return null;
+  return flight;
 }
 
 export interface Taster {

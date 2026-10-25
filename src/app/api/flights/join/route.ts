@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { getSessionUser, requireUser, withErrorHandling } from "@/lib/session";
-import { flightByCode, guestJoinSchema, joinAsGuest, joinAsUser } from "@/lib/flights";
+import { visibleFlightByCode, guestJoinSchema, joinAsGuest, joinAsUser } from "@/lib/flights";
 import { guestCookieName, guestCookieOptions } from "@/lib/flights/guest-cookie";
 
 const bodySchema = z.object({ code: z.string().min(1).max(32), guest: guestJoinSchema.optional() }).strict();
@@ -19,10 +19,10 @@ export async function POST(req: Request) {
     const parsed = bodySchema.safeParse(await req.json().catch(() => null));
     if (!parsed.success) return NextResponse.json({ error: "Invalid input" }, { status: 400 });
     const db = getDb();
-    const flight = await flightByCode(db, parsed.data.code);
+    const session = await getSessionUser();
+    const flight = await visibleFlightByCode(db, parsed.data.code, session?.id ?? null);
     if (!flight || flight.state === "closed") return NextResponse.json({ error: "not_found" }, { status: 404 });
 
-    const session = await getSessionUser();
     if (session || !parsed.data.guest) {
       const user = await requireUser();
       const result = await joinAsUser(db, flight.id, user.id);

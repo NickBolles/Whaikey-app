@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
 import { useRouter } from "next/navigation";
 import { Star } from "lucide-react";
@@ -102,16 +102,19 @@ export function RateGlass({ code, slot, initial }: { code: string; slot: string;
   const [tags, setTags] = useState<Record<string, number>>(initial?.flavorTags ?? {});
   const [note, setNote] = useState(initial?.note ?? "");
   const [status, setStatus] = useState<"idle" | "saved" | "error">("idle");
+  // Saves run one at a time, each sending the latest full entry, so a slow
+  // older request can never land after — and overwrite — a newer one.
+  const latest = useRef<MyEntry>({ rating, flavorTags: tags, note });
+  const queue = useRef<Promise<void>>(Promise.resolve());
 
-  async function save(next: Partial<MyEntry>) {
-    const body = {
-      slot,
-      rating: next.rating !== undefined ? next.rating : rating,
-      flavorTags: next.flavorTags !== undefined ? next.flavorTags : tags,
-      note: next.note !== undefined ? next.note : note,
-    };
-    const res = await post(`/api/flights/${code}/entries`, "PUT", body).catch(() => null);
-    setStatus(res?.ok ? "saved" : "error");
+  function save(next: Partial<MyEntry>) {
+    latest.current = { ...latest.current, ...next };
+    queue.current = queue.current.then(async () => {
+      const body = { slot, ...latest.current };
+      const res = await post(`/api/flights/${code}/entries`, "PUT", body).catch(() => null);
+      setStatus(res?.ok ? "saved" : "error");
+    });
+    return queue.current;
   }
 
   return (
@@ -254,4 +257,28 @@ export function LinkQr({ path, label }: { path: string; label: string }) {
   if (!src) return null;
   // eslint-disable-next-line @next/next/no-img-element
   return <img src={src} alt={label} width={160} height={160} className="rounded-lg bg-white p-1" />;
+}
+
+/**
+ * Everyone at the table sees the reveal when the host makes it (C4): a light
+ * poll of the flight's state while it is open, refreshing on change. Stops
+ * when the page goes away or the flight is no longer open.
+ */
+export function RevealWatcher({ code }: { code: string }) {
+  const router = useRouter();
+  useEffect(() => {
+    let live = true;
+    const tick = async () => {
+      const res = await fetch(`/api/flights/${code}/state`, { cache: "no-store" }).catch(() => null);
+      if (!live || !res?.ok) return;
+      const { state } = (await res.json()) as { state: string };
+      if (state !== "open") router.refresh();
+    };
+    const id = window.setInterval(() => void tick(), 8000);
+    return () => {
+      live = false;
+      window.clearInterval(id);
+    };
+  }, [code, router]);
+  return null;
 }

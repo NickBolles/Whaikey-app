@@ -5,7 +5,7 @@ import { notFound } from "next/navigation";
 import { getDb } from "@/db";
 import { getSessionUser } from "@/lib/session";
 import { OFFERED_MARKETS } from "@/lib/age-gate";
-import { findTaster, flightByCode, getFlightView } from "@/lib/flights";
+import { findTaster, getFlightView, visibleFlightByCode } from "@/lib/flights";
 import { guestCookieName } from "@/lib/flights/guest-cookie";
 import {
   ClaimSeatButton,
@@ -15,6 +15,7 @@ import {
   JoinAsUserButton,
   LinkQr,
   RateGlass,
+  RevealWatcher,
 } from "@/components/social/flight-client";
 
 export const dynamic = "force-dynamic";
@@ -29,18 +30,21 @@ export const metadata: Metadata = { title: "Tasting night", robots: { index: fal
 export default async function FlightPage({ params }: { params: Promise<{ code: string }> }) {
   const { code } = await params;
   const db = getDb();
-  const flight = await flightByCode(db, code);
-  if (!flight) notFound();
   const user = await getSessionUser();
+  const flight = await visibleFlightByCode(db, code, user?.id ?? null);
+  if (!flight) notFound();
   const cookieStore = await cookies();
   const guestToken = cookieStore.get(guestCookieName(code))?.value ?? null;
   const taster = await findTaster(db, flight.id, { userId: user?.id ?? null, guestToken });
-  const guestSeatToClaim = user && !taster?.userId && guestToken ? await findTaster(db, flight.id, { guestToken }) : null;
+  // Looked up on its own: an account that already has a seat can still merge
+  // ratings it made as a guest on this device into the empty glasses.
+  const guestSeatToClaim = user && guestToken ? await findTaster(db, flight.id, { guestToken }) : null;
   const view = await getFlightView(db, flight, user?.id ?? null, taster);
   const revealed = view.state !== "open";
 
   return (
     <div className="mx-auto flex max-w-lg flex-col gap-4 px-3 pb-24 pt-5">
+      {view.state === "open" && taster && !view.isHost && <RevealWatcher code={code} />}
       <header className="flex flex-col gap-1">
         <p className="section-label">{view.blind ? "Blind tasting" : "Tasting night"}{view.club ? ` · ${view.club.name}` : ""}</p>
         <h1 className="font-display text-[1.75rem] font-semibold leading-tight">{view.title}</h1>

@@ -32,6 +32,7 @@ import {
   saveEntry,
   setFlightState,
   sweepGuests,
+  visibleFlightByCode,
 } from "@/lib/flights";
 import { listInbox } from "@/lib/notify";
 import { POST as JOIN } from "@/app/api/flights/join/route";
@@ -264,6 +265,19 @@ describe("tasting nights", () => {
     await joinByCode(db, member.id, (await createInvite(db, host.id, club.id))!.code);
     await createFlight(db, host.id, { title: "Club night", blind: true, clubId: club.id, bottleIds: ids() });
     expect((await listInbox(db, member.id)).map((n) => n.text)).toContain("@host_f invited you to Club night");
+  });
+
+  it("a block or a suspended host closes the flight to that viewer; pending bottles can't be poured", async () => {
+    const flight = (await createFlight(db, host.id, { title: "Night", blind: true, bottleIds: ids() }))!;
+    const t = await person(db, "t_vis");
+    expect(await visibleFlightByCode(db, flight.joinCode, t.id)).not.toBeNull();
+    await blockUser(db, host.id, t.id);
+    expect(await visibleFlightByCode(db, flight.joinCode, t.id)).toBeNull();
+    expect(await visibleFlightByCode(db, flight.joinCode, host.id)).not.toBeNull();
+    await db.update(schema.userProfiles).set({ suspendedAt: new Date() }).where(eq(schema.userProfiles.userId, host.id));
+    expect(await visibleFlightByCode(db, flight.joinCode, null)).toBeNull();
+    const pending = await createTestBottle(db, { status: "user_submitted" });
+    expect(await createFlight(db, host.id, { title: "x", blind: true, bottleIds: [...ids().slice(0, 2), pending.id] })).toBeNull();
   });
 
   it("writes an .ics only for a scheduled night", () => {

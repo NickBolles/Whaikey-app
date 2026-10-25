@@ -77,7 +77,7 @@ ALTER TABLE "club_members" ADD CONSTRAINT "club_members_club_id_clubs_id_fk" FOR
 ALTER TABLE "club_members" ADD CONSTRAINT "club_members_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "clubs" ADD CONSTRAINT "clubs_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "flight_bottles" ADD CONSTRAINT "flight_bottles_flight_id_flights_id_fk" FOREIGN KEY ("flight_id") REFERENCES "public"."flights"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "flight_bottles" ADD CONSTRAINT "flight_bottles_bottle_id_bottles_id_fk" FOREIGN KEY ("bottle_id") REFERENCES "public"."bottles"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "flight_bottles" ADD CONSTRAINT "flight_bottles_bottle_id_bottles_id_fk" FOREIGN KEY ("bottle_id") REFERENCES "public"."bottles"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "flight_entries" ADD CONSTRAINT "flight_entries_participant_id_flight_participants_id_fk" FOREIGN KEY ("participant_id") REFERENCES "public"."flight_participants"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "flight_entries" ADD CONSTRAINT "flight_entries_flight_id_flights_id_fk" FOREIGN KEY ("flight_id") REFERENCES "public"."flights"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "flight_participants" ADD CONSTRAINT "flight_participants_flight_id_flights_id_fk" FOREIGN KEY ("flight_id") REFERENCES "public"."flights"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint

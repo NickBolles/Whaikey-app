@@ -790,4 +790,50 @@ export async function seedDemoUser(db: DB): Promise<void> {
       createdAt: D("2026-06-01T12:00:00Z"),
     },
   ]);
+
+  // ── Track C (social M2): a club and a revealed blind tasting night ──────────
+  // Jordan owns "Tuesday Drams" with Sasha as a member, and hosted a revealed
+  // three-glass blind flight both of them rated — the /clubs, club and /f
+  // visual baselines. Fixed ids, codes and timestamps.
+  await db.insert(schema.clubs).values({
+    id: "demo-club-1",
+    name: "Tuesday Drams",
+    description: "Peat on the first Tuesday, everything else after.",
+    createdBy: DEMO_USER_ID,
+    createdAt: D("2026-07-01T18:00:00Z"),
+    updatedAt: D("2026-07-01T18:00:00Z"),
+  });
+  await db.insert(schema.clubMembers).values([
+    { clubId: "demo-club-1", userId: DEMO_USER_ID, role: "owner", joinedAt: D("2026-07-01T18:00:00Z") },
+    { clubId: "demo-club-1", userId: DEMO_FRIEND_ID, role: "member", joinedAt: D("2026-07-02T18:00:00Z") },
+  ]);
+  await db.insert(schema.flights).values({
+    id: "demo-flight-1",
+    hostId: DEMO_USER_ID,
+    clubId: "demo-club-1",
+    title: "Islay night",
+    blind: true,
+    state: "revealed",
+    joinCode: "demonight1",
+    createdAt: D("2026-07-07T19:00:00Z"),
+    revealedAt: D("2026-07-07T21:00:00Z"),
+  });
+  await db.insert(schema.flightBottles).values([
+    { flightId: "demo-flight-1", slot: "A", bottleId: "lagavulin-16" },
+    { flightId: "demo-flight-1", slot: "B", bottleId: "highland-park-12" },
+    { flightId: "demo-flight-1", slot: "C", bottleId: "eagle-rare-10" },
+  ]);
+  await db.insert(schema.flightParticipants).values([
+    { id: "demo-seat-jordan", flightId: "demo-flight-1", userId: DEMO_USER_ID, joinedAt: D("2026-07-07T19:00:00Z") },
+    { id: "demo-seat-sasha", flightId: "demo-flight-1", userId: DEMO_FRIEND_ID, joinedAt: D("2026-07-07T19:05:00Z") },
+  ]);
+  const at = D("2026-07-07T20:00:00Z");
+  await db.insert(schema.flightEntries).values([
+    { id: "demo-fe-1", participantId: "demo-seat-jordan", flightId: "demo-flight-1", slot: "A", rating: 4.5, flavorTags: { campfire: 3, brine: 2 }, note: "Smoke first, then the sea.", createdAt: at, updatedAt: at },
+    { id: "demo-fe-2", participantId: "demo-seat-sasha", flightId: "demo-flight-1", slot: "A", rating: 4, flavorTags: { campfire: 2, peat: 3, brine: 1 }, createdAt: at, updatedAt: at },
+    { id: "demo-fe-3", participantId: "demo-seat-jordan", flightId: "demo-flight-1", slot: "B", rating: 3.5, flavorTags: { heather: 2, honey: 2 }, createdAt: at, updatedAt: at },
+    { id: "demo-fe-4", participantId: "demo-seat-sasha", flightId: "demo-flight-1", slot: "B", rating: 4, flavorTags: { honey: 3 }, note: "Heather honey all day.", createdAt: at, updatedAt: at },
+    { id: "demo-fe-5", participantId: "demo-seat-jordan", flightId: "demo-flight-1", slot: "C", rating: 4, flavorTags: { vanilla: 2, toffee: 2 }, createdAt: at, updatedAt: at },
+    { id: "demo-fe-6", participantId: "demo-seat-sasha", flightId: "demo-flight-1", slot: "C", rating: 3.5, flavorTags: { vanilla: 2, oak: 1 }, createdAt: at, updatedAt: at },
+  ]);
 }

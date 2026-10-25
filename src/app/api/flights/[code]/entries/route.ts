@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/db";
 import { getSessionUser, withErrorHandling } from "@/lib/session";
-import { entrySchema, findTaster, flightByCode, saveEntry } from "@/lib/flights";
+import { entrySchema, findTaster, visibleFlightByCode, saveEntry } from "@/lib/flights";
 import { readGuestTokenFromHeader } from "@/lib/flights/guest-cookie";
 
 /**
@@ -16,9 +16,9 @@ export async function PUT(req: Request, ctx: { params: Promise<{ code: string }>
     const parsed = entrySchema.safeParse(await req.json().catch(() => null));
     if (!parsed.success) return NextResponse.json({ error: "Invalid input" }, { status: 400 });
     const db = getDb();
-    const flight = await flightByCode(db, code);
-    if (!flight) return NextResponse.json({ error: "not_found" }, { status: 404 });
     const user = await getSessionUser();
+    const flight = await visibleFlightByCode(db, code, user?.id ?? null);
+    if (!flight) return NextResponse.json({ error: "not_found" }, { status: 404 });
     const taster = await findTaster(db, flight.id, {
       userId: user?.id ?? null,
       guestToken: readGuestTokenFromHeader(req.headers.get("cookie"), code),

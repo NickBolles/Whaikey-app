@@ -312,8 +312,8 @@ export interface ClubView {
 
 /**
  * The club shelf: distinct bottles "tasted by the club" — what was revealed
- * at the club's tasting nights, plus members' notes they already share with
- * followers or publicly (never a friends-only or private pour, whose audience
+ * at the club's tasting nights, plus members' notes they already share
+ * publicly (never a followers-, friends-only or private pour, whose audience
  * the club is not). Distinct, so it saturates; no counts per person.
  */
 export async function clubShelf(db: DB, viewerId: string, clubId: string): Promise<ClubShelfBottle[]> {
@@ -329,7 +329,9 @@ export async function clubShelf(db: DB, viewerId: string, clubId: string): Promi
     .where(
       and(
         eq(schema.clubMembers.clubId, clubId),
-        inArray(schema.pours.visibility, ["followers", "public"]),
+        // Public only: joining a club must not widen a followers-only note's
+        // audience to members who don't follow its author.
+        eq(schema.pours.visibility, "public"),
         memberVisibleSql(schema.clubMembers.userId, viewerId),
       ),
     );

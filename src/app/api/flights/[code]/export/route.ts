@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/db";
 import { getSessionUser, withErrorHandling } from "@/lib/session";
-import { findTaster, flightByCode, flightResultsCsv, getFlightView } from "@/lib/flights";
+import { findTaster, visibleFlightByCode, flightResultsCsv, getFlightView } from "@/lib/flights";
 import { readGuestTokenFromHeader } from "@/lib/flights/guest-cookie";
 
 /** GET — results CSV for anyone seated at the table, after the reveal. */
@@ -9,9 +9,9 @@ export async function GET(req: Request, ctx: { params: Promise<{ code: string }>
   return withErrorHandling(async () => {
     const { code } = await ctx.params;
     const db = getDb();
-    const flight = await flightByCode(db, code);
-    if (!flight) return NextResponse.json({ error: "not_found" }, { status: 404 });
     const user = await getSessionUser();
+    const flight = await visibleFlightByCode(db, code, user?.id ?? null);
+    if (!flight) return NextResponse.json({ error: "not_found" }, { status: 404 });
     const taster = await findTaster(db, flight.id, {
       userId: user?.id ?? null,
       guestToken: readGuestTokenFromHeader(req.headers.get("cookie"), code),

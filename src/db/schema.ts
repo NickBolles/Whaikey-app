@@ -2114,9 +2114,11 @@ export const flightBottles = pgTable(
       .notNull()
       .references(() => flights.id, { onDelete: "cascade" }),
     slot: text("slot").$type<FlightSlot>().notNull(),
+    // Cascade: a bottle that leaves the catalog (a rejected submission, a
+    // duplicate merged away) must never block an account deletion or a merge.
     bottleId: text("bottle_id")
       .notNull()
-      .references(() => bottles.id),
+      .references(() => bottles.id, { onDelete: "cascade" }),
   },
   (t) => [primaryKey({ columns: [t.flightId, t.slot] })],
 );
