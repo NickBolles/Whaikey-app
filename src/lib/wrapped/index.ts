@@ -104,13 +104,22 @@ export async function getWrapped(db: DB, userId: string, year: number): Promise<
   const styles = [...firstMetIn(events, (e) => e.category, start)].sort();
   const newBottles = firstMetIn(events, (e) => e.bottleId, start);
 
+  // Descriptors are discoveries too: named for the first time this year.
   const noteRows = await db
-    .select({ flavorTags: schema.tastingNotes.flavorTags })
+    .select({ flavorTags: schema.tastingNotes.flavorTags, at: schema.pours.createdAt })
     .from(schema.tastingNotes)
     .innerJoin(schema.pours, eq(schema.pours.id, schema.tastingNotes.pourId))
-    .where(and(eq(schema.pours.userId, userId), gte(schema.pours.createdAt, start), lt(schema.pours.createdAt, end)));
-  const descriptors = [...new Set(noteRows.flatMap((r) => Object.keys(r.flavorTags ?? {})))]
-    .map((id) => leafLabel(id))
+    .where(and(eq(schema.pours.userId, userId), lt(schema.pours.createdAt, end)));
+  const firstNamed = new Map<string, Date>();
+  for (const r of noteRows) {
+    for (const id of Object.keys(r.flavorTags ?? {})) {
+      const prev = firstNamed.get(id);
+      if (!prev || r.at < prev) firstNamed.set(id, r.at);
+    }
+  }
+  const descriptors = [...firstNamed.entries()]
+    .filter(([, at]) => at >= start)
+    .map(([id]) => leafLabel(id))
     .filter((l): l is string => Boolean(l))
     .sort();
 

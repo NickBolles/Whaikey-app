@@ -11,6 +11,7 @@ import { getWrapped, wrappedAvailable } from "@/lib/wrapped";
 import { cardPath, revokeAllCards, signCard, verifyCard } from "@/lib/cards";
 import { makeEverythingPrivate } from "@/lib/social";
 import { POST as MINT } from "@/app/api/cards/route";
+import { createFlight, setFlightState } from "@/lib/flights";
 import { GET as CARD } from "@/app/api/cards/[kind]/route";
 
 describe("Wrapped", () => {
@@ -41,10 +42,13 @@ describe("Wrapped", () => {
     const [p] = await db.select().from(schema.pours).where(eq(schema.pours.bottleId, islayNew.id));
     await db.insert(schema.tastingNotes).values({ id: uid("n"), pourId: p.id, extractedBy: "user", flavorTags: { peat: 2, brine: 1 } });
 
+    // "Earthy peat" was already named in 2025, so only brine is new in 2026.
+    const [oldPour] = await db.select().from(schema.pours).where(eq(schema.pours.bottleId, islayOld.id));
+    await db.insert(schema.tastingNotes).values({ id: uid("n"), pourId: oldPour.id, extractedBy: "user", flavorTags: { peat: 1 } });
     const w = await getWrapped(db, me.id, 2026);
     expect(w.discovered.countries).toEqual(["United States"]); // Scotland was met in 2025
     expect(w.discovered.regions).toEqual(["Kentucky"]);
-    expect(w.descriptors).toEqual(["Brine / seaweed", "Earthy peat"]);
+    expect(w.descriptors).toEqual(["Brine / seaweed"]);
     expect(w.bestNewFind).toMatchObject({ name: "Kentucky", rating: 4.5 });
     // No field anywhere counts pours: twenty pours of Kentucky are one discovery.
     // A bottle shelved long ago but bought this year counts as met this year.
@@ -101,5 +105,42 @@ describe("share cards", () => {
     await makeEverythingPrivate(db, me.id);
     await db.update(schema.userProfiles).set({ socialEnabled: true }).where(eq(schema.userProfiles.userId, me.id));
     expect((await CARD(new Request(`http://localhost${fresh.link}`), { params: Promise.resolve({ kind: "passport" }) })).status).toBe(404);
+  });
+});
+
+describe("card renders", () => {
+  let db: DB;
+  beforeEach(async () => {
+    db = await setupTestDb();
+    vi.stubEnv("BETTER_AUTH_SECRET", "test-secret-for-cards-0123456789");
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  const render = (path: string, kind: string) => CARD(new Request(`http://localhost${path}`), { params: Promise.resolve({ kind }) });
+
+  it("renders palate, Wrapped and flight-results cards in both formats, and 404s the rest", async () => {
+    const me = await createTestUser(db);
+    await createProfile(db, me, "me_render");
+    setSessionUser(me);
+    const palate = (await (await MINT(jsonRequest("/api/cards", "POST", { kind: "palate" }))).json()) as { story: string; link: string };
+    expect((await render(palate.story, "palate")).status).toBe(200);
+    const wrapped = (await (await MINT(jsonRequest("/api/cards", "POST", { kind: "wrapped", year: 2025 }))).json()) as { story: string; link: string };
+    expect((await render(wrapped.link, "wrapped")).status).toBe(200);
+    expect((await render(wrapped.link.replace("x=2025", "x=2024"), "wrapped")).status).toBe(404);
+    expect((await render(palate.story, "nonsense")).status).toBe(404);
+    expect((await render(palate.story.replace("f=story", "f=poster"), "palate")).status).toBe(404);
+    expect((await MINT(jsonRequest("/api/cards", "POST", { kind: "bogus" }))).status).toBe(400);
+
+    const bs = [await createTestBottle(db), await createTestBottle(db), await createTestBottle(db)];
+    const flight = (await createFlight(db, me.id, { title: "Card night", blind: true, bottleIds: bs.map((b) => b.id) }))!;
+    // Not revealed yet: no card.
+    expect((await MINT(jsonRequest("/api/cards", "POST", { kind: "flight", code: flight.joinCode }))).status).toBe(404);
+    await setFlightState(db, me.id, flight.id, "revealed");
+    const card = (await (await MINT(jsonRequest("/api/cards", "POST", { kind: "flight", code: flight.joinCode }))).json()) as { story: string };
+    expect((await render(card.story, "flight")).status).toBe(200);
+    // A suspended owner's cards stop rendering.
+    await db.update(schema.userProfiles).set({ suspendedAt: new Date() }).where(eq(schema.userProfiles.userId, me.id));
+    expect((await render(card.story, "flight")).status).toBe(404);
+    expect((await render(palate.story, "palate")).status).toBe(404);
   });
 });
