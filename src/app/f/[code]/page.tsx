@@ -7,6 +7,7 @@ import { getSessionUser } from "@/lib/session";
 import { OFFERED_MARKETS } from "@/lib/age-gate";
 import { findTaster, getFlightView, visibleFlightByCode } from "@/lib/flights";
 import { guestCookieName } from "@/lib/flights/guest-cookie";
+import { ShareCardButton } from "@/components/social/share-card-button";
 import {
   ClaimSeatButton,
   GuestJoinForm,
@@ -155,9 +156,12 @@ export default async function FlightPage({ params }: { params: Promise<{ code: s
       </ol>
 
       {revealed && taster && (
-        <a href={`/api/flights/${code}/export`} className="self-start text-xs text-muted hover:text-foreground">
-          Download results (CSV)
-        </a>
+        <div className="flex flex-col gap-2">
+          {!taster.guest && <ShareCardButton body={{ kind: "flight", code }} title={`${view.title} — results`} label="Share the results card" />}
+          <a href={`/api/flights/${code}/export`} className="self-start text-xs text-muted hover:text-foreground">
+            Download results (CSV)
+          </a>
+        </div>
       )}
     </div>
   );

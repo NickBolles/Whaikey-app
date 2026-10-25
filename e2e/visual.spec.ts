@@ -495,6 +495,13 @@ test.describe("signed in (demo collector)", () => {
     await expect(page).toHaveScreenshot(shot("challenges"), { fullPage: true });
   });
 
+  test("wrapped: the year opens December 10", async ({ page }) => {
+    await page.goto("/wrapped/2026");
+    await expect(page.getByRole("heading", { name: /opens December 10/ })).toBeVisible();
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("wrapped-waiting"), { fullPage: true });
+  });
+
   test("friends: following, followers, and a mutual", async ({ page }) => {
     await page.goto("/friends/people");
     // exact: the redesigned page adds a "Find friends" h2 alongside the h1.
