@@ -251,6 +251,8 @@ The decision sheet for a miss carries **three** ways out, not two: pick from the
 
 ### 3.10 Friends (tab)
 
+> **Amended 2026-10 (design board 2026-10-25, decision C1 — "Social tab = Feed · Clubs · Challenges; Home keeps 3–5 items").** The tab opens on the **feed** (SOCIAL D15) under a compact section switcher — Feed · Clubs · People (Challenges joins when it ships) — with the notifications bell at the trailing edge. The people controls below (search/scan field, Show my code, How you're found, Following / Followers / Requests) are unchanged in content and order; they live one tap away under **People** (`/friends/people`) rather than above the feed, so the feed is above the fold at 390×844. The empty/low-volume feed leads with "Find friends" (→ People) per SOCIAL §6.3.
+
 Header row: "Friends" · **Show my code** · settings icon (opens **How you're found**, the existing discovery settings, as a sheet). One search field "@handle or phone number" with the **scan-code** button at its trailing edge (D15). Then Following / Followers / Requests, then the full "From your friends" feed (Q4).
 
 ### 3.11 Compare, Note discussion, Learn — unchanged. These remain the reference compositions.

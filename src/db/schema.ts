@@ -476,6 +476,8 @@ export const pours = pgTable(
   },
   (t) => [
     index("pours_user_idx").on(t.userId),
+    // The feed reads followees' pours newest-first (Track C, M2.1).
+    index("pours_user_created_idx").on(t.userId, t.createdAt),
     index("pours_bottle_idx").on(t.bottleId),
     uniqueIndex("pours_user_client_idx").on(t.userId, t.clientId),
   ],
@@ -1924,3 +1926,96 @@ export const upcProviderUsage = pgTable(
   (t) => [primaryKey({ columns: [t.provider, t.day] })],
 );
 export type UpcProviderUsage = typeof upcProviderUsage.$inferSelect;
+
+// ── Track C: social (M2, docs/SOCIAL.md D15–D21) ─────────────────────────────
+// Tables owned by the social track (whiskey-build-tracks.md, Track C). Other
+// tracks add their own fenced section rather than editing this one.
+
+/**
+ * Notification categories (docs/SOCIAL.md §7.5 / D18). A closed list: a new
+ * kind of notification is a decision, recorded here and in the banned-copy
+ * test, never a free-form string.
+ */
+export const NOTIFICATION_CATEGORIES = [
+  "follower",
+  "follow_request",
+  "follow_accepted",
+  "cheer",
+  "comment",
+  "reply",
+  "friend_tasted",
+  "club",
+  "flight",
+  "challenge",
+] as const;
+export type NotificationCategory = (typeof NOTIFICATION_CATEGORIES)[number];
+
+/**
+ * What happened to a notification's push copy.
+ * - `none`         push not attempted (category's push switch off)
+ * - `unconfigured` the deployment has no push credentials; in-app only
+ * - `quiet`        inside the recipient's quiet hours; in-app only, never re-sent later
+ * - `no_device`    the recipient has no registered device
+ * - `pending`      queued for the sender
+ * - `sent` / `failed`
+ */
+export const PUSH_STATES = ["none", "unconfigured", "quiet", "no_device", "pending", "sent", "failed"] as const;
+export type PushState = (typeof PUSH_STATES)[number];
+
+/**
+ * The in-app inbox (D18). Copy is rendered at read time from `category` and the
+ * actor's CURRENT handle, so a rename shows through and a block or suspension
+ * hides the row on the read path instead of leaving stale text behind. No
+ * free text from the actor is stored here (a comment body stays on the
+ * comment, behind its own visibility check).
+ */
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: id(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    /** Who caused it; null for system notifications (a challenge completed). */
+    actorId: text("actor_id").references(() => user.id, { onDelete: "cascade" }),
+    category: text("category").$type<NotificationCategory>().notNull(),
+    /** What it is about — a pour id, club id, flight id, bottle id … by category. */
+    subjectId: text("subject_id"),
+    /** Small structured context for the template (no actor free text). */
+    data: jsonb("data").$type<Record<string, string | number | boolean>>(),
+    /** One notification per real-world event, e.g. `cheer:<pour>:<actor>`. */
+    dedupeKey: text("dedupe_key").notNull(),
+    createdAt: createdAt(),
+    readAt: timestamp("read_at", { withTimezone: true, mode: "date" }),
+    pushState: text("push_state").$type<PushState>().notNull().default("none"),
+    pushedAt: timestamp("pushed_at", { withTimezone: true, mode: "date" }),
+  },
+  (t) => [
+    index("notifications_user_created_idx").on(t.userId, t.createdAt),
+    uniqueIndex("notifications_user_dedupe_uq").on(t.userId, t.dedupeKey),
+    index("notifications_actor_idx").on(t.actorId),
+    index("notifications_push_state_idx").on(t.pushState),
+  ],
+);
+export type Notification = typeof notifications.$inferSelect;
+
+/**
+ * Per-person notification settings (D18): a switch per category group and
+ * optional quiet hours in the person's own time zone. No row = defaults.
+ */
+export const notificationSettings = pgTable("notification_settings", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => user.id, { onDelete: "cascade" }),
+  /** Group key → enabled. Missing keys use the group's default. */
+  groups: jsonb("groups").$type<Record<string, boolean>>(),
+  /** Push for everything at once; the inbox still fills when this is off. */
+  pushEnabled: boolean("push_enabled").notNull().default(true),
+  /** Minutes after local midnight; both null = no quiet hours. */
+  quietStart: integer("quiet_start"),
+  quietEnd: integer("quiet_end"),
+  timeZone: text("time_zone"),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+export type NotificationSettingsRow = typeof notificationSettings.$inferSelect;

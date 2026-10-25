@@ -26,6 +26,7 @@ import { getUserPalate } from "@/lib/palate-store";
 import { palateWheelHeat } from "@/lib/palate";
 import { hashPhone, normalizePhone, phoneLast2 } from "@/lib/phone";
 import { RESERVED_HANDLES } from "@/lib/reserved-handles";
+import { notify } from "@/lib/notify";
 
 // ---------------------------------------------------------------------------
 // Identity
@@ -361,7 +362,15 @@ export async function followByHandle(db: DB, followerId: string, handle: string)
       .onConflictDoNothing()
       .returning();
   });
-  if (inserted[0]) return { state: inserted[0].state };
+  if (inserted[0]) {
+    await notify(db, {
+      recipientId: target.userId,
+      actorId: followerId,
+      category: inserted[0].state === "accepted" ? "follower" : "follow_request",
+      dedupeKey: `follow:${followerId}:${inserted[0].state}`,
+    });
+    return { state: inserted[0].state };
+  }
 
   const raced = await db.query.follows.findFirst({
     where: and(eq(schema.follows.followerId, followerId), eq(schema.follows.followeeId, target.userId)),
@@ -388,6 +397,19 @@ export async function unfollow(db: DB, followerId: string, followeeId: string): 
  * such guard: they only ever narrow.
  */
 export async function approveFollow(db: DB, followeeId: string, followerId: string): Promise<boolean> {
+  const approved = await approveFollowTx(db, followeeId, followerId);
+  if (approved) {
+    await notify(db, {
+      recipientId: followerId,
+      actorId: followeeId,
+      category: "follow_accepted",
+      dedupeKey: `follow_accepted:${followeeId}`,
+    });
+  }
+  return approved;
+}
+
+async function approveFollowTx(db: DB, followeeId: string, followerId: string): Promise<boolean> {
   return db.transaction(async (tx) => {
     // The same key `makeEverythingPrivate` and `suspendAccount` contend on, so
     // an approval in flight cannot land just after a suspension commits.
@@ -1380,7 +1402,31 @@ export interface FeedItem extends SocialNote {
  * excluded, socialEnabled=false authors excluded. viewerTags is the union of
  * the viewer's own flavorTags on the same bottle ("you tasted this too").
  */
-export async function getFriendFeed(db: DB, viewerId: string, opts: { limit?: number } = {}): Promise<FeedItem[]> {
+export interface FeedCursor {
+  createdAt: Date;
+  pourId: string;
+}
+
+/** Opaque cursor for `/api/feed`: `<iso>~<pourId>`. Null when malformed. */
+export function encodeFeedCursor(c: FeedCursor): string {
+  return `${c.createdAt.toISOString()}~${c.pourId}`;
+}
+
+export function decodeFeedCursor(raw: string | null | undefined): FeedCursor | null {
+  if (!raw) return null;
+  const i = raw.indexOf("~");
+  if (i <= 0) return null;
+  const createdAt = new Date(raw.slice(0, i));
+  const pourId = raw.slice(i + 1);
+  if (Number.isNaN(createdAt.getTime()) || !pourId || pourId.length > 128) return null;
+  return { createdAt, pourId };
+}
+
+export async function getFriendFeed(
+  db: DB,
+  viewerId: string,
+  opts: { limit?: number; before?: FeedCursor | null } = {},
+): Promise<FeedItem[]> {
   if (await suspendedViewer(db, viewerId)) return [];
   const limit = Math.min(Math.max(opts.limit ?? 20, 1), 100);
 
@@ -1442,6 +1488,12 @@ export async function getFriendFeed(db: DB, viewerId: string, opts: { limit?: nu
         contributorVisibleSql(schema.pours.userId, viewerId),
         visibilityCond,
         or(isNotNull(schema.pours.rating), isNotNull(schema.tastingNotes.id)),
+        opts.before
+          ? or(
+              lt(schema.pours.createdAt, opts.before.createdAt),
+              and(eq(schema.pours.createdAt, opts.before.createdAt), lt(schema.pours.id, opts.before.pourId)),
+            )
+          : undefined,
       ),
     )
     .orderBy(desc(schema.pours.createdAt), desc(schema.pours.id))
@@ -1862,6 +1914,14 @@ export async function cheerPour(db: DB, userId: string, pourId: string): Promise
         set: { retractedAt: null },
       });
   });
+  // One notification per reader per note, however often the control toggles.
+  await notify(db, {
+    recipientId: ctx.authorId,
+    actorId: userId,
+    category: "cheer",
+    subjectId: pourId,
+    dedupeKey: `cheer:${pourId}:${userId}`,
+  });
   return { cheersCount: await countCheers(db, pourId, userId) };
 }
 
@@ -2082,6 +2142,31 @@ export async function addComment(
       .insert(schema.comments)
       .values({ id: crypto.randomUUID(), pourId, userId, parentId: effectiveParentId, body: trimmed })
       .returning();
+  });
+
+  let parentAuthorId: string | null = null;
+  if (row.parentId) {
+    const parent = await db.query.comments.findFirst({
+      columns: { userId: true },
+      where: eq(schema.comments.id, row.parentId),
+    });
+    parentAuthorId = parent?.userId ?? null;
+  }
+  if (parentAuthorId && parentAuthorId !== ctx.authorId) {
+    await notify(db, {
+      recipientId: parentAuthorId,
+      actorId: userId,
+      category: "reply",
+      subjectId: pourId,
+      dedupeKey: `reply:${row.id}`,
+    });
+  }
+  await notify(db, {
+    recipientId: ctx.authorId,
+    actorId: userId,
+    category: parentAuthorId === ctx.authorId ? "reply" : "comment",
+    subjectId: pourId,
+    dedupeKey: `comment:${row.id}`,
   });
 
   const author = await getOwnProfile(db, userId);

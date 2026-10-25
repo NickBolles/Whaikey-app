@@ -3,6 +3,7 @@
 import { useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { BookmarkPlus, MessageCircle, Star, Wine } from "lucide-react";
+import { CheersButton } from "@/components/cheers-button";
 import { PalateMatchChip } from "@/components/palate-match-chip";
 import { UserAvatar } from "@/components/user-avatar";
 import { FLAVOR_WHEEL, leafLabel, wedgeForLeaf } from "@/lib/flavor-wheel";
@@ -62,6 +63,11 @@ export interface FriendFeedItem {
   flavorTags: Record<string, number> | null;
   cheersCount: number;
   commentCount: number;
+  /**
+   * Present on the Friends-tab feed, where the card carries a live Cheers
+   * control; absent on Home's module, which shows the counts only.
+   */
+  viewerCheered?: boolean;
   viewerTags: Record<string, number> | null;
   viewerBottleRelationship: "own" | "tried" | "wishlist" | null;
   /**
@@ -132,7 +138,7 @@ function noteSnippet(item: FriendFeedItem): string | null {
   return text.length > 140 ? `${text.slice(0, 140).trimEnd()}…` : text;
 }
 
-function FeedCard({ item }: { item: FriendFeedItem }) {
+export function FeedCard({ item }: { item: FriendFeedItem }) {
   const snippet = noteSnippet(item);
   const tags = item.flavorTags ? Object.entries(item.flavorTags).slice(0, 4) : [];
   const hasComparison = item.viewerTags != null && Object.keys(item.viewerTags).length > 0;
@@ -245,14 +251,28 @@ function FeedCard({ item }: { item: FriendFeedItem }) {
         </span>
       </div>
 
-      <div className="flex items-center gap-3 text-xs text-muted">
-        <span className="flex items-center gap-1">
-          <Wine size={12} strokeWidth={1.8} aria-hidden /> {item.cheersCount}
-        </span>
-        <span className="flex items-center gap-1">
-          <MessageCircle size={12} strokeWidth={1.8} aria-hidden /> {item.commentCount}
-        </span>
-      </div>
+      {item.viewerCheered !== undefined ? (
+        <div className="flex items-center gap-4 border-t border-border-subtle pt-2">
+          <CheersButton pourId={item.pourId} initialCount={item.cheersCount} initialCheered={item.viewerCheered} />
+          <Link
+            href={`/notes/${item.pourId}`}
+            className="tap-target inline-flex items-center gap-1.5 text-sm text-muted hover:text-foreground transition-colors"
+          >
+            <MessageCircle size={16} strokeWidth={1.8} aria-hidden />
+            <span className="tabular-nums">{item.commentCount}</span>
+            <span className="sr-only">comments</span>
+          </Link>
+        </div>
+      ) : (
+        <div className="flex items-center gap-3 text-xs text-muted">
+          <span className="flex items-center gap-1">
+            <Wine size={12} strokeWidth={1.8} aria-hidden /> {item.cheersCount}
+          </span>
+          <span className="flex items-center gap-1">
+            <MessageCircle size={12} strokeWidth={1.8} aria-hidden /> {item.commentCount}
+          </span>
+        </div>
+      )}
     </li>
   );
 }
@@ -269,8 +289,11 @@ export function FriendsModule({ items, hasProfile, hasFollows }: FriendsModulePr
     <section aria-label="From your friends">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="section-label">From your friends</h2>
-        <Link href="/friends" className="text-xs text-muted hover:text-foreground transition-colors">
-          {hasFollows ? "Manage" : "Find friends"}
+        <Link
+          href={hasFollows ? "/friends" : "/friends/people"}
+          className="text-xs text-muted hover:text-foreground transition-colors"
+        >
+          {hasFollows ? "See all" : "Find friends"}
         </Link>
       </div>
 
@@ -284,7 +307,7 @@ export function FriendsModule({ items, hasProfile, hasFollows }: FriendsModulePr
             Follow the people you drink with and their notes land beside yours — so every bottle
             you&rsquo;ve both opened has something to talk about.
           </p>
-          <Link href="/friends" className="btn-secondary px-5 py-2.5 text-sm font-medium">
+          <Link href="/friends/people" className="btn-secondary px-5 py-2.5 text-sm font-medium">
             Find friends
           </Link>
         </div>
