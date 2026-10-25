@@ -21,7 +21,7 @@
  * Provider data stays isolated: titles are only used to fuzzy-search our own
  * catalog and are never merged into `bottles`/`bottle_upcs` (ODbL / ToS).
  */
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, gt, sql } from "drizzle-orm";
 import type { DB } from "@/db";
 import { upcLookupCache, upcProviderUsage, type UpcProvider } from "@/db/schema";
 
@@ -225,7 +225,7 @@ export async function activeBackoff(db: DB, provider: UpcProvider, now: Date): P
   const [row] = await db
     .select({ until: upcProviderUsage.backoffUntil })
     .from(upcProviderUsage)
-    .where(and(eq(upcProviderUsage.provider, provider), sql`${upcProviderUsage.backoffUntil} > ${now}`))
+    .where(and(eq(upcProviderUsage.provider, provider), gt(upcProviderUsage.backoffUntil, now)))
     .orderBy(desc(upcProviderUsage.backoffUntil))
     .limit(1);
   return row?.until ?? null;
@@ -246,6 +246,9 @@ export async function reserveRequest(
   const perMinute = limits.perMinute ?? MAX_INT;
   if (perDay <= 0 || perMinute <= 0) return false;
   const minute = minuteStart(now);
+  // Raw `sql` params carry no column type, and postgres-js will not serialize
+  // a Date there (PGlite does) — so the timestamp goes in as ISO text, cast.
+  const minuteSql = sql`${minute.toISOString()}::timestamptz`;
   const u = upcProviderUsage;
   const rows = await db
     .insert(u)
@@ -254,11 +257,11 @@ export async function reserveRequest(
       target: [u.provider, u.day],
       set: {
         requests: sql`${u.requests} + 1`,
-        minuteCount: sql`case when ${u.minuteStart} = ${minute} then ${u.minuteCount} + 1 else 1 end`,
+        minuteCount: sql`case when ${u.minuteStart} = ${minuteSql} then ${u.minuteCount} + 1 else 1 end`,
         minuteStart: minute,
         updatedAt: now,
       },
-      setWhere: sql`${u.requests} < ${perDay} and (${u.minuteStart} is distinct from ${minute} or ${u.minuteCount} < ${perMinute})`,
+      setWhere: sql`${u.requests} < ${perDay} and (${u.minuteStart} is distinct from ${minuteSql} or ${u.minuteCount} < ${perMinute})`,
     })
     .returning({ requests: u.requests });
   return rows.length > 0;

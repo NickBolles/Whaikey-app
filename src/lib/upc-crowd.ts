@@ -311,7 +311,7 @@ export async function listPendingBarcodes(db: DB, now = new Date(), limit = 100)
       bottleId: upcConfirmations.bottleId,
       bottleName: schema.bottles.name,
       votes: sql<number>`count(*)::int`,
-      eligibleVotes: sql<number>`count(*) filter (where ${schema.userProfiles.suspendedAt} is null and ${schema.user.createdAt} <= ${cutoff})::int`,
+      eligibleVotes: sql<number>`count(*) filter (where ${schema.userProfiles.suspendedAt} is null and ${schema.user.createdAt} <= ${cutoff.toISOString()}::timestamptz)::int`,
       firstAt: sql<Date>`min(${upcConfirmations.createdAt})`,
       lastAt: sql<Date>`max(${upcConfirmations.updatedAt})`,
     })
