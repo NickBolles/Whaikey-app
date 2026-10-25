@@ -66,7 +66,19 @@ export class FlightClubError extends Error {
 
 export const hashGuestToken = (token: string) => createHash("sha256").update(token).digest("hex");
 
+export class FlightProfileRequiredError extends Error {
+  constructor() {
+    super("profile_required");
+  }
+}
+
 export async function createFlight(db: DB, hostId: string, input: z.infer<typeof flightCreateSchema>) {
+  // A host nobody can reach would hand out an invite that 404s for every guest.
+  const host = await db.query.userProfiles.findFirst({
+    columns: { socialEnabled: true, suspendedAt: true },
+    where: eq(schema.userProfiles.userId, hostId),
+  });
+  if (!host || !host.socialEnabled || host.suspendedAt != null) throw new FlightProfileRequiredError();
   if (input.clubId && (await getRole(db, input.clubId, hostId)) == null) throw new FlightClubError();
   // Catalog bottles only: a pending submission is visible to its submitter
   // alone, and would put a stranger's private entry on everyone's table.
@@ -507,12 +519,20 @@ export function flightIcs(flight: Pick<schema.Flight, "id" | "title" | "schedule
   ].join("\r\n");
 }
 
+/** SQL twin of `flightVisibleTo` for list projections. */
+export function hostVisibleSql(viewerId: string) {
+  return sql`(${schema.flights.hostId} = ${viewerId} or (
+    exists (select 1 from user_profiles hp where hp.user_id = ${schema.flights.hostId} and hp.social_enabled = true and hp.suspended_at is null)
+    and not exists (select 1 from blocks b where (b.blocker_id = ${viewerId} and b.blocked_id = ${schema.flights.hostId}) or (b.blocker_id = ${schema.flights.hostId} and b.blocked_id = ${viewerId}))
+  ))`;
+}
+
 export async function listMyFlights(db: DB, userId: string) {
   return db
     .select({ title: schema.flights.title, joinCode: schema.flights.joinCode, state: schema.flights.state, createdAt: schema.flights.createdAt })
     .from(schema.flightParticipants)
     .innerJoin(schema.flights, eq(schema.flights.id, schema.flightParticipants.flightId))
-    .where(eq(schema.flightParticipants.userId, userId))
+    .where(and(eq(schema.flightParticipants.userId, userId), hostVisibleSql(userId)))
     .orderBy(sql`${schema.flights.createdAt} desc`)
     .limit(20);
 }

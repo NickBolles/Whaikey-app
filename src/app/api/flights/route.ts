@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/db";
 import { requireUser, withErrorHandling } from "@/lib/session";
-import { FlightClubError, createFlight, flightCreateSchema, listMyFlights } from "@/lib/flights";
+import { FlightClubError, FlightProfileRequiredError, createFlight, flightCreateSchema, listMyFlights } from "@/lib/flights";
 
 /** GET /api/flights — tasting nights the caller hosts or joined. */
 export async function GET() {
@@ -11,7 +11,7 @@ export async function GET() {
   });
 }
 
-/** POST /api/flights — host a tasting night with 3–6 bottles; 404 unknown bottle, 403 not in the club. */
+/** POST /api/flights — host a tasting night with 3–6 bottles; 404 unknown bottle, 403 not in the club, 409 without a social profile. */
 export async function POST(req: Request) {
   return withErrorHandling(async () => {
     const user = await requireUser();
@@ -23,6 +23,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ id: flight.id, joinCode: flight.joinCode, path: `/f/${flight.joinCode}` }, { status: 201 });
     } catch (err) {
       if (err instanceof FlightClubError) return NextResponse.json({ error: "not_a_member" }, { status: 403 });
+      if (err instanceof FlightProfileRequiredError) return NextResponse.json({ error: "profile_required" }, { status: 409 });
       throw err;
     }
   });

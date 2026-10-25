@@ -31,6 +31,7 @@ import {
   joinAsUser,
   saveEntry,
   setFlightState,
+  listMyFlights,
   sweepGuests,
   visibleFlightByCode,
 } from "@/lib/flights";
@@ -271,11 +272,20 @@ describe("tasting nights", () => {
     const flight = (await createFlight(db, host.id, { title: "Night", blind: true, bottleIds: ids() }))!;
     const t = await person(db, "t_vis");
     expect(await visibleFlightByCode(db, flight.joinCode, t.id)).not.toBeNull();
+    await joinAsUser(db, flight.id, t.id);
+    expect((await listMyFlights(db, t.id)).map((f) => f.joinCode)).toEqual([flight.joinCode]);
     await blockUser(db, host.id, t.id);
     expect(await visibleFlightByCode(db, flight.joinCode, t.id)).toBeNull();
+    expect(await listMyFlights(db, t.id)).toEqual([]);
     expect(await visibleFlightByCode(db, flight.joinCode, host.id)).not.toBeNull();
     await db.update(schema.userProfiles).set({ suspendedAt: new Date() }).where(eq(schema.userProfiles.userId, host.id));
     expect(await visibleFlightByCode(db, flight.joinCode, null)).toBeNull();
+    // Lists drop it too.
+    expect((await listMyFlights(db, host.id)).map((f) => f.joinCode)).toContain(flight.joinCode);
+    await joinAsUser(db, flight.id, (await person(db, "seat_vis")).id);
+    const noProfile = await createTestUser(db);
+    await expect(createFlight(db, noProfile.id, { title: "x", blind: true, bottleIds: ids() })).rejects.toThrow("profile_required");
+    await db.update(schema.userProfiles).set({ suspendedAt: null }).where(eq(schema.userProfiles.userId, host.id));
     const pending = await createTestBottle(db, { status: "user_submitted" });
     expect(await createFlight(db, host.id, { title: "x", blind: true, bottleIds: [...ids().slice(0, 2), pending.id] })).toBeNull();
   });

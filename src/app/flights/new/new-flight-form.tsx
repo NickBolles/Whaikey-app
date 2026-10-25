@@ -58,7 +58,8 @@ export function NewFlightForm({ clubs, defaultClubId }: { clubs: Array<{ id: str
     if (res?.status === 201) {
       const { path } = (await res.json()) as { path: string };
       router.push(path);
-    } else setError("Couldn't create the tasting night — check the title and pick 3 to 6 bottles.");
+    } else if (res?.status === 409) setError("Set up your profile on the Friends tab first — guests need to see who's hosting.");
+    else setError("Couldn't create the tasting night — check the title and pick 3 to 6 bottles.");
   }
 
   return (

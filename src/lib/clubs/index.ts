@@ -371,7 +371,15 @@ export async function getClubView(db: DB, viewerId: string, clubId: string): Pro
       createdAt: schema.flights.createdAt,
     })
     .from(schema.flights)
-    .where(and(eq(schema.flights.clubId, clubId), sql`not exists (select 1 from blocks b where (b.blocker_id = ${viewerId} and b.blocked_id = ${schema.flights.hostId}) or (b.blocker_id = ${schema.flights.hostId} and b.blocked_id = ${viewerId}))`))
+    .where(
+      and(
+        eq(schema.flights.clubId, clubId),
+        sql`(${schema.flights.hostId} = ${viewerId} or (
+          exists (select 1 from user_profiles hp where hp.user_id = ${schema.flights.hostId} and hp.social_enabled = true and hp.suspended_at is null)
+          and not exists (select 1 from blocks b where (b.blocker_id = ${viewerId} and b.blocked_id = ${schema.flights.hostId}) or (b.blocker_id = ${schema.flights.hostId} and b.blocked_id = ${viewerId}))
+        ))`,
+      ),
+    )
     .orderBy(desc(schema.flights.createdAt))
     .limit(20);
   const shelf = await clubShelf(db, viewerId, clubId);
