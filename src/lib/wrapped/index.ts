@@ -143,7 +143,9 @@ export async function getWrapped(db: DB, userId: string, year: number): Promise<
     }
   }
 
-  const twins = await getTasteTwins(db, userId, 1).catch(() => []);
+  // The twin is bounded to the Wrapped year too: a rating added later must not
+  // change who was "your taste twin this year".
+  const twins = await getTasteTwins(db, userId, 1, new Date(Math.min(end.getTime(), Date.now()))).catch(() => []);
   const tasteTwin = twins[0] ? { handle: twins[0].handle, matchPercent: twins[0].matchPercent } : null;
 
   return {
