@@ -1,11 +1,10 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import type { DB } from "@/db";
 import { createTestBottle, setupTestDb, uid } from "@/test/helpers";
 import {
   candidatesFromExternalName,
   confirmUpcMapping,
   isValidUpc,
-  lookupExternalUpc,
   normalizeUpc,
   resolveUpc,
 } from "./scan";
@@ -95,90 +94,6 @@ describe("resolveUpc / confirmUpcMapping", () => {
 
     const matches = await resolveUpc(db, UPC);
     expect(matches.map((m) => m.id)).toEqual([newer.id, older.id]);
-  });
-});
-
-describe("lookupExternalUpc", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  it("returns the UPCitemdb title when available", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () =>
-        Response.json({ items: [{ title: "Buffalo Trace Bourbon 750ml" }] }),
-      ),
-    );
-    const product = await lookupExternalUpc(UPC);
-    expect(product).toEqual({ name: "Buffalo Trace Bourbon 750ml", provider: "upcitemdb" });
-  });
-
-  it("falls back to Open Food Facts when UPCitemdb misses", async () => {
-    const fetchMock = vi.fn(async (url: string | URL) => {
-      if (String(url).includes("upcitemdb")) return Response.json({ items: [] });
-      return Response.json({ product: { product_name: "Lagavulin 16", brands: "Lagavulin" } });
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    const product = await lookupExternalUpc("5000267107011");
-    expect(product).toEqual({ name: "Lagavulin Lagavulin 16", provider: "openfoodfacts" });
-  });
-
-  it("returns null when every provider errors", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => {
-      throw new Error("network down");
-    }));
-    expect(await lookupExternalUpc(UPC)).toBeNull();
-  });
-
-  it("returns null on non-OK responses", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response("rate limited", { status: 429 })));
-    expect(await lookupExternalUpc(UPC)).toBeNull();
-  });
-});
-
-describe("lookupExternalUpc: whiskey-first provider", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    vi.unstubAllEnvs();
-  });
-
-  it("tries the configured whiskey API before the generic providers", async () => {
-    vi.stubEnv("WHAIKEY_WHISKY_UPC_URL", "https://whisky.example/api/v1/spirits?barcode={upc}");
-    vi.stubEnv("WHAIKEY_WHISKY_UPC_KEY", "secret");
-    const fetchMock = vi.fn(async (url: string | URL, init?: RequestInit) => {
-      expect(String(url)).toBe(`https://whisky.example/api/v1/spirits?barcode=${UPC}`);
-      expect((init?.headers as Record<string, string>)["API-Key"]).toBe("secret");
-      return Response.json({ spirits: [{ name: "Ardbeg 10 Year" }] });
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    const product = await lookupExternalUpc(UPC);
-    expect(product).toEqual({ name: "Ardbeg 10 Year", provider: "whiskyapi" });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("falls through to UPCitemdb when the whiskey API misses", async () => {
-    vi.stubEnv("WHAIKEY_WHISKY_UPC_URL", "https://whisky.example/lookup/{upc}");
-    const fetchMock = vi.fn(async (url: string | URL) => {
-      if (String(url).startsWith("https://whisky.example/")) {
-        return Response.json({ items: [] });
-      }
-      return Response.json({ items: [{ title: "Buffalo Trace Bourbon" }] });
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    const product = await lookupExternalUpc(UPC);
-    expect(product).toEqual({ name: "Buffalo Trace Bourbon", provider: "upcitemdb" });
-  });
-
-  it("skips the provider when the template is unset or lacks the {upc} slot", async () => {
-    vi.stubEnv("WHAIKEY_WHISKY_UPC_URL", "https://whisky.example/no-slot");
-    const fetchMock = vi.fn(async (url: string | URL) => {
-      expect(String(url)).toContain("upcitemdb");
-      return Response.json({ items: [{ title: "Generic Hit" }] });
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    const product = await lookupExternalUpc(UPC);
-    expect(product?.provider).toBe("upcitemdb");
   });
 });
 

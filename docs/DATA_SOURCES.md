@@ -85,11 +85,14 @@ Start with `config/catalog-resource-manifest.example.json`; the respected-source
 
 Order of resolution at scan time:
 
-1. **Own DB** (seeded from COLA Cloud barcode extractions + Iowa identifiers + **BC price-list barcodes** + user confirmations).
+1. **Own DB** (seeded from COLA Cloud barcode extractions + Iowa identifiers + **BC price-list barcodes** + crowd-verified user confirmations).
+1a. **Pending crowd claims** (`upc_confirmations`, `src/lib/upc-crowd.ts`). An unknown barcode the user resolves by picking a bottle becomes a *pending claim*, not a mapping. It is published to `bottle_upcs` when `WHAIKEY_UPC_CONFIRMATIONS_REQUIRED` (default 2) eligible accounts agree with a 2:1 lead over any competing claim, when a trusted account confirms it (an operator, or an account ≥30 days old with ≥5 claims borne out and none rejected), or when an operator approves it at `/admin/catalog/barcodes`. Eligible means not suspended and older than 7 days. Each account gets one claim per barcode and at most 25 new pending claims a day. The scanner's own pending claim resolves for them immediately, and other people's claims are offered as suggestions before any provider is asked.
 2. **Whiskey-specialized provider** (optional, env-configured `WHAIKEY_WHISKY_UPC_URL`/`_KEY`) — a licensed spirits API such as WhiskyDB's per-license endpoint, tried before the generic catalogs because spirits-aware data beats them on whiskey. Skipped when unset.
-3. **UPCitemdb** — 715M+ claimed UPCs; free 100 req/day, Dev $99/mo (20k/day). Best volume-per-dollar.
+3. **UPCitemdb** — 715M+ claimed UPCs; free 100 req/day, Dev $99/mo (20k/day). Best volume-per-dollar. The paid `/prod/v1` endpoint is used when `UPCITEMDB_KEY` is set, otherwise the trial.
 4. **Open Food Facts** — free, no key, but spirits coverage is thin and **ODbL share-alike licensing** means we must NOT merge OFF data into our proprietary DB (use as transient lookup only; consider contributing user scans back as goodwill).
 5. **Miss → photo + OCR flow** that grows our own DB (every miss is a data-acquisition event).
+
+**Provider guards (`src/lib/upc-providers.ts`).** Every provider answer, hit or miss, is cached in `upc_lookup_cache`. A hit is kept permanently (OFF for 30 days) and a miss for 7–30 days, so a barcode costs at most one request per provider. The cache is isolated: it is never merged into `bottles`/`bottle_upcs`, and titles are only used to fuzzy-search our catalog. `upc_provider_usage` meters requests per UTC day and per minute. The UPCitemdb trial defaults to 95/day and 5/min (`WHAIKEY_UPCITEMDB_DAILY_BUDGET`, `WHAIKEY_UPCITEMDB_PER_MINUTE`), under its 100/day and 6/min cap. A 429 or 5xx sets an exponential backoff that honours `Retry-After`/`X-RateLimit-Reset`; a 429 on a capped provider backs off to the next UTC midnight. A spent or backed-off provider is skipped, never failed: the scan falls through to the next provider, then to search or "add this bottle". Kill switches: `WHAIKEY_UPCITEMDB=off`, `WHAIKEY_OPENFOODFACTS=off`, and `WHAIKEY_UPC_LOOKUP=off` for all providers. `/admin/scan` shows today's requests against budget, the backoff state and the cache size.
 
 Alternatives: Go-UPC ($74.95/mo for 5k req/mo, explicitly advertises liquor coverage), Barcode Lookup (~$99–999/mo *(unverified)*).
 

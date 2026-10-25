@@ -78,6 +78,13 @@ export default function PrivacyPage() {
             reason if it was declined. Declining takes nothing off your own shelf.
           </li>
           <li>
+            <strong className="text-foreground">Barcodes you confirm</strong> — which bottle you said
+            a barcode belongs to, and whether it has been accepted. A barcode only starts answering
+            other people&rsquo;s scans once enough people agree or a moderator checks it. Your
+            confirmation is deleted with your account; an accepted barcode stays in the catalog
+            without your name on it.
+          </li>
+          <li>
             <strong className="text-foreground">Why the app suggested something</strong> — the
             one-line reason behind a recommendation is cached against your account so the same
             suggestion reads the same way twice. It is written from your own journal and says
@@ -164,6 +171,18 @@ export default function PrivacyPage() {
             depending on configuration. When you use the concierge, scan a label, or have a note
             extracted, the relevant text or image and the relevant part of your own data are sent
             to be processed. Only what that request needs is sent.
+          </li>
+          <li>
+            <strong className="text-foreground">Reading a label</strong> — in the iPhone and
+            Android apps, a label photo is first read on your phone by the operating system&rsquo;s
+            own text recognition; only the words it found are sent to us to search the catalog, and
+            they are not stored. The photo goes to the AI provider only when that read was not good
+            enough to name the bottle.
+          </li>
+          <li>
+            <strong className="text-foreground">Barcode lookups</strong> — when we do not know a
+            barcode, the barcode number alone (nothing about you) may be looked up with UPCitemdb or
+            Open Food Facts, and their answer is kept so the same barcode is never looked up twice.
           </li>
           <li>
             <strong className="text-foreground">Hosting and the database</strong> — the servers

@@ -124,6 +124,13 @@ const INVENTORY: Record<string, Verdict> = {
   },
   analytics_events: { disclosed: "that a\n            share page was opened" },
   scan_events: { disclosed: "whether a scan was recognised" },
+  upc_confirmations: { disclosed: "which bottle you said\n            a barcode belongs to" },
+  upc_lookup_cache: {
+    notPersonal: "A barcode provider's answer keyed by (provider, barcode); no user, session or IP column.",
+  },
+  upc_provider_usage: {
+    notPersonal: "Request counters and backoff per barcode provider per day; no user column.",
+  },
 
   // --- Devices ---
   push_devices: { disclosed: "Device push tokens" },

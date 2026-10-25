@@ -79,7 +79,19 @@ export interface ScanMetrics {
     confirmedOutsideOwnRate: number | null;
     bySource: Array<{ source: ScanSource; outcome: ScanOutcome; count: number }>;
   };
-  label: ScanFunnel;
+  label: ScanFunnel & {
+    bySource: Array<{ source: ScanSource; outcome: ScanOutcome; count: number }>;
+    /** Label scans answered by the free on-device read (no AI call). */
+    ocrResolved: number;
+    /** On-device reads that were not confident and handed the photo to the AI. */
+    ocrDeferred: number;
+    /** Label scans that reached the paid AI read. */
+    aiCalls: number;
+    /** ocrResolved / attempts — the M1 target is AI calls per label scan down >50%. */
+    ocrResolvedRate: number | null;
+    /** aiCalls / attempts. */
+    aiShare: number | null;
+  };
   /** Most-scanned barcodes we could not map, for an operator to fill in. */
   topUnmappedUpcs: Array<{ upc: string; scans: number; misses: number }>;
 }
@@ -113,6 +125,26 @@ function funnel(rows: Row[], kind: ScanKind, latency: { p50: number | null; p95:
   };
 }
 
+function labelFunnel(rows: Row[], latency: { p50: number | null; p95: number | null }): ScanMetrics["label"] {
+  const base = funnel(rows, "label", latency);
+  const label = rows.filter((r) => r.kind === "label");
+  const sum = (pred: (r: Row) => boolean) => label.filter(pred).reduce((s, r) => s + r.count, 0);
+  const ocrResolved = sum((r) => r.source === "ocr" && (r.outcome === "candidates" || r.outcome === "matched"));
+  const ocrDeferred = sum((r) => r.source === "ocr" && r.outcome === "deferred");
+  const aiCalls = sum((r) => r.source === "ai" && r.outcome !== "confirmed");
+  return {
+    ...base,
+    bySource: label
+      .map(({ source, outcome, count }) => ({ source, outcome, count }))
+      .sort((a, b) => b.count - a.count),
+    ocrResolved,
+    ocrDeferred,
+    aiCalls,
+    ocrResolvedRate: ratio(ocrResolved, base.attempts),
+    aiShare: ratio(aiCalls, base.attempts),
+  };
+}
+
 /** The scan funnel over `[since, until)` — 30 days by default. */
 export async function scanMetrics(db: DB, opts: { since?: Date; until?: Date } = {}): Promise<ScanMetrics> {
   const until = opts.until ?? new Date();
@@ -133,7 +165,8 @@ export async function scanMetrics(db: DB, opts: { since?: Date; until?: Date } =
         p95: sql<number | null>`percentile_cont(0.95) within group (order by ${e.latencyMs})`,
       })
       .from(e)
-      .where(and(window, isNotNull(e.latencyMs), sql`${e.outcome} <> 'confirmed'`))
+      // Confirmations and deferred on-device reads are not answers a person waited for.
+      .where(and(window, isNotNull(e.latencyMs), sql`${e.outcome} not in ('confirmed', 'deferred')`))
       .groupBy(e.kind),
     db
       .select({
@@ -176,7 +209,7 @@ export async function scanMetrics(db: DB, opts: { since?: Date; until?: Date } =
         .map(({ source, outcome, count }) => ({ source, outcome, count }))
         .sort((a, b) => b.count - a.count),
     },
-    label: funnel(typed, "label", lat("label")),
+    label: labelFunnel(typed, lat("label")),
     topUnmappedUpcs: gaps.map((g) => ({ upc: g.upc, scans: Number(g.scans), misses: Number(g.misses) })),
   };
 }

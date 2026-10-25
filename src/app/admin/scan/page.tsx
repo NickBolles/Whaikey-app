@@ -4,6 +4,7 @@ import { getDb } from "@/db";
 import { getSessionUser } from "@/lib/session";
 import { isOperator } from "@/lib/operator";
 import { catalogCoverage, scanMetrics, type ScanFunnel } from "@/lib/observability/scan-telemetry";
+import { providerStatus } from "@/lib/upc-providers";
 
 export const dynamic = "force-dynamic";
 
@@ -49,9 +50,10 @@ export default async function AdminScanPage({ searchParams }: { searchParams: Pr
   const days = Math.min(90, Math.max(1, Number.parseInt(rawDays ?? "30", 10) || 30));
   const db = getDb();
   const until = new Date();
-  const [metrics, coverage] = await Promise.all([
+  const [metrics, coverage, providers] = await Promise.all([
     scanMetrics(db, { since: new Date(until.getTime() - days * 86_400_000), until }),
     catalogCoverage(db),
+    providerStatus(db),
   ]);
   const b = metrics.barcode;
 
@@ -74,6 +76,9 @@ export default async function AdminScanPage({ searchParams }: { searchParams: Pr
           </Link>
           <Link href="/admin/submissions" className="text-accent hover:underline">
             Submissions →
+          </Link>
+          <Link href="/admin/catalog/barcodes" className="text-accent hover:underline">
+            Barcode claims →
           </Link>
           <Link href="/admin/feedback" className="text-accent hover:underline">
             Feedback →
@@ -107,7 +112,11 @@ export default async function AdminScanPage({ searchParams }: { searchParams: Pr
           <Stat label="Barcode own-DB hit" value={pct(b.ownHitRate)} hint={`${num(b.matched)} of ${num(b.attempts)}`} />
           <Stat label="Barcode resolved" value={pct(b.resolutionRate)} hint="own + provider candidates" />
           <Stat label="Top match confirmed" value={pct(b.confirmedTopMatchRate)} hint={`of ${num(b.confirmed)} confirmations`} />
-          <Stat label="Label scans (AI)" value={num(metrics.label.attempts)} hint={`${pct(metrics.label.resolutionRate)} gave candidates`} />
+          <Stat
+            label="Label scans"
+            value={num(metrics.label.attempts)}
+            hint={`on-device ${pct(metrics.label.ocrResolvedRate)} · AI ${pct(metrics.label.aiShare)}`}
+          />
         </div>
         <table className="w-full text-xs">
           <thead className="text-muted">
@@ -132,6 +141,51 @@ export default async function AdminScanPage({ searchParams }: { searchParams: Pr
           {b.bySource.length === 0 ? "none yet" : b.bySource.map((s) => `${s.source}/${s.outcome} ${num(s.count)}`).join(" · ")}.
           Label attempts include live label-ID frames, so read the rate rather than the count. Confirmations without a
           barcode come from a label read or a search pick.
+        </p>
+      </section>
+
+      <section aria-labelledby="providers" className="flex flex-col gap-2">
+        <h2 id="providers" className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+          Barcode providers · today (UTC)
+        </h2>
+        <table className="w-full text-xs">
+          <thead className="text-muted">
+            <tr>
+              <th className="py-1 pr-3 text-left font-normal">Provider</th>
+              <th className="py-1 pr-3 text-right font-normal">Requests / budget</th>
+              <th className="py-1 pr-3 text-right font-normal">Cached hits / misses</th>
+              <th className="py-1 pr-3 text-right font-normal">Last status</th>
+              <th className="py-1 text-right font-normal">Backoff until</th>
+            </tr>
+          </thead>
+          <tbody>
+            {providers.map((p) => (
+              <tr key={p.provider} className="border-t border-border-subtle">
+                <td className="py-1 pr-3 font-medium">
+                  {p.provider}
+                  {!p.enabled && <span className="text-muted"> (off)</span>}
+                </td>
+                <td className="py-1 pr-3 text-right tabular-nums">
+                  {num(p.requestsToday)} / {p.perDay == null ? "∞" : num(p.perDay)}
+                </td>
+                <td className="py-1 pr-3 text-right tabular-nums">
+                  {num(p.cachedHits)} / {num(p.cachedMisses)}
+                </td>
+                <td className="py-1 pr-3 text-right tabular-nums">{p.lastStatus ?? "–"}</td>
+                <td className="py-1 text-right tabular-nums">
+                  {p.backoffUntil ? p.backoffUntil.toISOString().slice(11, 16) + " UTC" : "–"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p className="text-xs text-muted">
+          Label outcomes by source:{" "}
+          {metrics.label.bySource.length === 0
+            ? "none yet"
+            : metrics.label.bySource.map((s) => `${s.source}/${s.outcome} ${num(s.count)}`).join(" · ")}
+          . On-device reads that were not confident are counted once, under the AI read that followed (
+          {num(metrics.label.ocrDeferred)} deferred).
         </p>
       </section>
 

@@ -291,6 +291,7 @@ Everything the native shell unlocks, mapped to the product. Ordered by value.
 |---|---|---|
 | **Barcode scanning** | `@capacitor-mlkit/barcode-scanning` | **Fixes iOS scanning entirely** (no `BarcodeDetector` in WKWebView). Faster and better in low light than the JS loop; keeps the existing rapid-batch queue UX. |
 | **Camera / label capture** | `@capacitor/camera` | Full-res label photos, native permission UX, native torch. Feeds `/api/scan-label`. |
+| **On-device label OCR** | custom `WhaikeyOcr` (app target: `ios/App/App/WhaikeyOcrPlugin.swift`, `android/app/src/main/java/com/whaikey/app/WhaikeyOcrPlugin.kt`) | Free first pass of a label scan. Apple Vision `VNRecognizeTextRequest` on iOS, Play-services ML Kit text recognition on Android. The lines go to `/api/scan/label-text` (`src/lib/label-match.ts`), and the paid AI read (`/api/scan-label`) runs only when that match is not confident. The plugin is custom because `@capacitor-mlkit/text-recognition` is CocoaPods-only and this iOS app is SPM-based. Both sides are registered in code (`AppBridgeViewController.capacitorDidLoad`, `MainActivity.onCreate`), not by `cap sync`. JS seam: `src/lib/native/ocr.ts`, which returns null on the web and in older shells, so those fall back to the AI read. |
 | **Haptics** | `@capacitor/haptics` | Scan lock-on, star ratings, flavor-wheel wedge taps, pour saved. The wheel input with per-wedge taptic feedback is a real native delight — replaces `navigator.vibrate` (which iOS ignores). |
 | **Offline pour queue** | `@capacitor/preferences` + `@capacitor/network` | PLAN.md §4.2's "a bar basement has no signal". Queue pours locally, flush on reconnect/resume. |
 | **Status bar / splash / keyboard / safe areas** | `@capacitor/status-bar`, `splash-screen`, `keyboard` | Table-stakes polish; without it the app reads as a website. |
@@ -389,6 +390,30 @@ keeping the remote-URL model for everything else. This is architecture option B 
   it doesn't exist in a desktop Chromium screenshot.
 - **Device smoke (manual, per release):** sign in, scan a barcode, log a pour offline,
   reconnect, hardware back button, deep link into a bottle page, background/foreground.
+- **On-device label OCR (manual, once per native build that touches it).** CI compiles
+  Android on every PR but iOS only on `main`, and neither runs the plugin:
+  1. Build and install a debug build (`pnpm native:sync`, then Xcode ▶ / `./gradlew installDebug`)
+     against a deployment that has this change.
+  2. In Safari or Chrome remote devtools on the WebView, run
+     `Capacitor.isPluginAvailable("WhaikeyOcr")`. It should print `true`.
+  3. Open `/scan`, tap **Snap the label**, and photograph the front label of a bottle in the
+     catalog (for example Buffalo Trace or Lagavulin 16). Expected: candidates in under 2 s
+     with the subtitle "The label reads …". Devtools Network shows `POST /api/scan/label-text`
+     and **no** `POST /api/scan-label`.
+  4. Photograph a label not in the catalog, or only its back label. Expected:
+     `/api/scan/label-text` answers `confident:false`, then `/api/scan-label` runs (the AI
+     fallback, if AI is configured). With AI unconfigured, any OCR candidates are still offered.
+  5. Rotate the phone (landscape label shot) and repeat step 3. The text should still be read,
+     which checks the EXIF/orientation handling.
+  6. Android only: on a fresh install with airplane mode on, the first label scan should fail
+     soft (the ML Kit model is not downloaded yet) and fall back to the AI read once online.
+     It should not crash.
+  7. Confirm a bottle from step 3. `/admin/scan` should show label `ocr/candidates` and
+     `ocr/confirmed` rows. Also check "on-device X% · AI Y%".
+  8. Barcode teach: scan a barcode the catalog lacks with two accounts older than 7 days,
+     picking the same bottle each time. The first gets "barcode saved for review" and the
+     second gets "You taught Whaikey this barcode". A third account's scan then resolves
+     instantly. The claim is visible and reversible at `/admin/catalog/barcodes`.
 - **CI:** `pnpm native:check` validates the Capacitor config and that the shell bundle
   exists. Native builds are not in CI until Phase 2 (they need signing secrets).
 

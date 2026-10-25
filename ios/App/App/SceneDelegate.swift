@@ -38,5 +38,8 @@ class AppBridgeViewController: CAPBridgeViewController {
     override func capacitorDidLoad() {
         super.capacitorDidLoad()
         webView?.allowsBackForwardNavigationGestures = true
+        // App-target plugins are not discovered by `cap sync`; register them here.
+        // On-device label OCR (src/lib/native/ocr.ts).
+        bridge?.registerPluginInstance(WhaikeyOcrPlugin())
     }
 }
