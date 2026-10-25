@@ -201,6 +201,13 @@ async function seedFootprint(db: DB, subject: schema.User, counterpart: schema.U
   });
   await db.insert(schema.feedback).values({ id: uid("fb"), userId: subject.id, body: `${tag} support message` });
 
+  // --- Notifications (social M2)
+  await db.insert(schema.notifications).values([
+    { id: uid("ntf"), userId: subject.id, actorId: counterpart.id, category: "cheer", subjectId: pourId, dedupeKey: `${tag}-in` },
+    { id: uid("ntf"), userId: counterpart.id, actorId: subject.id, category: "comment", subjectId: theirPour, dedupeKey: `${tag}-out` },
+  ]);
+  await db.insert(schema.notificationSettings).values({ userId: subject.id, groups: { cheers: false }, quietStart: 1320, quietEnd: 420, timeZone: "UTC" });
+
   // --- AI and telemetry
   await db.insert(schema.aiRateLimits).values({ userId: subject.id, window: "day", windowStart: at, count: 3 });
   await db.insert(schema.aiUsage).values({ id: uid("ai"), userId: subject.id, feature: "chat", model: "m", inputTokens: 10 });
