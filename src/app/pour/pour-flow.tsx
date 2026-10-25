@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Check, ChevronDown, ChevronUp, Eye, X } from "lucide-react";
 import { SERVING_STYLES, type PourVisibility, type ServingStyle } from "@/db/schema";
@@ -312,6 +313,7 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
                 Change
               </button>
             </div>
+            {pickedVia && pickedVia.via !== "recent" && <ShelfQuickActions bottle={bottle} />}
             {notItOpen && (
               <div className="flex flex-wrap gap-1.5" role="group" aria-label="Other bottles with this barcode">
                 {(pickedVia?.alternatives ?? []).map((alt) => (
@@ -468,6 +470,67 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
           )}
         </p>
       </div>
+    </div>
+  );
+}
+
+/**
+ * ＋ is also "what is this bottle?" (STORYBOARD D6): a scanned or searched
+ * bottle can go on the shelf or the wishlist, or open its page, without
+ * leaving the sheet or logging anything. A new shelf row confirms with Undo.
+ */
+function ShelfQuickActions({ bottle }: { bottle: ScanBottle }) {
+  const toast = useToast();
+  const router = useRouter();
+  const [busy, setBusy] = useState<"own" | "wishlist" | null>(null);
+  const [done, setDone] = useState<"own" | "wishlist" | null>(null);
+
+  async function add(relationship: "own" | "wishlist") {
+    if (busy) return;
+    setBusy(relationship);
+    try {
+      const res = await fetch("/api/user-bottles", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ bottleId: bottle.id, relationship }),
+      });
+      if (!res.ok) throw new Error(String(res.status));
+      const row = (await res.json().catch(() => null)) as { id?: string } | null;
+      setDone(relationship);
+      const where = relationship === "own" ? "your bar" : "your wishlist";
+      toast.show({
+        message: `Added ${bottle.name} to ${where}`,
+        tone: "success",
+        // Only a row this tap created can be taken back; re-filing a bottle
+        // that was already on the shelf is not undone into deleting it.
+        undo:
+          res.status === 201 && row?.id
+            ? async () => {
+                const undone = await fetch(`/api/user-bottles/${encodeURIComponent(row.id!)}`, { method: "DELETE" });
+                if (!undone.ok) throw new Error(String(undone.status));
+                setDone(null);
+                router.refresh();
+              }
+            : undefined,
+      });
+    } catch {
+      toast.error(`Couldn't add ${bottle.name}. Try again.`);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Shelf">
+      <button type="button" onClick={() => void add("own")} disabled={busy !== null || done === "own"} aria-pressed={done === "own"} className={`chip min-h-11 px-3 text-xs ${done === "own" ? "chip-active" : "text-foreground/90"}`}>
+        {done === "own" ? "In your bar" : "Add to bar"}
+      </button>
+      <button type="button" onClick={() => void add("wishlist")} disabled={busy !== null || done === "wishlist"} aria-pressed={done === "wishlist"} className={`chip min-h-11 px-3 text-xs ${done === "wishlist" ? "chip-active" : "text-foreground/90"}`}>
+        {done === "wishlist" ? "Wishlisted" : "Wishlist"}
+      </button>
+      <Link href={`/bottles/${encodeURIComponent(bottle.id)}`} className="tap-target ml-auto px-1 text-xs text-accent">
+        Bottle page →
+      </Link>
     </div>
   );
 }

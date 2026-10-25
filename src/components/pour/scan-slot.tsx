@@ -320,6 +320,14 @@ export function PourScanSlot({
               <ScanLine size={14} strokeWidth={1.8} aria-hidden /> Snap label
             </button>
           )}
+          {camera === "on" && engine === "native" && (
+            // MLKit owns the camera here, so there is no frame to grab; the
+            // full scanner's native photo capture reads the label instead and
+            // hands the bottle back to this sheet.
+            <Link href="/scan?then=pour" className="chip chip-active flex min-h-11 shrink-0 items-center gap-1.5 px-3 text-xs font-medium">
+              <ScanLine size={14} strokeWidth={1.8} aria-hidden /> Snap label
+            </Link>
+          )}
           {(camera === "paused" || camera === "unavailable") && (
             <button
               type="button"

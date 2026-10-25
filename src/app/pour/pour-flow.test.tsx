@@ -105,6 +105,24 @@ describe("PourFlow — the 3-tap path", () => {
     expect(screen.getByTestId("pour-bottle")).toHaveTextContent("Blanton's Gold");
   });
 
+  it("a scanned bottle can go on the shelf from the sheet, with Undo for a new row", async () => {
+    const fetchMock = stubFetch(async (url, init) => {
+      if (String(url) === "/api/user-bottles" && init?.method === "POST") return { ok: true, status: 201, json: async () => ({ id: "ub1" }) } as Response;
+      return ok({});
+    });
+    renderFlow();
+    await act(async () => {});
+    fireEvent.click(screen.getByRole("button", { name: "fake barcode hit" }));
+    expect(screen.getByRole("link", { name: /Bottle page/ })).toHaveAttribute("href", "/bottles/blantons");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Add to bar" }));
+    });
+    expect(screen.getByRole("button", { name: "In your bar" })).toBeDisabled();
+    const post = fetchMock.mock.calls.find(([u, i]) => u === "/api/user-bottles" && i?.method === "POST");
+    expect(JSON.parse(String(post?.[1]?.body))).toEqual({ bottleId: "blantons", relationship: "own" });
+    expect(screen.getByText(/Added Blanton's Original to your bar/)).toBeInTheDocument();
+  });
+
   it("an unrated pour saves (rating is optional) and goes Home with no in-app history", async () => {
     const fetchMock = stubFetch(async (url, init) => (String(url) === "/api/pours" && init?.method === "POST" ? ok({ pour: { id: "p2" } }) : ok({})));
     renderFlow();
