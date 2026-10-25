@@ -596,3 +596,161 @@ export async function deletePour(
   }
   return deleted;
 }
+
+const nullableText = (max: number) => z.string().max(max).nullable().optional();
+
+/**
+ * An edit of a journal entry (rating, serving, note text, visibility). Every
+ * field is optional; a field that is absent is left alone and `null` clears
+ * it. Flavor tags are accepted so an Undo can restore them, never required.
+ */
+export const pourEditSchema = z
+  .object({
+    rating: z
+      .number()
+      .min(0.5, "Rating must be between 0.5 and 5")
+      .max(5, "Rating must be between 0.5 and 5")
+      .multipleOf(0.5, "Rating must be in half-star steps")
+      .nullable()
+      .optional(),
+    servingStyle: z.enum(SERVING_STYLES).nullable().optional(),
+    note: z
+      .object({
+        nose: nullableText(2000),
+        palate: nullableText(2000),
+        finish: nullableText(2000),
+        freeform: nullableText(5000),
+        flavorTags: flavorTagsSchema.nullable().optional(),
+      })
+      .optional(),
+    visibility: z.enum(POUR_VISIBILITIES).optional(),
+  })
+  .strict()
+  .refine((edit) => Object.keys(edit).length > 0, "Nothing to change");
+
+export type PourEdit = z.infer<typeof pourEditSchema>;
+
+export interface EditedPour {
+  pour: Pour;
+  note: TastingNote | null;
+  /** The same fields as the edit, as they stood before it — what Undo sends back. */
+  previous: PourEdit;
+}
+
+const NOTE_FIELDS = ["nose", "palate", "finish", "freeform"] as const;
+
+/**
+ * Edit one of the owner's journal entries. Returns null for missing/others'.
+ *
+ * Audit-safe by construction:
+ * - only the entry's own fields move. `createdAt`, `visibilityAtCreation`,
+ *   `shelfRelationshipAtPour`, `amountMl` and the fill level are facts about
+ *   the moment of the pour and an edit never rewrites them (WP-19);
+ * - a visibility change goes through `updatePourVisibility`, so the pending-
+ *   bottle, moderation-hide and stepped-back rules and the `firstSharedAt`
+ *   stamp apply exactly as they do from the row's visibility control;
+ * - a report already holds the text as it was reported (`subject_snapshot`),
+ *   and the queue flags `editedSinceReport`, so editing cannot launder a
+ *   complaint's evidence;
+ * - the response carries `previous`, the pre-edit values of exactly the
+ *   fields edited, which is what the client's Undo PATCHes back.
+ */
+export async function updatePourEntry(
+  db: DB,
+  userId: string,
+  pourId: string,
+  input: PourEdit,
+): Promise<EditedPour | null> {
+  const edit = pourEditSchema.parse(input);
+  const result = await db.transaction(async (tx) => {
+    const own = await tx.query.pours.findFirst({
+      where: and(eq(schema.pours.id, pourId), eq(schema.pours.userId, userId)),
+    });
+    if (!own) return null;
+    const existingNote =
+      (await tx.query.tastingNotes.findFirst({ where: eq(schema.tastingNotes.pourId, pourId) })) ?? null;
+
+    const previous: PourEdit = {};
+    if (edit.rating !== undefined) previous.rating = own.rating;
+    if (edit.servingStyle !== undefined) previous.servingStyle = own.servingStyle;
+    if (edit.visibility !== undefined) previous.visibility = own.visibility;
+    if (edit.note) {
+      const prevNote: NonNullable<PourEdit["note"]> = {};
+      for (const field of NOTE_FIELDS) {
+        if (edit.note[field] !== undefined) prevNote[field] = existingNote?.[field] ?? null;
+      }
+      if (edit.note.flavorTags !== undefined) prevNote.flavorTags = existingNote?.flavorTags ?? null;
+      previous.note = prevNote;
+    }
+
+    let pour = own;
+    // Visibility first: if it is refused (pending bottle, moderation, social
+    // off) the whole edit rolls back rather than half-landing.
+    // Even an unchanged value goes through it, so the same refusals answer
+    // the same request whichever door it came in by.
+    if (edit.visibility !== undefined) {
+      const updated = await updatePourVisibility(tx as DB, userId, pourId, edit.visibility);
+      if (!updated) return null;
+      pour = updated;
+    }
+
+    const set: Partial<typeof schema.pours.$inferInsert> = {};
+    if (edit.rating !== undefined && edit.rating !== own.rating) set.rating = edit.rating;
+    if (edit.servingStyle !== undefined && edit.servingStyle !== own.servingStyle) {
+      set.servingStyle = edit.servingStyle;
+    }
+
+    let note = existingNote;
+    let noteChanged = false;
+    if (edit.note) {
+      const merged = {
+        nose: existingNote?.nose ?? null,
+        palate: existingNote?.palate ?? null,
+        finish: existingNote?.finish ?? null,
+        freeform: existingNote?.freeform ?? null,
+        flavorTags: existingNote?.flavorTags ?? null,
+      };
+      for (const field of NOTE_FIELDS) {
+        const value = edit.note[field];
+        if (value !== undefined) merged[field] = value?.trim() || null;
+      }
+      if (edit.note.flavorTags !== undefined) {
+        merged.flavorTags =
+          edit.note.flavorTags && Object.keys(edit.note.flavorTags).length > 0 ? edit.note.flavorTags : null;
+      }
+      noteChanged =
+        NOTE_FIELDS.some((f) => merged[f] !== (existingNote?.[f] ?? null)) ||
+        JSON.stringify(merged.flavorTags) !== JSON.stringify(existingNote?.flavorTags ?? null);
+      const empty = NOTE_FIELDS.every((f) => !merged[f]) && !merged.flavorTags;
+      if (noteChanged) {
+        if (existingNote && empty) {
+          await tx.delete(schema.tastingNotes).where(eq(schema.tastingNotes.id, existingNote.id));
+          note = null;
+        } else if (existingNote) {
+          [note] = await tx
+            .update(schema.tastingNotes)
+            .set(merged)
+            .where(eq(schema.tastingNotes.id, existingNote.id))
+            .returning();
+        } else if (!empty) {
+          [note] = await tx
+            .insert(schema.tastingNotes)
+            .values({ id: crypto.randomUUID(), pourId, ...merged, extractedBy: "user" })
+            .returning();
+        }
+      }
+    }
+
+    if (Object.keys(set).length > 0 || noteChanged) {
+      [pour] = await tx
+        .update(schema.pours)
+        .set({ ...set, editedAt: new Date() })
+        .where(and(eq(schema.pours.id, pourId), eq(schema.pours.userId, userId)))
+        .returning();
+      // Rating and flavor tags feed the palate; keep it in the same write.
+      await refreshUserPalate(tx as DB, userId);
+    }
+    return { pour, note, previous };
+  });
+  return result;
+}

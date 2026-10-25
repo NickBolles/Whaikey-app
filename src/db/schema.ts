@@ -472,6 +472,13 @@ export const pours = pgTable(
      * unique index below only ever constrains real keys.
      */
     clientId: text("client_id"),
+    /**
+     * Last time the owner edited the entry itself (rating, serving, note).
+     * Null for a pour never edited. The snapshot columns above are never
+     * touched by an edit — they describe the moment of the pour, and an
+     * edit is not that moment.
+     */
+    editedAt: timestamp("edited_at", { withTimezone: true, mode: "date" }),
     createdAt: createdAt(),
   },
   (t) => [
