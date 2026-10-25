@@ -915,6 +915,8 @@ export const NOT_LINKED: Readonly<Record<string, string>> = {
   distilleries: "Catalog reference data; no user column.",
   bottle_aliases: "Alternative names for catalog bottles; no user column.",
   bottle_upcs: "Barcode → bottle map; no user column (a submitted barcode lives on bottle_submissions until promoted).",
+  scan_events:
+    "Scan outcomes (kind, outcome, source, counts, latency, and a product barcode only when it was not already mapped); no user, session or IP column, so no row can be attributed to an account.",
   critic_notes: "Published critic notes; no user column.",
   price_history: "Observed market prices; no user column.",
   catalog_totals: "Counts of verified catalog bottles per country, region and style; no user column, and nothing a person logs is counted.",

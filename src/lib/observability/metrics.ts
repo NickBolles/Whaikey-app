@@ -420,7 +420,7 @@ export const TELEMETRY_RETENTION_DAYS = 90;
 export async function sweepTelemetry(
   db: DB,
   now = new Date(),
-): Promise<{ aiUsage: number; analyticsEvents: number; retractedCheers: number }> {
+): Promise<{ aiUsage: number; analyticsEvents: number; retractedCheers: number; scanEvents: number }> {
   const cutoff = new Date(now.getTime() - TELEMETRY_RETENTION_DAYS * DAY_MS);
   /**
    * Three tables, three independent deletes — and they were three sequential
@@ -463,6 +463,14 @@ export async function sweepTelemetry(
           .where(lt(schema.reactions.retractedAt, cutoff))
           .returning({ id: schema.reactions.id }),
     ],
+    [
+      "scan_events",
+      () =>
+        db
+          .delete(schema.scanEvents)
+          .where(lt(schema.scanEvents.createdAt, cutoff))
+          .returning({ id: schema.scanEvents.id }),
+    ],
   ]);
 
   const swept = (name: string) => outcomes.find((o) => o.name === name)?.value?.length ?? 0;
@@ -474,5 +482,6 @@ export async function sweepTelemetry(
     aiUsage: swept("ai_usage"),
     analyticsEvents: swept("analytics_events"),
     retractedCheers: swept("retracted_cheers"),
+    scanEvents: swept("scan_events"),
   };
 }

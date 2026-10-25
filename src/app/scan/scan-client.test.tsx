@@ -264,7 +264,7 @@ describe("ScanClient (manual fallback mode)", () => {
     expect(screen.getByText("Eagle Rare 10 Year")).toBeTruthy();
 
     const confirm = calls.find((c) => c.url.includes("/api/scan/confirm"));
-    expect(confirm?.body).toEqual({ upc: UPC, bottleId: EAGLE.id, relationship: "own" });
+    expect(confirm?.body).toEqual({ upc: UPC, bottleId: EAGLE.id, relationship: "own", auto: true });
   });
 
   it("sends the selected relationship with the confirmation", async () => {

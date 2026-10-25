@@ -1747,3 +1747,68 @@ export type AnalyticsEvent = typeof analyticsEvents.$inferSelect;
 export type ChatSession = typeof chatSessions.$inferSelect;
 export type ChatMessage = typeof chatMessages.$inferSelect;
 export type RecExplanation = typeof recExplanations.$inferSelect;
+
+// ── Track A: catalog and scan ───────────────────────────────────────────────
+// Tables owned by the catalog/scan track (whiskey-build-tracks.md, Track A).
+// Other tracks add their own fenced section rather than editing this one.
+
+export const SCAN_KINDS = ["barcode", "label"] as const;
+export type ScanKind = (typeof SCAN_KINDS)[number];
+
+/**
+ * - `matched`    our own barcode table knew it (barcode only)
+ * - `candidates` no own mapping, but an external lookup (barcode) or the AI
+ *                label read (label) produced catalog candidates to pick from
+ * - `miss`       nothing to offer — the person has to search or add the bottle
+ * - `confirmed`  the person confirmed which bottle it was (POST /api/scan/confirm)
+ */
+export const SCAN_OUTCOMES = ["matched", "candidates", "miss", "confirmed"] as const;
+export type ScanOutcome = (typeof SCAN_OUTCOMES)[number];
+
+/** Where a resolution came from: own DB, an external UPC provider, the AI label read, or nothing. */
+export const SCAN_SOURCES = ["own", "whiskyapi", "upcitemdb", "openfoodfacts", "ai", "none"] as const;
+export type ScanSource = (typeof SCAN_SOURCES)[number];
+
+/**
+ * Scan funnel telemetry (M0.5): how often a barcode resolves, from where, and
+ * whether the answer was the one the person confirmed. The roadmap's M1 exit
+ * line ("scan hit rate ≥ 85%") is unmeasurable without it.
+ *
+ * **Deliberately not about anyone.** No user id, no session, no IP, no photo,
+ * no label text — the questions this answers are about the catalog ("which
+ * barcodes do we not know?"), not about people, so nothing here can be joined
+ * back to an account. That also keeps it out of export/deletion
+ * (account-data.ts NOT_LINKED) while still being disclosed on /privacy.
+ *
+ * `upc` is the PRODUCT's barcode, and is stored only when we did not already
+ * have it mapped (`candidates` / `miss`): that is the coverage-gap list an
+ * operator works from. A barcode we already know is never written here.
+ * Swept with the rest of the telemetry after TELEMETRY_RETENTION_DAYS.
+ */
+export const scanEvents = pgTable(
+  "scan_events",
+  {
+    id: id(),
+    kind: text("kind").$type<ScanKind>().notNull(),
+    outcome: text("outcome").$type<ScanOutcome>().notNull(),
+    source: text("source").$type<ScanSource>().notNull(),
+    /** Only for unmapped barcodes (outcome `candidates` | `miss`). */
+    upc: text("upc"),
+    /** Matches + candidates shown to the person. */
+    resultCount: integer("result_count").notNull().default(0),
+    /**
+     * For `confirmed` barcode scans: the confirmed bottle's position in our
+     * own matches (0 = the top answer was right), or null when the person
+     * picked a bottle our table did not offer for that barcode.
+     */
+    confirmRank: integer("confirm_rank"),
+    /** Server-side resolution time. */
+    latencyMs: integer("latency_ms"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("scan_events_created_idx").on(t.createdAt),
+    index("scan_events_upc_idx").on(t.upc),
+  ],
+);
+export type ScanEvent = typeof scanEvents.$inferSelect;
