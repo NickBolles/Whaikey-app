@@ -337,6 +337,13 @@
       "when": 1792962519571,
       "tag": "0047_social_clubs_flights",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1792962990377,
+      "tag": "0048_social_challenges",
+      "breakpoints": true
     }
   ]
 }

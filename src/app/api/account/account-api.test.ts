@@ -238,6 +238,22 @@ async function seedFootprint(db: DB, subject: schema.User, counterpart: schema.U
     { id: uid("fe"), participantId: theirSeatAtMine, flightId: hosted, slot: "A", rating: 3 },
   ]);
 
+  // --- Challenges (social M2)
+  const challengeId = uid("ch");
+  await db.insert(schema.challenges).values({
+    id: challengeId,
+    slug: uid("slug"),
+    title: `${tag} club challenge`,
+    scope: "club",
+    clubId,
+    rule: { kind: "distinct_countries", target: 3 },
+    startsAt: at,
+    endsAt: new Date("2030-01-01T00:00:00Z"),
+    createdBy: subject.id,
+  });
+  await db.insert(schema.challengeParticipants).values({ challengeId, userId: subject.id });
+  await db.insert(schema.breadthBoardOptIns).values({ userId: subject.id });
+
   // --- AI and telemetry
   await db.insert(schema.aiRateLimits).values({ userId: subject.id, window: "day", windowStart: at, count: 3 });
   await db.insert(schema.aiUsage).values({ id: uid("ai"), userId: subject.id, feature: "chat", model: "m", inputTokens: 10 });

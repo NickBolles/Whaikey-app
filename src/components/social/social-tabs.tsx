@@ -12,6 +12,7 @@ import { Bell } from "lucide-react";
 export const SOCIAL_TABS = [
   { href: "/friends", label: "Feed" },
   { href: "/clubs", label: "Clubs" },
+  { href: "/challenges", label: "Challenges" },
   { href: "/friends/people", label: "People" },
 ] as const;
 
