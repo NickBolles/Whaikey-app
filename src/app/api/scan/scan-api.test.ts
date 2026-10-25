@@ -206,3 +206,89 @@ describe("POST /api/scan/confirm", () => {
     expect(body.userBottle.relationship).toBe("tried");
   });
 });
+
+describe("scan telemetry (M0.5)", () => {
+  const events = () => db.select().from(dbSchema.scanEvents);
+
+  it("records an own-DB hit without storing the barcode", async () => {
+    setSessionUser(user);
+    const bottle = await createTestBottle(db, { name: "Eagle Rare 10 Year" });
+    await confirmUpcMapping(db, UPC, bottle.id);
+    await resolvePost(jsonRequest("/api/scan/upc", "POST", { upc: UPC }));
+    const [e] = await events();
+    expect(e).toMatchObject({ kind: "barcode", outcome: "matched", source: "own", resultCount: 1, upc: null });
+    expect(e.latencyMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it("records a miss with the unmapped barcode, and no user anywhere on the row", async () => {
+    setSessionUser(user);
+    await resolvePost(jsonRequest("/api/scan/upc", "POST", { upc: UPC }));
+    const [e] = await events();
+    expect(e).toMatchObject({ kind: "barcode", outcome: "miss", source: "none", upc: UPC, resultCount: 0 });
+    expect(Object.keys(e)).not.toContain("userId");
+    expect(JSON.stringify(e)).not.toContain(user.id);
+  });
+
+  it("attributes provider candidates to the provider", async () => {
+    setSessionUser(user);
+    delete process.env.WHAIKEY_UPC_LOOKUP;
+    await createTestBottle(db, { name: "Buffalo Trace" });
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ items: [{ title: "Buffalo Trace Bourbon 750ml" }] })));
+    await resolvePost(jsonRequest("/api/scan/upc", "POST", { upc: UPC }));
+    const [e] = await events();
+    expect(e).toMatchObject({ outcome: "candidates", source: "upcitemdb", upc: UPC });
+    expect(e.resultCount).toBeGreaterThan(0);
+  });
+
+  it("does not record an invalid barcode or a signed-out request", async () => {
+    await resolvePost(jsonRequest("/api/scan/upc", "POST", { upc: UPC }));
+    setSessionUser(user);
+    await resolvePost(jsonRequest("/api/scan/upc", "POST", { upc: "080244002144" }));
+    expect(await events()).toHaveLength(0);
+  });
+
+  it("records the confirmed bottle's rank among our own matches, read before the confirmation", async () => {
+    setSessionUser(user);
+    const top = await createTestBottle(db, { name: "Eagle Rare 10 Year" });
+    const other = await createTestBottle(db, { name: "Eagle Rare 17 Year" });
+    const unrelated = await createTestBottle(db, { name: "Blanton's Original" });
+    await confirmUpcMapping(db, UPC, top.id);
+    await confirmUpcMapping(db, UPC, top.id);
+    await confirmUpcMapping(db, UPC, other.id);
+
+    for (const b of [top, other, unrelated]) {
+      await confirmPost(jsonRequest("/api/scan/confirm", "POST", { upc: UPC, bottleId: b.id }));
+    }
+    const ranks = (await events()).filter((e) => e.outcome === "confirmed").map((e) => [e.source, e.confirmRank]);
+    expect(ranks).toEqual([
+      ["own", 0],
+      ["own", 1],
+      ["none", null],
+    ]);
+  });
+
+  it("records a barcode-less confirmation as a label/search pick", async () => {
+    setSessionUser(user);
+    const bottle = await createTestBottle(db, { name: "Eagle Rare 10 Year" });
+    await confirmPost(jsonRequest("/api/scan/confirm", "POST", { bottleId: bottle.id }));
+    const [e] = await events();
+    expect(e).toMatchObject({ kind: "label", outcome: "confirmed", confirmRank: null, upc: null });
+  });
+
+  it("never fails the scan when the telemetry write fails", async () => {
+    setSessionUser(user);
+    const realInsert = db.insert.bind(db);
+    db.insert = ((t: unknown) =>
+      t === dbSchema.scanEvents
+        ? { values: () => Promise.reject(new Error("telemetry down")) }
+        : realInsert(t as never)) as unknown as typeof db.insert;
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const res = await resolvePost(jsonRequest("/api/scan/upc", "POST", { upc: UPC }));
+      expect(res.status).toBe(200);
+    } finally {
+      db.insert = realInsert;
+      spy.mockRestore();
+    }
+  });
+});

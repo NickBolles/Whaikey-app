@@ -6,7 +6,8 @@ import { RELATIONSHIPS } from "@/db/schema";
 import { requireUser, withErrorHandling } from "@/lib/session";
 import { upsertUserBottle } from "@/lib/bar";
 import { canViewBottle } from "@/lib/catalog-visibility";
-import { confirmUpcMapping, isValidUpc, normalizeUpc } from "@/lib/scan";
+import { confirmUpcMapping, isValidUpc, normalizeUpc, resolveUpc } from "@/lib/scan";
+import { recordScanEvent } from "@/lib/observability/scan-telemetry";
 
 export const runtime = "nodejs";
 
@@ -56,16 +57,34 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Bottle not found" }, { status: 404 });
     }
 
+    const ownMatches = upc ? await resolveUpc(db, upc) : [];
+
     /**
      * A confirmation teaches every future scanner, so it may only be recorded
      * against a bottle everyone can see. Confirming your own submission still
      * puts it on your shelf below; the barcode is held on the submission and
      * published when the bottle is (`publishSubmissionUpc`).
      */
+    // Where the confirmed bottle stood in our own answer for this barcode,
+    // read BEFORE the confirmation changes the ordering: 0 means the top
+    // match was right, null means our table did not offer it at all.
+    const confirmRank = upc
+      ? (() => {
+          const i = ownMatches.findIndex((m) => m.id === input.bottleId);
+          return i >= 0 ? i : null;
+        })()
+      : null;
     const mapping =
       upc && bottle.status !== "user_submitted"
         ? await confirmUpcMapping(db, upc, input.bottleId)
         : null;
+    await recordScanEvent(db, {
+      // No barcode means the bottle was picked from a label read or a search.
+      kind: upc ? "barcode" : "label",
+      outcome: "confirmed",
+      source: upc ? (confirmRank != null ? "own" : "none") : "none",
+      confirmRank,
+    });
 
     let userBottle: schema.UserBottle | null = null;
     let created = false;

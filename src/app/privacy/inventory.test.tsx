@@ -123,6 +123,7 @@ const INVENTORY: Record<string, Verdict> = {
     disclosed: "which model answered, how many tokens it used, and how many web searches it ran",
   },
   analytics_events: { disclosed: "that a\n            share page was opened" },
+  scan_events: { disclosed: "whether a scan was recognised" },
 
   // --- Devices ---
   push_devices: { disclosed: "Device push tokens" },

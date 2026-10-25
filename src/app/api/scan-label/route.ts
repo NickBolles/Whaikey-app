@@ -8,6 +8,7 @@ import { searchBottlesLike, type BottleSearchResult } from "@/lib/ai/tools";
 import { reserveAiRequest } from "@/lib/ai/rate-limit";
 import { recordAiUsage } from "@/lib/ai/usage";
 import { readJsonWithinLimit } from "@/lib/body-limit";
+import { recordScanEvent } from "@/lib/observability/scan-telemetry";
 
 // Node runtime (not edge): uses the DB driver and the Anthropic SDK.
 export const runtime = "nodejs";
@@ -81,6 +82,7 @@ export async function POST(request: Request) {
     if (!(await reserveAiRequest(db, user.id))) {
       return NextResponse.json({ error: "AI request limit reached. Try again later." }, { status: 429 });
     }
+    const started = Date.now();
     const anthropic = getAnthropic();
     const model = fastModel();
     const response = await anthropic.messages.create({
@@ -142,6 +144,14 @@ export async function POST(request: Request) {
       }
     }
 
+    // Anonymous outcome row (M0.5): no image, no extracted text, no user.
+    await recordScanEvent(db, {
+      kind: "label",
+      outcome: candidates.length > 0 ? "candidates" : "miss",
+      source: "ai",
+      resultCount: candidates.length,
+      latencyMs: Date.now() - started,
+    });
     return NextResponse.json({ extracted, candidates });
   });
 }
