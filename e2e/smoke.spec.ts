@@ -540,7 +540,17 @@ test.describe("flavor wheel touch gesture", () => {
     await expect(chips).toHaveCount(0);
 
     // Hold first, and the wheel takes the touch over: the sweep registers and
-    // the page stays exactly where it was.
+    // the page stays exactly where it was. Let the swipe's fling finish
+    // first: a page still coasting when the hold starts moves the wheel
+    // under the finger, which is not the bug this test is about.
+    const scrollY = () => page.evaluate(() => window.scrollY);
+    await expect
+      .poll(async () => {
+        const a = await scrollY();
+        await page.waitForTimeout(150);
+        return a === (await scrollY());
+      })
+      .toBe(true);
     await centre();
     const held = (await wheel.boundingBox())!;
     const holdFrom = { x: held.x + held.width / 2, y: held.y + held.height / 2 + 85 * unit };
