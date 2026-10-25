@@ -138,6 +138,7 @@ describe("card renders", () => {
     await setFlightState(db, me.id, flight.id, "revealed");
     const card = (await (await MINT(jsonRequest("/api/cards", "POST", { kind: "flight", code: flight.joinCode }))).json()) as { story: string };
     expect((await render(card.story, "flight")).status).toBe(200);
+    expect(card.story).not.toContain(flight.joinCode);
     // A suspended owner's cards stop rendering.
     await db.update(schema.userProfiles).set({ suspendedAt: new Date() }).where(eq(schema.userProfiles.userId, me.id));
     expect((await render(card.story, "flight")).status).toBe(404);

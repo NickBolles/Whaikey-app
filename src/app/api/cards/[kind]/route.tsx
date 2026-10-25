@@ -7,7 +7,7 @@ import { CARD_FORMATS, CARD_KINDS, cardEpoch, cardOwner, verifyCard, type CardFo
 import { getPalateCard } from "@/lib/social";
 import { leafLabel } from "@/lib/flavor-wheel";
 import { getWrapped, wrappedAvailable } from "@/lib/wrapped";
-import { findTaster, getFlightView, visibleFlightByCode } from "@/lib/flights";
+import { findTaster, flightVisibleTo, getFlightView } from "@/lib/flights";
 
 export const runtime = "nodejs";
 
@@ -119,7 +119,8 @@ export async function GET(req: Request, ctx: { params: Promise<{ kind: string }>
   } else if (kind === "flight") {
     // Rendered as the taster who minted it (their seat, their blocks), and only
     // while they still hold that seat and can still see the flight.
-    const flight = await visibleFlightByCode(db, subject, extra || null);
+    const byId = await db.query.flights.findFirst({ where: eq(schema.flights.id, subject) });
+    const flight = byId && (await flightVisibleTo(db, byId, extra || null)) ? byId : null;
     if (!flight || flight.state === "open" || !extra) return notFound();
     const seat = await findTaster(db, flight.id, { userId: extra });
     if (!seat) return notFound();

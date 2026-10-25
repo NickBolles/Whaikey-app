@@ -36,7 +36,9 @@ export async function POST(req: Request) {
       if (!flight || flight.state === "open" || !(await findTaster(db, flight.id, { userId: user.id }))) {
         return NextResponse.json({ error: "not_found" }, { status: 404 });
       }
-      subject = flight.joinCode;
+      // The flight's id, never its join code: a results image must not carry
+      // the credential that seats someone at the table.
+      subject = flight.id;
       // Rendered as the person who shared it: their blocks shape the results.
       extra = user.id;
     }
