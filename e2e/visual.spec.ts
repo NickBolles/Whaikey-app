@@ -453,8 +453,16 @@ test.describe("signed in (demo collector)", () => {
   // discussion, the sharing/privacy hub, and a signed-in bearer-link
   // comparison — see CONTRACTS.md for the underlying data shapes.
 
-  test("friends: following, followers, and a mutual", async ({ page }) => {
+  test("friends feed: Sasha's notes as rich cards with cheers", async ({ page }) => {
     await page.goto("/friends");
+    await expect(page.getByRole("navigation", { name: "Social sections" })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Feed" }).getByText("@sasha").first()).toBeVisible();
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("friends-feed"), { fullPage: true });
+  });
+
+  test("friends: following, followers, and a mutual", async ({ page }) => {
+    await page.goto("/friends/people");
     // exact: the redesigned page adds a "Find friends" h2 alongside the h1.
     await expect(page.getByRole("heading", { name: "Friends", exact: true })).toBeVisible();
     await expect(page.getByText("Sasha Glen").first()).toBeVisible();

@@ -8,6 +8,7 @@ import { sweepOrphanedSubmissions } from "@/lib/catalog";
 import { sweepNativeAuth } from "@/lib/native-auth";
 import { sweepExpiredPhoneLookups } from "@/lib/social";
 import { sweepTelemetry } from "@/lib/observability/metrics";
+import { drainPendingPushes, friendTastedDigest, sweepNotifications } from "@/lib/notify";
 
 export const dynamic = "force-dynamic";
 
@@ -94,6 +95,13 @@ export async function GET(request: Request): Promise<NextResponse> {
       // writes plaintext the migration will never see again. Nothing reads
       // these columns, so clearing them every run closes that window.
       ["provider-tokens", () => sweepProviderTokens(db)],
+      // Inbox rows past the 90 days `/privacy` states (docs/SOCIAL.md D18).
+      ["notifications", () => sweepNotifications(db, now)],
+      // Pushes whose after-response send never ran (a cold-killed function).
+      ["push-drain", () => drainPendingPushes(db, now)],
+      // "A friend shared a note on a bottle you own or wishlisted", at most
+      // once a day per person — this once-daily run IS the batching (D18).
+      ["friend-tasted-digest", () => friendTastedDigest(db, now)],
     ];
 
     const { outcomes, failed } = await runIndependently(tasks);

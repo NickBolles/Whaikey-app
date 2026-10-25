@@ -1,25 +1,25 @@
 import Link from "next/link";
-import { eq } from "drizzle-orm";
+import { redirect } from "next/navigation";
 import { getDb } from "@/db";
-import * as schema from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
-import { getOwnProfile, listBlocked, listFollowRequests, listFollowers, listFollowing } from "@/lib/social";
-import { ProfileClaim } from "@/components/profile-claim";
-import { UserAvatar } from "@/components/user-avatar";
-import { FriendsClient } from "./friends-client";
+import { encodeFeedCursor, getFriendFeed, getOwnProfile, listFollowing } from "@/lib/social";
+import { getPalateMatches } from "@/lib/taste-twins";
+import { toFeedItemJson } from "@/lib/feed";
+import { unreadCount } from "@/lib/notify";
+import { SocialTabs } from "@/components/social/social-tabs";
+import { SocialFeed } from "@/components/social/social-feed";
 
 export const dynamic = "force-dynamic";
 
-/** A first-pass @handle from the account name — the user edits it before submitting. */
-function suggestHandle(name: string): string {
-  const base = name
-    .toLowerCase()
-    .replace(/[^a-z0-9_]+/g, "")
-    .slice(0, 20);
-  return base.length >= 3 ? base : `${base}whiskey`.slice(0, 20);
-}
+const PAGE = 20;
 
-export default async function FriendsPage() {
+/**
+ * The Friends tab is the feed (docs/SOCIAL.md D15; design board C1): people
+ * controls one tap away under "People", the inbox bell in the header, then
+ * friends' notes as rich cards. Sparse first — with no follows it leads with
+ * the invite loop, never a blank list (SOCIAL §6.3).
+ */
+export default async function FriendsFeedPage() {
   const user = await getSessionUser();
   if (!user) {
     return (
@@ -29,7 +29,7 @@ export default async function FriendsPage() {
         </div>
         <div>
           <h1 className="font-display text-2xl font-semibold">Friends</h1>
-          <p className="mt-2 max-w-sm text-muted">Sign in to follow friends and see who follows you.</p>
+          <p className="mt-2 max-w-sm text-muted">Sign in to follow friends and see their notes.</p>
         </div>
         <Link href="/sign-in" className="btn-primary px-8 py-3">
           Sign in
@@ -40,70 +40,51 @@ export default async function FriendsPage() {
 
   const db = getDb();
   const profile = await getOwnProfile(db, user.id);
+  // Claiming a handle lives with the people controls.
+  if (!profile) redirect("/friends/people");
 
-  if (!profile) {
-    return (
-      <div className="mx-auto flex max-w-lg flex-col gap-6 px-4 pb-24 pt-8">
-        <header>
-          <h1 className="font-display text-[2rem] font-semibold leading-tight">Friends</h1>
-          <p className="mt-1 text-sm text-muted">Set up a profile to start following people and being followed.</p>
-        </header>
-        <ProfileClaim suggestedHandle={suggestHandle(user.name)} suggestedDisplayName={user.name} />
-        <Link
-          href="/welcome"
-          className="self-center text-sm text-muted transition-colors hover:text-foreground"
-        >
-          Prefer the guided tour? →
-        </Link>
-      </div>
-    );
-  }
-
-  const [requests, following, followers, blocked, phoneRow] = await Promise.all([
-    listFollowRequests(db, user.id),
+  const [feed, following, unread] = await Promise.all([
+    getFriendFeed(db, user.id, { limit: PAGE }),
     listFollowing(db, user.id),
-    listFollowers(db, user.id),
-    listBlocked(db, user.id),
-    // Not covered by getOwnProfile's projection — read the raw row for these
-    // two columns; the owner reading their own phone state is fine.
-    db.query.userProfiles.findFirst({
-      where: eq(schema.userProfiles.userId, user.id),
-      columns: { phoneLast2: true, phoneDiscoverable: true },
-    }),
+    unreadCount(db, user.id),
   ]);
-
-  const followerIds = new Set(followers.map((f) => f.userId));
-  const followingWithMutual = following.map((f) => ({ ...f, mutual: f.state === "accepted" && followerIds.has(f.userId) }));
+  const matches = await getPalateMatches(db, user.id, feed.map((f) => f.author.userId));
+  const items = feed.map((f) => toFeedItemJson(f, matches));
+  const last = feed[feed.length - 1];
+  const nextCursor = feed.length === PAGE && last ? encodeFeedCursor({ createdAt: last.createdAt, pourId: last.pourId }) : null;
+  const followsAnyone = following.some((f) => f.state === "accepted");
 
   return (
-    <div className="mx-auto flex max-w-lg flex-col gap-6 px-4 pb-24 pt-8">
-      <header className="flex flex-col gap-4">
-        <h1 className="font-display text-[2rem] font-semibold leading-tight">Friends</h1>
-        <div className="card flex items-center gap-3 p-4">
-          <UserAvatar name={profile.displayName || profile.handle} image={profile.avatarUrl} size={48} />
-          <div className="min-w-0 flex-1">
-            <p className="truncate font-display text-lg font-semibold leading-tight">
-              {profile.displayName || `@${profile.handle}`}
-            </p>
-            <p className="truncate text-sm text-muted">@{profile.handle}</p>
-          </div>
-          <Link
-            href={`/u/${profile.handle}`}
-            className="tap-target shrink-0 text-sm text-accent transition-opacity hover:opacity-80"
-          >
-            View profile →
+    <div className="mx-auto flex max-w-lg flex-col gap-4 px-3 pb-24 pt-5">
+      <header className="flex flex-col gap-3">
+        <h1 className="font-display text-[1.75rem] font-semibold leading-tight">Friends</h1>
+        <SocialTabs unread={unread} />
+      </header>
+
+      {!followsAnyone ? (
+        <div className="card flex flex-col items-center gap-3 p-5 text-center">
+          <p className="font-display text-lg font-semibold">A dram is better shared</p>
+          <p className="max-w-xs text-sm text-muted">
+            Follow the people you taste with and their notes land here, beside yours — with a cheers and a
+            comment one tap away.
+          </p>
+          <Link href="/friends/people" className="btn-secondary px-5 py-2.5 text-sm font-medium">
+            Find friends
           </Link>
         </div>
-      </header>
-      <FriendsClient
-        handle={profile.handle}
-        phoneLast2={phoneRow?.phoneLast2 ?? null}
-        phoneDiscoverable={phoneRow?.phoneDiscoverable ?? false}
-        requests={requests}
-        following={followingWithMutual}
-        followers={followers}
-        blocked={blocked}
-      />
+      ) : items.length === 0 ? (
+        <div className="card-flat flex flex-col gap-2 p-4">
+          <p className="text-sm text-muted">
+            Quiet here for now. When friends share a note it shows up in this feed — share one of your own and
+            the conversation usually starts.
+          </p>
+          <Link href="/friends/people" className="text-sm text-accent">
+            Find more friends →
+          </Link>
+        </div>
+      ) : (
+        <SocialFeed initialItems={items} initialCursor={nextCursor} />
+      )}
     </div>
   );
 }

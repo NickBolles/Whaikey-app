@@ -110,10 +110,20 @@ test.describe("social: signed in as Jordan (the demo user)", () => {
     await expect(cheersButton).toContainText("1");
   });
 
+  test("/friends is the feed: Sasha's note card, a working cheers, and the inbox bell", async ({ page }) => {
+    await page.goto("/friends");
+    const feed = page.getByRole("region", { name: "Feed" });
+    await expect(feed.getByText("@sasha").first()).toBeVisible();
+    await expect(page.getByRole("link", { name: /^Notifications/ })).toBeVisible();
+    await page.getByRole("link", { name: "People" }).click();
+    await expect(page).toHaveURL(/\/friends\/people$/);
+    await expect(page.getByLabel("Handle or phone number to add")).toBeVisible();
+  });
+
   test("/friends lists Sasha under both Following and Followers with a Friends chip, plus the handle-or-phone finder form", async ({
     page,
   }) => {
-    await page.goto("/friends");
+    await page.goto("/friends/people");
 
     // v2 finder form (docs/SOCIAL.md §7.2): a single input takes @handle or
     // phone number, landing on /add/[handle] rather than following inline.
@@ -135,7 +145,7 @@ test.describe("social: signed in as Jordan (the demo user)", () => {
   test("/friends shows identity up top and the Find friends card with both faces", async ({
     page,
   }) => {
-    await page.goto("/friends");
+    await page.goto("/friends/people");
 
     // Identity header card carries the handle now.
     await expect(page.getByText("@jordan").first()).toBeVisible();
@@ -156,7 +166,7 @@ test.describe("social: signed in as Jordan (the demo user)", () => {
   test("typing a handle in the finder lands on /add/sasha showing her identity and Following state", async ({
     page,
   }) => {
-    await page.goto("/friends");
+    await page.goto("/friends/people");
     await page.getByLabel("Handle or phone number to add").fill("sasha");
     await page.getByRole("button", { name: "Add", exact: true }).click();
 
@@ -175,7 +185,7 @@ test.describe("social: signed in as Jordan (the demo user)", () => {
   });
 
   test("typing Sasha's seeded phone number looks her up and lands on /add/sasha", async ({ page }) => {
-    await page.goto("/friends");
+    await page.goto("/friends/people");
     await page.getByLabel("Handle or phone number to add").fill(DEMO_FRIEND_PHONE);
     await page.getByRole("button", { name: "Add", exact: true }).click();
 
@@ -184,14 +194,14 @@ test.describe("social: signed in as Jordan (the demo user)", () => {
   });
 
   test("an unknown phone number stays on /friends with the no-match copy", async ({ page }) => {
-    await page.goto("/friends");
+    await page.goto("/friends/people");
     await page.getByLabel("Handle or phone number to add").fill("+15550001234");
     await page.getByRole("button", { name: "Add", exact: true }).click();
 
     await expect(
       page.getByText("No one found by that number. They may not have opted in — ask them for their @handle or code."),
     ).toBeVisible();
-    await expect(page).toHaveURL(/\/friends$/);
+    await expect(page).toHaveURL(/\/friends\/people$/);
   });
 
   test("/add/nobody999 shows friendly not-found copy", async ({ page }) => {
@@ -305,7 +315,7 @@ test.describe("social: phone discovery settings", () => {
   });
 
   test("claiming a handle, then setting and toggling off a discoverable phone number", async ({ page }) => {
-    await page.goto("/friends");
+    await page.goto("/friends/people");
 
     // Retries reuse the same seeded DB within a run, so only claim a handle
     // when this attempt actually needs to (idempotent across a retry).

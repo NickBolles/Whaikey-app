@@ -15,6 +15,8 @@ import { DiscoveryPanel } from "@/app/friends/discovery-settings";
 import { SharedLinksList } from "./shared-links-list";
 import { PrivacyControls } from "./privacy-controls";
 import { NotificationsCard } from "./notifications-card";
+import { getNotificationSettings } from "@/lib/notify";
+import { isPushConfigured } from "@/lib/push/send";
 import { YourData } from "./your-data";
 
 export const dynamic = "force-dynamic";
@@ -52,7 +54,7 @@ export default async function SettingsPage() {
   }
 
   const db = getDb();
-  const [shares, profile, prefs, suspension, holds, providers, phone] = await Promise.all([
+  const [shares, profile, prefs, suspension, holds, providers, phone, notificationSettings] = await Promise.all([
     listPourShares(db, user.id),
     getOwnProfile(db, user.id),
     getSocialPrefs(db, user.id),
@@ -69,6 +71,7 @@ export default async function SettingsPage() {
       columns: { phoneLast2: true, phoneDiscoverable: true },
       where: eq(userProfiles.userId, user.id),
     }),
+    getNotificationSettings(db, user.id),
   ]);
 
   const providerLine = providers.length
@@ -252,7 +255,7 @@ export default async function SettingsPage() {
         <p className="text-xs text-muted">These are the only scale and unit Whaikey has today.</p>
       </section>
 
-      <NotificationsCard />
+      <NotificationsCard initial={notificationSettings} pushAvailable={isPushConfigured()} />
 
       <YourData />
 
