@@ -4,6 +4,8 @@ Companion to [PLAN.md](../PLAN.md) §1 and the [September 2026 review](./REVIEW_
 
 The visual style does not change. DESIGN.md's tokens, recipes and rules all stand. What changes is **priority, density and navigation**: which thing each screen is for, what sits above the fold, and how you get back.
 
+> **Amended 2026-10.** DESIGN.md now prescribes a **compact, dense** rhythm (its Density section; owner direction). The boards' *structure* — what each screen holds, its order, its "not here" list and tap counts — is unchanged; their *spacing* follows the dense tokens, which is what makes "primary action above the fold" hold at 390×844 with room to spare. The Friends tab (D15, Q4) is the full feed beneath the people controls, per SOCIAL.md D15; its empty state leads with invites and open challenges.
+
 > **v2 (2026-09-03) supersedes v1's nav and several boards after an owner review.** The owner's decisions are collected in §0 so an implementing agent can read them in one place; every board below is already updated to match them. Where v1 proposed something the owner rejected, the rejection is stated so it is not re-proposed.
 
 ---
