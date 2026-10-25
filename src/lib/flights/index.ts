@@ -194,11 +194,20 @@ async function blockedEither(db: DB, a: string, b: string) {
   return rows.length > 0;
 }
 
-export type JoinOutcome = { participantId: string } | { error: "closed" | "blocked" | "underage" };
+export type JoinOutcome = { participantId: string } | { error: "closed" | "blocked" | "underage" | "profile_required" };
 
 export async function joinAsUser(db: DB, flightId: string, userId: string): Promise<JoinOutcome> {
   const flight = await db.query.flights.findFirst({ where: eq(schema.flights.id, flightId) });
   if (!flight || flight.state === "closed") return { error: "closed" };
+  // An account seat's ratings are shown to the table only from a reachable
+  // profile; refuse up front rather than accept ratings nobody will see.
+  if (userId !== flight.hostId) {
+    const me = await db.query.userProfiles.findFirst({
+      columns: { socialEnabled: true, suspendedAt: true },
+      where: eq(schema.userProfiles.userId, userId),
+    });
+    if (!me || !me.socialEnabled || me.suspendedAt != null) return { error: "profile_required" };
+  }
   if (await blockedEither(db, flight.hostId, userId)) return { error: "blocked" };
   const existing = await findTaster(db, flightId, { userId });
   if (existing) return { participantId: existing.participantId };

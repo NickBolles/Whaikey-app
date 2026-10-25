@@ -284,6 +284,7 @@ describe("tasting nights", () => {
     expect((await listMyFlights(db, host.id)).map((f) => f.joinCode)).toContain(flight.joinCode);
     await joinAsUser(db, flight.id, (await person(db, "seat_vis")).id);
     const noProfile = await createTestUser(db);
+    expect(await joinAsUser(db, flight.id, noProfile.id)).toEqual({ error: "profile_required" });
     await expect(createFlight(db, noProfile.id, { title: "x", blind: true, bottleIds: ids() })).rejects.toThrow("profile_required");
     await db.update(schema.userProfiles).set({ suspendedAt: null }).where(eq(schema.userProfiles.userId, host.id));
     const pending = await createTestBottle(db, { status: "user_submitted" });

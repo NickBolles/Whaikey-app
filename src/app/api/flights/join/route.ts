@@ -26,7 +26,10 @@ export async function POST(req: Request) {
     if (session || !parsed.data.guest) {
       const user = await requireUser();
       const result = await joinAsUser(db, flight.id, user.id);
-      if ("error" in result) return NextResponse.json({ error: "not_found" }, { status: 404 });
+      if ("error" in result) {
+        if (result.error === "profile_required") return NextResponse.json({ error: "profile_required" }, { status: 409 });
+        return NextResponse.json({ error: "not_found" }, { status: 404 });
+      }
       return NextResponse.json({ joined: true, guest: false });
     }
 

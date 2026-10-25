@@ -73,20 +73,33 @@ export function GuestJoinForm({ code, markets }: { code: string; markets: Readon
 export function JoinAsUserButton({ code }: { code: string }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
+  const [needsProfile, setNeedsProfile] = useState(false);
   return (
-    <button
-      type="button"
-      disabled={busy}
-      onClick={async () => {
-        setBusy(true);
-        await post("/api/flights/join", "POST", { code }).catch(() => null);
-        setBusy(false);
-        router.refresh();
-      }}
-      className="btn-primary px-8 py-3 disabled:opacity-60"
-    >
-      {busy ? "Joining…" : "Take a seat"}
-    </button>
+    <div className="flex flex-col items-center gap-2">
+      <button
+        type="button"
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          const res = await post("/api/flights/join", "POST", { code }).catch(() => null);
+          setBusy(false);
+          if (res?.status === 409) setNeedsProfile(true);
+          else router.refresh();
+        }}
+        className="btn-primary px-8 py-3 disabled:opacity-60"
+      >
+        {busy ? "Joining…" : "Take a seat"}
+      </button>
+      {needsProfile && (
+        <p role="status" className="text-center text-sm text-muted">
+          Set up your profile first so the table can see your ratings —{" "}
+          <a href="/friends/people" className="text-accent">
+            it takes a moment
+          </a>
+          .
+        </p>
+      )}
+    </div>
   );
 }
 
