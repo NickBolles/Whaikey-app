@@ -4,8 +4,7 @@ ignoredBuiltDependencies:
   - unrs-resolver
 
 # Security floors for transitive dev-tooling deps flagged by `pnpm audit --prod`
-# (reached through better-auth's peer graph: vitest > vite/jsdom/postcss).
+# (reached through vitest > jsdom/postcss). vite is pinned as a direct devDependency.
 overrides:
   source-map-js: ">=1.2.2"
-  vite: "^8.1.6"
   "undici@>=7.18.0 <7.30.1": "^7.30.1"
