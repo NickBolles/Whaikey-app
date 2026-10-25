@@ -24,12 +24,10 @@ export default async function ChallengesPage({ searchParams }: { searchParams: P
   const key: BoardKey = (BOARD_KEYS as readonly string[]).includes(boardParam ?? "") ? (boardParam as BoardKey) : "regions";
   const db = getDb();
   const now = appNow();
-  const [cards, crests, board, unread] = await Promise.all([
-    listChallenges(db, user.id, now),
-    listCrests(db, user.id),
-    getBoard(db, user.id, key, now),
-    unreadCount(db, user.id),
-  ]);
+  // Evaluation first: it may stamp a crest and send its notification, which
+  // the crest list and the unread badge must then include.
+  const cards = await listChallenges(db, user.id, now);
+  const [crests, board, unread] = await Promise.all([listCrests(db, user.id), getBoard(db, user.id, key, now), unreadCount(db, user.id)]);
 
   return (
     <div className="mx-auto flex max-w-lg flex-col gap-4 px-3 pb-24 pt-5">
@@ -104,7 +102,7 @@ export default async function ChallengesPage({ searchParams }: { searchParams: P
                   key={k}
                   href={`/challenges?board=${k}`}
                   aria-current={k === board.key ? "page" : undefined}
-                  className={`rounded-lg px-2.5 py-1 ${k === board.key ? "bg-surface-raised text-foreground" : "text-muted"}`}
+                  className={`tap-target rounded-lg px-2.5 py-1 ${k === board.key ? "bg-surface-raised text-foreground" : "text-muted"}`}
                 >
                   {k[0].toUpperCase() + k.slice(1)}
                 </Link>
@@ -120,7 +118,7 @@ export default async function ChallengesPage({ searchParams }: { searchParams: P
                 </li>
               ))}
             </ol>
-            <p className="text-[11px] text-muted">Counted from notes you share, different {board.key} this season. Ties are ties.</p>
+            <p className="text-xs text-muted">Counted from notes you share, different {board.key} this season. Ties are ties.</p>
           </div>
         )}
       </section>

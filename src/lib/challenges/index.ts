@@ -42,7 +42,7 @@ export const ruleSchema = z
  * from, so neither ever discloses a private pour.
  */
 export async function metRows(db: DB, userId: string, from: Date, to: Date, sharedOnly: boolean): Promise<MetRow[]> {
-  return db
+  const poured = await db
     .select({
       bottleId: schema.bottles.id,
       distilleryId: schema.bottles.distilleryId,
@@ -64,6 +64,32 @@ export async function metRows(db: DB, userId: string, from: Date, to: Date, shar
         sharedOnly ? ne(schema.pours.visibility, "private") : undefined,
       ),
     );
+  if (sharedOnly) return poured;
+  // Your own progress also counts bottles marked tried (or shelved) in the
+  // window (SOCIAL §7.12) — never in anyone else's view, since a shelf row has
+  // no audience of its own.
+  const shelved = await db
+    .select({
+      bottleId: schema.bottles.id,
+      distilleryId: schema.bottles.distilleryId,
+      country: schema.bottles.country,
+      region: schema.bottles.region,
+      category: schema.bottles.category,
+      caskTypes: schema.bottles.caskTypes,
+      flavorTags: sql<Record<string, number> | null>`null`,
+    })
+    .from(schema.userBottles)
+    .innerJoin(schema.bottles, eq(schema.bottles.id, schema.userBottles.bottleId))
+    .where(
+      and(
+        eq(schema.userBottles.userId, userId),
+        inArray(schema.userBottles.relationship, ["own", "tried"]),
+        gte(schema.userBottles.createdAt, from),
+        lte(schema.userBottles.createdAt, to),
+        ne(schema.bottles.status, "user_submitted"),
+      ),
+    );
+  return [...poured, ...shelved];
 }
 
 // ---------------------------------------------------------------------------
@@ -89,7 +115,7 @@ const ROTATION: CuratedSpec[][] = [
     { key: "style-sampler", title: "Style sampler", description: "4 different styles — bourbon, rye, single malt, and beyond.", rule: { kind: "distinct_styles", target: 4 } },
   ],
   [
-    { key: "american-distilleries", title: "American road trip", description: "4 different US distilleries.", rule: { kind: "distinct_distilleries", target: 4, filter: { country: "United States" } } },
+    { key: "american-distilleries", title: "American road trip", description: "4 different US distilleries.", rule: { kind: "distinct_distilleries", target: 4, filter: { country: "USA" } } },
     { key: "around-the-world", title: "Around the world", description: "Whiskey from 4 different countries this month.", rule: { kind: "distinct_countries", target: 4 } },
     { key: "word-hunter", title: "Word hunter", description: "Name 10 different descriptors in your notes.", rule: { kind: "distinct_descriptors", target: 10 } },
   ],
@@ -141,6 +167,12 @@ export const clubChallengeSchema = z
 export async function createClubChallenge(db: DB, userId: string, clubId: string, input: z.infer<typeof clubChallengeSchema>, now = new Date()) {
   const role = await getRole(db, clubId, userId);
   if (role !== "owner" && role !== "admin") return null;
+  // A social write: a suspended or stepped-back admin cannot publish to the club.
+  const me = await db.query.userProfiles.findFirst({
+    columns: { socialEnabled: true, suspendedAt: true },
+    where: eq(schema.userProfiles.userId, userId),
+  });
+  if (!me || !me.socialEnabled || me.suspendedAt != null) return null;
   const [row] = await db
     .insert(schema.challenges)
     .values({
@@ -255,6 +287,12 @@ export async function listChallenges(db: DB, userId: string, now = new Date()): 
         clubIds.length > 0
           ? sql`(${schema.challenges.scope} = 'global' or ${inArray(schema.challenges.clubId, clubIds)})`
           : eq(schema.challenges.scope, "global"),
+        // A club challenge carries its creator's words: hidden across a block,
+        // and while the creator is suspended or stepped back.
+        sql`(${schema.challenges.createdBy} is null or ${schema.challenges.createdBy} = ${userId} or (
+          exists (select 1 from user_profiles cp where cp.user_id = ${schema.challenges.createdBy} and cp.social_enabled = true and cp.suspended_at is null)
+          and not exists (select 1 from blocks b where (b.blocker_id = ${userId} and b.blocked_id = ${schema.challenges.createdBy}) or (b.blocker_id = ${schema.challenges.createdBy} and b.blocked_id = ${userId}))
+        ))`,
       ),
     )
     .orderBy(asc(schema.challenges.scope), asc(schema.challenges.endsAt));

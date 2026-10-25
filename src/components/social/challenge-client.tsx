@@ -26,7 +26,7 @@ export function JoinChallengeButton({ slug, joined, completed }: { slug: string;
         setBusy(false);
         router.refresh();
       }}
-      className={`${joined ? "text-xs text-muted hover:text-foreground" : "btn-secondary px-3 py-1.5 text-sm"} disabled:opacity-60`}
+      className={`tap-target ${joined ? "px-2 text-xs text-muted hover:text-foreground" : "btn-secondary px-3 py-1.5 text-sm"} disabled:opacity-60`}
     >
       {joined ? "Leave" : "Join"}
     </button>
@@ -46,7 +46,7 @@ export function BoardOptIn({ optedIn }: { optedIn: boolean }) {
         setBusy(false);
         router.refresh();
       }}
-      className={`${optedIn ? "text-xs text-muted hover:text-foreground" : "btn-secondary px-3 py-1.5 text-sm"} disabled:opacity-60`}
+      className={`tap-target ${optedIn ? "px-2 text-xs text-muted hover:text-foreground" : "btn-secondary px-3 py-1.5 text-sm"} disabled:opacity-60`}
     >
       {optedIn ? "Leave the board" : "Join the board"}
     </button>
@@ -64,7 +64,7 @@ export function ClubChallengeForm({ clubId }: { clubId: string }) {
   const [error, setError] = useState(false);
   if (!open) {
     return (
-      <button type="button" onClick={() => setOpen(true)} className="text-xs font-medium text-accent">
+      <button type="button" onClick={() => setOpen(true)} className="tap-target text-xs font-medium text-accent">
         Start a club challenge →
       </button>
     );
@@ -101,7 +101,7 @@ export function ClubChallengeForm({ clubId }: { clubId: string }) {
           <input type="number" min={7} max={92} value={days} onChange={(e) => setDays(Number(e.target.value))} className="rounded-lg border border-border-subtle bg-surface px-2 py-2" />
         </label>
       </div>
-      <p className="text-[11px] text-muted">Challenges count different things met, never how much — a repeat counts for nothing.</p>
+      <p className="text-xs text-muted">Challenges count different things met, never how much — a repeat counts for nothing.</p>
       <button type="submit" className="btn-primary py-2 text-sm">
         Start it
       </button>

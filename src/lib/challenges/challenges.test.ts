@@ -149,6 +149,23 @@ describe("challenges and crests", () => {
     expect((await listChallenges(db, owner.id, after)).find((c) => c.slug === ch.slug)!.friends).toEqual([]);
     // A crest, once earned, cannot be left.
     expect(await leaveChallenge(db, friend.id, ch.slug)).toBe(false);
+    // A block hides the creator's club challenge from the other side.
+    await blockUser(db, friend.id, owner.id);
+    expect((await listChallenges(db, friend.id, after)).map((c) => c.slug)).not.toContain(ch.slug);
+  });
+});
+
+describe("own progress counts tried bottles too", () => {
+  it("a bottle marked tried in the window counts for you, never for a friend's view", async () => {
+    const db = await setupTestDb();
+    const now = new Date("2026-10-20T12:00:00Z");
+    const me = await person(db, "me_tr");
+    const club = await createClub(db, me.id, { name: "Club" });
+    const ch = (await createClubChallenge(db, me.id, club.id, { title: "One country", rule: { kind: "distinct_countries", target: 1 }, days: 30 }, now))!;
+    const b = await createTestBottle(db, { country: "Japan" });
+    await db.insert(schema.userBottles).values({ id: uid("ub"), userId: me.id, bottleId: b.id, relationship: "tried", createdAt: new Date(now.getTime() + 1000) });
+    expect(await joinChallenge(db, me.id, ch.slug, new Date(now.getTime() + 2000))).toBe(true);
+    expect((await listCrests(db, me.id)).map((c) => c.title)).toEqual(["One country"]);
   });
 });
 
