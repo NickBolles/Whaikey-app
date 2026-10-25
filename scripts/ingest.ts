@@ -254,10 +254,14 @@ function annotate(level: "warning" | "error", message: string): void {
   else console[level === "error" ? "error" : "warn"](message);
 }
 
+/** The summary last written, so a later finalization failure can override it. */
+let writtenSummary: SourceRunSummary | null = null;
+
 /** Persist the run summary when --summary FILE was given. */
 async function writeSummary(summary: SourceRunSummary): Promise<void> {
   const path = arg("summary");
   if (!path) return;
+  writtenSummary = summary;
   await writeFile(path, `${JSON.stringify(summary, null, 2)}\n`, "utf8");
 }
 
@@ -283,7 +287,17 @@ main()
     if (ingestDb && !hasFlag("dry-run")) await refreshCatalogTotals(ingestDb);
   })
   .then(() => process.exit(process.exitCode ?? 0))
-  .catch((err) => {
+  .catch(async (err) => {
     console.error(err);
+    // A failure after the source summary was written (e.g. the catalog-totals
+    // refresh losing its connection) must not leave an "ok" summary behind:
+    // the workflow trusts summaries, not step outcomes.
+    if (writtenSummary && writtenSummary.status !== "failed") {
+      await writeSummary({
+        ...writtenSummary,
+        status: "failed",
+        message: `finalization failed after import: ${describeError(err)}`,
+      }).catch(() => {});
+    }
     process.exit(1);
   });
