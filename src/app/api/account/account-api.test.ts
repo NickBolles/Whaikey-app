@@ -113,6 +113,8 @@ async function seedFootprint(db: DB, subject: schema.User, counterpart: schema.U
   await db.insert(schema.bottleSubmissions).values({ id: uid("sub"), bottleId: pending.id, submittedBy: subject.id, distilleryText: `${tag} Distillery` });
   const promoted = await createTestBottle(db, { name: `${tag} Promoted`, status: "verified", submittedBy: subject.id });
   await db.insert(schema.bottleSubmissions).values({ id: uid("sub"), bottleId: promoted.id, submittedBy: subject.id, state: "approved" });
+  // A crowd barcode claim (M1 teach-the-scanner).
+  await db.insert(schema.upcConfirmations).values({ id: uid("upcc"), upc: "080244002145", bottleId: catalog.id, userId: subject.id });
   // Somebody else's submission that `subject` decided, as an operator.
   const theirs = await createTestBottle(db, { name: `${tag} Theirs`, status: "user_submitted", submittedBy: counterpart.id });
   await db.insert(schema.bottleSubmissions).values({
