@@ -89,6 +89,17 @@ describe("scanMetrics", () => {
     expect(m.label.latencyP50Ms).toBe(80);
   });
 
+  it("drops a barcode from the gap list once it is mapped", async () => {
+    const bottle = await createTestBottle(db);
+    await seed([
+      [{ kind: "barcode", outcome: "miss", source: "none", upc: "080244002145" }, 3],
+      [{ kind: "barcode", outcome: "miss", source: "none", upc: "082184090466" }, 1],
+    ]);
+    await confirmUpcMapping(db, "080244002145", bottle.id);
+    const m = await scanMetrics(db, { until: later() });
+    expect(m.topUnmappedUpcs.map((g) => g.upc)).toEqual(["082184090466"]);
+  });
+
   it("returns nulls rather than 0% when nothing was scanned", async () => {
     const m = await scanMetrics(db, { until: later() });
     expect(m.barcode).toMatchObject({ attempts: 0, ownHitRate: null, resolutionRate: null, latencyP50Ms: null });

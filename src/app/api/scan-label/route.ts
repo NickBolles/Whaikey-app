@@ -10,6 +10,9 @@ import { recordAiUsage } from "@/lib/ai/usage";
 import { readJsonWithinLimit } from "@/lib/body-limit";
 import { recordScanEvent } from "@/lib/observability/scan-telemetry";
 
+/** Mirrors `OCR_FALLBACK_HEADER` in src/lib/label-scan.ts (client module; not imported server-side). */
+const OCR_FALLBACK_HEADER = "x-whaikey-ocr-fallback";
+
 // Node runtime (not edge): uses the DB driver and the Anthropic SDK.
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -56,11 +59,30 @@ function cleanString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
+/**
+ * The on-device read was deferred to this endpoint (`OCR_FALLBACK_HEADER`):
+ * when the AI read is unavailable the client falls back to those OCR
+ * candidates, so record that as the scan's outcome — otherwise the only row
+ * for the scan is `deferred`, which the funnel does not count.
+ */
+async function recordOcrFallback(request: Request): Promise<void> {
+  const raw = request.headers.get(OCR_FALLBACK_HEADER);
+  if (raw == null) return;
+  const n = Math.min(50, Math.max(0, Number.parseInt(raw, 10) || 0));
+  await recordScanEvent(getDb(), {
+    kind: "label",
+    outcome: n > 0 ? "candidates" : "miss",
+    source: "ocr",
+    resultCount: n,
+  });
+}
+
 /** POST /api/scan-label {imageBase64, mediaType} → {extracted, candidates} */
 export async function POST(request: Request) {
   return withErrorHandling(async () => {
     const user = await requireUser();
     if (!isAiConfigured()) {
+      await recordOcrFallback(request);
       return NextResponse.json({ error: "AI features are not configured" }, { status: 503 });
     }
 
@@ -80,6 +102,7 @@ export async function POST(request: Request) {
 
     const db = getDb();
     if (!(await reserveAiRequest(db, user.id))) {
+      await recordOcrFallback(request);
       return NextResponse.json({ error: "AI request limit reached. Try again later." }, { status: 429 });
     }
     const started = Date.now();
