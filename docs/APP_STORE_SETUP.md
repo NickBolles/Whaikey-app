@@ -178,7 +178,8 @@ Set the **App Store availability age gate** consistently, and check whether any 
 country restricts alcohol-related apps outright.
 
 ### 6.3 App Privacy (the nutrition label)
-Declare every data type collected. For Whaikey at minimum:
+**Current draft answers, derived from `ACCOUNT_DATA`: `docs/store/data-disclosures.md`**
+(supersedes the starter table below). Declare every data type collected. For Whaikey at minimum:
 
 | Data type | Collected | Linked to user | Used for tracking | Purpose |
 |---|---|---|---|---|
@@ -273,7 +274,8 @@ is granted. Organization accounts are exempt.
    - **Target audience** — **18+ only**. Do **not** include any under-18 bracket; an
      alcohol app in a child-adjacent bracket triggers Families policy review and refusal.
    - **News app** — no. **COVID-19 apps** — no.
-   - **Data safety** — mirrors §6.3. Declare data collected, whether encrypted in transit
+   - **Data safety** — mirrors §6.3 (`docs/store/data-disclosures.md`). Account
+     deletion URL: `https://<domain>/delete-account` (public, works signed out). Declare data collected, whether encrypted in transit
      (yes), whether users can request deletion (**yes** — PLAN.md guarantees exportable,
      user-owned data; make sure an actual deletion path exists).
    - **Government apps** — no. **Financial features** — no.

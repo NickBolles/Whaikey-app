@@ -72,6 +72,12 @@ test.describe("signed out", () => {
     await expect(page).toHaveScreenshot(shot("support"), { fullPage: true });
   });
 
+  test("delete account (signed out)", async ({ page }) => {
+    await page.goto("/delete-account");
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("delete-account"), { fullPage: true });
+  });
+
   test("search empty state", async ({ page }) => {
     await page.goto("/search");
     await settle(page);

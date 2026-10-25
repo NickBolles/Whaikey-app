@@ -1,29 +1,29 @@
 import { isNotNull, lt, or } from "drizzle-orm";
-import { betterAuth } from "better-auth";
+import { betterAuth, type BetterAuthOptions } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { getDb, schema } from "@/db";
 import { reportInBackground } from "@/lib/observability/errors";
 import type { DB } from "@/db";
+import { appleProviderOptions } from "@/lib/apple-sign-in";
 
 /**
  * Social login only (PLAN.md §2.1 / user decision): no email+password.
  * Providers activate when their env vars are present, so local dev without
  * OAuth credentials still boots (the sign-in page explains setup).
  */
-function socialProviders() {
-  const providers: Record<string, { clientId: string; clientSecret: string }> = {};
+function socialProviders(secret: string) {
+  const providers: NonNullable<BetterAuthOptions["socialProviders"]> = {};
   if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
     providers.google = {
       clientId: process.env.GOOGLE_CLIENT_ID,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET,
     };
   }
-  if (process.env.APPLE_CLIENT_ID && process.env.APPLE_CLIENT_SECRET) {
-    providers.apple = {
-      clientId: process.env.APPLE_CLIENT_ID,
-      clientSecret: process.env.APPLE_CLIENT_SECRET,
-    };
-  }
+  // Web redirect (APPLE_CLIENT_ID + APPLE_CLIENT_SECRET) and/or native iOS id
+  // token (APPLE_APP_BUNDLE_IDENTIFIER) — see src/lib/apple-sign-in.ts. The
+  // native path refuses any id token without a nonce this server minted.
+  const apple = appleProviderOptions(secret);
+  if (apple) providers.apple = apple;
   return providers;
 }
 
@@ -53,7 +53,9 @@ function trustedOrigins(): string[] {
     process.env.VERCEL_PROJECT_PRODUCTION_URL,
   ]
     .filter((host): host is string => Boolean(host))
-    .map((host) => `https://${host}`);
+    .map((host) => `https://${host}`)
+    // Apple's web flow answers with a cross-site form_post to the callback.
+    .concat(process.env.APPLE_CLIENT_ID ? ["https://appleid.apple.com"] : []);
 }
 
 function authSecret(): string {
@@ -66,12 +68,14 @@ function authSecret(): string {
   return secret ?? "dev-only-secret-change-me";
 }
 
+const secret = authSecret();
+
 export const auth = betterAuth({
   database: drizzleAdapter(getDb(), { provider: "pg", schema }),
-  secret: authSecret(),
+  secret,
   baseURL: baseURL(),
   trustedOrigins: trustedOrigins(),
-  socialProviders: socialProviders(),
+  socialProviders: socialProviders(secret),
   emailAndPassword: { enabled: false },
   /**
    * Better Auth's `account` table keeps the provider's access, refresh and id

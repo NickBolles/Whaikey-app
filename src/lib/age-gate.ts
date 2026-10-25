@@ -233,6 +233,9 @@ const UNGATED_ROOTS = [
   "/terms",
   "/privacy",
   "/support",
+  // Account deletion (Google Play's web-deletion requirement): leaving must
+  // never require answering the gate first.
+  "/delete-account",
   "/s",
   "/api",
 ];

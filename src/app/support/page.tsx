@@ -44,7 +44,11 @@ export default function SupportPage() {
               if you would rather.{" "}
             </>
           ) : null}
-          A wrong detail on a bottle goes somewhere else on purpose: the{" "}
+          To delete your account, see{" "}
+          <Link href="/delete-account" className="text-accent">
+            Delete your account
+          </Link>
+          . A wrong detail on a bottle goes somewhere else on purpose: the{" "}
           <a
             href="https://github.com/NickBolles/Whaikey-app/issues/new?template=whiskey-catalog-feedback.yml"
             className="text-accent"

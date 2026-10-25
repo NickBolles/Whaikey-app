@@ -248,6 +248,36 @@ naming a real team id and bundle id — none of which can be written until the a
 name, bundle id and production domain are decided (PLAN.md §12). **Do not submit
 native sign-in to either store before this is in place.**
 
+### 2.3.1 Sign in with Apple — native, no browser (M3.3)
+
+Apple's sheet is native (`ASAuthorizationController`), so on iOS Apple sign-in does not
+use the browser round trip above:
+
+```
+1. GET /api/auth/native/apple/nonce → { nonce }   (404 = not configured → browser flow)
+   The nonce is HMAC-signed with BETTER_AUTH_SECRET and expires in 10 minutes.
+2. WhaikeyAppleSignIn.authorize({ nonce: sha256hex(nonce) })   (app-target Swift plugin)
+   → { identityToken, givenName?, familyName?, email? }
+3. The WebView POSTs /api/auth/sign-in/social
+     { provider: "apple", idToken: { token, nonce, user? } }
+   Better Auth verifies the token against Apple's JWKS (issuer, audience = bundle id,
+   ≤ 1 h old, nonce claim = sha256(nonce)); our wrapper first refuses any request
+   without a nonce this server minted. The Set-Cookie lands in the WebView jar.
+```
+
+Server config: `APPLE_APP_BUNDLE_IDENTIFIER` (native) and/or `APPLE_CLIENT_ID` +
+`APPLE_CLIENT_SECRET` (web). Code: `src/lib/apple-sign-in.ts`,
+`src/lib/native/apple-sign-in.ts`, `ios/App/App/WhaikeyAppleSignInPlugin.swift`.
+Older shells without the plugin, Android, and servers without the bundle id fall back to
+the browser flow, so shipping the web change first is safe.
+
+**Manual device test (no Xcode in CI for PRs):** on a device signed into an Apple ID,
+with the App ID's Sign in with Apple capability on and `APPLE_APP_BUNDLE_IDENTIFIER` set
+on the target deployment: tap *Continue with Apple* → native sheet (no Safari) → Face ID
+→ lands signed in; second sign-in reuses the account; cancel the sheet → back on sign-in
+with no error; unset the env → button falls back to the browser flow; Settings → Apple
+ID → Password & Security → Apps Using Apple ID shows Whaikey.
+
 ### 2.4 Repo layout
 
 ```
@@ -431,7 +461,8 @@ exactly the shape that gets flagged, so the defense has to be real, not rhetoric
 - Haptic feedback throughout.
 - Push notifications.
 - Offline pour logging that works with no network.
-- Sign in with Apple, native.
+- Sign in with Apple, native (`WhaikeyAppleSignInPlugin.swift`).
+- Full inventory with status: `docs/store/guideline-4.2.md`.
 - Home screen widgets (Phase 4 — ship before first submission if review is at all tight).
 
 **Do not submit before Phase 3.** A Phase-2 build is a WebView with a scanner; a

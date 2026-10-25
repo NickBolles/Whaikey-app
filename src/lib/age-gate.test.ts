@@ -207,6 +207,7 @@ describe("isUngatedPath", () => {
     expect(isUngatedPath("/terms")).toBe(true);
     expect(isUngatedPath("/privacy")).toBe(true);
     expect(isUngatedPath("/support")).toBe(true);
+    expect(isUngatedPath("/delete-account")).toBe(true);
     expect(isUngatedPath("/s/abc123")).toBe(true);
     expect(isUngatedPath("/api/age")).toBe(true);
   });

@@ -2,6 +2,8 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, Check, Undo2, X } from "lucide-react";
+import { haptic } from "@/lib/native/haptics";
+import { isNativeApp } from "@/lib/native/platform";
 
 /**
  * The app-level toast region with undo (docs/STORYBOARD.md §1.2, review UX-13).
@@ -116,6 +118,10 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   const show = useCallback(
     (input: ToastOptions | string) => {
       const options = typeof input === "string" ? { message: input } : input;
+      // App Store 4.2 polish: a save or a failure is felt as well as seen.
+      // Native only — on the web a toast is not worth a vibration.
+      if (isNativeApp() && options.tone === "success") haptic("success");
+      else if (isNativeApp() && options.tone === "error") haptic("warning");
       const id = `toast-${++nextId}`;
       const all = [...toastsRef.current, { ...options, id, undoing: false }];
       const overflow = all.slice(0, Math.max(0, all.length - MAX_VISIBLE_TOASTS));

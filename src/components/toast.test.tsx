@@ -11,6 +11,9 @@ import {
   type ToastApi,
 } from "@/components/toast";
 
+const hapticMock = vi.fn();
+vi.mock("@/lib/native/haptics", () => ({ haptic: (m: string) => hapticMock(m) }));
+
 let api: ToastApi;
 /** Every value the hook returned, one entry per commit. */
 const seen: ToastApi[] = [];
@@ -251,5 +254,29 @@ describe("ToastProvider / useToast", () => {
   it("throws a clear error when used without a provider", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     expect(() => render(<Harness />)).toThrow(/needs a <ToastProvider>/);
+  });
+});
+
+describe("native haptics", () => {
+  afterEach(() => {
+    cleanup();
+    hapticMock.mockReset();
+    delete (window as { Capacitor?: unknown }).Capacitor;
+  });
+
+  it("are felt on a device for a save and a failure, and never on the web", () => {
+    renderToasts();
+    act(() => {
+      api.show({ message: "Saved", tone: "success" });
+    });
+    expect(hapticMock).not.toHaveBeenCalled();
+
+    (window as { Capacitor?: unknown }).Capacitor = { getPlatform: () => "ios" };
+    act(() => {
+      api.show({ message: "Saved", tone: "success" });
+      api.error("Failed");
+      api.show("Plain");
+    });
+    expect(hapticMock.mock.calls).toEqual([["success"], ["warning"]]);
   });
 });

@@ -52,6 +52,10 @@ export function YourData() {
           <a href="/privacy#getting-it-out" className="text-accent">
             privacy policy
           </a>
+          ; it can also be done on the web at{" "}
+          <a href="/delete-account" className="text-accent">
+            /delete-account
+          </a>
           .
         </p>
         <DeleteAccount />
