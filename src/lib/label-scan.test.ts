@@ -112,3 +112,15 @@ describe("identifyLabel when the AI request drops", () => {
     expect(r.candidates.map((c) => c.id)).toEqual(["lag16"]);
   });
 });
+
+describe("identifyLabel OCR fallback header", () => {
+  it("tells the AI endpoint how many OCR candidates it holds once the free pass was deferred", async () => {
+    const f = router({
+      "/api/scan/label-text": () => Response.json({ confident: false, candidates: [bottle("a"), bottle("b")] }),
+      "/api/scan-label": () => Response.json({ error: "AI features are not configured" }, { status: 503 }),
+    });
+    await identifyLabel("data:image/jpeg;base64,QUJD", "image/jpeg", { fetch: f, recognize: async () => OCR });
+    const aiCall = f.mock.calls.find(([url]) => String(url) === "/api/scan-label");
+    expect((aiCall?.[1] as RequestInit).headers).toMatchObject({ "x-whaikey-ocr-fallback": "2" });
+  });
+});

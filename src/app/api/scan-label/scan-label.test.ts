@@ -37,6 +37,22 @@ describe("POST /api/scan-label", () => {
     expect(res.status).toBe(401);
   });
 
+  it("records the OCR fallback as the outcome when the AI read is unavailable", async () => {
+    setSessionUser(user);
+    const req = jsonRequest("/api/scan-label", "POST", { imageBase64: TINY_PNG, mediaType: "image/png" });
+    req.headers.set("x-whaikey-ocr-fallback", "2");
+    expect((await POST(req)).status).toBe(503);
+    const rows = await db.select().from(dbSchema.scanEvents);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ kind: "label", outcome: "candidates", source: "ocr", resultCount: 2 });
+  });
+
+  it("records nothing for an unavailable AI read without a deferred OCR pass", async () => {
+    setSessionUser(user);
+    await POST(jsonRequest("/api/scan-label", "POST", { imageBase64: TINY_PNG, mediaType: "image/png" }));
+    expect(await db.select().from(dbSchema.scanEvents)).toHaveLength(0);
+  });
+
   it("returns 503 when AI is not configured", async () => {
     setSessionUser(user);
     const res = await POST(

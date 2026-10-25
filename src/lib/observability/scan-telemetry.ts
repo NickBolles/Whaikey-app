@@ -183,7 +183,15 @@ export async function scanMetrics(db: DB, opts: { since?: Date; until?: Date } =
         misses: sql<number>`count(*) filter (where ${e.outcome} = 'miss')::int`,
       })
       .from(e)
-      .where(and(window, isNotNull(e.upc)))
+      // Only barcodes still unmapped now: one fixed since its misses were
+      // recorded is no longer a gap (raw names — see catalogCoverage).
+      .where(
+        and(
+          window,
+          isNotNull(e.upc),
+          sql`not exists (select 1 from bottle_upcs m where m.upc = scan_events.upc)`,
+        ),
+      )
       .groupBy(e.upc)
       .orderBy(sql`count(*) desc`, e.upc)
       .limit(25),

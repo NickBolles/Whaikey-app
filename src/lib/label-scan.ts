@@ -33,8 +33,16 @@ export interface LabelScanDeps {
   recognize?: (dataUrl: string) => Promise<OcrResult | null>;
 }
 
-const post = (f: typeof fetch, url: string, body: unknown) =>
-  f(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+const post = (f: typeof fetch, url: string, body: unknown, headers: Record<string, string> = {}) =>
+  f(url, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
+
+/**
+ * Sent with the AI read when the on-device pass was deferred: how many OCR
+ * candidates the client holds as a fallback. If the AI read is unavailable
+ * (503/429) the server records that fallback as the scan's terminal outcome,
+ * so the label funnel still counts the scan once.
+ */
+export const OCR_FALLBACK_HEADER = "x-whaikey-ocr-fallback";
 
 /** The two most prominent lines (largest print), in label order. */
 export function ocrGuess(ocr: OcrResult): string | null {
@@ -58,6 +66,7 @@ export async function identifyLabel(
 
   let ocrCandidates: BottleSearchResult[] = [];
   let ocrText: string | null = null;
+  let ocrDeferred = false;
   const ocr = await recognize(dataUrl).catch(() => null);
   if (ocr) {
     ocrText = ocrGuess(ocr);
@@ -69,6 +78,7 @@ export async function identifyLabel(
           return { via: "ocr", candidates: data.candidates, guess: ocrText, aiUnavailable: null };
         }
         ocrCandidates = data.candidates ?? [];
+        ocrDeferred = true;
       }
     } catch {
       // The free pass failing is never fatal: fall through to the AI read.
@@ -78,7 +88,12 @@ export async function identifyLabel(
   const base64 = dataUrl.split(",", 2)[1] ?? dataUrl;
   let res: Response;
   try {
-    res = await post(f, "/api/scan-label", { imageBase64: base64, mediaType });
+    res = await post(
+      f,
+      "/api/scan-label",
+      { imageBase64: base64, mediaType },
+      ocrDeferred ? { [OCR_FALLBACK_HEADER]: String(ocrCandidates.length) } : {},
+    );
   } catch (err) {
     // A dropped connection on the AI read must not throw away the choices
     // the free OCR pass already found; the person can still pick one.
