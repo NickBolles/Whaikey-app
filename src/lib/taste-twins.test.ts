@@ -112,6 +112,21 @@ describe("taste twins against the graph", () => {
     expect(twins[0].matchPercent).toBeGreaterThan(twins[1].matchPercent);
   });
 
+  it("bounds both palates to the requested instant when asked (Wrapped's past years)", async () => {
+    const viewer = await createTestUser(db);
+    const friend = await createTestUser(db);
+    await profile(viewer.id, "viewer");
+    await profile(friend.id, "friend");
+    await follow(viewer.id, friend.id);
+    const cutoff = new Date();
+    await seedPalate(viewer.id, { peaty: 9 });
+    await seedPalate(friend.id, { peaty: 8 });
+    // Everything was logged after the cutoff: as of then neither had a palate.
+    expect(await getTasteTwins(db, viewer.id, 5, cutoff)).toEqual([]);
+    const later = new Date(Date.now() + 60_000);
+    expect((await getTasteTwins(db, viewer.id, 5, later)).map((t) => t.handle)).toEqual(["friend"]);
+  });
+
   it("never makes a stranger a twin, however alike their palate", async () => {
     const viewer = await createTestUser(db);
     const stranger = await createTestUser(db);

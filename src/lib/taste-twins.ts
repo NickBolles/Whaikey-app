@@ -25,10 +25,10 @@
  * you, never someone who drinks more than you.
  */
 
-import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
 import type { DB } from "@/db";
 import { schema } from "@/db";
-import { cosineSimilarity, type PalateVector } from "@/lib/palate";
+import { computePalateProfile, cosineSimilarity, type PalateVector } from "@/lib/palate";
 import { getUserPalate, getUserPalates } from "@/lib/palate-store";
 import { acceptedFollowSql, contributorVisibleSql, suspendedViewer } from "@/lib/social";
 
@@ -204,11 +204,24 @@ export async function getPalateMatches(
  * profile that is an honest answer to "how alike are we", and nothing acts on
  * it. Only this pool feeds recommendations.
  */
-export async function getTasteTwins(db: DB, viewerId: string, limit = 5): Promise<TasteTwin[]> {
+export async function getTasteTwins(
+  db: DB,
+  viewerId: string,
+  limit = 5,
+  /**
+   * Bound both palates to pours logged before this instant (Wrapped asks for
+   * a past year's twin): later discoveries must not be attributed to an
+   * earlier year. Omitted = the current, all-time palates.
+   */
+  before?: Date,
+): Promise<TasteTwin[]> {
   const followeeIds = await visibleFolloweeIds(db, viewerId);
   if (followeeIds.length === 0) return [];
 
-  const mine = await getUserPalate(db, viewerId);
+  const bound = before ? lt(schema.pours.createdAt, before) : undefined;
+  const mine = before
+    ? ((await getUserPalates(db, [viewerId], before, bound)).get(viewerId) ?? computePalateProfile([], before))
+    : await getUserPalate(db, viewerId);
   if (mine.ratedSampleSize < MIN_TWIN_SAMPLE) return [];
 
   const profiles: Array<{
@@ -237,8 +250,8 @@ export async function getTasteTwins(db: DB, viewerId: string, limit = 5): Promis
   const palates = await getUserPalates(
     db,
     profiles.map((p) => p.userId),
-    undefined,
-    palateReadableBy(viewerId),
+    before,
+    bound ? and(palateReadableBy(viewerId), bound) : palateReadableBy(viewerId),
   );
 
   const twins: TasteTwin[] = [];

@@ -164,6 +164,12 @@ export default function PrivacyPage() {
             from your notes when shown.
           </li>
           <li>
+            <strong className="text-foreground">Share cards</strong> — images of your palate,
+            passport, Wrapped or a tasting night&rsquo;s results that you choose to share. They are
+            drawn from your data when opened, not stored; we keep only a counter that lets you revoke
+            every card link at once in Settings.
+          </li>
+          <li>
             <strong className="text-foreground">Anything you send us through support</strong> — the
             message itself, the contact address you offer with it, and which platform and app
             version you were on. It is kept so a person can act on it, which means anything you put

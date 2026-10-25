@@ -1001,6 +1001,12 @@ export async function makeEverythingPrivate(db: DB, userId: string): Promise<voi
       .update(schema.pourShares)
       .set({ revokedAt: now })
       .where(and(eq(schema.pourShares.userId, userId), isNull(schema.pourShares.revokedAt)));
+    // Share-card links die with the pour shares — permanently (a re-enable
+    // later does not bring them back).
+    await tx
+      .insert(schema.shareCardKeys)
+      .values({ userId, epoch: 1, rotatedAt: now })
+      .onConflictDoUpdate({ target: schema.shareCardKeys.userId, set: { epoch: sql`${schema.shareCardKeys.epoch} + 1`, rotatedAt: now } });
     await tx
       .update(schema.userProfiles)
       // phoneDiscoverable included: re-enabling social must not silently make

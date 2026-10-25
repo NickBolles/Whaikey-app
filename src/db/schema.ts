@@ -2234,3 +2234,19 @@ export const breadthBoardOptIns = pgTable("breadth_board_opt_ins", {
     .references(() => user.id, { onDelete: "cascade" }),
   optedInAt: createdAt(),
 });
+
+// ── Track C: share cards (§7.10) ────────────────────────────────────────────
+
+/**
+ * A per-person key epoch for share-card links. Every card URL a person mints
+ * is signed with their current epoch; bumping it (Settings → "Revoke all share
+ * cards", or "make everything private") kills every card link they ever
+ * shared, permanently — a later epoch never re-validates an older one.
+ */
+export const shareCardKeys = pgTable("share_card_keys", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => user.id, { onDelete: "cascade" }),
+  epoch: integer("epoch").notNull().default(0),
+  rotatedAt: updatedAt(),
+});

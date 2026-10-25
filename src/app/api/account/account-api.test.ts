@@ -253,6 +253,7 @@ async function seedFootprint(db: DB, subject: schema.User, counterpart: schema.U
   });
   await db.insert(schema.challengeParticipants).values({ challengeId, userId: subject.id });
   await db.insert(schema.breadthBoardOptIns).values({ userId: subject.id });
+  await db.insert(schema.shareCardKeys).values({ userId: subject.id, epoch: 2 });
 
   // --- AI and telemetry
   await db.insert(schema.aiRateLimits).values({ userId: subject.id, window: "day", windowStart: at, count: 3 });

@@ -5,8 +5,10 @@ import { getSessionUser } from "@/lib/session";
 import { BOARD_KEYS, getBoard, listChallenges, listCrests, type BoardKey } from "@/lib/challenges";
 import { unreadCount } from "@/lib/notify";
 import { appNow } from "@/lib/clock";
+import { wrappedAvailable } from "@/lib/wrapped";
 import { SocialTabs } from "@/components/social/social-tabs";
 import { BoardOptIn, JoinChallengeButton } from "@/components/social/challenge-client";
+import { ShareCardButton } from "@/components/social/share-card-button";
 
 export const dynamic = "force-dynamic";
 
@@ -121,6 +123,21 @@ export default async function ChallengesPage({ searchParams }: { searchParams: P
             <p className="text-xs text-muted">Counted from notes you share, different {board.key} this season. Ties are ties.</p>
           </div>
         )}
+      </section>
+
+      <section aria-labelledby="cards-heading" className="flex flex-col gap-2">
+        <h2 id="cards-heading" className="section-label">
+          Share cards
+        </h2>
+        {wrappedAvailable(now.getUTCFullYear(), now) && (
+          <Link href={`/wrapped/${now.getUTCFullYear()}`} className="card-flat block p-3 text-sm font-medium text-accent">
+            Your {now.getUTCFullYear()} Wrapped is ready →
+          </Link>
+        )}
+        <div className="flex flex-wrap gap-3">
+          <ShareCardButton body={{ kind: "passport" }} title="My whiskey passport" label="Passport card" />
+          <ShareCardButton body={{ kind: "palate" }} title="My palate" label="Palate card" />
+        </div>
       </section>
 
       {crests.length > 0 && (
