@@ -123,7 +123,7 @@ describe("PourScanSlot — live barcode", () => {
 
   it("unverified suggestions are offered, never auto-picked", async () => {
     fakeCamera(["080244003302"]);
-    stubFetch((url) => (url === "/api/scan/upc" ? { upc: "080244003302", matches: [], candidates: [blantons], externalName: "BLANTONS SB" } : undefined));
+    const fetchMock = stubFetch((url) => (url === "/api/scan/upc" ? { upc: "080244003302", matches: [], candidates: [blantons], externalName: "BLANTONS SB" } : undefined));
     const onPick = vi.fn();
     render(<PourScanSlot onPick={onPick} />);
     const group = await screen.findByRole("group", { name: "Is it one of these?" }, { timeout: 3000 });
@@ -131,6 +131,9 @@ describe("PourScanSlot — live barcode", () => {
     expect(onPick).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: /Blanton's Original/ }));
     expect(onPick).toHaveBeenCalledWith(blantons, { via: "barcode" });
+    // The pick teaches the barcode, without shelving anything.
+    const confirm = fetchMock.mock.calls.find(([u]) => String(u) === "/api/scan/confirm");
+    expect(JSON.parse(String(confirm?.[1]?.body))).toEqual({ upc: "080244003302", bottleId: "blantons" });
   });
 
   it("an unknown barcode points at teaching the scanner", async () => {
@@ -150,7 +153,7 @@ describe("PourScanSlot — live barcode", () => {
 
   it("without a barcode detector, Snap label reads the label and offers its matches", async () => {
     fakeCamera(null);
-    stubFetch(() => undefined);
+    const fetchMock = stubFetch(() => undefined);
     identifyLabel.mockResolvedValue({ via: "ocr", candidates: [blantons], guess: "Blanton's", aiUnavailable: null });
     const onPick = vi.fn();
     render(<PourScanSlot onPick={onPick} />);
@@ -167,6 +170,7 @@ describe("PourScanSlot — live barcode", () => {
     expect(identifyLabel).toHaveBeenCalledWith("data:image/jpeg;base64,AAAA", "image/jpeg");
     fireEvent.click(await screen.findByRole("button", { name: /Blanton's Original/ }));
     expect(onPick).toHaveBeenCalledWith(expect.objectContaining({ id: "blantons" }), { via: "label" });
+    expect(fetchMock.mock.calls.some(([u, i]) => String(u) === "/api/scan/confirm" && JSON.parse(String(i?.body)).via === "ocr")).toBe(true);
   });
 
   it("a label it can't place says what it read", async () => {

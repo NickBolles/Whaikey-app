@@ -149,10 +149,40 @@ describe("logPour", () => {
     const second = await logPour(db, userId, { bottleId, amountMl: 45 });
     const fill = async () => (await db.query.userBottles.findFirst({ where: eq(schema.userBottles.id, ub.id) }))?.fillLevel;
     expect(await fill()).toBe(90);
-    expect(await deletePour(db, userId, second.pour.id, { restoreFill: true })).toBe(true);
+    expect(await deletePour(db, userId, second.pour.id, { undo: true })).toBe(true);
     expect(await fill()).toBe(95);
     expect(await deletePour(db, userId, first.pour.id)).toBe(true);
     expect(await fill()).toBe(95);
+  });
+
+  it("an Undo of a first pour also removes the tried row it filed; a journal delete keeps it", async () => {
+    const shelf = () =>
+      db.query.userBottles.findMany({ where: and(eq(schema.userBottles.userId, userId), eq(schema.userBottles.bottleId, bottleId)) });
+    const first = await logPour(db, userId, { bottleId });
+    expect(await shelf()).toHaveLength(1);
+    expect(await deletePour(db, userId, first.pour.id, { undo: true })).toBe(true);
+    expect(await shelf()).toHaveLength(0);
+
+    const again = await logPour(db, userId, { bottleId });
+    expect(await deletePour(db, userId, again.pour.id)).toBe(true);
+    expect(await shelf()).toHaveLength(1);
+  });
+
+  it("an Undo never removes a tried row the user filed themselves, however recent", async () => {
+    await createUserBottle(db, userId, bottleId, { relationship: "tried", notes: "from the tasting" });
+    const { pour } = await logPour(db, userId, { bottleId });
+    expect(await deletePour(db, userId, pour.id, { undo: true })).toBe(true);
+    const rows = await db.query.userBottles.findMany({ where: and(eq(schema.userBottles.userId, userId), eq(schema.userBottles.bottleId, bottleId)) });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].notes).toBe("from the tasting");
+  });
+
+  it("an Undo keeps a tried row that other pours still stand on", async () => {
+    await logPour(db, userId, { bottleId });
+    const second = await logPour(db, userId, { bottleId });
+    expect(await deletePour(db, userId, second.pour.id, { undo: true })).toBe(true);
+    const rows = await db.query.userBottles.findMany({ where: and(eq(schema.userBottles.userId, userId), eq(schema.userBottles.bottleId, bottleId)) });
+    expect(rows).toHaveLength(1);
   });
 
   it("decrements 3 for a 30ml pour", async () => {

@@ -225,6 +225,10 @@ export async function logPour(db: DB, userId: string, input: PourInput): Promise
     // is invisible to the Tried tab and to every flavor map, so record the
     // weakest relationship that is unambiguously true. Existing rows are left
     // alone — this never promotes or demotes a bottle you already filed.
+    // One instant for the pour and any row it files: a shelf row whose
+    // created_at equals its pour's is how an Undo knows the pour filed it
+    // (deletePour), rather than guessing from freshness.
+    const loggedAt = new Date();
     if (!userBottle) {
       [userBottle] = await tx
         .insert(schema.userBottles)
@@ -233,13 +237,15 @@ export async function logPour(db: DB, userId: string, input: PourInput): Promise
           userId,
           bottleId: parsed.bottleId,
           relationship: "tried",
+          createdAt: loggedAt,
+          updatedAt: loggedAt,
         })
         .returning();
     }
     const [pour] = await tx
       .insert(schema.pours)
       .values({
-        id: crypto.randomUUID(), userId, bottleId: parsed.bottleId, userBottleId: userBottle?.id ?? null,
+        id: crypto.randomUUID(), userId, bottleId: parsed.bottleId, userBottleId: userBottle?.id ?? null, createdAt: loggedAt,
         rating: parsed.rating ?? null, servingStyle: parsed.servingStyle ?? null, amountMl, context: parsed.context ?? null,
         visibility, clientId: parsed.clientId ?? null,
         // Snapshots, written once and never updated (WP-19). `userBottle` is
@@ -508,23 +514,25 @@ export async function deletePour(
   userId: string,
   pourId: string,
   /**
-   * `restoreFill`: this delete is the Undo of a pour just logged, so the fill
-   * decrement that pour applied to an open bottle is put back too. A journal
-   * delete of an old pour leaves the bottle alone — that whiskey is gone.
-   * Capped at 100; a pour that hit the 0 floor may restore slightly more than
-   * it took, which only ever errs toward "more left".
+   * `undo`: this delete is the toast's Undo of a pour just logged, so what
+   * that pour did to the shelf is reversed too — the fill decrement it took
+   * from an open bottle (capped at 100; a pour that hit the 0 floor may give
+   * back slightly more than it took, which only errs toward "more left"), and
+   * the `tried` row it filed for a bottle that had none. A journal delete of
+   * an old pour leaves the shelf alone: that whiskey is gone and the bottle
+   * was tried.
    */
-  opts: { restoreFill?: boolean } = {},
+  opts: { undo?: boolean } = {},
 ): Promise<boolean> {
   const deleted = await db.transaction(async (tx) => {
     const own = await tx
-      .select({ id: schema.pours.id, userBottleId: schema.pours.userBottleId, amountMl: schema.pours.amountMl })
+      .select({ id: schema.pours.id, userBottleId: schema.pours.userBottleId, amountMl: schema.pours.amountMl, createdAt: schema.pours.createdAt })
       .from(schema.pours)
       .where(and(eq(schema.pours.id, pourId), eq(schema.pours.userId, userId)));
     if (own.length === 0) return false;
 
     const [pour] = own;
-    if (opts.restoreFill && pour.userBottleId && pour.amountMl != null) {
+    if (opts.undo && pour.userBottleId && pour.amountMl != null) {
       await tx
         .update(schema.userBottles)
         .set({ fillLevel: sql`least(100, ${schema.userBottles.fillLevel} + ${fillDecrementFor(pour.amountMl)})`, updatedAt: new Date() })
@@ -536,6 +544,25 @@ export async function deletePour(
             isNotNull(schema.userBottles.fillLevel),
           ),
         );
+    }
+    // The shelf row this pour filed itself (logPour's "tried" for a bottle
+    // with no row): stamped with the pour's own instant, still `tried`, and
+    // stood on by no other pour. A row the user filed — even moments before —
+    // carries its own timestamp and is never touched.
+    let autoFiled: string | null = null;
+    if (opts.undo && pour.userBottleId) {
+      const [row] = await tx
+        .select({ id: schema.userBottles.id, relationship: schema.userBottles.relationship, createdAt: schema.userBottles.createdAt })
+        .from(schema.userBottles)
+        .where(and(eq(schema.userBottles.id, pour.userBottleId), eq(schema.userBottles.userId, userId)));
+      const others = await tx
+        .select({ id: schema.pours.id })
+        .from(schema.pours)
+        .where(and(eq(schema.pours.userBottleId, pour.userBottleId), ne(schema.pours.id, pourId)))
+        .limit(1);
+      if (row?.relationship === "tried" && others.length === 0 && row.createdAt.getTime() === pour.createdAt.getTime()) {
+        autoFiled = row.id;
+      }
     }
 
     // Never overwrite a recorded owner: `is null` only, the same condition
@@ -560,6 +587,7 @@ export async function deletePour(
     `);
 
     await tx.delete(schema.pours).where(eq(schema.pours.id, pourId));
+    if (autoFiled) await tx.delete(schema.userBottles).where(eq(schema.userBottles.id, autoFiled));
     return true;
   });
   if (deleted) {
