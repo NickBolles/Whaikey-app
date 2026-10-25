@@ -215,11 +215,19 @@ export async function deliverNotification(db: DB, notificationId: string): Promi
     .where(and(eq(schema.notifications.id, notificationId), eq(schema.notifications.pushState, "pending")))
     .returning();
   if (!claimed) return null;
+  // Everything that decided "push this" is re-asked now: a drain can run
+  // hours after the row was written, and a block, a switched-off group or
+  // quiet hours that began since must win.
+  const suppress = async (state: PushState) => {
+    await db.update(schema.notifications).set({ pushState: state }).where(eq(schema.notifications.id, claimed.id));
+    return state;
+  };
+  if (!(await reachable(db, claimed.userId))) return suppress("none");
   const actorHandle = claimed.actorId ? ((await reachable(db, claimed.actorId))?.handle ?? null) : null;
-  if (claimed.actorId && !actorHandle) {
-    await db.update(schema.notifications).set({ pushState: "none" }).where(eq(schema.notifications.id, claimed.id));
-    return "none";
-  }
+  if (claimed.actorId && (!actorHandle || (await blockedEither(db, claimed.actorId, claimed.userId)))) return suppress("none");
+  const settings = await getNotificationSettings(db, claimed.userId);
+  if (!settings.pushEnabled || !settings.groups[groupFor(claimed.category).key as NotificationGroupKey]) return suppress("none");
+  if (inQuietHours(settings, new Date())) return suppress("quiet");
   const copy = renderNotification({
     category: claimed.category,
     actorHandle,
@@ -285,6 +293,24 @@ function actorVisibleSql(viewerId: string) {
   return sql`(${schema.notifications.actorId} is null or (
     exists (select 1 from user_profiles ap where ap.user_id = ${schema.notifications.actorId} and ap.social_enabled = true and ap.suspended_at is null)
     and not exists (select 1 from blocks b where (b.blocker_id = ${viewerId} and b.blocked_id = ${schema.notifications.actorId}) or (b.blocker_id = ${schema.notifications.actorId} and b.blocked_id = ${viewerId}))
+  )) and ${subjectVisibleSql(viewerId)}`;
+}
+
+/**
+ * Notifications that describe somebody else's pour (only `friend_tasted`
+ * today: its row names the bottle) stay visible only while that pour is: not
+ * deleted, not private, and still readable under its own tier for this
+ * viewer. The cheer/comment/reply rows are about the viewer's own note or
+ * thread and carry no content of the actor's.
+ */
+function subjectVisibleSql(viewerId: string) {
+  return sql`(${schema.notifications.category} <> 'friend_tasted' or exists (
+    select 1 from pours sp where sp.id = ${schema.notifications.subjectId} and (
+      (sp.visibility in ('followers', 'public') and exists (select 1 from follows f1 where f1.follower_id = ${viewerId} and f1.followee_id = sp.user_id and f1.state = 'accepted'))
+      or (sp.visibility = 'friends'
+        and exists (select 1 from follows f2 where f2.follower_id = ${viewerId} and f2.followee_id = sp.user_id and f2.state = 'accepted')
+        and exists (select 1 from follows f3 where f3.follower_id = sp.user_id and f3.followee_id = ${viewerId} and f3.state = 'accepted'))
+    )
   ))`;
 }
 

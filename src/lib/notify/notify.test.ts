@@ -29,7 +29,7 @@ import {
   unreadCount,
   updateNotificationSettings,
 } from "@/lib/notify";
-import { setPushFetchForTests, signAssertion } from "@/lib/push/send";
+import { setApnsTransportForTests, setPushFetchForTests, signAssertion } from "@/lib/push/send";
 
 async function person(db: DB, handle: string, overrides: Partial<typeof schema.userProfiles.$inferInsert> = {}) {
   const user = await createTestUser(db, { name: handle });
@@ -69,6 +69,11 @@ describe("notify triggers on social actions", () => {
     await friends(db, author, "author_n", reader, "reader_n");
     const bottle = await createTestBottle(db);
     const p = await pour(db, author.id, bottle.id);
+    // Off by default (SOCIAL §7.5): nothing until the author opts in.
+    await cheerPour(db, reader.id, p.id);
+    expect((await listInbox(db, author.id)).filter((i) => i.category === "cheer")).toEqual([]);
+    await uncheerPour(db, reader.id, p.id);
+    await updateNotificationSettings(db, author.id, { groups: { cheers: true } });
 
     await cheerPour(db, reader.id, p.id);
     await uncheerPour(db, reader.id, p.id);
@@ -197,6 +202,9 @@ describe("friend tasted digest", () => {
     const tasted = inbox.filter((i) => i.category === "friend_tasted");
     expect(tasted.map((i) => i.text)).toEqual(["@friend_d shared a note on Test Islay 10 from your shelf"]);
     expect(await listInbox(db, stranger.id)).toEqual([]);
+    // The note going private takes the notification (which names the bottle) with it.
+    await db.update(schema.pours).set({ visibility: "private" }).where(eq(schema.pours.userId, friend.id));
+    expect((await listInbox(db, owner.id)).filter((i) => i.category === "friend_tasted")).toEqual([]);
   });
 });
 
@@ -209,7 +217,7 @@ describe("settings and quiet hours", () => {
   it("defaults every group on and validates patches", async () => {
     const a = await createTestUser(db);
     const s = await getNotificationSettings(db, a.id);
-    expect(Object.values(s.groups).every(Boolean)).toBe(true);
+    expect(s.groups).toMatchObject({ follows: true, comments: true, cheers: false });
     expect(s.quietStart).toBeNull();
     expect(notificationSettingsPatchSchema.safeParse({ quietStart: 60 }).success).toBe(false);
     expect(notificationSettingsPatchSchema.safeParse({ groups: { nope: true } }).success).toBe(false);
@@ -263,7 +271,7 @@ describe("push delivery through FCM", () => {
     const b = await person(db, "b_push");
     await db.insert(schema.pushDevices).values([
       { id: uid("dev"), userId: a.id, token: "good-token", platform: "android" },
-      { id: uid("dev"), userId: a.id, token: "dead-token", platform: "ios" },
+      { id: uid("dev"), userId: a.id, token: "dead-token", platform: "android" },
     ]);
     const sent: Array<{ token: string; body: string; deepLink: string }> = [];
     setPushFetchForTests(async (url, init) => {
@@ -279,17 +287,66 @@ describe("push delivery through FCM", () => {
     // Insert directly as pending so the after()-scheduled send doesn't race the assertion.
     const [row] = await db
       .insert(schema.notifications)
-      .values({ id: uid("n"), userId: a.id, actorId: b.id, category: "cheer", subjectId: "pour1", dedupeKey: "d", pushState: "pending" })
+      .values({ id: uid("n"), userId: a.id, actorId: b.id, category: "comment", subjectId: "pour1", dedupeKey: "d", pushState: "pending" })
       .returning();
     expect(await deliverNotification(db, row.id)).toBe("sent");
     expect(await deliverNotification(db, row.id)).toBeNull(); // claimed once
     expect(sent.map((s) => s.token).sort()).toEqual(["dead-token", "good-token"]);
-    expect(sent[0]).toMatchObject({ body: "@b_push cheered your note", deepLink: "/notes/pour1" });
+    expect(sent[0]).toMatchObject({ body: "@b_push commented on your note", deepLink: "/notes/pour1" });
     const devices = await db.select().from(schema.pushDevices).where(eq(schema.pushDevices.userId, a.id));
     expect(devices.map((d) => d.token)).toEqual(["good-token"]);
     const [after] = await db.select().from(schema.notifications).where(eq(schema.notifications.id, row.id));
     expect(after.pushState).toBe("sent");
     expect(after.pushedAt).not.toBeNull();
+  });
+
+  it("re-checks blocks and switches at send time", async () => {
+    const a = await person(db, "a_late");
+    const b = await person(db, "b_late");
+    await db.insert(schema.pushDevices).values({ id: uid("dev"), userId: a.id, token: "t1", platform: "android" });
+    setPushFetchForTests(async () => Response.json({ access_token: "at", expires_in: 3600 }));
+    const [row] = await db
+      .insert(schema.notifications)
+      .values({ id: uid("n"), userId: a.id, actorId: b.id, category: "comment", dedupeKey: "late", pushState: "pending" })
+      .returning();
+    await blockUser(db, a.id, b.id);
+    expect(await deliverNotification(db, row.id)).toBe("none");
+  });
+
+  it("sends iOS devices straight to APNs with an ES256 token, and prunes a 410", async () => {
+    vi.unstubAllEnvs();
+    const { privateKey: ec, publicKey: ecPub } = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+    vi.stubEnv("APNS_KEY_P8", ec.export({ type: "pkcs8", format: "pem" }).toString());
+    vi.stubEnv("APNS_KEY_ID", "KEY123");
+    vi.stubEnv("APNS_TEAM_ID", "TEAM123");
+    vi.stubEnv("APNS_TOPIC", "com.whaikey.app");
+    const a = await person(db, "a_apns");
+    const b = await person(db, "b_apns");
+    await db.insert(schema.pushDevices).values([
+      { id: uid("dev"), userId: a.id, token: "ios-live", platform: "ios" },
+      { id: uid("dev"), userId: a.id, token: "ios-gone", platform: "ios" },
+      { id: uid("dev"), userId: a.id, token: "android-no-fcm", platform: "android" },
+    ]);
+    const calls: Array<{ host: string; path: string; headers: Record<string, string>; body: string }> = [];
+    setApnsTransportForTests(async (host, path, headers, body) => {
+      calls.push({ host, path, headers, body });
+      return path.endsWith("ios-gone") ? { status: 410, reason: "Unregistered" } : { status: 200 };
+    });
+    const [row] = await db
+      .insert(schema.notifications)
+      .values({ id: uid("n"), userId: a.id, actorId: b.id, category: "comment", subjectId: "p9", dedupeKey: "apns", pushState: "pending" })
+      .returning();
+    expect(await deliverNotification(db, row.id)).toBe("sent");
+    expect(calls.map((c) => c.path).sort()).toEqual(["/3/device/ios-gone", "/3/device/ios-live"]);
+    expect(calls[0]).toMatchObject({ host: "https://api.push.apple.com", headers: { "apns-topic": "com.whaikey.app", "apns-push-type": "alert" } });
+    expect(JSON.parse(calls[0].body)).toMatchObject({ aps: { alert: { body: "@b_apns commented on your note" } }, deepLink: "/notes/p9" });
+    const [h, c, sig] = calls[0].headers.authorization.replace("bearer ", "").split(".");
+    const v = createVerify("SHA256");
+    v.update(`${h}.${c}`);
+    expect(v.verify({ key: ecPub, dsaEncoding: "ieee-p1363" }, Buffer.from(sig, "base64url"))).toBe(true);
+    const left = await db.select().from(schema.pushDevices).where(eq(schema.pushDevices.userId, a.id));
+    expect(left.map((d) => d.token).sort()).toEqual(["android-no-fcm", "ios-live"]);
+    setApnsTransportForTests(null);
   });
 
   it("inside quiet hours a notification is inbox-only", async () => {

@@ -58,9 +58,18 @@ export function NotificationsCard({
     };
   }, []);
 
+  const [saving, setSaving] = useState(false);
+
+  /**
+   * One save at a time. Each response replaces the whole settings object, so
+   * two in flight could land out of order and quietly undo the newer switch;
+   * the controls are disabled until the server has answered.
+   */
   async function save(patch: Partial<NotificationSettingsJson>) {
+    if (saving) return;
+    setSaving(true);
     const previous = settings;
-    setSettings({ ...settings, ...patch });
+    setSettings({ ...settings, ...patch, groups: { ...settings.groups, ...(patch.groups ?? {}) } });
     setMessage(null);
     try {
       const res = await fetch("/api/notifications/settings", {
@@ -73,6 +82,8 @@ export function NotificationsCard({
     } catch {
       setSettings(previous);
       setMessage("Couldn't save that — try again.");
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -145,13 +156,15 @@ export function NotificationsCard({
                 role="switch"
                 aria-checked={on}
                 aria-label={group.label}
-                onClick={() => void save({ groups: { ...settings.groups, [group.key]: !on } })}
-                className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${on ? "bg-accent" : "bg-surface-raised"}`}
+                disabled={saving}
+                onClick={() => void save({ groups: { [group.key]: !on } })}
+                className="tap-target flex min-h-11 min-w-11 shrink-0 items-center justify-end disabled:opacity-70"
               >
-                <span
-                  aria-hidden
-                  className={`absolute top-0.5 h-5 w-5 rounded-full bg-foreground transition-[left] ${on ? "left-[22px]" : "left-0.5"}`}
-                />
+                <span aria-hidden className={`relative h-6 w-11 rounded-full transition-colors ${on ? "bg-accent" : "bg-surface-raised"}`}>
+                  <span
+                    className={`absolute top-0.5 h-5 w-5 rounded-full bg-foreground transition-[left] ${on ? "left-[22px]" : "left-0.5"}`}
+                  />
+                </span>
               </button>
             </li>
           );
@@ -165,6 +178,7 @@ export function NotificationsCard({
             <input
               type="checkbox"
               checked={settings.pushEnabled}
+              disabled={saving}
               onChange={(e) => void save({ pushEnabled: e.target.checked })}
               className="h-4 w-4"
             />
@@ -174,6 +188,7 @@ export function NotificationsCard({
             <input
               type="checkbox"
               checked={quietOn}
+              disabled={saving}
               onChange={(e) =>
                 void save(
                   e.target.checked

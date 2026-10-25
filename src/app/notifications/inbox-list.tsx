@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { UserAvatar } from "@/components/user-avatar";
 
@@ -23,32 +23,66 @@ function when(iso: string): string {
   return `${Math.floor(hours / 24)}d`;
 }
 
-export function InboxList({ items }: { items: InboxItemJson[] }) {
-  const unreadIds = items.filter((i) => !i.read).map((i) => i.id);
-  const key = unreadIds.join(",");
+/**
+ * Opening the inbox clears the badge: everything unread is marked read on
+ * view (the rows keep their unread dot for this visit). Older entries page in
+ * through "Show older".
+ */
+export function InboxList({ items: initial, hasUnread, pageSize }: { items: InboxItemJson[]; hasUnread: boolean; pageSize: number }) {
+  const [items, setItems] = useState(initial);
+  const [more, setMore] = useState(initial.length >= pageSize);
+  const [busy, setBusy] = useState(false);
+
   useEffect(() => {
-    if (!key) return;
+    if (!hasUnread) return;
     void fetch("/api/notifications/read", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ids: key.split(",") }),
+      body: "{}",
     }).catch(() => {});
-  }, [key]);
+  }, [hasUnread]);
+
+  async function older() {
+    const last = items[items.length - 1];
+    if (!last || busy) return;
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/notifications?before=${encodeURIComponent(last.createdAt)}`);
+      const json = (await res.json()) as { items: InboxItemJson[] };
+      setItems((prev) => [...prev, ...json.items.filter((i) => !prev.some((p) => p.id === i.id))]);
+      setMore(json.items.length > 0);
+    } catch {
+      // Leave the button; a retry is one tap.
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
-    <ul className="flex flex-col divide-y divide-border-subtle rounded-xl border border-border-subtle">
-      {items.map((item) => (
-        <li key={item.id}>
-          <Link href={item.deepLink} className="flex items-center gap-3 px-3 py-2.5 hover:bg-surface-raised">
-            <UserAvatar name={item.actor?.displayName || item.actor?.handle || "Whaikey"} image={item.actor?.avatarUrl ?? null} size={32} />
-            <span className={`min-w-0 flex-1 text-sm ${item.read ? "text-muted" : "text-foreground"}`}>{item.text}</span>
-            <span className="shrink-0 text-xs text-muted" suppressHydrationWarning>
-              {when(item.createdAt)}
-            </span>
-            {!item.read && <span aria-label="Unread" className="h-2 w-2 shrink-0 rounded-full bg-accent" />}
-          </Link>
-        </li>
-      ))}
-    </ul>
+    <div className="flex flex-col gap-3">
+      <ul className="flex flex-col divide-y divide-border-subtle rounded-xl border border-border-subtle">
+        {items.map((item) => (
+          <li key={item.id}>
+            <Link href={item.deepLink} className="flex items-center gap-3 px-3 py-2.5 hover:bg-surface-raised">
+              <UserAvatar
+                name={item.actor?.displayName || item.actor?.handle || "Whaikey"}
+                image={item.actor?.avatarUrl ?? null}
+                size={32}
+              />
+              <span className={`min-w-0 flex-1 text-sm ${item.read ? "text-muted" : "text-foreground"}`}>{item.text}</span>
+              <span className="shrink-0 text-xs text-muted" suppressHydrationWarning>
+                {when(item.createdAt)}
+              </span>
+              {!item.read && <span aria-label="Unread" className="h-2 w-2 shrink-0 rounded-full bg-accent" />}
+            </Link>
+          </li>
+        ))}
+      </ul>
+      {more && (
+        <button type="button" onClick={() => void older()} disabled={busy} className="btn-secondary self-center px-4 py-2 text-sm disabled:opacity-60">
+          {busy ? "Loading…" : "Show older"}
+        </button>
+      )}
+    </div>
   );
 }

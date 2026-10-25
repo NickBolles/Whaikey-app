@@ -1,21 +1,25 @@
 import { createSign } from "node:crypto";
+import { connect } from "node:http2";
 import { eq, inArray } from "drizzle-orm";
 import type { DB } from "@/db";
 import { pushDevices } from "@/db/schema";
 
 /**
  * Push transport (whiskey-build-tracks Track D4's contract, shipped by the
- * social track so notifications have a real sender): FCM HTTP v1, which also
- * delivers to iOS through the APNs key uploaded to the Firebase project.
+ * social track so notifications have a real sender). No SDKs, no paid
+ * service — JWTs are signed with node:crypto.
  *
- * Configuration is one env var, `FCM_SERVICE_ACCOUNT_JSON` — the service
- * account key file's JSON (project_id, client_email, private_key). Unset means
- * push is off and every notification stays in the in-app inbox; nothing else
- * changes. No SDK: an RS256 JWT is exchanged for an OAuth token with
- * node:crypto, so there is no dependency and no paid service.
+ * - **Android → FCM HTTP v1**, configured by `FCM_SERVICE_ACCOUNT_JSON` (the
+ *   service-account key file's JSON). Capacitor hands Android an FCM token.
+ * - **iOS → APNs directly** over HTTP/2 with a token-based (.p8) key:
+ *   `APNS_KEY_P8`, `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_TOPIC` (the bundle id)
+ *   and optional `APNS_ENV=sandbox`. Capacitor hands iOS a raw APNs device
+ *   token, which FCM cannot address without the Firebase iOS SDK.
  *
- * Tokens FCM reports as gone (`UNREGISTERED`, 404) are pruned, which is the
- * only way a stale registration ever leaves `push_devices` besides sign-out.
+ * Either half may be unset; a device whose platform has no transport is
+ * skipped, and with neither the whole thing is inbox-only. Tokens a service
+ * reports as gone (FCM `UNREGISTERED`/404, APNs 410 or `BadDeviceToken`) are
+ * pruned.
  */
 
 export interface PushMessage {
@@ -61,8 +65,105 @@ export function readServiceAccount(env: Record<string, string | undefined> = pro
   }
 }
 
+interface ApnsConfig {
+  key: string;
+  keyId: string;
+  teamId: string;
+  topic: string;
+  host: string;
+}
+
+export function readApnsConfig(env: Record<string, string | undefined> = process.env): ApnsConfig | null {
+  const { APNS_KEY_P8, APNS_KEY_ID, APNS_TEAM_ID, APNS_TOPIC } = env;
+  if (!APNS_KEY_P8 || !APNS_KEY_ID || !APNS_TEAM_ID || !APNS_TOPIC) return null;
+  return {
+    key: APNS_KEY_P8.replace(/\\n/g, "\n"),
+    keyId: APNS_KEY_ID,
+    teamId: APNS_TEAM_ID,
+    topic: APNS_TOPIC,
+    host: env.APNS_ENV === "sandbox" ? "https://api.sandbox.push.apple.com" : "https://api.push.apple.com",
+  };
+}
+
 export function isPushConfigured(env: Record<string, string | undefined> = process.env): boolean {
-  return readServiceAccount(env) !== null;
+  return readServiceAccount(env) !== null || readApnsConfig(env) !== null;
+}
+
+/** ES256 provider token for APNs (valid up to an hour; cached 50 minutes). */
+export function signApnsToken(cfg: Pick<ApnsConfig, "key" | "keyId" | "teamId">, nowSeconds: number): string {
+  const header = b64url(JSON.stringify({ alg: "ES256", kid: cfg.keyId }));
+  const claims = b64url(JSON.stringify({ iss: cfg.teamId, iat: nowSeconds }));
+  const signer = createSign("SHA256");
+  signer.update(`${header}.${claims}`);
+  const sig = signer.sign({ key: cfg.key, dsaEncoding: "ieee-p1363" }).toString("base64url");
+  return `${header}.${claims}.${sig}`;
+}
+
+export interface ApnsResponse {
+  status: number;
+  reason?: string;
+}
+type ApnsTransport = (host: string, path: string, headers: Record<string, string>, body: string) => Promise<ApnsResponse>;
+
+const http2Transport: ApnsTransport = (host, path, headers, body) =>
+  new Promise((resolve, reject) => {
+    const client = connect(host);
+    client.on("error", reject);
+    const req = client.request({ ":method": "POST", ":path": path, ...headers });
+    let status = 0;
+    let data = "";
+    req.on("response", (h) => {
+      status = Number(h[":status"] ?? 0);
+    });
+    req.setEncoding("utf8");
+    req.on("data", (chunk) => (data += chunk));
+    req.on("end", () => {
+      client.close();
+      let reason: string | undefined;
+      try {
+        reason = data ? (JSON.parse(data) as { reason?: string }).reason : undefined;
+      } catch {
+        reason = undefined;
+      }
+      resolve({ status, reason });
+    });
+    req.on("error", (err) => {
+      client.close();
+      reject(err);
+    });
+    req.end(body);
+  });
+
+let apnsTransport: ApnsTransport = http2Transport;
+let apnsToken: { value: string; issuedAt: number } | null = null;
+
+export function setApnsTransportForTests(t: ApnsTransport | null): void {
+  apnsTransport = t ?? http2Transport;
+  apnsToken = null;
+}
+
+async function sendApns(cfg: ApnsConfig, token: string, message: PushMessage): Promise<"sent" | "dead" | "failed"> {
+  const now = Math.floor(Date.now() / 1000);
+  if (!apnsToken || now - apnsToken.issuedAt > 50 * 60) apnsToken = { value: signApnsToken(cfg, now), issuedAt: now };
+  const res = await apnsTransport(
+    cfg.host,
+    `/3/device/${token}`,
+    {
+      authorization: `bearer ${apnsToken.value}`,
+      "apns-topic": cfg.topic,
+      "apns-push-type": "alert",
+      "apns-priority": "5",
+      "content-type": "application/json",
+    },
+    JSON.stringify({
+      aps: { alert: { title: message.title, body: message.body }, sound: "default", "thread-id": message.category },
+      deepLink: message.deepLink,
+      category: message.category,
+    }),
+  );
+  if (res.status === 200) return "sent";
+  if (res.status === 410 || res.reason === "BadDeviceToken" || res.reason === "Unregistered") return "dead";
+  return "failed";
 }
 
 const b64url = (input: string | Buffer) => Buffer.from(input).toString("base64url");
@@ -122,29 +223,38 @@ async function isDeadToken(res: Response): Promise<boolean> {
  */
 export async function sendPush(db: DB, userId: string, message: PushMessage): Promise<PushResult> {
   const sa = readServiceAccount();
-  if (!sa) return "unconfigured";
+  const apns = readApnsConfig();
+  if (!sa && !apns) return "unconfigured";
   try {
-    const devices = await db
+    const all = await db
       .select({ id: pushDevices.id, token: pushDevices.token, platform: pushDevices.platform })
       .from(pushDevices)
       .where(eq(pushDevices.userId, userId));
+    const devices = all.filter((d) => (d.platform === "ios" ? apns : sa));
     if (devices.length === 0) return "no_device";
-    const token = await getAccessToken(sa);
-    if (!token) return "failed";
 
     let delivered = 0;
     const dead: string[] = [];
+    let fcmToken: string | null | undefined;
     for (const device of devices) {
+      if (device.platform === "ios" && apns) {
+        const outcome = await sendApns(apns, device.token, message).catch(() => "failed" as const);
+        if (outcome === "sent") delivered++;
+        else if (outcome === "dead") dead.push(device.id);
+        continue;
+      }
+      if (!sa) continue;
+      if (fcmToken === undefined) fcmToken = await getAccessToken(sa);
+      if (!fcmToken) continue;
       const res = await doFetch(`https://fcm.googleapis.com/v1/projects/${sa.project_id}/messages:send`, {
         method: "POST",
-        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        headers: { authorization: `Bearer ${fcmToken}`, "content-type": "application/json" },
         body: JSON.stringify({
           message: {
             token: device.token,
             notification: { title: message.title, body: message.body },
             data: { deepLink: message.deepLink, category: message.category },
             android: { priority: "normal", notification: { tag: message.category } },
-            apns: { payload: { aps: { sound: "default", "thread-id": message.category } } },
           },
         }),
       });

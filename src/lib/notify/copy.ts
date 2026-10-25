@@ -22,9 +22,11 @@ export const NOTIFICATION_GROUPS = [
   {
     key: "cheers",
     label: "Cheers",
-    description: "Someone cheers one of your notes.",
+    description: "Someone cheers one of your notes. Off unless you turn it on.",
     categories: ["cheer"],
-    defaultOn: true,
+    // SOCIAL §7.5 defaults: follows and direct replies on, everything else
+    // daily-batched or off. Cheers are neither, so they start off.
+    defaultOn: false,
   },
   {
     key: "comments",

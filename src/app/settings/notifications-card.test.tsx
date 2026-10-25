@@ -56,7 +56,7 @@ describe("NotificationsCard", () => {
     await userEvent.click(cheers);
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/notifications/settings",
-      expect.objectContaining({ method: "PATCH", body: expect.stringContaining('"cheers":false') }),
+      expect.objectContaining({ method: "PATCH", body: JSON.stringify({ groups: { cheers: false } }) }),
     );
     expect(await screen.findByRole("status")).toHaveTextContent(/couldn't save/i);
     expect(screen.getByRole("switch", { name: "Cheers" })).toHaveAttribute("aria-checked", "true");

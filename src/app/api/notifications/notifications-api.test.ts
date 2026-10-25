@@ -37,13 +37,13 @@ describe("/api/notifications, /api/feed", () => {
   });
 
   it("lists the inbox with an unread count and marks read", async () => {
-    await notify(db, { recipientId: me.id, actorId: other.id, category: "cheer", subjectId: "p1", dedupeKey: "a" });
-    await notify(db, { recipientId: other.id, actorId: me.id, category: "cheer", subjectId: "p2", dedupeKey: "b" });
+    await notify(db, { recipientId: me.id, actorId: other.id, category: "comment", subjectId: "p1", dedupeKey: "a" });
+    await notify(db, { recipientId: other.id, actorId: me.id, category: "comment", subjectId: "p2", dedupeKey: "b" });
     const res = await GET(jsonRequest("/api/notifications", "GET"));
     const body = await res.json();
     expect(body.unread).toBe(1);
     expect(body.items).toHaveLength(1);
-    expect(body.items[0]).toMatchObject({ text: "@other_api cheered your note", deepLink: "/notes/p1", read: false });
+    expect(body.items[0]).toMatchObject({ text: "@other_api commented on your note", deepLink: "/notes/p1", read: false });
 
     expect((await READ(jsonRequest("/api/notifications/read", "POST", { ids: "nope" }))).status).toBe(400);
     const read = await READ(jsonRequest("/api/notifications/read", "POST", {}));
@@ -68,7 +68,7 @@ describe("/api/notifications, /api/feed", () => {
       jsonRequest("/api/notifications/settings", "PATCH", { groups: { cheers: false }, quietStart: 1320, quietEnd: 420, timeZone: "Europe/London" }),
     );
     expect(ok.status).toBe(200);
-    expect(await ok.json()).toMatchObject({ quietStart: 1320, quietEnd: 420, timeZone: "Europe/London", groups: { cheers: false, comments: true } });
+    expect(await ok.json()).toMatchObject({ quietStart: 1320, quietEnd: 420, timeZone: "Europe/London", groups: { cheers: false, comments: true, follows: true } });
   });
 
   it("returns an empty feed page with no cursor for someone who follows nobody", async () => {
