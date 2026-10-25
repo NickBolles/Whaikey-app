@@ -26,7 +26,7 @@ export function SocialTabs({ unread }: { unread: number }) {
               key={tab.href}
               href={tab.href}
               aria-current={active ? "page" : undefined}
-              className={`rounded-lg px-3 py-1.5 text-sm transition-colors ${
+              className={`tap-target rounded-lg px-3 py-1.5 text-sm transition-colors ${
                 active ? "bg-surface text-foreground shadow-sm" : "text-muted hover:text-foreground"
               }`}
             >
