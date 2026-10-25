@@ -1,4 +1,4 @@
-import { and, count, eq, inArray, ne, notExists, sql, type SQL } from "drizzle-orm";
+import { and, count, eq, inArray, ne, notExists, notInArray, sql, type SQL } from "drizzle-orm";
 import { alias, type PgTable } from "drizzle-orm/pg-core";
 import { strToU8, zipSync } from "fflate";
 import type { DB } from "@/db";
@@ -13,8 +13,15 @@ import {
   bottles,
   chatMessages,
   chatSessions,
+  clubInvites,
+  clubMembers,
+  clubs,
   comments,
   feedback,
+  flightBottles,
+  flightEntries,
+  flightParticipants,
+  flights,
   follows,
   moderationActions,
   nativeAuthCodes,
@@ -99,6 +106,14 @@ const ownPourIds = (db: DB, userId: string) =>
 
 const ownShareIds = (db: DB, userId: string) =>
   db.select({ id: pourShares.id }).from(pourShares).where(eq(pourShares.userId, userId));
+
+const ownFlightIds = (db: DB, userId: string) =>
+  db.select({ id: flights.id }).from(flights).where(eq(flights.hostId, userId));
+
+const ownSeatIds = (db: DB, userId: string) =>
+  db.select({ id: flightParticipants.id }).from(flightParticipants).where(eq(flightParticipants.userId, userId));
+
+const notInArraySeats = (db: DB, userId: string) => notInArray(flightEntries.participantId, ownSeatIds(db, userId));
 
 const ownChatIds = (db: DB, userId: string) =>
   db.select({ id: chatSessions.id }).from(chatSessions).where(eq(chatSessions.userId, userId));
@@ -986,6 +1001,171 @@ export const ACCOUNT_DATA: readonly DataSlice[] = [
           .from(notificationSettings)
           .where(eq(notificationSettings.userId, userId)),
     },
+  },
+
+  // --- Social M2: clubs and tasting nights (Track C, §7.8–7.9) ------------
+  {
+    key: "clubs_started",
+    table: clubs,
+    description: "Clubs you started: the name, description and when.",
+    onDelete: "unlinked",
+    why: "A club belongs to its members, not to whoever made it; the club stays for them and stops naming you as its founder. Ownership passes to the longest-standing admin or member.",
+    where: (_db, userId) => eq(clubs.createdBy, userId),
+    export: {
+      columns: ["id", "name", "description", "createdAt"],
+      rows: (db, userId) =>
+        db
+          .select({ id: clubs.id, name: clubs.name, description: clubs.description, createdAt: clubs.createdAt })
+          .from(clubs)
+          .where(eq(clubs.createdBy, userId))
+          .orderBy(clubs.createdAt, clubs.id),
+    },
+  },
+  {
+    key: "club_memberships",
+    table: clubMembers,
+    description: "The clubs you belong to, your role in each, and when you joined.",
+    onDelete: "deleted",
+    why: "Your membership; the club carries on without you.",
+    where: (_db, userId) => eq(clubMembers.userId, userId),
+    export: {
+      columns: ["clubId", "clubName", "role", "joinedAt"],
+      rows: (db, userId) =>
+        db
+          .select({ clubId: clubMembers.clubId, clubName: clubs.name, role: clubMembers.role, joinedAt: clubMembers.joinedAt })
+          .from(clubMembers)
+          .innerJoin(clubs, eq(clubs.id, clubMembers.clubId))
+          .where(eq(clubMembers.userId, userId))
+          .orderBy(clubMembers.joinedAt),
+    },
+  },
+  {
+    key: "club_invites_made",
+    table: clubInvites,
+    description: "Club invite links you created: when, when they expire, whether you withdrew them, and how often they were used.",
+    onDelete: "deleted",
+    why: "Links you issued; they stop working with the account.",
+    where: (_db, userId) => eq(clubInvites.createdBy, userId),
+    export: {
+      // Not the code: a live invite is a key to the club.
+      columns: ["clubId", "createdAt", "expiresAt", "revokedAt", "uses"],
+      rows: (db, userId) =>
+        db
+          .select({
+            clubId: clubInvites.clubId,
+            createdAt: clubInvites.createdAt,
+            expiresAt: clubInvites.expiresAt,
+            revokedAt: clubInvites.revokedAt,
+            uses: clubInvites.uses,
+          })
+          .from(clubInvites)
+          .where(eq(clubInvites.createdBy, userId))
+          .orderBy(clubInvites.createdAt),
+    },
+  },
+  {
+    key: "tasting_nights_hosted",
+    table: flights,
+    description: "Tasting nights you hosted: the name, whether it was blind, when, and when you revealed it.",
+    onDelete: "deleted",
+    why: "Yours; the night, its glasses and the ratings at it go with you.",
+    where: (_db, userId) => eq(flights.hostId, userId),
+    export: {
+      // Not the join code: it is the night's invite.
+      columns: ["id", "title", "blind", "state", "scheduledAt", "createdAt", "revealedAt"],
+      rows: (db, userId) =>
+        db
+          .select({
+            id: flights.id,
+            title: flights.title,
+            blind: flights.blind,
+            state: flights.state,
+            scheduledAt: flights.scheduledAt,
+            createdAt: flights.createdAt,
+            revealedAt: flights.revealedAt,
+          })
+          .from(flights)
+          .where(eq(flights.hostId, userId))
+          .orderBy(flights.createdAt),
+    },
+  },
+  {
+    key: "tasting_night_glasses",
+    table: flightBottles,
+    description: "Which bottle you poured into which glass at the nights you hosted.",
+    onDelete: "deleted",
+    why: "Part of a night you hosted.",
+    where: (db, userId) => inArray(flightBottles.flightId, ownFlightIds(db, userId)),
+    export: {
+      columns: ["flightId", "slot", "bottleId"],
+      rows: (db, userId) =>
+        db
+          .select({ flightId: flightBottles.flightId, slot: flightBottles.slot, bottleId: flightBottles.bottleId })
+          .from(flightBottles)
+          .where(inArray(flightBottles.flightId, ownFlightIds(db, userId)))
+          .orderBy(flightBottles.flightId, flightBottles.slot),
+    },
+  },
+  {
+    key: "tasting_night_seats",
+    table: flightParticipants,
+    description: "The tasting nights you took a seat at, and when.",
+    onDelete: "deleted",
+    why: "Your seat; the night carries on for the rest of the table.",
+    where: (_db, userId) => eq(flightParticipants.userId, userId),
+    export: {
+      columns: ["flightId", "joinedAt"],
+      rows: (db, userId) =>
+        db
+          .select({ flightId: flightParticipants.flightId, joinedAt: flightParticipants.joinedAt })
+          .from(flightParticipants)
+          .where(eq(flightParticipants.userId, userId))
+          .orderBy(flightParticipants.joinedAt),
+    },
+  },
+  {
+    key: "tasting_night_guests",
+    table: flightParticipants,
+    description: "Other people's seats at the nights you hosted, including guests.",
+    onDelete: "deleted",
+    why: "They sat at a night that is deleted with you.",
+    where: (db, userId) => and(inArray(flightParticipants.flightId, ownFlightIds(db, userId)), sql`${flightParticipants.userId} is distinct from ${userId}`),
+    notExported: "Other people's seats, not yours.",
+  },
+  {
+    key: "tasting_night_ratings",
+    table: flightEntries,
+    description: "Your ratings, descriptors and notes for each glass at tasting nights.",
+    onDelete: "deleted",
+    why: "Your words; the table's results lose your row.",
+    where: (db, userId) => inArray(flightEntries.participantId, ownSeatIds(db, userId)),
+    export: {
+      columns: ["flightId", "slot", "rating", "flavorTags", "note", "createdAt", "updatedAt"],
+      rows: (db, userId) =>
+        db
+          .select({
+            flightId: flightEntries.flightId,
+            slot: flightEntries.slot,
+            rating: flightEntries.rating,
+            flavorTags: flightEntries.flavorTags,
+            note: flightEntries.note,
+            createdAt: flightEntries.createdAt,
+            updatedAt: flightEntries.updatedAt,
+          })
+          .from(flightEntries)
+          .where(inArray(flightEntries.participantId, ownSeatIds(db, userId)))
+          .orderBy(flightEntries.flightId, flightEntries.slot),
+    },
+  },
+  {
+    key: "tasting_night_ratings_by_others",
+    table: flightEntries,
+    description: "Other people's ratings at the nights you hosted.",
+    onDelete: "deleted",
+    why: "They belong to a night that is deleted with you.",
+    where: (db, userId) =>
+      and(inArray(flightEntries.flightId, ownFlightIds(db, userId)), notInArraySeats(db, userId)),
+    notExported: "Other people's words, not yours.",
   },
 ];
 

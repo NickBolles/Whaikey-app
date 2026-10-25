@@ -147,6 +147,17 @@ export default function PrivacyPage() {
             want, whether push is on, and your quiet hours with the time zone they are in.
           </li>
           <li>
+            <strong className="text-foreground">Clubs you start or join</strong> — the club&rsquo;s name and
+            description, who is in it and their role, and the invite links admins create (with how often
+            each was used). Clubs are invite-only and are never listed publicly.
+          </li>
+          <li>
+            <strong className="text-foreground">Tasting nights</strong> — the nights you host (name, time,
+            which bottle is in which glass) and, for everyone seated, their ratings, descriptors and notes
+            per glass. A guest without an account gives a first name and a birth date; we check the date
+            and keep only the name and their ratings, for 24 hours, unless they create an account.
+          </li>
+          <li>
             <strong className="text-foreground">Anything you send us through support</strong> — the
             message itself, the contact address you offer with it, and which platform and app
             version you were on. It is kept so a person can act on it, which means anything you put
@@ -274,7 +285,7 @@ export default function PrivacyPage() {
           yours — account, sign-in methods and sessions, age answer, shelf, pours and tasting
           notes, share links, passport, concierge conversations, bottles you proposed, profile,
           who you follow and who follows you, who you blocked, cheers and comments you gave,
-          your notification inbox and settings,
+          your notification inbox and settings, your clubs and tasting nights,
           reports you filed, support messages, and the AI and share-link records about you — as
           one JSON file or a zip of spreadsheets. What it leaves out, it names inside the file,
           with the reason. Three kinds of thing are always left out: credentials (session tokens,
@@ -301,7 +312,9 @@ export default function PrivacyPage() {
             recommendation reasons, your profile and settings (the handle becomes available to
             others), your phone number&rsquo;s hash, follows in both directions, blocks in both
             directions, device push registrations, your notification inbox and settings (and the
-            notifications your actions put in other people&rsquo;s inboxes), rate-limit counters, support messages you sent
+            notifications your actions put in other people&rsquo;s inboxes), club memberships and invite
+            links, tasting nights you hosted (with every rating at them) and your ratings at other people&rsquo;s,
+            rate-limit counters, support messages you sent
             signed in, and bottles you proposed that were never added to the shared catalog, with
             the proposals themselves.
           </li>
@@ -317,8 +330,9 @@ export default function PrivacyPage() {
             readings and share-link events described above (they expire on the same 90 days);
             reports you filed about other people&rsquo;s content, so a complaint still gets judged
             after you leave; a bottle you added that is now in the shared catalog, because other
-            people&rsquo;s shelves point at it; and, if you were ever a moderator, the decisions you
-            made.
+            people&rsquo;s shelves point at it; a club you started, which stays with its other
+            members and no longer names you as founder; and, if you were ever a moderator, the
+            decisions you made.
           </li>
           <li>
             <strong className="text-foreground">Kept as they are:</strong> reports other people

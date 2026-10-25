@@ -2019,3 +2019,155 @@ export const notificationSettings = pgTable("notification_settings", {
   updatedAt: updatedAt(),
 });
 export type NotificationSettingsRow = typeof notificationSettings.$inferSelect;
+
+// ── Track C: clubs and tasting nights (docs/SOCIAL.md §7.8–7.9, D20) ────────
+
+export const CLUB_ROLES = ["owner", "admin", "member"] as const;
+export type ClubRole = (typeof CLUB_ROLES)[number];
+
+/**
+ * Invite-only groups (design board C5): no directory, no public page, joined
+ * only through a member's invite link or QR. Ownership lives on the
+ * membership row; `createdBy` is history and survives the creator leaving.
+ */
+export const clubs = pgTable("clubs", {
+  id: id(),
+  name: text("name").notNull(),
+  description: text("description"),
+  createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+export type Club = typeof clubs.$inferSelect;
+
+export const clubMembers = pgTable(
+  "club_members",
+  {
+    clubId: text("club_id")
+      .notNull()
+      .references(() => clubs.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    role: text("role").$type<ClubRole>().notNull().default("member"),
+    joinedAt: timestamp("joined_at", { withTimezone: true, mode: "date" })
+      .$defaultFn(() => new Date())
+      .notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.clubId, t.userId] }), index("club_members_user_idx").on(t.userId)],
+);
+
+/** A revocable, expiring invite link. The code is the whole credential. */
+export const clubInvites = pgTable(
+  "club_invites",
+  {
+    code: text("code").primaryKey(),
+    clubId: text("club_id")
+      .notNull()
+      .references(() => clubs.id, { onDelete: "cascade" }),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    createdAt: createdAt(),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }).notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "date" }),
+    uses: integer("uses").notNull().default(0),
+  },
+  (t) => [index("club_invites_club_idx").on(t.clubId)],
+);
+
+export const FLIGHT_STATES = ["open", "revealed", "closed"] as const;
+export type FlightState = (typeof FLIGHT_STATES)[number];
+export const FLIGHT_SLOTS = ["A", "B", "C", "D", "E", "F"] as const;
+export type FlightSlot = (typeof FLIGHT_SLOTS)[number];
+
+/**
+ * A tasting night (§7.9): a host pours 3–6 bottles, optionally blind behind
+ * letters, everyone rates privately, the host reveals for the whole table
+ * (design board C4). `joinCode` is the link/QR credential.
+ */
+export const flights = pgTable(
+  "flights",
+  {
+    id: id(),
+    hostId: text("host_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    clubId: text("club_id").references(() => clubs.id, { onDelete: "set null" }),
+    title: text("title").notNull(),
+    blind: boolean("blind").notNull().default(true),
+    state: text("state").$type<FlightState>().notNull().default("open"),
+    joinCode: text("join_code").notNull().unique(),
+    scheduledAt: timestamp("scheduled_at", { withTimezone: true, mode: "date" }),
+    createdAt: createdAt(),
+    revealedAt: timestamp("revealed_at", { withTimezone: true, mode: "date" }),
+    closedAt: timestamp("closed_at", { withTimezone: true, mode: "date" }),
+  },
+  (t) => [index("flights_host_idx").on(t.hostId), index("flights_club_idx").on(t.clubId)],
+);
+export type Flight = typeof flights.$inferSelect;
+
+export const flightBottles = pgTable(
+  "flight_bottles",
+  {
+    flightId: text("flight_id")
+      .notNull()
+      .references(() => flights.id, { onDelete: "cascade" }),
+    slot: text("slot").$type<FlightSlot>().notNull(),
+    bottleId: text("bottle_id")
+      .notNull()
+      .references(() => bottles.id),
+  },
+  (t) => [primaryKey({ columns: [t.flightId, t.slot] })],
+);
+
+/**
+ * Who is at the table. A signed-in taster has `userId`; a guest (D20) has a
+ * hashed bearer token from an httpOnly cookie, a first name they typed, and an
+ * `expiresAt` 24 h out — after which the row and its ratings are swept unless
+ * they created an account and claimed it. A guest passed the same 21+ birth
+ * date check as an account; the birth date itself is not stored.
+ */
+export const flightParticipants = pgTable(
+  "flight_participants",
+  {
+    id: id(),
+    flightId: text("flight_id")
+      .notNull()
+      .references(() => flights.id, { onDelete: "cascade" }),
+    userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
+    guestTokenHash: text("guest_token_hash").unique(),
+    guestName: text("guest_name"),
+    joinedAt: timestamp("joined_at", { withTimezone: true, mode: "date" })
+      .$defaultFn(() => new Date())
+      .notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }),
+  },
+  (t) => [
+    uniqueIndex("flight_participants_flight_user_uq").on(t.flightId, t.userId),
+    index("flight_participants_user_idx").on(t.userId),
+    index("flight_participants_expires_idx").on(t.expiresAt),
+  ],
+);
+
+export const flightEntries = pgTable(
+  "flight_entries",
+  {
+    id: id(),
+    participantId: text("participant_id")
+      .notNull()
+      .references(() => flightParticipants.id, { onDelete: "cascade" }),
+    flightId: text("flight_id")
+      .notNull()
+      .references(() => flights.id, { onDelete: "cascade" }),
+    slot: text("slot").$type<FlightSlot>().notNull(),
+    rating: doublePrecision("rating"),
+    flavorTags: jsonb("flavor_tags").$type<Record<string, number>>(),
+    note: text("note"),
+    /** Set by the host (or an operator) removing a note from the table. */
+    hiddenAt: timestamp("hidden_at", { withTimezone: true, mode: "date" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex("flight_entries_participant_slot_uq").on(t.participantId, t.slot), index("flight_entries_flight_idx").on(t.flightId)],
+);
