@@ -135,6 +135,10 @@ const INVENTORY: Record<string, Verdict> = {
   // --- Devices ---
   push_devices: { disclosed: "Device push tokens" },
 
+  // --- Social M2 (Track C) ---
+  notifications: { disclosed: "Your notification inbox" },
+  notification_settings: { disclosed: "Your notification settings" },
+
   // --- Catalog: about bottles, not about people ---
   distilleries: { notPersonal: "Catalog reference data." },
   bottles: { notPersonal: "The shared bottle catalog." },

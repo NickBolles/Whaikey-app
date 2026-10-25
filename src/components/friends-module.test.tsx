@@ -33,13 +33,13 @@ describe("FriendsModule", () => {
     expect(screen.getByText("A dram is better shared")).toBeInTheDocument();
     const links = screen.getAllByRole("link", { name: "Find friends" });
     expect(links.length).toBeGreaterThan(0);
-    for (const link of links) expect(link).toHaveAttribute("href", "/friends");
+    for (const link of links) expect(link).toHaveAttribute("href", "/friends/people");
   });
 
   it("shows the quiet-week line when followed but nothing shared", () => {
     render(<FriendsModule items={[]} hasProfile={true} hasFollows={true} />);
     expect(screen.getByText(/Quiet week from your friends/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Manage" })).toHaveAttribute("href", "/friends");
+    expect(screen.getByRole("link", { name: "See all" })).toHaveAttribute("href", "/friends");
   });
 
   it("renders the comparison line + Compare notes CTA when the viewer tasted the bottle too", () => {

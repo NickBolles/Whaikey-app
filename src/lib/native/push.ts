@@ -230,3 +230,34 @@ export async function disablePush(): Promise<boolean> {
     return false;
   }
 }
+
+/**
+ * Route a tapped notification to its deep link (docs/SOCIAL.md D18). The
+ * sender puts a same-origin path in `data.deepLink`; anything that is not a
+ * plain absolute path is ignored, so a crafted payload cannot navigate the
+ * WebView off-site. Returns an unsubscribe for the shell's cleanup.
+ */
+export function onPushOpened(navigate: (path: string) => void): () => void {
+  let handle: { remove: () => void | Promise<void> } | null = null;
+  let cancelled = false;
+  void loadPlugin(() => import("@capacitor/push-notifications"))
+    .then((plugin) => {
+      if (!plugin || cancelled) return;
+      return plugin.PushNotifications.addListener("pushNotificationActionPerformed", (action) => {
+        const link = (action.notification?.data as { deepLink?: unknown } | undefined)?.deepLink;
+        if (typeof link === "string" && isSafePushPath(link)) navigate(link);
+      }).then((h) => {
+        if (cancelled) void h.remove();
+        else handle = h;
+      });
+    })
+    .catch(() => {});
+  return () => {
+    cancelled = true;
+    if (handle) void handle.remove();
+  };
+}
+
+export function isSafePushPath(link: string): boolean {
+  return /^\/[A-Za-z0-9/_\-.?=&%#]*$/.test(link) && !link.startsWith("//");
+}

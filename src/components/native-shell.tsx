@@ -18,7 +18,7 @@ import { checkShellVersion, type ShellVersionCheck } from "@/lib/native/manifest
 import { ShellUpdateRequired } from "@/components/shell-update-required";
 import { useToast } from "@/components/toast";
 import { isNativeApp } from "@/lib/native/platform";
-import { refreshPushRegistration } from "@/lib/native/push";
+import { onPushOpened, refreshPushRegistration } from "@/lib/native/push";
 import { flushPourQueue, isOnline } from "@/lib/native/offline-queue";
 
 /**
@@ -187,6 +187,9 @@ export function NativeShell({ userId }: { userId?: string | null }) {
       router.push(path);
     });
 
+    // A tapped notification opens what it was about (docs/SOCIAL.md D18).
+    const unsubscribePushOpen = onPushOpened((path) => router.push(path));
+
     /**
      * `whaikey://` is a scheme any app on the device can register, so an
      * inbound auth callback is a claim, not a fact. Acting on an unsolicited
@@ -271,6 +274,7 @@ export function NativeShell({ userId }: { userId?: string | null }) {
     return () => {
       unsubscribeBack();
       unsubscribeDeepLink();
+      unsubscribePushOpen();
       unsubscribeResume();
       document.documentElement.classList.remove("native-app");
     };

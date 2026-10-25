@@ -18,6 +18,8 @@ import {
   follows,
   moderationActions,
   nativeAuthCodes,
+  notificationSettings,
+  notifications,
   passportTiers,
   phoneLookups,
   pourShares,
@@ -925,6 +927,65 @@ export const ACCOUNT_DATA: readonly DataSlice[] = [
     why: "Their activity, not yours; the event stops pointing at your (deleted) link and expires on the 90-day sweep.",
     where: (db, userId) => inArray(analyticsEvents.shareId, ownShareIds(db, userId)),
     notExported: "Other people's activity.",
+  },
+
+  // --- Social M2: notifications (Track C, docs/SOCIAL.md D18) -------------
+  {
+    key: "notifications",
+    table: notifications,
+    description: "Your notification inbox: what happened (a follow, a cheer, a comment, club or tasting-night news), when, whether you read it and whether it was pushed.",
+    onDelete: "deleted",
+    why: "Addressed to you and about your activity; nobody else reads an inbox.",
+    where: (_db, userId) => eq(notifications.userId, userId),
+    export: {
+      // The actor is left out on purpose: the inbox shows a current handle,
+      // and an export is not where an id of somebody else's belongs.
+      columns: ["category", "subjectId", "createdAt", "readAt", "pushState"],
+      rows: (db, userId) =>
+        db
+          .select({
+            category: notifications.category,
+            subjectId: notifications.subjectId,
+            createdAt: notifications.createdAt,
+            readAt: notifications.readAt,
+            pushState: notifications.pushState,
+          })
+          .from(notifications)
+          .where(eq(notifications.userId, userId))
+          .orderBy(notifications.createdAt, notifications.id),
+    },
+  },
+  {
+    key: "notifications_you_caused",
+    table: notifications,
+    description: "Notifications in other people's inboxes that name you as the one who followed, cheered or commented.",
+    onDelete: "deleted",
+    why: "They name an account that no longer exists; the cheer or comment they pointed at is deleted with it.",
+    where: (_db, userId) => eq(notifications.actorId, userId),
+    notExported: "Other people's inboxes, not yours.",
+  },
+  {
+    key: "notification_settings",
+    table: notificationSettings,
+    description: "Which kinds of notification you want, whether push is on, and your quiet hours and time zone.",
+    onDelete: "deleted",
+    why: "Your own preferences; meaningless without the account.",
+    where: (_db, userId) => eq(notificationSettings.userId, userId),
+    export: {
+      columns: ["groups", "pushEnabled", "quietStart", "quietEnd", "timeZone", "updatedAt"],
+      rows: (db, userId) =>
+        db
+          .select({
+            groups: notificationSettings.groups,
+            pushEnabled: notificationSettings.pushEnabled,
+            quietStart: notificationSettings.quietStart,
+            quietEnd: notificationSettings.quietEnd,
+            timeZone: notificationSettings.timeZone,
+            updatedAt: notificationSettings.updatedAt,
+          })
+          .from(notificationSettings)
+          .where(eq(notificationSettings.userId, userId)),
+    },
   },
 ];
 

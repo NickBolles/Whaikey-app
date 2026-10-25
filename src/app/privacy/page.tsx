@@ -137,6 +137,16 @@ export default function PrivacyPage() {
             notifications on, so we can send to that device and stop when you sign out.
           </li>
           <li>
+            <strong className="text-foreground">Your notification inbox</strong> — who followed you,
+            cheered or commented on your notes, or sent club, tasting-night or challenge news, and
+            when; whether you have read each one and whether it was pushed to a device. The wording
+            is not stored, only what happened. Kept for 90 days, then deleted.
+          </li>
+          <li>
+            <strong className="text-foreground">Your notification settings</strong> — which kinds you
+            want, whether push is on, and your quiet hours with the time zone they are in.
+          </li>
+          <li>
             <strong className="text-foreground">Anything you send us through support</strong> — the
             message itself, the contact address you offer with it, and which platform and app
             version you were on. It is kept so a person can act on it, which means anything you put
@@ -264,6 +274,7 @@ export default function PrivacyPage() {
           yours — account, sign-in methods and sessions, age answer, shelf, pours and tasting
           notes, share links, passport, concierge conversations, bottles you proposed, profile,
           who you follow and who follows you, who you blocked, cheers and comments you gave,
+          your notification inbox and settings,
           reports you filed, support messages, and the AI and share-link records about you — as
           one JSON file or a zip of spreadsheets. What it leaves out, it names inside the file,
           with the reason. Three kinds of thing are always left out: credentials (session tokens,
@@ -289,7 +300,8 @@ export default function PrivacyPage() {
             links (they stop opening immediately), passport, concierge conversations, cached
             recommendation reasons, your profile and settings (the handle becomes available to
             others), your phone number&rsquo;s hash, follows in both directions, blocks in both
-            directions, device push registrations, rate-limit counters, support messages you sent
+            directions, device push registrations, your notification inbox and settings (and the
+            notifications your actions put in other people&rsquo;s inboxes), rate-limit counters, support messages you sent
             signed in, and bottles you proposed that were never added to the shared catalog, with
             the proposals themselves.
           </li>

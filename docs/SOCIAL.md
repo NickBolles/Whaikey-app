@@ -271,6 +271,8 @@ The bottle page gains a comparison view: **you vs. the producer vs. your friends
 ### 7.5 Reactions, comments & notifications (Cheers S2 · comments S3)
 
 > **Amended 2026-10 (D18):** notifications get a real sender (FCM/APNs; PLAN §5) and an in-app inbox. Allowed categories: new follower / request, cheer or comment on your note, a friend tasted a bottle you own or wishlisted (batched, ≤ 1/day), club and flight events, challenge invites and completions. Per-category preferences plus quiet hours. A banned-copy test rejects templates that suggest pouring or reference logging cadence ("pour", "drink now", "streak", "haven't logged", "don't break").
+>
+> **Built (M2 slice 1):** `src/lib/notify/` (rules, inbox, settings, daily friend-tasted digest), `src/lib/push/send.ts` (Android via FCM HTTP v1, `FCM_SERVICE_ACCOUNT_JSON`; iOS straight to APNs with a .p8 key, `APNS_KEY_P8`/`APNS_KEY_ID`/`APNS_TEAM_ID`/`APNS_TOPIC`; unset = inbox only; eligibility re-checked at send time), `/notifications` inbox, Settings → Notifications (a switch per group — follows, comments/replies, the daily friend digest, clubs and challenges on; cheers off, per the defaults below — push switch, quiet hours that suppress rather than delay). Categories are a closed list in `schema.ts`; `src/lib/notify/copy.test.ts` is the banned-copy test. The Friends tab is now the feed (`/friends`, cursor-paged via `/api/feed`) with people controls at `/friends/people`.
 
 
 - One-tap positive reaction: **"Cheers"** (§14 D4). Positive-only; there is no dislike. Ships with the graph in S2 — it's a day of work and it makes the first social release feel alive.
