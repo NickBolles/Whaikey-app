@@ -138,6 +138,13 @@ const INVENTORY: Record<string, Verdict> = {
   // --- Social M2 (Track C) ---
   notifications: { disclosed: "Your notification inbox" },
   notification_settings: { disclosed: "Your notification settings" },
+  clubs: { disclosed: "Clubs you start or join", sharedWith: ["club_members", "club_invites"] },
+  club_members: { disclosed: "Clubs you start or join", sharedWith: ["clubs", "club_invites"] },
+  club_invites: { disclosed: "Clubs you start or join", sharedWith: ["clubs", "club_members"] },
+  flights: { disclosed: "Tasting nights", sharedWith: ["flight_bottles", "flight_participants", "flight_entries"] },
+  flight_bottles: { disclosed: "Tasting nights", sharedWith: ["flights", "flight_participants", "flight_entries"] },
+  flight_participants: { disclosed: "Tasting nights", sharedWith: ["flights", "flight_bottles", "flight_entries"] },
+  flight_entries: { disclosed: "Tasting nights", sharedWith: ["flights", "flight_bottles", "flight_participants"] },
 
   // --- Catalog: about bottles, not about people ---
   distilleries: { notPersonal: "Catalog reference data." },

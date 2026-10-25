@@ -9,6 +9,8 @@ import { sweepNativeAuth } from "@/lib/native-auth";
 import { sweepExpiredPhoneLookups } from "@/lib/social";
 import { sweepTelemetry } from "@/lib/observability/metrics";
 import { drainPendingPushes, friendTastedDigest, sweepNotifications } from "@/lib/notify";
+import { sweepClubs } from "@/lib/clubs";
+import { sweepGuests } from "@/lib/flights";
 
 export const dynamic = "force-dynamic";
 
@@ -102,6 +104,10 @@ export async function GET(request: Request): Promise<NextResponse> {
       // "A friend shared a note on a bottle you own or wishlisted", at most
       // once a day per person — this once-daily run IS the batching (D18).
       ["friend-tasted-digest", () => friendTastedDigest(db, now)],
+      // Guest seats past their 24 hours, ratings with them (D20).
+      ["flight-guests", () => sweepGuests(db, now)],
+      // Clubs whose owner left or deleted their account get a new one; empty clubs go.
+      ["clubs", () => sweepClubs(db)],
     ];
 
     const { outcomes, failed } = await runIndependently(tasks);

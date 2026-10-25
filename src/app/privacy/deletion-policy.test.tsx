@@ -19,6 +19,7 @@ const SURVIVORS: Record<string, string> = {
   catalog_bottles_you_added: "a bottle you added that is now in the shared catalog",
   submissions_you_reviewed: "if you were ever a moderator, the decisions you made",
   moderation_decisions_you_made: "if you were ever a moderator, the decisions you made",
+  clubs_started: "a club you started, which stays with its other members",
   reports_filed: "reports you filed about other people’s content",
   reports_about_you: "reports other people filed about something of yours",
   ai_usage: "the AI meter readings and share-link events described above",
