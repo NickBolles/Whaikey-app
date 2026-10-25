@@ -137,5 +137,5 @@ export async function GET(req: Request, ctx: { params: Promise<{ kind: string }>
     };
   }
   if (!card) return notFound();
-  return new ImageResponse(<Card {...card} />, { ...CARD_FORMATS[format], headers: { "cache-control": "private, max-age=300" } });
+  return new ImageResponse(<Card {...card} />, { ...CARD_FORMATS[format], headers: { "cache-control": "private, max-age=300", "x-robots-tag": "noindex, noimageindex" } });
 }

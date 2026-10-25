@@ -3,17 +3,18 @@
 import { useState } from "react";
 import { share } from "@/lib/native/share";
 
-async function shareImageFile(url: string, title: string): Promise<boolean> {
+/** "shared" | "cancelled" (the person closed the sheet — stop there) | "unsupported" (fall back to the link). */
+async function shareImageFile(url: string, title: string): Promise<"shared" | "cancelled" | "unsupported"> {
   try {
     const nav = navigator as Navigator & { canShare?: (data: ShareData) => boolean };
-    if (typeof nav.share !== "function" || typeof nav.canShare !== "function") return false;
+    if (typeof nav.share !== "function" || typeof nav.canShare !== "function") return "unsupported";
     const blob = await (await fetch(url)).blob();
     const file = new File([blob], "whaikey-card.png", { type: "image/png" });
-    if (!nav.canShare({ files: [file] })) return false;
+    if (!nav.canShare({ files: [file] })) return "unsupported";
     await nav.share({ files: [file], title });
-    return true;
-  } catch {
-    return false;
+    return "shared";
+  } catch (err) {
+    return err instanceof DOMException && err.name === "AbortError" ? "cancelled" : "unsupported";
   }
 }
 
@@ -35,7 +36,7 @@ export function ShareCardButton({ body, title, label = "Share card" }: { body: R
     // Share the rendered story PNG itself where the platform can take a file
     // (Web Share Level 2 — mobile browsers and the iOS/Android WebViews that
     // expose it); otherwise fall back to the link through the native seam.
-    if (await shareImageFile(abs.story, title)) return;
+    if ((await shareImageFile(abs.story, title)) !== "unsupported") return;
     await share({ title, url: abs.story }).catch(() => undefined);
   }
   return (
