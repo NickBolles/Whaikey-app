@@ -211,7 +211,9 @@ export function PourScanSlot({
           if (cancelled || busyRef.current || video.readyState < 2) return;
           try {
             const codes = await detector.detect(video);
-            const hit = codes.find((c) => c.rawValue);
+            // Any valid product code in the frame, not just the first payload:
+            // a lot number beside the UPC must not shadow it.
+            const hit = codes.find((c) => c.rawValue && productCode(c.rawValue));
             if (hit) void resolveBarcode(hit.rawValue);
           } catch {
             // A frame the detector couldn't read; the next one might.

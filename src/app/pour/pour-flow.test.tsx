@@ -163,6 +163,20 @@ describe("PourFlow — draft (notes before the bottle)", () => {
     expect(window.localStorage.length).toBe(0);
   });
 
+  it("a save inside the debounce window does not write the draft back", async () => {
+    stubFetch(async (url, init) => (String(url) === "/api/pours" && init?.method === "POST" ? ok({ pour: { id: "p9" } }) : ok({})));
+    renderFlow({ initialBottle: { id: "b1", name: "Test Bourbon" } });
+    await act(async () => {});
+    fireEvent.click(screen.getByRole("button", { name: "Rate 3 stars" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Save pour" }));
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 400));
+    });
+    expect(window.localStorage.length).toBe(0);
+  });
+
   it("a draft marked Only me comes back Only me, even when the account default is wider", async () => {
     stubFetch(async (url) => (String(url).includes("/api/social/prefs") ? ok({ defaultPourVisibility: "public" }) : ok({})));
     const first = renderFlow();

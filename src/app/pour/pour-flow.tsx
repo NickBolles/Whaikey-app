@@ -136,7 +136,10 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
   useEffect(() => {
     latestDraftRef.current = { bottle, rating, servingStyle, amountMl, freeform, nose, palate, finish, flavorTags, companions, visibility: draftVisibility };
     if (!hydratedRef.current || finishedRef.current) return;
-    const t = setTimeout(() => saveDraft(userId, latestDraftRef.current), 300);
+    const t = setTimeout(() => {
+      // Saved or discarded while this was pending: never write it back.
+      if (!finishedRef.current) saveDraft(userId, latestDraftRef.current);
+    }, 300);
     return () => clearTimeout(t);
   }, [userId, bottle, rating, servingStyle, amountMl, freeform, nose, palate, finish, flavorTags, companions, draftVisibility]);
   useEffect(
