@@ -16,8 +16,13 @@
 export const TABS = [
   { href: "/", label: "Home" },
   { href: "/bar", label: "My Bar" },
-  { href: "/friends", label: "Friends" },
-  { href: "/chat", label: "Chat" },
+  // Explore (STORYBOARD D10): catalog search is its front door until the
+  // Explore hub lands; Learn, Passport and the Concierge hang off it.
+  { href: "/search", label: "Explore" },
+  // The Social tab (design board C1): Feed · Clubs · Challenges live under
+  // /friends, owned by the social track. Chat left the nav (D1): it is an
+  // affordance on Home and the bottle page.
+  { href: "/friends", label: "Social" },
 ] as const;
 
 export type TabHref = (typeof TABS)[number]["href"];
@@ -30,8 +35,10 @@ export type TabHref = (typeof TABS)[number]["href"];
  *   may not have an account, so five tabs they cannot use are noise.
  * - `/age` — a blocking screen (§3.14); every tab behind it redirects back.
  * - `/app-update` — the outage screen (§3.15), full screen over everything.
+ * - `/pour` — the Log a pour sheet (§2.2). It covers the app like a sheet,
+ *   with its own ✕ and a sticky Save where the nav would be.
  */
-const CHROMELESS_ROUTES = ["/sign-in", "/welcome", "/s", "/age", "/app-update"] as const;
+const CHROMELESS_ROUTES = ["/sign-in", "/welcome", "/s", "/age", "/app-update", "/pour"] as const;
 
 /** `/foo/` and `/foo` are the same route; the root stays `/`. */
 function normalize(pathname: string): string {
@@ -90,6 +97,8 @@ export function routeLabel(pathname: string): string | null {
       return "Scan";
     case "pour":
       return "Log a pour";
+    case "chat":
+      return "Concierge";
     case "import":
       return "Import";
     case "sharing":
@@ -149,9 +158,9 @@ export function parentRoute(pathname: string, ctx: ParentContext): ParentRoute {
       if (second && second !== "new" && third === "compare") {
         return { href: `/bottles/${second}`, label: "Bottle" };
       }
-      if (second === "new") return { href: "/search", label: "Search" };
+      if (second === "new") return { href: "/search", label: "Explore" };
       // Signed out, the catalog is the only shelf there is.
-      return ctx.signedIn ? { href: "/bar", label: "My Bar" } : { href: "/search", label: "Search" };
+      return ctx.signedIn ? { href: "/bar", label: "My Bar" } : { href: "/search", label: "Explore" };
     case "learn":
       return second ? { href: "/learn", label: "Whiskey School" } : HOME;
     case "passport":

@@ -11,7 +11,7 @@ describe("isTabRoute", () => {
   });
 
   it("is false for anything nested under a tab, and every other route", () => {
-    for (const path of ["/friends/requests", "/bottles/eagle-rare-10", "/history", "/search", "/u/ada", "/learn"]) {
+    for (const path of ["/friends/requests", "/bottles/eagle-rare-10", "/history", "/chat", "/u/ada", "/learn"]) {
       expect(isTabRoute(path)).toBe(false);
     }
   });
@@ -19,7 +19,7 @@ describe("isTabRoute", () => {
 
 describe("isChromeless (review UX-14)", () => {
   it("covers sign-in, the welcome tour, share pages, the age gate and the update screen", () => {
-    for (const path of ["/sign-in", "/welcome", "/s/sashalagav16", "/age", "/app-update"]) {
+    for (const path of ["/sign-in", "/welcome", "/s/sashalagav16", "/age", "/app-update", "/pour"]) {
       expect(isChromeless(path)).toBe(true);
     }
   });
@@ -36,12 +36,12 @@ describe("routeLabel", () => {
   it("names the tabs by their nav labels", () => {
     expect(routeLabel("/")).toBe("Home");
     expect(routeLabel("/bar")).toBe("My Bar");
-    expect(routeLabel("/friends")).toBe("Friends");
+    expect(routeLabel("/friends")).toBe("Social");
+    expect(routeLabel("/search")).toBe("Explore");
   });
 
   it("names the places a back button most often returns to", () => {
     expect(routeLabel("/history")).toBe("Journal");
-    expect(routeLabel("/search")).toBe("Search");
     expect(routeLabel("/bottles/eagle-rare-10")).toBe("Bottle");
     expect(routeLabel("/bottles/eagle-rare-10/compare")).toBe("Compare");
     expect(routeLabel("/bottles/new")).toBe("Add a bottle");
@@ -65,7 +65,7 @@ describe("routeLabel", () => {
 describe("parentRoute — where back goes with no in-app history", () => {
   it("sends a bottle page to the viewer's bar, or to the catalog when signed out", () => {
     expect(parentRoute("/bottles/eagle-rare-10", SIGNED_IN)).toEqual({ href: "/bar", label: "My Bar" });
-    expect(parentRoute("/bottles/eagle-rare-10", SIGNED_OUT)).toEqual({ href: "/search", label: "Search" });
+    expect(parentRoute("/bottles/eagle-rare-10", SIGNED_OUT)).toEqual({ href: "/search", label: "Explore" });
   });
 
   it("sends a comparison to its own bottle", () => {

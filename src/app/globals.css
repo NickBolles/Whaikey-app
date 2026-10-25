@@ -24,6 +24,7 @@
   --color-surface: var(--surface);
   --color-surface-raised: var(--surface-raised);
   --color-border-subtle: var(--border);
+  --color-border: var(--border);
   --color-foreground: var(--foreground);
   --color-muted: var(--muted);
   --color-accent: var(--accent);
@@ -54,24 +55,60 @@ body {
 
 /* --- Recipes (see docs/DESIGN.md) --- */
 
+/* Radii follow the Density table (DESIGN.md, amended 2026-10): cards are
+   rounded-xl (0.75rem), controls rounded-lg (0.5rem), chips rounded-full. */
 .card {
   background: linear-gradient(180deg, var(--surface-raised), var(--surface));
   border: 1px solid var(--border);
-  border-radius: 1rem;
+  border-radius: 0.75rem;
   box-shadow: inset 0 1px 0 rgba(244, 236, 221, 0.04);
 }
 
 .card-flat {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 1rem;
+  border-radius: 0.75rem;
+}
+
+/* Ledger lists (design direction B): thin-ruled rows instead of a stack of
+   cards. One hairline between rows, none around the list, so more of the
+   shelf or the journal fits on one screen. A row is ~40px to the eye and
+   never under 44px to the finger (rule 8). */
+.ledger > li + li {
+  border-top: 1px solid var(--border);
+}
+.ledger-row {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  min-height: 44px;
+  padding: 0.375rem 0.25rem;
+  border-radius: 0.5rem;
+  transition: background-color 160ms ease;
+}
+.ledger-row:hover {
+  background: rgba(244, 236, 221, 0.03);
+}
+
+/* An inline stat line ("47 bottles · 31 open · 4.2 avg"): numbers in the
+   display face, labels muted, before reaching for stat tiles. */
+.stat-inline {
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.stat-inline b {
+  font-family: var(--font-fraunces), Georgia, serif;
+  font-weight: 500;
+  font-size: 15px;
+  color: var(--foreground);
 }
 
 .btn-primary {
   background: linear-gradient(180deg, #f0b054, var(--accent) 45%, var(--accent-deep));
   color: #1b130a;
   font-weight: 600;
-  border-radius: 0.75rem;
+  border-radius: 0.5rem;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.25),
     0 6px 16px -8px rgba(232, 161, 60, 0.5);
@@ -87,7 +124,7 @@ body {
 .btn-secondary {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 0.75rem;
+  border-radius: 0.5rem;
   transition: background-color 160ms ease, border-color 160ms ease;
 }
 .btn-secondary:hover {
@@ -213,6 +250,13 @@ html.native-scanning body {
 html.native-scanning .card-viewfinder {
   background: transparent;
   box-shadow: none;
+}
+
+/* The pour sheet's compact viewfinder (src/components/pour/scan-slot.tsx)
+   sits inside the sheet, so the sheet's own fill would hide the camera; its
+   cards and controls keep their opaque backgrounds, as on the scan screen. */
+html.native-scanning [data-pour-sheet] {
+  background: transparent;
 }
 
 /* Friend-QR scanning happens on the dense /friends page, where opaque cards

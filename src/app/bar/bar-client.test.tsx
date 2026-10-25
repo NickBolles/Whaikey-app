@@ -893,21 +893,21 @@ describe("BarClient filter/summary agreement", () => {
 });
 
 describe("BarClient analytics-first layout", () => {
-  it("reads stats and flavor map above the bottle list, with no Insights zone", () => {
+  it("reads the stats line, then the shelf, then the flavor map (STORYBOARD D21), with no Insights zone", () => {
     const rows = [bottleRow("owned-row", "Owned Bottle", "own", {})];
     render(<BarClient initialRows={rows} flavorHeat={heatMatrix()}
         calibration={calibrationMatrix()} palate={palate} />);
 
-    // Analytics lead the page again: the map is primary content, not a demoted
-    // "Insights" appendix under the shelf.
+    // D21: the first bottle is visible without scrolling, so the shelf comes
+    // before the map; the map is still a full section, not an "Insights" appendix.
     const map = screen.getByRole("region", { name: "Flavor map" });
     const bottle = screen.getByText("Owned Bottle");
-    expect(map.compareDocumentPosition(bottle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(bottle.compareDocumentPosition(map) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Insights" })).not.toBeInTheDocument();
 
-    // The stats strip stays above the map.
+    // The stats line stays above the shelf.
     const stats = screen.getByRole("region", { name: "Bar stats" });
-    expect(stats.compareDocumentPosition(map) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(stats.compareDocumentPosition(bottle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("shows one slim stats strip on the own shelf only — the sole money surface", () => {

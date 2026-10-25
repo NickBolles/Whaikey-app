@@ -1,28 +1,27 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ChevronDown, ChevronUp, CloudOff, GlassWater, ScanLine, Search, Star, UserPlus } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Check, ChevronDown, ChevronUp, Eye, X } from "lucide-react";
 import { SERVING_STYLES, type PourVisibility, type ServingStyle } from "@/db/schema";
 import { matchLeafIds } from "@/lib/flavor-wheel";
+import { previousPath } from "@/lib/nav-history";
 import { StarRating } from "@/components/star-rating";
 import { FlavorWheelInput } from "@/components/flavor-wheel-input";
 import { PourSizePicker } from "@/components/pour-size-picker";
 import { NoteCapture, type ExtractedTastingNote } from "@/components/note-capture";
 import { VisibilityChips } from "@/components/visibility-chips";
+import { useToast } from "@/components/toast";
+import { PourScanSlot, type PickMeta } from "@/components/pour/scan-slot";
+import { bottleMeta, type ScanBottle } from "@/components/pour/scan-decision";
+import { clearDraft, hasDraftContent, loadDraft, saveDraft } from "@/components/pour/pour-draft";
 import { enqueuePour, newPourClientId } from "@/lib/native/offline-queue";
 
 export interface BottlePick {
   id: string;
   name: string;
   distillery?: string | null;
-  category?: string | null;
-}
-
-interface SearchResult {
-  id: string;
-  name: string;
-  distillery?: string | { name?: string } | null;
   category?: string | null;
 }
 
@@ -35,7 +34,6 @@ const NOTE_SECTIONS = [
 
 type NoteSection = (typeof NOTE_SECTIONS)[number]["key"];
 
-/** What the collapsed "add detail" row says the pour is currently set to. */
 const VISIBILITY_SUMMARY: Record<PourVisibility, string> = {
   private: "Only me",
   friends: "Friends",
@@ -43,190 +41,31 @@ const VISIBILITY_SUMMARY: Record<PourVisibility, string> = {
   public: "Public",
 };
 
-function distilleryName(d: SearchResult["distillery"]): string | null {
-  if (!d) return null;
-  if (typeof d === "string") return d;
-  return d.name ?? null;
-}
-
-// ---------------------------------------------------------------------------
-// Step 1: bottle picker
-// ---------------------------------------------------------------------------
-
-function BottlePicker({ onPick }: { onPick: (bottle: BottlePick) => void }) {
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState<SearchResult[]>([]);
-  const [searching, setSearching] = useState(false);
-  const [searchError, setSearchError] = useState(false);
-  const [recent, setRecent] = useState<BottlePick[]>([]);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Recent bottles from the user's pour history — one-tap re-log.
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/pours?limit=20")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data: { pours?: Array<{ bottleId: string; bottleName: string }> } | null) => {
-        if (cancelled || !data?.pours) return;
-        const seen = new Set<string>();
-        const unique: BottlePick[] = [];
-        for (const p of data.pours) {
-          if (seen.has(p.bottleId)) continue;
-          seen.add(p.bottleId);
-          unique.push({ id: p.bottleId, name: p.bottleName });
-          if (unique.length >= 5) break;
-        }
-        setRecent(unique);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const runSearch = useCallback((q: string) => {
-    setSearching(true);
-    setSearchError(false);
-    fetch(`/api/bottles/search?q=${encodeURIComponent(q)}`)
-      .then((res) => {
-        if (!res.ok) throw new Error("search failed");
-        return res.json();
-      })
-      .then((data: { results?: SearchResult[] }) => {
-        setResults(Array.isArray(data?.results) ? data.results : []);
-      })
-      .catch(() => {
-        setResults([]);
-        setSearchError(true);
-      })
-      .finally(() => setSearching(false));
-  }, []);
-
-  // Clear any pending debounce on unmount.
-  useEffect(() => {
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
-  }, []);
-
-  const handleQueryChange = (next: string) => {
-    setQuery(next);
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    const q = next.trim();
-    if (q.length < 2) {
-      setResults([]);
-      setSearchError(false);
-      return;
-    }
-    debounceRef.current = setTimeout(() => runSearch(q), 250);
-  };
-
-  return (
-    <div className="flex flex-col gap-5">
-      <label className="relative block">
-        <span className="sr-only">Search bottles</span>
-        <Search
-          size={18}
-          strokeWidth={1.8}
-          className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted"
-          aria-hidden
-        />
-        <input
-          type="search"
-          autoFocus
-          value={query}
-          onChange={(e) => handleQueryChange(e.target.value)}
-          placeholder="What are you pouring?"
-          className="w-full rounded-xl bg-surface border border-border-subtle pl-11 pr-4 py-3 placeholder:text-muted focus:outline-none focus:border-accent"
-        />
-      </label>
-
-      {/* Scanning is the fastest way to pick a bottle you're holding, so it
-          sits with the search box rather than only on the shelf-building page. */}
-      <Link
-        href="/scan?then=pour"
-        className="card-flat flex items-center gap-3 p-4 hover:bg-surface-raised transition-colors"
-      >
-        <ScanLine size={18} strokeWidth={1.8} className="text-accent shrink-0" aria-hidden />
-        <span className="flex-1 min-w-0">
-          <span className="font-medium block">Scan the bottle</span>
-          <span className="text-xs text-muted">Barcode or label — faster than typing.</span>
-        </span>
-      </Link>
-
-      {searchError && (
-        <p className="card-flat text-sm text-muted p-4">
-          Search is unavailable right now — try again in a moment, or pick from your recent
-          bottles below.
-        </p>
-      )}
-
-      {searching && <p role="status" className="text-sm text-muted px-1">Searching…</p>}
-
-      {results.length > 0 && (
-        <ul className="flex flex-col gap-2.5" aria-label="Search results">
-          {results.map((r) => (
-            <li key={r.id}>
-              <button
-                type="button"
-                onClick={() =>
-                  onPick({
-                    id: r.id,
-                    name: r.name,
-                    distillery: distilleryName(r.distillery),
-                    category: r.category,
-                  })
-                }
-                className="card-flat w-full text-left p-4 hover:bg-surface-raised transition-colors"
-              >
-                <span className="font-medium block">{r.name}</span>
-                <span className="text-xs text-muted">
-                  {[distilleryName(r.distillery), r.category].filter(Boolean).join(" · ")}
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {query.trim().length >= 2 && !searching && !searchError && results.length === 0 && (
-        <p className="text-sm text-muted px-1">No bottles match “{query.trim()}”.</p>
-      )}
-
-      {recent.length > 0 && (
-        <section aria-label="Recent bottles">
-          <h2 className="section-label mb-3">Recent bottles</h2>
-          <ul className="flex flex-col gap-2.5">
-            {recent.map((b) => (
-              <li key={b.id}>
-                <button
-                  type="button"
-                  onClick={() => onPick(b)}
-                  className="card-flat w-full flex items-center gap-3 text-left p-4 hover:bg-surface-raised transition-colors"
-                >
-                  <GlassWater size={18} strokeWidth={1.8} className="text-accent shrink-0" aria-hidden />
-                  <span className="font-medium">{b.name}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// The flow
-// ---------------------------------------------------------------------------
-
+/**
+ * Log a pour — the scan-first quick-confirm sheet (docs/STORYBOARD.md §2.2 as
+ * amended by the design board's direction B and decisions S1–S6).
+ *
+ * Top to bottom: the bottle slot (live viewfinder, type beneath, recents) →
+ * rating (optional) → serving → "Add notes, wheel, photo", which expands the
+ * full D3 richness in place → one sticky Save. An exact barcode fills the slot
+ * without a confirm step ("Not it?" + Undo cover a wrong read), so a bottle in
+ * front of you is ＋ → ★ → Save: three taps. A prefilled bottle (any Pour
+ * button) is the same three.
+ *
+ * Notes can start before the bottle (D4); closing keeps a 24 h draft (Q2).
+ * After Save a toast carries Undo and the sheet returns where you came from —
+ * there is no "Poured." page any more.
+ */
 export function PourFlow({ userId, initialBottle = null, initialBottleMissing = false }: { userId?: string; initialBottle?: BottlePick | null; initialBottleMissing?: boolean }) {
-  const [bottle, setBottle] = useState<BottlePick | null>(initialBottle);
+  const router = useRouter();
+  const toast = useToast();
+  const [bottle, setBottle] = useState<ScanBottle | null>(initialBottle);
+  const [pickedVia, setPickedVia] = useState<PickMeta | null>(null);
+  const [notItOpen, setNotItOpen] = useState(false);
   const [rating, setRating] = useState<number | null>(null);
   const [servingStyle, setServingStyle] = useState<ServingStyle | null>(null);
   const [amountMl, setAmountMl] = useState<number>(45);
   const [activeSection, setActiveSection] = useState<NoteSection>("nose");
-  const [peopleOpen, setPeopleOpen] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
   const [companions, setCompanions] = useState("");
   const [nose, setNose] = useState("");
@@ -234,38 +73,26 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
   const [finish, setFinish] = useState("");
   const [freeform, setFreeform] = useState("");
   const [flavorTags, setFlavorTags] = useState<Record<string, number>>({});
+  // Default visibility is the account's saved preference, "Only me" until it
+  // loads (owner decision on D19 is pending: do not widen the default here).
   const [visibility, setVisibility] = useState<PourVisibility>("private");
-  // Once the user touches the selector, a late-arriving prefs response must
-  // never overwrite their explicit choice (e.g. flip "Only me" to a broader
-  // saved default right before submit).
   const visibilityDirtyRef = useRef(false);
-  // The user's saved default, so "Log another" starts fresh instead of
-  // silently inheriting a previous pour's one-off visibility choice.
-  const [defaultVisibility, setDefaultVisibility] = useState<PourVisibility>("private");
+  const [visibilityChosen, setVisibilityChosen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  // The idempotency key for the pour being written, held across retries and
-  // cleared once it lands (or is queued). "Log another" is a different pour and
-  // gets a different key.
+  const [draftRestored, setDraftRestored] = useState(false);
   const clientIdRef = useRef<string | null>(null);
-  const [done, setDone] = useState<{
-    bottleName: string;
-    rating: number | null;
-    /** Saved locally because the network was gone; it syncs on reconnect. */
-    queued: boolean;
-  } | null>(null);
+  const hydratedRef = useRef(false);
+  // Set once the pour is saved or discarded, so the unmount flush below
+  // cannot write the draft back.
+  const finishedRef = useRef(false);
 
-  // US-6: the visibility selector defaults to the user's saved preference,
-  // never a new tap — a failed/401 fetch just leaves it at "Only me".
   useEffect(() => {
     let cancelled = false;
     fetch("/api/social/prefs")
       .then((res) => (res.ok ? res.json() : null))
       .then((data: { defaultPourVisibility?: PourVisibility } | null) => {
-        if (!cancelled && data?.defaultPourVisibility) {
-          if (!visibilityDirtyRef.current) setVisibility(data.defaultPourVisibility);
-          setDefaultVisibility(data.defaultPourVisibility);
-        }
+        if (!cancelled && data?.defaultPourVisibility && !visibilityDirtyRef.current) setVisibility(data.defaultPourVisibility);
       })
       .catch(() => {});
     return () => {
@@ -273,66 +100,99 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
     };
   }, []);
 
-  const reset = () => {
-    setBottle(null);
-    setRating(null);
-    setServingStyle(null);
-    setAmountMl(45);
-    setActiveSection("nose");
-    setPeopleOpen(false);
-    setDetailOpen(false);
-    setCompanions("");
-    setNose("");
-    setPalate("");
-    setFinish("");
-    setFreeform("");
-    setFlavorTags({});
-    visibilityDirtyRef.current = false;
-    setVisibility(defaultVisibility);
-    clientIdRef.current = null;
-    setSubmitting(false);
-    setSubmitError(null);
-    setDone(null);
-  };
+  // Resume a draft from the last 24 h. A Pour button that names a bottle wins
+  // over a draft's bottle, but the draft's words still come back.
+  useEffect(() => {
+    const draft = loadDraft(userId);
+    hydratedRef.current = true;
+    if (!draft) return;
+    /* eslint-disable react-hooks/set-state-in-effect -- one-shot restore from localStorage, which the server render can't see */
+    if (!initialBottle && draft.bottle) setBottle(draft.bottle);
+    setRating(draft.rating);
+    if (draft.servingStyle && (SERVING_STYLES as readonly string[]).includes(draft.servingStyle)) setServingStyle(draft.servingStyle as ServingStyle);
+    setAmountMl(draft.amountMl || 45);
+    setFreeform(draft.freeform);
+    setNose(draft.nose);
+    setPalate(draft.palate);
+    setFinish(draft.finish);
+    setFlavorTags(draft.flavorTags ?? {});
+    setCompanions(draft.companions);
+    if (draft.visibility) {
+      // An explicit choice outranks the account default arriving later.
+      visibilityDirtyRef.current = true;
+      setVisibilityChosen(true);
+      setVisibility(draft.visibility);
+    }
+    if (draft.freeform || draft.nose || draft.palate || draft.finish || Object.keys(draft.flavorTags ?? {}).length > 0) setDetailOpen(true);
+    setDraftRestored(true);
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, [userId, initialBottle]);
 
-  // Merge an AI extraction into the user's in-progress note WITHOUT clobbering
-  // anything they've already entered. Extraction assists; the user stays author.
-  // Nothing is hidden behind a disclosure anymore — the section tabs' counts
-  // make anything that landed visible without switching.
+  const draftContent = { bottle, rating, servingStyle, amountMl, freeform, nose, palate, finish, flavorTags, companions };
+  const hasContent = hasDraftContent({ ...draftContent, bottle: bottle && bottle.id !== initialBottle?.id ? bottle : null });
+  const draftVisibility = visibilityChosen ? visibility : null;
+  // The latest fields, for the flush on close/unmount: the debounced write
+  // below can still be pending when the sheet goes away.
+  const latestDraftRef = useRef({ ...draftContent, visibility: draftVisibility });
+  useEffect(() => {
+    latestDraftRef.current = { bottle, rating, servingStyle, amountMl, freeform, nose, palate, finish, flavorTags, companions, visibility: draftVisibility };
+    if (!hydratedRef.current || finishedRef.current) return;
+    const t = setTimeout(() => {
+      // Saved or discarded while this was pending: never write it back.
+      if (!finishedRef.current) saveDraft(userId, latestDraftRef.current);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [userId, bottle, rating, servingStyle, amountMl, freeform, nose, palate, finish, flavorTags, companions, draftVisibility]);
+  useEffect(
+    () => () => {
+      // Only ever adds: an empty flush would erase a stored draft (and React's
+      // dev double-mount runs this before the restore has landed).
+      if (hydratedRef.current && !finishedRef.current && hasDraftContent(latestDraftRef.current)) saveDraft(userId, latestDraftRef.current);
+    },
+    [userId],
+  );
+
+  function leave() {
+    const prev = previousPath();
+    if (prev && prev !== "/pour") router.back();
+    else router.push("/");
+  }
+
+  function pick(next: ScanBottle, meta: PickMeta) {
+    setBottle(next);
+    setPickedVia(meta);
+    setNotItOpen(false);
+    if (meta.via === "barcode") {
+      // S2: no confirm step on an exact barcode — Undo and "Not it?" cover it.
+      toast.show({
+        message: `Matched ${next.name}`,
+        undo: () => {
+          setBottle(null);
+          setPickedVia(null);
+        },
+      });
+    }
+  }
+
   const applyExtraction = (r: ExtractedTastingNote) => {
     if (r.nose && !nose.trim()) setNose(r.nose);
     if (r.palate && !palate.trim()) setPalate(r.palate);
     if (r.finish && !finish.trim()) setFinish(r.finish);
-    if (Object.keys(r.flavorTags).length > 0) {
-      setFlavorTags((cur) => ({ ...r.flavorTags, ...cur }));
-    }
+    if (Object.keys(r.flavorTags).length > 0) setFlavorTags((cur) => ({ ...r.flavorTags, ...cur }));
     if (r.suggestedRating != null && rating == null) setRating(r.suggestedRating);
-    if (
-      r.servingStyle &&
-      servingStyle == null &&
-      (SERVING_STYLES as readonly string[]).includes(r.servingStyle)
-    ) {
+    if (r.servingStyle && servingStyle == null && (SERVING_STYLES as readonly string[]).includes(r.servingStyle)) {
       setServingStyle(r.servingStyle as ServingStyle);
     }
   };
 
-  /**
-   * `bare` is the "just drinking?" path: record the dram — bottle, amount,
-   * serving, company — and deliberately leave any half-typed note or rating
-   * behind. A pour with one flavor and no score is equally valid via Save.
-   */
-  const submit = async (bare = false) => {
+  const submit = async () => {
     if (!bottle || submitting) return;
     setSubmitting(true);
     setSubmitError(null);
-
-    // Minted once per pour, not per attempt: a retry after a failed save — by
-    // the user tapping again or by the offline queue — carries the same key, so
-    // if the first attempt actually reached the server and only the response
-    // was lost, the second collapses onto it instead of logging the dram twice.
+    // Minted once per pour, not per attempt, so a retry collapses onto a save
+    // that reached the server but lost its response.
     clientIdRef.current ??= newPourClientId();
     const clientId = clientIdRef.current;
-
     const noteFields = {
       nose: nose.trim() || undefined,
       palate: palate.trim() || undefined,
@@ -340,18 +200,16 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
       freeform: freeform.trim() || undefined,
       flavorTags: Object.keys(flavorTags).length > 0 ? flavorTags : undefined,
     };
-    const hasNote = !bare && Object.values(noteFields).some((v) => v !== undefined);
-
+    const hasNote = Object.values(noteFields).some((v) => v !== undefined);
     const payload = {
       bottleId: bottle.id,
-      rating: bare ? undefined : rating ?? undefined,
+      rating: rating ?? undefined,
       servingStyle: servingStyle ?? undefined,
       amountMl,
       context: companions.trim() ? { companions: companions.trim() } : undefined,
       note: hasNote ? noteFields : undefined,
       visibility,
       clientId,
-      // Refused server-side if the session isn't this user any more.
       expectedUserId: userId,
     };
 
@@ -365,17 +223,37 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
         const data = await res.json().catch(() => null);
         throw new Error(data?.error ?? "Something went wrong saving your pour.");
       }
+      const pourId = await res
+        .json()
+        .then((body: { pour?: { id?: unknown } }) => (typeof body.pour?.id === "string" ? body.pour.id : null))
+        .catch(() => null);
       clientIdRef.current = null;
-      setDone({ bottleName: bottle.name, rating: bare ? null : rating, queued: false });
+      finishedRef.current = true;
+      clearDraft(userId);
+      toast.show({
+        message: `Poured ${bottle.name}${rating != null ? ` · ★${rating.toFixed(1)}` : ""}`,
+        tone: "success",
+        undo: pourId
+          ? async () => {
+              const undone = await fetch(`/api/pours/${encodeURIComponent(pourId)}?undo=1`, { method: "DELETE" });
+              if (!undone.ok) throw new Error(`DELETE /api/pours/${pourId} → ${undone.status}`);
+              router.refresh();
+            }
+          : undefined,
+        action: { label: "Journal", onClick: () => router.push("/history") },
+      });
+      leave();
+      router.refresh();
     } catch (err) {
-      // A pour is logged where the whiskey is, and that is routinely somewhere
-      // with no signal (PLAN.md §4.2). Losing the note the user just wrote is a
-      // far worse outcome than a delayed save, so a network failure queues it
-      // instead of erroring. A server that answered and said no is a real error.
+      // No signal where the whiskey is (PLAN.md §4.2): queue rather than lose
+      // the note. A server that answered "no" is a real error.
       if (err instanceof TypeError) {
         await enqueuePour({ body: payload, bottleName: bottle.name, userId });
         clientIdRef.current = null;
-        setDone({ bottleName: bottle.name, rating: bare ? null : rating, queued: true });
+        finishedRef.current = true;
+        clearDraft(userId);
+        toast.show({ message: `Saved ${bottle.name} on your phone — it syncs when you’re back online.` });
+        leave();
       } else {
         setSubmitError(err instanceof Error ? err.message : "Something went wrong.");
       }
@@ -384,272 +262,299 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
     }
   };
 
-  if (done) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[70dvh] px-6 text-center gap-7">
-        <div aria-hidden className="text-6xl drop-shadow-[0_0_24px_rgba(232,161,60,0.25)]">
-          🥃
-        </div>
-        <div>
-          <h1 className="font-display text-5xl font-semibold tracking-tight text-gradient-amber">
-            Poured.
-          </h1>
-          <p className="text-muted mt-3">{done.bottleName}</p>
-          {done.rating != null && (
-            <p className="mt-2.5 flex items-center justify-center gap-1.5 text-accent">
-              <Star size={16} fill="currentColor" aria-hidden />
-              <span className="stat-number text-2xl leading-none">{done.rating.toFixed(1)}</span>
-            </p>
-          )}
-          {done.queued && (
-            // Reassurance, not an error: the pour is saved on the device and
-            // goes up on its own. Nothing for the user to do or remember.
-            <p role="status" className="text-sm text-muted mt-4 flex items-center justify-center gap-2">
-              <CloudOff size={15} strokeWidth={1.8} aria-hidden />
-              Saved on your phone — it&apos;ll sync when you&apos;re back online.
-            </p>
-          )}
-        </div>
-        <div className="flex gap-3">
-          <button type="button" onClick={reset} className="btn-primary px-7 py-3">
-            Log another
-          </button>
-          <Link href="/history" className="btn-secondary px-7 py-3 font-medium">
-            View journal
-          </Link>
-        </div>
-      </div>
-    );
+  function discard() {
+    finishedRef.current = true;
+    clearDraft(userId);
+    leave();
   }
 
   return (
-    <div className="px-4 pt-8 pb-24 flex flex-col gap-6 max-w-lg mx-auto">
-      {/* Save lives in the header from the first tap — a pour with one flavor
-          and no score is already valid. */}
-      <header
-        data-sticky
-        className="sticky top-0 z-30 -mx-4 flex items-center justify-between gap-3 bg-background/95 px-4 py-2 backdrop-blur"
-      >
-        <div>
-          <h1 className="font-display text-[2rem] leading-tight font-semibold">Log a pour</h1>
-          <p className="text-muted text-sm mt-1">
-            {bottle ? "How was it?" : "Pick a bottle to get started."}
-          </p>
-        </div>
-        {bottle && (
-          <button
-            type="button"
-            onClick={() => submit()}
-            disabled={submitting}
-            className="btn-primary shrink-0 px-5 py-2.5 text-sm disabled:opacity-60"
-          >
-            {submitting ? "Saving…" : "Save"}
-          </button>
-        )}
-      </header>
-
-      {!bottle ? (
-        <>
-          {initialBottleMissing && <p role="alert" className="rounded-xl border border-danger/40 bg-danger/10 p-3 text-sm text-danger">We couldn’t load that bottle. Pick one below instead.</p>}
-          <BottlePicker onPick={setBottle} />
-        </>
-      ) : (
-        <div className="flex flex-col gap-6">
-          <div className="card flex items-center justify-between p-4">
-            <div>
-              <div className="font-medium">{bottle.name}</div>
-              {(bottle.distillery || bottle.category) && (
-                <div className="text-xs text-muted mt-0.5">
-                  {[bottle.distillery, bottle.category].filter(Boolean).join(" · ")}
-                </div>
-              )}
-            </div>
-            <button
-              type="button"
-              onClick={() => setBottle(null)}
-              className="text-sm text-accent shrink-0 ml-3 min-h-11 px-1 hover:brightness-110 transition-[filter]"
-            >
-              Change
+    <div className="mx-auto flex min-h-[calc(100dvh-4rem)] max-w-lg flex-col">
+      <div data-pour-sheet className="flex-1 bg-background px-3 pt-2 pb-4">
+        <div aria-hidden className="mx-auto mb-2 h-1 w-9 rounded-full bg-border" />
+        <header className="flex min-h-11 items-center justify-between gap-2">
+          <h1 className="font-display text-[20px] font-semibold leading-tight">Log a pour</h1>
+          <div className="flex items-center gap-1">
+            {(hasContent || draftRestored) && <span className="text-xs text-muted">{draftRestored ? "Draft restored" : "Draft kept 24h"}</span>}
+            <button type="button" onClick={leave} aria-label="Close" className="flex h-11 w-11 items-center justify-center rounded-lg text-muted hover:bg-surface-raised hover:text-foreground">
+              <X size={18} strokeWidth={1.8} aria-hidden />
             </button>
           </div>
+        </header>
 
-          {/* Speak first, correct after. This sits above the form because
-              dictating a note can fill most of what's below it — burying it in
-              the collapsed section made the app look like a form to type into. */}
-          <section aria-label="Capture your note" className="card flex flex-col gap-3 p-4">
-            <NoteCapture
-              freeform={freeform}
-              onFreeformChange={setFreeform}
-              onApplyExtraction={applyExtraction}
-              label="Say what you taste"
-              placeholder="“Loads of vanilla and charred oak, long warm finish — about a four.”"
-              hint="Auto-fill turns your words into a rating, flavors, and nose/palate/finish. You can edit everything after."
-            />
-          </section>
-
-          {/* Context chips: how it was served, how much, and who with. */}
-          <section aria-label="Context" className="flex flex-col gap-2.5">
-            <div className="flex flex-wrap gap-2" role="group" aria-label="Serving style">
-              {SERVING_STYLES.map((style) => (
-                <button
-                  key={style}
-                  type="button"
-                  aria-pressed={servingStyle === style}
-                  onClick={() => setServingStyle((cur) => (cur === style ? null : style))}
-                  className={`chip min-h-11 px-4 text-sm capitalize ${
-                    servingStyle === style ? "chip-active font-medium" : "hover:bg-surface-raised"
-                  }`}
-                >
-                  {style}
+        {!bottle ? (
+          <PourScanSlot onPick={pick} missingNotice={initialBottleMissing} />
+        ) : (
+          <section aria-label="Bottle" className="flex flex-col gap-1.5">
+            {pickedVia?.via === "barcode" && (
+              <p className="flex items-center justify-between gap-2 text-xs">
+                <span className="flex items-center gap-1 text-taste-shared">
+                  <Check size={14} strokeWidth={2} aria-hidden /> Barcode match
+                </span>
+                <button type="button" onClick={() => setNotItOpen((o) => !o)} aria-expanded={notItOpen} className="tap-target px-1 text-accent">
+                  Not it?{pickedVia.alternatives && pickedVia.alternatives.length > 0 ? ` ${pickedVia.alternatives.length} other${pickedVia.alternatives.length === 1 ? "" : "s"}` : ""}
                 </button>
-              ))}
+              </p>
+            )}
+            <div className="card flex items-center gap-3 px-3 py-2.5" data-testid="pour-bottle">
+              <span className="min-w-0 flex-1">
+                <span className="block truncate font-display text-[17px] font-semibold leading-tight">{bottle.name}</span>
+                <span className="block truncate text-xs text-muted">{bottleMeta(bottle) || bottle.category}</span>
+              </span>
               <button
                 type="button"
-                aria-pressed={peopleOpen}
-                aria-expanded={peopleOpen}
-                onClick={() => setPeopleOpen((o) => !o)}
-                className={`chip inline-flex min-h-11 items-center gap-1.5 px-4 text-sm ${
-                  peopleOpen || companions.trim() ? "chip-active font-medium" : "hover:bg-surface-raised"
-                }`}
+                onClick={() => {
+                  setBottle(null);
+                  setPickedVia(null);
+                  setNotItOpen(false);
+                }}
+                className="btn-secondary min-h-11 shrink-0 px-3 text-sm"
               >
-                <UserPlus size={14} strokeWidth={1.8} aria-hidden /> People
+                Change
               </button>
             </div>
-            <PourSizePicker value={amountMl} onChange={setAmountMl} />
-            {peopleOpen && (
-              <label className="flex flex-col gap-1.5">
-                <span className="sr-only">Who you shared it with</span>
+            {pickedVia && pickedVia.via !== "recent" && <ShelfQuickActions key={bottle.id} bottle={bottle} />}
+            {notItOpen && (
+              <div className="flex flex-wrap gap-1.5" role="group" aria-label="Other bottles with this barcode">
+                {(pickedVia?.alternatives ?? []).map((alt) => (
+                  <button key={alt.id} type="button" onClick={() => pick(alt, { via: "search" })} className="chip min-h-11 px-3 text-xs text-foreground/90">
+                    {alt.name}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setBottle(null);
+                    setPickedVia(null);
+                    setNotItOpen(false);
+                  }}
+                  className="chip min-h-11 px-3 text-xs"
+                >
+                  Scan or type again
+                </button>
+              </div>
+            )}
+          </section>
+        )}
+
+        <section aria-label="Your rating" className="mt-3 flex flex-col items-center gap-1 border-t border-border pt-3">
+          <h2 className="section-label">Your rating <span className="font-normal normal-case tracking-normal">· optional</span></h2>
+          <StarRating value={rating} onChange={setRating} size={40} />
+        </section>
+
+        <section aria-label="Serving" className="mt-2 flex flex-wrap justify-center gap-1.5" role="group">
+          {SERVING_STYLES.map((style) => (
+            <button
+              key={style}
+              type="button"
+              aria-pressed={servingStyle === style}
+              onClick={() => setServingStyle((cur) => (cur === style ? null : style))}
+              className={`chip min-h-11 px-3.5 text-sm capitalize ${servingStyle === style ? "chip-active font-medium" : "hover:bg-surface-raised"}`}
+            >
+              {style}
+            </button>
+          ))}
+        </section>
+
+        <button
+          type="button"
+          onClick={() => setDetailOpen((o) => !o)}
+          aria-expanded={detailOpen}
+          className="mt-3 flex min-h-11 w-full items-center justify-between gap-3 rounded-lg border border-border bg-surface px-3 text-left text-sm hover:bg-surface-raised"
+        >
+          <span>Add notes, wheel, size, who can see</span>
+          {detailOpen ? <ChevronUp size={18} strokeWidth={1.8} className="text-muted" aria-hidden /> : <ChevronDown size={18} strokeWidth={1.8} className="text-muted" aria-hidden />}
+        </button>
+
+        {detailOpen && (
+          <div className="mt-3 flex flex-col gap-3" data-testid="pour-detail">
+            <section aria-label="Capture your note" className="flex flex-col gap-2">
+              <NoteCapture
+                freeform={freeform}
+                onFreeformChange={setFreeform}
+                onApplyExtraction={applyExtraction}
+                label="Say what you taste"
+                placeholder="“Loads of vanilla and charred oak, long warm finish — about a four.”"
+                hint="Auto-fill turns your words into a rating, flavors, and nose/palate/finish."
+              />
+            </section>
+            <section aria-label="Tasting notes" className="flex flex-col gap-2 border-t border-border pt-3">
+              <div role="tablist" aria-label="Note section" className="flex gap-1.5">
+                {NOTE_SECTIONS.map((section) => {
+                  const text = { nose, palate, finish }[section.key];
+                  const count = matchLeafIds(text).length;
+                  const active = activeSection === section.key;
+                  return (
+                    <button
+                      key={section.key}
+                      role="tab"
+                      aria-selected={active}
+                      onClick={() => setActiveSection(section.key)}
+                      className={`tap-target inline-flex min-h-9 flex-1 items-center justify-center gap-1 rounded-full border px-2 text-xs font-medium transition-colors ${active ? "chip-active" : "border-border text-muted hover:text-foreground"}`}
+                    >
+                      {section.label}
+                      {count > 0 && <span className="font-mono text-xs opacity-70 tabular-nums"> · {count}</span>}
+                    </button>
+                  );
+                })}
+              </div>
+              {NOTE_SECTIONS.map((section) => {
+                if (section.key !== activeSection) return null;
+                const [value, set] = section.key === "nose" ? ([nose, setNose] as const) : section.key === "palate" ? ([palate, setPalate] as const) : ([finish, setFinish] as const);
+                return (
+                  <label key={section.key} className="flex flex-col gap-1.5">
+                    <span className="sr-only">{section.label}</span>
+                    <textarea
+                      value={value}
+                      onChange={(e) => set(e.target.value)}
+                      rows={2}
+                      placeholder={section.placeholder}
+                      className="resize-y rounded-lg border border-border bg-surface p-2.5 text-sm placeholder:text-muted focus:border-accent focus:outline-none"
+                    />
+                  </label>
+                );
+              })}
+              <FlavorWheelInput value={flavorTags} onChange={setFlavorTags} />
+            </section>
+            <section aria-label="Pour size" className="border-t border-border pt-3">
+              <PourSizePicker value={amountMl} onChange={setAmountMl} />
+            </section>
+            <section aria-label="More" className="flex flex-col gap-2 border-t border-border pt-3">
+              <label className="flex flex-col gap-1">
+                <span className="section-label">With…</span>
                 <input
                   value={companions}
                   onChange={(e) => setCompanions(e.target.value)}
                   placeholder="Who was there? (optional)"
-                  className="rounded-xl bg-surface border border-border-subtle px-3 py-2.5 text-sm placeholder:text-muted focus:outline-none focus:border-accent"
+                  className="h-11 rounded-lg border border-border bg-surface px-3 text-sm placeholder:text-muted focus:border-accent focus:outline-none"
                 />
               </label>
-            )}
-          </section>
+              <span className="section-label">Who can see this</span>
+              <VisibilityChips
+                value={visibility}
+                onChange={(value) => {
+                  visibilityDirtyRef.current = true;
+                  setVisibilityChosen(true);
+                  setVisibility(value);
+                }}
+                idPrefix="pour-visibility"
+              />
+            </section>
+          </div>
+        )}
 
-          {/* Nose / palate / finish are a filter row over ONE persistent wheel,
-              not three steps: each tab counts the flavors its text names, so
-              coverage is visible without switching. */}
-          <section aria-label="Tasting notes" className="flex flex-col gap-3">
-            <div role="tablist" aria-label="Note section" className="flex gap-1.5">
-              {NOTE_SECTIONS.map((section) => {
-                const text = { nose, palate, finish }[section.key];
-                const count = matchLeafIds(text).length;
-                const active = activeSection === section.key;
-                return (
-                  <button
-                    key={section.key}
-                    role="tab"
-                    aria-selected={active}
-                    onClick={() => setActiveSection(section.key)}
-                    className={`tap-target inline-flex min-h-9 flex-1 items-center justify-center gap-1 rounded-full border px-2 text-[12.5px] font-medium transition-colors ${
-                      active ? "chip-active" : "border-border-subtle text-muted hover:text-foreground"
-                    }`}
-                  >
-                    {section.label}
-                    {count > 0 && (
-                      <span className="font-mono text-[10.5px] opacity-70 tabular-nums"> · {count}</span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-            {NOTE_SECTIONS.map((section) => {
-              if (section.key !== activeSection) return null;
-              const [value, set] =
-                section.key === "nose"
-                  ? ([nose, setNose] as const)
-                  : section.key === "palate"
-                    ? ([palate, setPalate] as const)
-                    : ([finish, setFinish] as const);
-              return (
-                <label key={section.key} className="flex flex-col gap-1.5">
-                  <span className="sr-only">{section.label}</span>
-                  <textarea
-                    value={value}
-                    onChange={(e) => set(e.target.value)}
-                    rows={2}
-                    placeholder={section.placeholder}
-                    className="rounded-xl bg-surface border border-border-subtle p-3 text-sm placeholder:text-muted focus:outline-none focus:border-accent focus-visible:ring-2 focus-visible:ring-accent/60 resize-y"
-                  />
-                </label>
-              );
-            })}
-            <FlavorWheelInput value={flavorTags} onChange={setFlavorTags} />
-          </section>
+        <p className="mt-2 flex items-center justify-between gap-2 text-xs text-muted">
+          <span className="flex items-center gap-1">
+            <Eye size={14} strokeWidth={1.8} aria-hidden /> {VISIBILITY_SUMMARY[visibility]} can see
+          </span>
+          <span className="tabular-nums">{amountMl} ml</span>
+        </p>
 
-          <section aria-label="Rating" className="flex flex-col gap-3">
-            <h2 className="section-label">Rating</h2>
-            <StarRating value={rating} onChange={setRating} />
-          </section>
+        {submitError && (
+          <p role="alert" className="mt-2 rounded-lg border border-danger/40 bg-surface p-2.5 text-sm text-danger">
+            {submitError}
+          </p>
+        )}
+      </div>
 
-          {/* US-6 (docs/SOCIAL.md, binding): visibility lives behind "add
-              detail" so choosing it is never a tap the core loop has to make.
-              The pour already carries the saved default, and the summary line
-              states it — opening this is for changing that default, once. */}
-          <section aria-label="Add detail" className="flex flex-col gap-2">
-            <button
-              type="button"
-              onClick={() => setDetailOpen((o) => !o)}
-              aria-expanded={detailOpen}
-              className="flex items-center justify-between gap-3 rounded-2xl border border-border-subtle bg-surface px-4 py-3 text-left transition-colors hover:bg-surface-raised"
-            >
-              <span className="text-sm font-medium">
-                Add detail{" "}
-                <span className="font-normal text-muted">
-                  · {VISIBILITY_SUMMARY[visibility]}
-                </span>
-              </span>
-              {detailOpen ? (
-                <ChevronUp size={18} strokeWidth={1.8} className="shrink-0 text-muted" aria-hidden />
-              ) : (
-                <ChevronDown size={18} strokeWidth={1.8} className="shrink-0 text-muted" aria-hidden />
-              )}
+      <div data-sticky className="sticky bottom-0 z-30 border-t border-border bg-background/95 px-3 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] backdrop-blur">
+        <button type="button" onClick={() => void submit()} disabled={!bottle || submitting} className="btn-primary min-h-12 w-full text-base disabled:opacity-50">
+          {submitting ? "Saving…" : "Save pour"}
+        </button>
+        <p className="mt-1 flex min-h-6 items-center justify-center gap-3 text-xs text-muted">
+          {!bottle ? <span>Pick a bottle to save</span> : <span>Undo for 4s after saving</span>}
+          {hasContent && (
+            <button type="button" onClick={discard} className="tap-target px-1 underline-offset-2 hover:text-foreground hover:underline">
+              Discard
             </button>
-
-            {detailOpen && (
-              <div className="flex flex-col gap-1.5">
-                <span className="section-label">Who can see this</span>
-                <VisibilityChips
-                  value={visibility}
-                  onChange={(value) => {
-                    visibilityDirtyRef.current = true;
-                    setVisibility(value);
-                  }}
-                  idPrefix="pour-visibility"
-                />
-              </div>
-            )}
-          </section>
-
-          {submitError && (
-            <p role="alert" className="text-sm text-danger rounded-xl border border-danger/40 bg-surface p-3">
-              {submitError}
-            </p>
           )}
+        </p>
+      </div>
+    </div>
+  );
+}
 
-          <button
-            type="button"
-            onClick={() => submit()}
-            disabled={submitting}
-            className="btn-primary w-full py-3.5 text-base disabled:opacity-60"
-          >
-            {submitting ? "Saving…" : "Save pour"}
-          </button>
+/**
+ * ＋ is also "what is this bottle?" (STORYBOARD D6): a scanned or searched
+ * bottle can go on the shelf or the wishlist, or open its page, without
+ * leaving the sheet or logging anything. Every change confirms with Undo: a
+ * new row is deleted, a re-filed one gets its previous relationship back.
+ */
+function ShelfQuickActions({ bottle }: { bottle: ScanBottle }) {
+  const toast = useToast();
+  const router = useRouter();
+  const [busy, setBusy] = useState<"own" | "wishlist" | null>(null);
+  const [done, setDone] = useState<"own" | "wishlist" | null>(null);
 
-          {/* mb keeps this clear of the floating ＋ button in the nav. */}
-          <button
-            type="button"
-            onClick={() => submit(true)}
-            disabled={submitting}
-            className="tap-target mx-auto mb-6 px-2 text-sm text-muted underline-offset-2 hover:text-foreground hover:underline disabled:opacity-60"
-          >
-            Just drinking? Log the pour without notes
-          </button>
-        </div>
-      )}
+  async function add(relationship: "own" | "wishlist") {
+    if (busy) return;
+    setBusy(relationship);
+    const where = relationship === "own" ? "your bar" : "your wishlist";
+    try {
+      // What the shelf says now, so Undo can put it back: re-filing an owned
+      // bottle as wishlist must be as reversible as adding a new one.
+      const current = await fetch("/api/user-bottles")
+        .then((r) => (r.ok ? r.json() : []))
+        .then((rows: Array<{ bottleId?: string; relationship?: string }>) => rows.find((r) => r.bottleId === bottle.id)?.relationship ?? null)
+        .catch(() => null);
+      if (current === relationship) {
+        setDone(relationship);
+        toast.show({ message: `${bottle.name} is already in ${where}` });
+        return;
+      }
+      const res = await fetch("/api/user-bottles", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ bottleId: bottle.id, relationship }),
+      });
+      if (!res.ok) throw new Error(String(res.status));
+      const row = (await res.json().catch(() => null)) as { id?: string } | null;
+      setDone(relationship);
+      const undo =
+        res.status === 201 && row?.id
+          ? async () => {
+              const undone = await fetch(`/api/user-bottles/${encodeURIComponent(row.id!)}`, { method: "DELETE" });
+              if (!undone.ok) throw new Error(String(undone.status));
+            }
+          : current
+            ? async () => {
+                const undone = await fetch("/api/user-bottles", {
+                  method: "POST",
+                  headers: { "content-type": "application/json" },
+                  body: JSON.stringify({ bottleId: bottle.id, relationship: current }),
+                });
+                if (!undone.ok) throw new Error(String(undone.status));
+              }
+            : undefined;
+      toast.show({
+        message: `Added ${bottle.name} to ${where}`,
+        tone: "success",
+        undo: undo
+          ? async () => {
+              await undo();
+              setDone(null);
+              router.refresh();
+            }
+          : undefined,
+      });
+    } catch {
+      toast.error(`Couldn't add ${bottle.name}. Try again.`);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Shelf">
+      <button type="button" onClick={() => void add("own")} disabled={busy !== null || done === "own"} aria-pressed={done === "own"} className={`chip min-h-11 px-3 text-xs ${done === "own" ? "chip-active" : "text-foreground/90"}`}>
+        {done === "own" ? "In your bar" : "Add to bar"}
+      </button>
+      <button type="button" onClick={() => void add("wishlist")} disabled={busy !== null || done === "wishlist"} aria-pressed={done === "wishlist"} className={`chip min-h-11 px-3 text-xs ${done === "wishlist" ? "chip-active" : "text-foreground/90"}`}>
+        {done === "wishlist" ? "Wishlisted" : "Wishlist"}
+      </button>
+      <Link href={`/bottles/${encodeURIComponent(bottle.id)}`} className="tap-target ml-auto px-1 text-xs text-accent">
+        Bottle page →
+      </Link>
     </div>
   );
 }

@@ -39,7 +39,7 @@ export function AppHeader({
 
   return (
     <header className="border-b border-border-subtle bg-surface">
-      <div className="flex h-14 items-center justify-between gap-2 pl-4 pr-1.5">
+      <div className="flex h-12 items-center justify-between gap-2 pl-3 pr-1">
         {isTabRoute(pathname) ? (
           <Link
             href="/"

@@ -56,8 +56,11 @@ export function ShelfActions({
               disabled={pending !== null}
               onClick={() => setRelationship(r)}
               aria-pressed={active}
-              className={`flex-1 px-3 py-3 text-sm font-medium disabled:opacity-60 ${
-                active ? "btn-primary" : "btn-secondary"
+              // One accent moment per screen (DESIGN rule 2): Log a pour owns
+              // the gradient, so the current shelf state reads as a selected
+              // chip rather than a second primary button.
+              className={`btn-secondary min-h-11 flex-1 px-2 text-sm font-medium disabled:opacity-60 ${
+                active ? "border-accent/60 bg-accent/10 text-accent" : ""
               }`}
             >
               {pending === r ? "Saving…" : RELATIONSHIP_LABELS[r]}

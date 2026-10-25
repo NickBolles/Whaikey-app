@@ -143,6 +143,18 @@ describe("logPour", () => {
     expect(updated?.fillLevel).toBe(95);
   });
 
+  it("an Undo delete gives the fill back; a journal delete does not", async () => {
+    const ub = await createUserBottle(db, userId, bottleId, { status: "open", fillLevel: 100 });
+    const first = await logPour(db, userId, { bottleId, amountMl: 45 });
+    const second = await logPour(db, userId, { bottleId, amountMl: 45 });
+    const fill = async () => (await db.query.userBottles.findFirst({ where: eq(schema.userBottles.id, ub.id) }))?.fillLevel;
+    expect(await fill()).toBe(90);
+    expect(await deletePour(db, userId, second.pour.id, { restoreFill: true })).toBe(true);
+    expect(await fill()).toBe(95);
+    expect(await deletePour(db, userId, first.pour.id)).toBe(true);
+    expect(await fill()).toBe(95);
+  });
+
   it("decrements 3 for a 30ml pour", async () => {
     const ub = await createUserBottle(db, userId, bottleId, { status: "open", fillLevel: 50 });
     await logPour(db, userId, { bottleId, amountMl: 30 });

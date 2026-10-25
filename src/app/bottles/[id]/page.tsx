@@ -153,22 +153,22 @@ export default async function BottleDetailPage({
     .filter((g) => g.rows.length > 0);
 
   return (
-    <div className="px-4 pt-6 pb-10 flex flex-col gap-6">
+    <div className="px-3 pt-3 pb-8 flex flex-col gap-4">
       {/* Hero */}
       <header>
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <h1 className="font-display text-[2rem] leading-[1.1] font-semibold tracking-tight">
+            <h1 className="font-display text-[22px] leading-[1.15] font-semibold tracking-tight">
               {bottle.name}
             </h1>
-            {distillery && <p className="text-muted mt-1.5">{distillery.name}</p>}
+            {distillery && <p className="text-sm text-muted mt-0.5">{distillery.name}</p>}
           </div>
           <div className="mt-1.5">
             <CategoryChip category={bottle.category} active />
           </div>
         </div>
         {metaParts.length > 0 && (
-          <p className="text-sm text-muted mt-2.5">{metaParts.join(" · ")}</p>
+          <p className="text-xs text-muted mt-1">{metaParts.join(" · ")}</p>
         )}
         {/* The bottle's own passport stamps, laid out in a row rather than the
             list row's stacked rail: this is the bottle's own page, so the
@@ -180,9 +180,20 @@ export default async function BottleDetailPage({
           category={bottle.category}
           region={bottle.region ?? distillery?.region}
           country={bottle.country ?? distillery?.country}
-          className="mt-3.5 gap-2"
+          className="mt-2 gap-2"
         />
       </header>
+
+      {/* The action bar (design board direction B; STORYBOARD §3.4): the
+          primary action sits directly under the identity, above the fold. */}
+      {user ? (
+        <section aria-label="Bottle actions" className="flex flex-col gap-2">
+          <Link href={`/pour?bottleId=${bottle.id}`} className="btn-primary flex min-h-11 items-center justify-center px-4 text-sm font-medium">
+            Log a pour
+          </Link>
+          <ShelfActions bottleId={bottle.id} current={userBottle?.relationship ?? null} />
+        </section>
+      ) : null}
 
       {submission && (
         <SubmissionStatus
@@ -288,8 +299,8 @@ export default async function BottleDetailPage({
 
       {/* Your shelf */}
       <section aria-label="Your shelf">
-        <h2 className="section-label mb-3">Your shelf</h2>
-        <div className="card p-5 flex flex-col gap-4">
+        <h2 className="section-label mb-2">Your shelf</h2>
+        <div className="card p-3 flex flex-col gap-3">
           {user ? (
             <>
               <p className="text-sm text-muted">
@@ -298,10 +309,6 @@ export default async function BottleDetailPage({
                   : "Not on your shelf yet."}
                 {userBottle?.status ? ` Status: ${userBottle.status}.` : ""}
               </p>
-              <div className="flex flex-col gap-2">
-                <Link href={`/pour?bottleId=${bottle.id}`} className="btn-primary flex items-center justify-center px-4 py-3 text-sm font-medium">Log a pour</Link>
-                <ShelfActions bottleId={bottle.id} current={userBottle?.relationship ?? null} />
-              </div>
               {userBottle?.relationship === "own" && (
                 <ShelfDetails
                   row={{

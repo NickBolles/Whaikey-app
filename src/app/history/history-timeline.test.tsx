@@ -1,12 +1,28 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render as rtlRender, screen } from "@testing-library/react";
+import type { ReactElement } from "react";
 
 vi.mock("@/components/pour-share-button", () => ({
   PourShareButton: ({ bottleName }: { bottleName: string }) => <button type="button">Share {bottleName}</button>,
 }));
 
+const refresh = vi.fn();
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh, push: vi.fn() }) }));
+vi.mock("@/components/visibility-control", () => ({
+  VisibilityControl: ({ onChange }: { onChange?: (v: string) => void }) => (
+    <button type="button" onClick={() => onChange?.("public")}>
+      make public
+    </button>
+  ),
+}));
+
+import { ToastProvider } from "@/components/toast";
 import { HistoryTimeline, type TimelinePour } from "./history-timeline";
+
+function render(ui: ReactElement) {
+  return rtlRender(<ToastProvider>{ui}</ToastProvider>);
+}
 
 afterEach(cleanup);
 
@@ -51,13 +67,45 @@ describe("HistoryTimeline", () => {
     );
     await act(async () => {});
     // Two same-day pours collapse into a single day <section>.
-    const sections = screen.getAllByRole("region");
+    const sections = screen.getAllByRole("region").filter((r) => r.getAttribute("aria-label") !== "Notifications");
     expect(sections).toHaveLength(1);
   });
 
-  it("renders a share action for each private journal entry", () => {
+  it("keeps share, visibility and delete behind the row's ⋯ menu (STORYBOARD D9)", () => {
     render(<HistoryTimeline pours={[pour({ bottleName: "Shareable Rye" })]} />);
+    expect(screen.queryByRole("button", { name: "Share Shareable Rye" })).not.toBeInTheDocument();
+    const more = screen.getByRole("button", { name: "More for Shareable Rye" });
+    expect(more).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(more);
+    expect(more).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByRole("button", { name: "Share Shareable Rye" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "All pours of this bottle" })).toHaveAttribute("href", "/history?bottleId=b1");
+  });
+
+  it("the row's meta line follows a visibility change made in its menu", () => {
+    render(<HistoryTimeline pours={[pour({ bottleName: "Open Rye" })]} />);
+    expect(screen.getByText(/only me/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "More for Open Rye" }));
+    fireEvent.click(screen.getByRole("button", { name: "make public" }));
+    expect(screen.getByText(/· public/)).toBeInTheDocument();
+  });
+
+  it("delete hides the row at once and only sends the DELETE when Undo was not pressed", async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({}) }) as Response);
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      render(<HistoryTimeline pours={[pour({ bottleName: "Gone Rye" })]} />);
+      fireEvent.click(screen.getByRole("button", { name: "More for Gone Rye" }));
+      fireEvent.click(screen.getByRole("button", { name: /Delete/ }));
+      expect(screen.queryByTestId("journal-row")).not.toBeInTheDocument();
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: /undo/i }));
+      });
+      expect(screen.getByTestId("journal-row")).toBeInTheDocument();
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("formats the pour time using Intl (viewer timezone), not a raw ISO string", async () => {

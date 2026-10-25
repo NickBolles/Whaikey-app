@@ -74,18 +74,18 @@ export default async function HistoryPage({
   }));
 
   return (
-    <div className="px-4 pt-8 pb-24 flex flex-col gap-6 max-w-lg mx-auto">
+    <div className="px-3 pt-3 pb-8 flex flex-col gap-3 max-w-lg mx-auto">
       <header className="flex items-end justify-between">
         <div>
-          <h1 className="font-display text-[2rem] leading-tight font-semibold">Tasting journal</h1>
-          <p className="text-muted text-sm mt-1">
+          <h1 className="font-display text-[22px] leading-tight font-semibold">Tasting journal</h1>
+          <p className="text-muted text-xs mt-0.5">
             {filteredBottleName ? `${filteredBottleName} · ` : ""}{pours.length} pour{pours.length === 1 ? "" : "s"} logged
           </p>
         </div>
         <div className="flex flex-col items-end gap-1">
           <Link
             href="/pour"
-            className="text-sm text-accent font-medium hover:brightness-110 transition-[filter]"
+            className="tap-target text-sm text-accent font-medium hover:brightness-110 transition-[filter]"
           >
             Log a pour
           </Link>
