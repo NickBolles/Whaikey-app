@@ -87,10 +87,10 @@ export async function DELETE(req: Request, ctx: Ctx) {
   return withErrorHandling(async () => {
     const user = await requireUser();
     const { id } = await ctx.params;
-    // `?undo=1`: the toast's Undo of a pour just logged also gives back the
-    // fill it took from an open bottle (src/lib/pours.ts deletePour).
-    const restoreFill = new URL(req.url).searchParams.get("undo") === "1";
-    const deleted = await deletePour(getDb(), user.id, id, { restoreFill });
+    // `?undo=1`: the toast's Undo of a pour just logged also reverses what it
+    // did to the shelf — fill taken, a "tried" row filed (lib/pours deletePour).
+    const undo = new URL(req.url).searchParams.get("undo") === "1";
+    const deleted = await deletePour(getDb(), user.id, id, { undo });
     if (!deleted) {
       return NextResponse.json({ error: "Pour not found" }, { status: 404 });
     }

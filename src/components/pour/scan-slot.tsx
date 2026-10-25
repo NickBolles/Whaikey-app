@@ -80,6 +80,7 @@ export function PourScanSlot({
   const [searchError, setSearchError] = useState(false);
   const [recent, setRecent] = useState<ScanBottle[]>([]);
   const [attempt, setAttempt] = useState(0);
+  const [labelVia, setLabelVia] = useState<"ocr" | "ai" | null>(null);
 
   // Recent bottles from the pour history — one tap re-logs a known bottle.
   useEffect(() => {
@@ -246,6 +247,7 @@ export function PourScanSlot({
       canvas.getContext("2d")?.drawImage(video, 0, 0, canvas.width, canvas.height);
       const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
       const result = await identifyLabel(dataUrl, "image/jpeg");
+      setLabelVia(result.via);
       if (result.candidates.length > 0) {
         setStatus(null);
         setChoice({ kind: "choose", upc: "", options: result.candidates.slice(0, 3).map(toBottle), externalName: result.guess ?? null });
@@ -257,6 +259,22 @@ export function PourScanSlot({
     } finally {
       busyRef.current = false;
     }
+  }
+
+  /**
+   * Picking a suggestion is a confirmation: it teaches the barcode (a pending
+   * crowd claim until enough accounts agree, src/lib/upc-crowd.ts) or records
+   * which label read was right — the same call the full scanner makes, without
+   * shelving anything. Best effort: the pour never waits on it.
+   */
+  function pickSuggestion(b: ScanBottle) {
+    const upc = choice?.upc || null;
+    void fetch("/api/scan/confirm", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(upc ? { upc, bottleId: b.id } : { bottleId: b.id, via: labelVia ?? undefined }),
+    }).catch(() => {});
+    onPick(b, { via: upc ? "barcode" : "label" });
   }
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -353,7 +371,7 @@ export function PourScanSlot({
           <ul className="ledger mt-1">
             {choice.options.map((b) => (
               <li key={b.id}>
-                <button type="button" onClick={() => onPick(b, { via: choice.upc ? "barcode" : "label" })} className="ledger-row w-full text-left">
+                <button type="button" onClick={() => pickSuggestion(b)} className="ledger-row w-full text-left">
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm font-medium">{b.name}</span>
                     <span className="block truncate text-xs text-muted">{bottleMeta(b)}</span>
