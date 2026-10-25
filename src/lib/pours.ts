@@ -225,6 +225,10 @@ export async function logPour(db: DB, userId: string, input: PourInput): Promise
     // is invisible to the Tried tab and to every flavor map, so record the
     // weakest relationship that is unambiguously true. Existing rows are left
     // alone — this never promotes or demotes a bottle you already filed.
+    // One instant for the pour and any row it files: a shelf row whose
+    // created_at equals its pour's is how an Undo knows the pour filed it
+    // (deletePour), rather than guessing from freshness.
+    const loggedAt = new Date();
     if (!userBottle) {
       [userBottle] = await tx
         .insert(schema.userBottles)
@@ -233,13 +237,15 @@ export async function logPour(db: DB, userId: string, input: PourInput): Promise
           userId,
           bottleId: parsed.bottleId,
           relationship: "tried",
+          createdAt: loggedAt,
+          updatedAt: loggedAt,
         })
         .returning();
     }
     const [pour] = await tx
       .insert(schema.pours)
       .values({
-        id: crypto.randomUUID(), userId, bottleId: parsed.bottleId, userBottleId: userBottle?.id ?? null,
+        id: crypto.randomUUID(), userId, bottleId: parsed.bottleId, userBottleId: userBottle?.id ?? null, createdAt: loggedAt,
         rating: parsed.rating ?? null, servingStyle: parsed.servingStyle ?? null, amountMl, context: parsed.context ?? null,
         visibility, clientId: parsed.clientId ?? null,
         // Snapshots, written once and never updated (WP-19). `userBottle` is
@@ -520,7 +526,7 @@ export async function deletePour(
 ): Promise<boolean> {
   const deleted = await db.transaction(async (tx) => {
     const own = await tx
-      .select({ id: schema.pours.id, userBottleId: schema.pours.userBottleId, amountMl: schema.pours.amountMl })
+      .select({ id: schema.pours.id, userBottleId: schema.pours.userBottleId, amountMl: schema.pours.amountMl, createdAt: schema.pours.createdAt })
       .from(schema.pours)
       .where(and(eq(schema.pours.id, pourId), eq(schema.pours.userId, userId)));
     if (own.length === 0) return false;
@@ -540,7 +546,9 @@ export async function deletePour(
         );
     }
     // The shelf row this pour filed itself (logPour's "tried" for a bottle
-    // with no row): only a fresh `tried` row that no other pour points at.
+    // with no row): stamped with the pour's own instant, still `tried`, and
+    // stood on by no other pour. A row the user filed — even moments before —
+    // carries its own timestamp and is never touched.
     let autoFiled: string | null = null;
     if (opts.undo && pour.userBottleId) {
       const [row] = await tx
@@ -552,7 +560,7 @@ export async function deletePour(
         .from(schema.pours)
         .where(and(eq(schema.pours.userBottleId, pour.userBottleId), ne(schema.pours.id, pourId)))
         .limit(1);
-      if (row?.relationship === "tried" && others.length === 0 && Date.now() - row.createdAt.getTime() < 10 * 60_000) {
+      if (row?.relationship === "tried" && others.length === 0 && row.createdAt.getTime() === pour.createdAt.getTime()) {
         autoFiled = row.id;
       }
     }

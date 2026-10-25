@@ -168,6 +168,15 @@ describe("logPour", () => {
     expect(await shelf()).toHaveLength(1);
   });
 
+  it("an Undo never removes a tried row the user filed themselves, however recent", async () => {
+    await createUserBottle(db, userId, bottleId, { relationship: "tried", notes: "from the tasting" });
+    const { pour } = await logPour(db, userId, { bottleId });
+    expect(await deletePour(db, userId, pour.id, { undo: true })).toBe(true);
+    const rows = await db.query.userBottles.findMany({ where: and(eq(schema.userBottles.userId, userId), eq(schema.userBottles.bottleId, bottleId)) });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].notes).toBe("from the tasting");
+  });
+
   it("an Undo keeps a tried row that other pours still stand on", async () => {
     await logPour(db, userId, { bottleId });
     const second = await logPour(db, userId, { bottleId });
