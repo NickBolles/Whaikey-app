@@ -36,6 +36,12 @@ export interface BottleListRowProps {
    * stamps at all — a row whose caller has no origin to hand.
    */
   stamps?: { category: string; region?: string | null; country?: string | null } | null;
+  /**
+   * A trailing quick action beside the row (My Bar's **Pour**, STORYBOARD
+   * D21). Rendered as a sibling of the row link, never inside it, so the two
+   * stay separate tap targets and the markup has no nested interactives.
+   */
+  action?: React.ReactNode;
 }
 
 /**
@@ -56,6 +62,7 @@ export function BottleListRow({
   flavorTags,
   pours,
   stamps,
+  action,
 }: BottleListRowProps) {
   const chips = topFlavorTags(flavorTags, 3);
   const pourCount = pours?.count ?? 0;
@@ -65,16 +72,15 @@ export function BottleListRow({
       ? { min: pours.ratingMin, max: pours.ratingMax }
       : null;
   const hasRatingBlock = score != null || pourCount > 0;
-  return (
+  const row = (
     <Link
       href={href}
       data-testid="bottle-list-row"
-      className="flex items-stretch gap-[13px] rounded-2xl border px-3.5 py-3 transition-colors hover:bg-surface-raised/60"
-      style={{ borderColor: "#2e2519", background: "rgba(244,236,221,.03)" }}
+      className="flex min-w-0 flex-1 items-stretch gap-2.5 rounded-lg px-1 py-2 transition-colors hover:bg-surface-raised/60"
     >
       {spine && <FillSpine level={spine.level} tone={spineTone(spine.bottleId)} className="self-stretch" />}
-      <span className="flex min-w-0 flex-1 flex-col justify-center gap-[7px]">
-        <span className="min-w-0 truncate text-[14.5px] font-semibold leading-[1.25]">
+      <span className="flex min-w-0 flex-1 flex-col justify-center gap-1">
+        <span className="min-w-0 truncate text-sm font-semibold leading-[1.25]">
           {name}
         </span>
         {(meta || metaRight) && (
@@ -104,12 +110,12 @@ export function BottleListRow({
                 </span>
               )}
               {range && (
-                <span aria-hidden className="font-mono text-[10px] leading-none text-muted tabular-nums">
+                <span aria-hidden className="font-mono text-xs leading-none text-muted tabular-nums">
                   {range.min.toFixed(1)}–{range.max.toFixed(1)}
                 </span>
               )}
               {pourCount > 0 && (
-                <span aria-hidden className="text-[10px] leading-none text-muted">
+                <span aria-hidden className="text-xs leading-none text-muted">
                   {pourCount} pour{pourCount === 1 ? "" : "s"}
                 </span>
               )}
@@ -135,6 +141,13 @@ export function BottleListRow({
         </span>
       )}
     </Link>
+  );
+  if (!action) return row;
+  return (
+    <div className="flex items-center gap-2">
+      {row}
+      <div className="shrink-0">{action}</div>
+    </div>
   );
 }
 

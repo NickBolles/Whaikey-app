@@ -128,15 +128,13 @@ test.describe("signed-out smoke", () => {
     await expect(hero.locator("[aria-hidden='true'] svg")).toHaveCount(3);
   });
 
-  test("bottom nav keeps destinations focused and exposes quick actions", async ({ page }) => {
+  test("bottom nav is Home · Bar · ＋ · Explore · Social, and ＋ opens the pour sheet", async ({ page }) => {
     await page.goto("/");
     const nav = page.getByRole("navigation", { name: "Primary" });
-    for (const label of ["Home", "My Bar", "Friends", "Chat"]) {
-      await expect(nav.getByText(label)).toBeVisible();
+    for (const label of ["Home", "Bar", "Explore", "Social"]) {
+      await expect(nav.getByText(label, { exact: true })).toBeVisible();
     }
-    await nav.getByRole("button", { name: "Open quick actions" }).click();
-    await expect(page.getByRole("link", { name: /Log a pour/i })).toHaveAttribute("href", "/pour");
-    await expect(page.getByRole("link", { name: /Scan a bottle/i })).toHaveAttribute("href", "/scan");
+    await expect(nav.getByRole("link", { name: "Log a pour" })).toHaveAttribute("href", "/pour");
   });
 });
 
@@ -151,7 +149,7 @@ test.describe("app shell", () => {
     // dead end. Nothing in-app sits behind a fresh load, so back is a link.
     await page.goto("/bottles/eagle-rare-10");
     const back = page.getByTestId("header-back");
-    await expect(back).toHaveAccessibleName("Back to Search");
+    await expect(back).toHaveAccessibleName("Back to Explore");
     await expect(page.getByRole("link", { name: "Whaikey" })).toHaveCount(0);
     await back.click();
     await expect(page).toHaveURL(/\/search$/);
@@ -170,28 +168,27 @@ test.describe("app shell", () => {
     await expect(page).toHaveURL(/\/bottles\//);
 
     const back = page.getByTestId("header-back");
-    await expect(back).toHaveAccessibleName("Back to Search");
+    await expect(back).toHaveAccessibleName("Back to Explore");
     await back.click();
     await expect(page).toHaveURL(/\/search/);
-    // History, not a fresh navigation: the trail unwound, so Search's own
-    // back now names the page before it (Home), not the bottle just left.
-    await expect(page.getByTestId("header-back")).toHaveAccessibleName("Back to Home");
+    // Explore is a tab now, so it carries the wordmark rather than a back button.
+    await expect(page.getByTestId("header-back")).toHaveCount(0);
   });
 
   test("the browser's own back (and so the iOS swipe) keeps the header's label honest", async ({ page }) => {
     await page.goto("/");
     await page.getByRole("link", { name: "Search" }).click();
     await expect(page).toHaveURL(/\/search$/);
-    await expect(page.getByTestId("header-back")).toHaveAccessibleName("Back to Home");
-
     await page.getByRole("searchbox").first().fill("eagle rare");
     await page.locator("a[href^='/bottles/']").first().click();
-    await expect(page.getByTestId("header-back")).toHaveAccessibleName("Back to Search");
+    await expect(page.getByTestId("header-back")).toHaveAccessibleName("Back to Explore");
 
     await page.goBack();
     await expect(page).toHaveURL(/\/search/);
-    // Unwound, not pushed: one step back from Search is Home again.
-    await expect(page.getByTestId("header-back")).toHaveAccessibleName("Back to Home");
+    await page.getByRole("searchbox").first().fill("lagavulin");
+    await page.locator("a[href^='/bottles/']").first().click();
+    // Unwound, not pushed: back still names Explore, not the bottle left behind.
+    await expect(page.getByTestId("header-back")).toHaveAccessibleName("Back to Explore");
   });
 
   test("sign-in and share pages carry neither header nor nav (review UX-14)", async ({ page }) => {
@@ -262,12 +259,53 @@ test.describe("signed-in scan flow", () => {
     await signIn(context, baseURL!, SCAN_SESSION_TOKEN);
   });
 
-  test("a bottle-linked pour starts at the tasting form and can be changed", async ({ page }) => {
+  test("a bottle-linked pour starts at the rating and can be changed", async ({ page }) => {
     await page.goto("/pour?bottleId=eagle-rare-10");
-    await expect(page.getByText("Eagle Rare 10 Year")).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Rating" })).toBeVisible();
+    await expect(page.getByTestId("pour-bottle")).toContainText("Eagle Rare 10 Year");
+    await expect(page.getByRole("heading", { name: /Your rating/ })).toBeVisible();
     await page.getByRole("button", { name: "Change" }).click();
-    await expect(page.getByPlaceholder("What are you pouring?")).toBeVisible();
+    await expect(page.getByPlaceholder(/or type a name/)).toBeVisible();
+  });
+
+  /**
+   * The core-loop target (STORYBOARD §2, design board S1/S2): a bottle in
+   * front of you with a known barcode is ＋ → ★ → Save. The camera and the
+   * detector are faked so the path is deterministic; the lookup, the save and
+   * the toast are real.
+   */
+  test("an exact barcode is ＋ → ★ → Save: three taps, back where you were", async ({ page }) => {
+    await page.addInitScript(() => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 320;
+      canvas.height = 240;
+      const ctx = canvas.getContext("2d")!;
+      const draw = () => {
+        ctx.fillStyle = "#241a12";
+        ctx.fillRect(0, 0, 320, 240);
+      };
+      draw();
+      setInterval(draw, 100);
+      const stream = canvas.captureStream(10);
+      Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia: async () => stream } });
+      (window as unknown as { BarcodeDetector: unknown }).BarcodeDetector = class {
+        async detect() {
+          return [{ rawValue: "080244003302" }]; // seeded: Blanton's
+        }
+      };
+    });
+    await page.goto("/bar");
+    let taps = 0;
+    await page.getByRole("navigation", { name: "Primary" }).getByRole("link", { name: "Log a pour" }).click();
+    taps += 1;
+    await expect(page.getByTestId("pour-bottle")).toContainText(/Blanton/i);
+    await expect(page.getByText("Barcode match")).toBeVisible();
+    await page.getByRole("button", { name: "Rate 4 stars" }).click();
+    taps += 1;
+    await page.getByRole("button", { name: "Save pour" }).click();
+    taps += 1;
+    await expect(page.getByRole("region", { name: "Notifications" })).toContainText(/Poured Blanton/i);
+    await expect(page).toHaveURL(/\/bar$/);
+    expect(taps).toBe(3);
   });
 
   test("rapid barcode entry shelves bottles one after another", async ({ page }) => {
@@ -292,10 +330,8 @@ test.describe("signed-in scan flow", () => {
     await expect(page.getByText(/Elijah Craig Small Batch/i).first()).toBeVisible();
   });
 
-  test("scanning and logging a pour are reachable from each other", async ({ page }) => {
-    // Out from the pour flow...
-    await page.goto("/pour");
-    await page.getByRole("link", { name: /scan the bottle/i }).click();
+  test("the shelf scanner hands a bottle on to the pour sheet", async ({ page }) => {
+    await page.goto("/scan?then=pour");
     await expect(page.getByRole("heading", { name: /scan what you're pouring/i })).toBeVisible();
 
     // ...identify the bottle in hand. Its own UPC, so the tests above cannot
@@ -307,14 +343,14 @@ test.describe("signed-in scan flow", () => {
     // ...and back into the pour flow with that bottle already chosen.
     // Scoped to main: the header's back slot reads "Back to Log a pour" here.
     await page.getByRole("main").getByRole("link", { name: "Pour" }).click();
-    await expect(page.getByRole("heading", { name: "Rating" })).toBeVisible();
-    await expect(page.getByText(/Maker's Mark/i).first()).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Your rating/ })).toBeVisible();
+    await expect(page.getByTestId("pour-bottle")).toContainText(/Maker's Mark/i);
   });
 
   test("a pour shelves an unfiled bottle so it shows up under Tried", async ({ page }) => {
     await page.goto("/pour?bottleId=glenfarclas-105");
     await page.getByRole("button", { name: "Save pour" }).click();
-    await expect(page.getByRole("heading", { name: "Poured." })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Notifications" })).toContainText(/Poured Glenfarclas 105/i);
 
     await page.goto("/bar");
     // Tried is a quick pick on the filter line.
@@ -468,6 +504,7 @@ test.describe("flavor wheel touch gesture", () => {
   }) => {
     await signIn(context, baseURL!, SCAN_SESSION_TOKEN);
     await page.goto("/pour?bottleId=eagle-rare-10");
+    await page.getByRole("button", { name: /Add notes/ }).click();
 
     const wheel = page.getByRole("application", { name: "Flavor wheel" });
     await wheel.scrollIntoViewIfNeeded();

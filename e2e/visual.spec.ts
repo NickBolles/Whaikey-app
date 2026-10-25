@@ -316,6 +316,10 @@ test.describe("signed in (demo collector)", () => {
 
   test("pour flow: bottle picker", async ({ page }) => {
     await page.goto("/pour");
+    // Headless has no camera: wait for the deterministic camera-off state
+    // and the recents, so the shot never catches "Starting the camera".
+    await expect(page.getByText(/Camera is off/)).toBeVisible();
+    await expect(page.getByRole("list", { name: "Recent bottles" })).toBeVisible();
     await settle(page);
     await expect(page).toHaveScreenshot(shot("pour-step-bottle"), { fullPage: true });
   });
@@ -323,8 +327,9 @@ test.describe("signed in (demo collector)", () => {
   test("pour flow: rating + wheel", async ({ page }) => {
     await page.goto("/pour");
     await settle(page);
-    // Pick a recent bottle to reach the rating step deterministically.
-    await page.getByText(/Eagle Rare 10/i).first().click();
+    // Pick a recent bottle to reach the quick-confirm card deterministically.
+    await page.getByRole("list", { name: "Recent bottles" }).getByText(/Eagle Rare 10/i).first().click();
+    await expect(page.getByTestId("pour-bottle")).toBeVisible();
     await settle(page);
     await expect(page).toHaveScreenshot(shot("pour-step-rate"), { fullPage: true });
   });
@@ -332,9 +337,9 @@ test.describe("signed in (demo collector)", () => {
   test("pour flow: freeform + voice note capture", async ({ page }) => {
     await page.goto("/pour");
     await settle(page);
-    await page.getByText(/Eagle Rare 10/i).first().click();
-    // Note capture is above the fold now, so no disclosure to open: it is the
-    // first thing offered after picking a bottle.
+    await page.getByRole("list", { name: "Recent bottles" }).getByText(/Eagle Rare 10/i).first().click();
+    // Notes, the wheel and visibility expand in place (design board S5).
+    await page.getByRole("button", { name: /Add notes/ }).click();
     await expect(page.getByRole("button", { name: /Auto-fill|Extract/i })).toBeVisible();
     // Typed text drives the on-device flavor pass, which is the part of this
     // surface that renders without any network call.
@@ -529,7 +534,7 @@ test.describe("signed in (demo collector)", () => {
 
   test("welcome: the tour intro", async ({ page }) => {
     await page.goto("/welcome");
-    await expect(page.getByRole("button", { name: "Set me up" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Add your first bottle" })).toBeVisible();
     await settle(page);
     await expect(page).toHaveScreenshot(shot("welcome-intro"), { fullPage: true });
   });
@@ -553,9 +558,8 @@ test.describe("signed in (demo collector)", () => {
 
   test("welcome: first bottle step", async ({ page }) => {
     await page.goto("/welcome");
-    await page.getByRole("button", { name: "Set me up" }).click();
-    await page.getByRole("button", { name: "Continue" }).click();
-    await page.getByRole("button", { name: "Continue" }).click();
+    // First run's short path (STORYBOARD §2.1): straight to the first bottle.
+    await page.getByRole("button", { name: "Add your first bottle" }).click();
     await expect(page.getByRole("heading", { name: "Your first bottle" })).toBeVisible();
     await settle(page);
     await expect(page).toHaveScreenshot(shot("welcome-bottle"), { fullPage: true });

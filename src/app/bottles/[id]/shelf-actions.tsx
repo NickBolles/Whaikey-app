@@ -56,7 +56,7 @@ export function ShelfActions({
               disabled={pending !== null}
               onClick={() => setRelationship(r)}
               aria-pressed={active}
-              className={`flex-1 px-3 py-3 text-sm font-medium disabled:opacity-60 ${
+              className={`min-h-11 flex-1 px-2 text-sm font-medium disabled:opacity-60 ${
                 active ? "btn-primary" : "btn-secondary"
               }`}
             >

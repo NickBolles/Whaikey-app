@@ -60,6 +60,7 @@ export interface WelcomeClientProps {
 }
 
 const TOTAL_STEPS = 4;
+const BOTTLE_STEP = 3;
 
 /**
  * The first-run wizard (docs/SOCIAL.md §7.1 as amended 2026-08): every step
@@ -75,6 +76,10 @@ export function WelcomeClient({
 }: WelcomeClientProps) {
   const router = useRouter();
   const [step, setStep] = useState(0);
+  // First run's short path (STORYBOARD §2.1): Welcome → first bottle → Home.
+  // Profile and friends stay one tap away on the welcome screen ("Set me up")
+  // and are asked for again at the first social action (SOCIAL.md §7.1).
+  const [direct, setDirect] = useState(false);
   const [done, setDone] = useState(false);
   const [profile, setProfile] = useState<OwnProfile | null>(initialProfile);
 
@@ -124,7 +129,7 @@ export function WelcomeClient({
         {step > 0 ? (
           <button
             type="button"
-            onClick={() => setStep(step - 1)}
+            onClick={() => setStep(direct && step === BOTTLE_STEP ? 0 : step - 1)}
             aria-label="Back"
             className="tap-target flex h-9 w-9 items-center justify-center rounded-xl text-muted transition-colors hover:text-foreground"
           >
@@ -160,7 +165,19 @@ export function WelcomeClient({
       </header>
 
       <div className="mt-6 flex flex-1 flex-col">
-        {step === 0 && <StepWelcome onStart={next} onSkipTour={goHome} />}
+        {step === 0 && (
+          <StepWelcome
+            onFirstBottle={() => {
+              setDirect(true);
+              setStep(BOTTLE_STEP);
+            }}
+            onStart={() => {
+              setDirect(false);
+              next();
+            }}
+            onSkipTour={goHome}
+          />
+        )}
         {step === 1 && (
           <StepProfile
             accountName={accountName}
@@ -183,7 +200,7 @@ export function WelcomeClient({
             onSkip={skipStep}
           />
         )}
-        {step === 3 && <StepBottle onFinish={next} onLeaveForScan={setOnboardedCookie} />}
+        {step === BOTTLE_STEP && <StepBottle onFinish={direct ? goHome : next} onLeaveForScan={setOnboardedCookie} />}
       </div>
     </div>
   );
@@ -193,30 +210,31 @@ export function WelcomeClient({
 // Step 1 — Welcome
 // ---------------------------------------------------------------------------
 
-function StepWelcome({ onStart, onSkipTour }: { onStart: () => void; onSkipTour: () => void }) {
+function StepWelcome({ onFirstBottle, onStart, onSkipTour }: { onFirstBottle: () => void; onStart: () => void; onSkipTour: () => void }) {
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-9 text-center">
+    <div className="flex flex-1 flex-col items-center justify-center gap-7 text-center">
       <div>
-        <div aria-hidden className="mb-4 text-5xl drop-shadow-[0_0_24px_rgba(232,161,60,0.25)]">
-          🥃
-        </div>
         <h1 className="font-display text-4xl font-semibold tracking-tight text-gradient-amber">Whaikey</h1>
+        <p className="mt-1 text-sm text-muted">Your bar, your palate, your pours.</p>
       </div>
 
-      <ul className="flex flex-col gap-4 text-left">
+      <ul className="flex flex-col gap-3 text-left">
         <ValueLine icon={<GlassWater size={18} strokeWidth={1.8} aria-hidden />} text="Track your bottles" />
         <ValueLine icon={<Heart size={18} strokeWidth={1.8} aria-hidden />} text="Map your palate" />
         <ValueLine icon={<Users size={18} strokeWidth={1.8} aria-hidden />} text="Compare notes with friends" />
       </ul>
 
-      <div className="flex w-full max-w-xs flex-col items-center gap-4">
-        <button type="button" onClick={onStart} className="btn-primary w-full py-3.5">
+      <div className="flex w-full max-w-xs flex-col items-center gap-2">
+        <button type="button" onClick={onFirstBottle} className="btn-primary min-h-12 w-full">
+          Add your first bottle
+        </button>
+        <button type="button" onClick={onStart} className="btn-secondary min-h-11 w-full text-sm font-medium">
           Set me up
         </button>
         <button
           type="button"
           onClick={onSkipTour}
-          className="tap-target text-sm text-muted transition-colors hover:text-foreground"
+          className="tap-target mt-1 text-sm text-muted transition-colors hover:text-foreground"
         >
           Skip the tour
         </button>

@@ -331,6 +331,36 @@ describe("WelcomeClient", () => {
     ]);
   });
 
+  it("first run's short path: Add your first bottle → add → Finish lands on Home (STORYBOARD §2.1)", async () => {
+    stubFetch((url, init) => {
+      if (url.startsWith("/api/bottles/search")) {
+        return { status: 200, body: { results: [{ id: "b1", name: "Eagle Rare 10", category: "bourbon", distillery: "Buffalo Trace", region: null, ageYears: 10, abv: 45, avgPrice: null, flavorProfile: null }] } };
+      }
+      if (url === "/api/user-bottles" && init?.method === "POST") return { status: 201, body: { id: "ub1" } };
+      return undefined;
+    });
+    const user = userEvent.setup();
+    render(<WelcomeClient {...baseProps} />);
+    await user.click(screen.getByRole("button", { name: "Add your first bottle" }));
+    expect(screen.getByRole("heading", { name: "Your first bottle" })).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: "Add Eagle Rare 10 to bar" }));
+    expect(await screen.findByText("In your bar")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Finish" }));
+    expect(hasOnboardedCookie()).toBe(true);
+    expect(push).toHaveBeenCalledWith("/");
+    expect(screen.queryByText("You're set.")).not.toBeInTheDocument();
+
+  });
+
+  it("back from the short path's bottle step returns to the welcome screen", async () => {
+    stubFetch((url) => (url.startsWith("/api/bottles/search") ? { status: 200, body: { results: [] } } : undefined));
+    const user = userEvent.setup();
+    render(<WelcomeClient {...baseProps} />);
+    await user.click(screen.getByRole("button", { name: "Add your first bottle" }));
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    expect(screen.getByRole("button", { name: "Add your first bottle" })).toBeInTheDocument();
+  });
+
   it("finishing shows the You're set moment, sets the cookie, and Open Whaikey goes home", async () => {
     stubFetch((url) => {
       if (url.startsWith("/api/bottles/search")) return { status: 200, body: { results: [] } };

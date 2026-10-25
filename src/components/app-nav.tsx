@@ -2,114 +2,64 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
-import { GlassWater, Home, MessageCircle, Plus, ScanLine, Search, Users, Wine, X } from "lucide-react";
-import { useScrollLock } from "@/lib/scroll-lock";
+import { Compass, Home, Plus, Users, Wine } from "lucide-react";
 import { TABS as TAB_ROUTES, isChromeless, type TabHref } from "@/lib/app-routes";
 
-// Search lives in the global header and the ＋ quick-actions sheet, not here
-// (2026-08 IA redesign; docs/SOCIAL.md §6.3 amendment covers the Friends slot).
-// The destinations themselves live in src/lib/app-routes.ts, which is also
-// what tells the header a route is a tab (wordmark) or not (back button).
+// Home · Bar · ＋ · Explore · Social (STORYBOARD D1; design board C1). The
+// destinations live in src/lib/app-routes.ts, which also tells the header a
+// route is a tab (wordmark) or not (back button).
 const TAB_ICONS: Record<TabHref, typeof Home> = {
   "/": Home,
   "/bar": Wine,
+  "/search": Compass,
   "/friends": Users,
-  "/chat": MessageCircle,
 };
-const TABS = TAB_ROUTES.map((tab) => ({ ...tab, icon: TAB_ICONS[tab.href] }));
+const NAV_LABELS: Partial<Record<TabHref, string>> = { "/bar": "Bar" };
+const TABS = TAB_ROUTES.map((tab) => ({ ...tab, label: NAV_LABELS[tab.href] ?? tab.label, icon: TAB_ICONS[tab.href] }));
 
-const QUICK_ACTIONS = [
-  { href: "/pour", label: "Log a pour", description: "Choose a bottle, then capture the moment.", icon: GlassWater },
-  { href: "/scan", label: "Scan a bottle", description: "Add a bottle to your shelf.", icon: ScanLine },
-  { href: "/search", label: "Find a bottle", description: "Browse the whiskey library.", icon: Search },
-] as const;
-
+/**
+ * The bottom nav. ＋ opens the Log a pour sheet directly, camera live
+ * (design board S1, STORYBOARD Q1): the breakdown card it shows for an
+ * unknown bottle already offers Add to bar and Wishlist, so a two-choice menu
+ * in between would only cost a tap. Shelf-building (batch scan, import) lives
+ * behind Bar → Add.
+ */
 export function AppNav() {
   const pathname = usePathname();
-  const [actionsOpen, setActionsOpen] = useState(false);
-  const actionsPanelRef = useRef<HTMLDivElement>(null);
-  const actionsTriggerRef = useRef<HTMLButtonElement>(null);
-  useScrollLock(actionsOpen);
+  // Same routes the header leaves out: sign-in, the welcome tour, share
+  // pages, the age gate, the update screen and the pour sheet itself.
+  if (isChromeless(pathname)) return null;
 
-  // Same routes the header leaves out (review UX-14): sign-in, the welcome
-  // tour, share pages, the age gate and the update screen. See app-routes.ts
-  // for why each one carries no chrome.
-  const hidden = isChromeless(pathname);
-
-  const closeActions = () => {
-    actionsTriggerRef.current?.focus();
-    setActionsOpen(false);
-  };
-
-  useEffect(() => {
-    if (!actionsOpen) return;
-    const panel = actionsPanelRef.current;
-    const focusable = () => Array.from(panel?.querySelectorAll<HTMLElement>("a[href], button:not([disabled])") ?? []);
-    focusable()[0]?.focus();
-
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        closeActions();
-        return;
-      }
-      if (event.key !== "Tab") return;
-      const items = focusable();
-      if (items.length === 0) return;
-      const first = items[0];
-      const last = items[items.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [actionsOpen]);
-
-  // Hooks first: an early return above them would change the hook order
-  // between routes, which React forbids.
-  if (hidden) return null;
-
+  const isActive = (href: string) => (href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(`${href}/`));
   return (
-    <>
-      {actionsOpen && (
-        <div className="fixed inset-0 z-[60] flex items-end bg-black/55 px-4 pb-24" role="dialog" aria-modal="true" aria-label="Quick actions">
-          <button className="absolute inset-0" type="button" aria-label="Dismiss quick actions" onClick={closeActions} />
-          <div ref={actionsPanelRef} className="card relative z-10 mx-auto w-full max-w-md p-3 shadow-2xl">
-            <div className="flex items-center justify-between px-2 pb-2">
-              <p className="section-label">Do something with your bar</p>
-              <button type="button" className="flex h-10 w-10 items-center justify-center rounded-xl text-muted hover:bg-surface-raised hover:text-foreground" aria-label="Close quick actions" onClick={closeActions}>
-                <X size={18} aria-hidden />
-              </button>
-            </div>
-            <div className="flex flex-col gap-1">
-              {QUICK_ACTIONS.map(({ href, label, description, icon: Icon }) => (
-                <Link key={href} href={href} onClick={closeActions} className="flex items-center gap-3 rounded-xl p-3 hover:bg-surface-raised">
-                  <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent/10 text-accent"><Icon size={19} aria-hidden /></span>
-                  <span><span className="block text-sm font-medium">{label}</span><span className="block text-xs text-muted mt-0.5">{description}</span></span>
-                </Link>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-      <nav aria-label="Primary" data-app-nav className="sticky bottom-0 z-50 mt-10 border-t border-border-subtle bg-surface/95 backdrop-blur supports-[backdrop-filter]:bg-surface/80">
-        <div className="grid grid-cols-5 pb-[env(safe-area-inset-bottom)]">
-          {TABS.slice(0, 2).map(({ href, label, icon: Icon }) => <NavLink key={href} href={href} label={label} Icon={Icon} active={href === "/" ? pathname === "/" : pathname.startsWith(href)} />)}
-          <button ref={actionsTriggerRef} type="button" onClick={() => setActionsOpen(true)} aria-expanded={actionsOpen} aria-haspopup="dialog" aria-label="Open quick actions" className="relative -mt-5 flex flex-col items-center gap-1 pb-2.5 text-[11px] text-foreground"><span className="flex h-12 w-12 items-center justify-center rounded-full border-4 border-background bg-accent text-background shadow-[0_0_16px_rgba(232,161,60,0.4)]"><Plus size={24} strokeWidth={2.5} aria-hidden /></span>New</button>
-          {TABS.slice(2).map(({ href, label, icon: Icon }) => <NavLink key={href} href={href} label={label} Icon={Icon} active={pathname.startsWith(href)} />)}
-        </div>
-      </nav>
-    </>
+    <nav aria-label="Primary" data-app-nav className="sticky bottom-0 z-50 mt-6 border-t border-border bg-surface/95 backdrop-blur supports-[backdrop-filter]:bg-surface/85">
+      <div className="grid grid-cols-5 pb-[env(safe-area-inset-bottom)]">
+        {TABS.slice(0, 2).map(({ href, label, icon: Icon }) => <NavLink key={href} href={href} label={label} Icon={Icon} active={isActive(href)} />)}
+        <Link
+          href="/pour"
+          aria-label="Log a pour"
+          className="flex flex-col items-center justify-center gap-0.5 py-1.5 text-xs text-foreground"
+        >
+          <span className="btn-primary flex h-9 w-12 items-center justify-center rounded-lg">
+            <Plus size={22} strokeWidth={2.4} aria-hidden />
+          </span>
+        </Link>
+        {TABS.slice(2).map(({ href, label, icon: Icon }) => <NavLink key={href} href={href} label={label} Icon={Icon} active={isActive(href)} />)}
+      </div>
+    </nav>
   );
 }
 
 function NavLink({ href, label, Icon, active }: { href: string; label: string; Icon: typeof Home; active: boolean }) {
-  return <Link href={href} aria-current={active ? "page" : undefined} className={`relative flex flex-col items-center gap-1 pt-3 pb-2.5 text-[11px] transition-colors ${active ? "text-accent" : "text-muted hover:text-foreground"}`}>{active && <span aria-hidden className="absolute top-0 h-0.5 w-8 rounded-full bg-accent shadow-[0_0_8px_rgba(232,161,60,0.6)]" />}<Icon size={20} strokeWidth={active ? 2.2 : 1.8} aria-hidden />{label}</Link>;
+  return (
+    <Link
+      href={href}
+      aria-current={active ? "page" : undefined}
+      className={`relative flex min-h-12 flex-col items-center justify-center gap-0.5 py-1.5 text-xs transition-colors ${active ? "text-accent" : "text-muted hover:text-foreground"}`}
+    >
+      {active && <span aria-hidden className="absolute top-0 h-0.5 w-8 rounded-full bg-accent" />}
+      <Icon size={20} strokeWidth={active ? 2.2 : 1.8} aria-hidden />
+      {label}
+    </Link>
+  );
 }

@@ -1,8 +1,10 @@
 "use client";
 
-import { useMemo, useSyncExternalStore } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
-import { Star } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { MoreHorizontal, Star, Trash2 } from "lucide-react";
+import { useToast } from "@/components/toast";
 import { PourShareButton } from "@/components/pour-share-button";
 import { VisibilityControl } from "@/components/visibility-control";
 import type { PourVisibility } from "@/db/schema";
@@ -56,66 +58,118 @@ function dayKey(date: Date, now: Date): string {
 }
 
 function PourRow({ pour }: { pour: TimelinePour }) {
+  const router = useRouter();
+  const toast = useToast();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [hidden, setHidden] = useState(false);
   const snippet = noteSnippet(pour.note);
   const tags = pour.note?.flavorTags ? Object.entries(pour.note.flavorTags) : [];
-  const shownTags = tags.slice(0, 4);
+  const shownTags = tags.slice(0, 3);
   const time = new Date(pour.createdAt).toLocaleTimeString("en-US", {
     hour: "numeric",
     minute: "2-digit",
   });
+  const menuId = `pour-menu-${pour.id}`;
 
+  /**
+   * Delete is a deferred commit (STORYBOARD §1.2): the row leaves at once, the
+   * DELETE only goes out when the toast closes without Undo.
+   */
+  function remove() {
+    setMenuOpen(false);
+    setHidden(true);
+    toast.show({
+      message: `Deleted a pour of ${pour.bottleName}`,
+      undo: () => setHidden(false),
+      onClose: (reason) => {
+        if (reason === "undone") return;
+        void fetch(`/api/pours/${encodeURIComponent(pour.id)}`, { method: "DELETE" })
+          .then((res) => {
+            if (!res.ok) throw new Error(String(res.status));
+            router.refresh();
+          })
+          .catch(() => {
+            setHidden(false);
+            toast.error(`Couldn't delete that pour of ${pour.bottleName}. Try again.`);
+          });
+      },
+    });
+  }
+
+  if (hidden) return null;
   return (
-    <li className="card-flat p-4 flex flex-col gap-2">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <Link href={`/bottles/${pour.bottleId}`} className="font-medium hover:text-accent transition-colors">
-            {pour.bottleName}
-          </Link>
-          <div className="text-xs text-muted mt-1">
-            {[
-              pour.servingStyle,
-              pour.amountMl != null ? `${pour.amountMl} ml` : null,
-              time,
-            ]
+    <li className="py-2" data-testid="journal-row">
+      <div className="flex items-start gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline justify-between gap-2">
+            <Link href={`/bottles/${pour.bottleId}`} className="truncate text-sm font-semibold hover:text-accent transition-colors">
+              {pour.bottleName}
+            </Link>
+            {pour.rating != null && (
+              <span className="flex shrink-0 items-center gap-1 text-accent">
+                <Star size={12} fill="currentColor" aria-hidden />
+                <span className="stat-number text-[15px] leading-none tabular-nums">{pour.rating.toFixed(1)}</span>
+              </span>
+            )}
+          </div>
+          <div className="mt-0.5 text-xs text-muted">
+            {[pour.servingStyle, pour.amountMl != null ? `${pour.amountMl} ml` : null, time, VISIBILITY_WORD[pour.visibility]]
               .filter(Boolean)
               .join(" · ")}
           </div>
-        </div>
-        {pour.rating != null && (
-          <span className="flex items-center gap-1.5 text-accent shrink-0">
-            <Star size={14} fill="currentColor" aria-hidden />
-            <span className="stat-number text-lg leading-none">{pour.rating.toFixed(1)}</span>
-          </span>
-        )}
-      </div>
-
-      {snippet && <p className="text-sm text-muted italic">{snippet}</p>}
-
-      {shownTags.length > 0 && (
-        <ul className="flex flex-wrap gap-1.5" aria-label="Flavor tags">
-          {shownTags.map(([leafId, intensity]) => (
-            <li key={leafId} className="chip flex items-center gap-1.5 px-2.5 py-1 text-xs">
-              <span
-                className="inline-block h-1.5 w-1.5 rounded-full"
-                style={{ backgroundColor: wedgeColor.get(wedgeForLeaf(leafId) ?? "") ?? "var(--muted)" }}
-                aria-hidden
-              />
-              <span className="text-foreground/90">{leafLabel(leafId) ?? leafId}</span>
-              <IntensityDots intensity={intensity} className="text-accent" />
-            </li>
-          ))}
-          {tags.length > 4 && (
-            <li className="rounded-full px-2 py-1 text-xs text-muted">+{tags.length - 4}</li>
+          {snippet && <p className="mt-1 line-clamp-2 text-xs italic text-foreground/75">{snippet}</p>}
+          {shownTags.length > 0 && (
+            <ul className="mt-1 flex flex-wrap gap-1" aria-label="Flavor tags">
+              {shownTags.map(([leafId, intensity]) => (
+                <li key={leafId} className="chip flex items-center gap-1 px-2 py-0.5 text-xs">
+                  <span
+                    className="inline-block h-1.5 w-1.5 rounded-full"
+                    style={{ backgroundColor: wedgeColor.get(wedgeForLeaf(leafId) ?? "") ?? "var(--muted)" }}
+                    aria-hidden
+                  />
+                  <span className="text-foreground/90">{leafLabel(leafId) ?? leafId}</span>
+                  <IntensityDots intensity={intensity} className="text-accent" />
+                </li>
+              ))}
+              {tags.length > 3 && <li className="px-1 py-0.5 text-xs text-muted">+{tags.length - 3}</li>}
+            </ul>
           )}
-        </ul>
-      )}
-
-      <VisibilityControl pourId={pour.id} visibility={pour.visibility} />
-
-      <PourShareButton pourId={pour.id} bottleName={pour.bottleName} />
+        </div>
+        <button
+          type="button"
+          aria-label={`More for ${pour.bottleName}`}
+          aria-expanded={menuOpen}
+          aria-controls={menuId}
+          onClick={() => setMenuOpen((o) => !o)}
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-muted hover:bg-surface-raised hover:text-foreground"
+        >
+          <MoreHorizontal size={18} strokeWidth={1.8} aria-hidden />
+        </button>
+      </div>
+      {/* Row ⋯ (STORYBOARD D9): sharing and visibility moved in here so a row
+          is one line of identity plus one of meta, not a stack of controls. */}
+      <div id={menuId} hidden={!menuOpen} className="mt-2 flex flex-col gap-2 rounded-lg border border-border bg-surface p-2.5">
+        <VisibilityControl pourId={pour.id} visibility={pour.visibility} />
+        <div className="flex flex-wrap items-center gap-2">
+          <PourShareButton pourId={pour.id} bottleName={pour.bottleName} />
+          <Link href={`/history?bottleId=${encodeURIComponent(pour.bottleId)}`} className="btn-secondary flex min-h-11 items-center px-3 text-sm">
+            All pours of this bottle
+          </Link>
+          <button type="button" onClick={remove} className="btn-secondary flex min-h-11 items-center gap-1.5 px-3 text-sm text-danger">
+            <Trash2 size={14} strokeWidth={1.8} aria-hidden /> Delete
+          </button>
+        </div>
+      </div>
     </li>
   );
 }
+
+const VISIBILITY_WORD: Record<PourVisibility, string> = {
+  private: "only me",
+  friends: "shared with friends",
+  followers: "followers",
+  public: "public",
+};
 
 /**
  * Groups pours into day sections and formats times in the viewer's timezone.
@@ -155,7 +209,7 @@ export function HistoryTimeline({ pours }: { pours: TimelinePour[] }) {
     // First paint: no day headers (their labels are timezone-dependent), just
     // the rows in order. Deterministic and identical on server and client.
     return (
-      <ul className="flex flex-col gap-2.5">
+      <ul className="ledger flex flex-col">
         {pours.map((pour) => (
           <PourRow key={pour.id} pour={pour} />
         ))}
@@ -167,8 +221,8 @@ export function HistoryTimeline({ pours }: { pours: TimelinePour[] }) {
     <>
       {groups.map((group) => (
         <section key={group.day} aria-label={group.day}>
-          <h2 className="section-label mb-3">{group.day}</h2>
-          <ul className="flex flex-col gap-2.5">
+          <h2 className="section-label mb-1 border-b border-border pb-1">{group.day}</h2>
+          <ul className="ledger flex flex-col">
             {group.pours.map((pour) => (
               <PourRow key={pour.id} pour={pour} />
             ))}

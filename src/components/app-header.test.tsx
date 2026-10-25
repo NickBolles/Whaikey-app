@@ -52,7 +52,7 @@ describe("AppHeader", () => {
 
 /** Review UX-1: "No back navigation; iOS bottle page is a dead end". */
 describe("AppHeader back slot", () => {
-  it.each(["/", "/bar", "/friends", "/chat"])("keeps the wordmark, not a back button, on the tab route %s", (path) => {
+  it.each(["/", "/bar", "/search", "/friends"])("keeps the wordmark, not a back button, on the tab route %s", (path) => {
     pathname = path;
     render(<AppHeader user={{ name: "Ada", image: null }} profileHandle="ada" />);
     expect(screen.getByRole("link", { name: "Whaikey" })).toBeInTheDocument();
@@ -73,7 +73,7 @@ describe("AppHeader back slot", () => {
     resetNavigation(pathname); // a deep link: nothing behind this page
     render(<AppHeader user={null} profileHandle={null} />);
 
-    const back = screen.getByRole("link", { name: "Back to Search" });
+    const back = screen.getByRole("link", { name: "Back to Explore" });
     expect(back).toHaveAttribute("href", "/search");
     fireEvent.click(back);
     // The Link navigates on its own; history is not touched, so back can
@@ -99,7 +99,7 @@ describe("AppHeader back slot", () => {
     pathname = "/bottles/eagle-rare-10";
     render(<AppHeader user={{ name: "Ada", image: null }} profileHandle="ada" />);
 
-    fireEvent.click(screen.getByRole("link", { name: "Back to Search" }), { metaKey: true });
+    fireEvent.click(screen.getByRole("link", { name: "Back to Explore" }), { metaKey: true });
     expect(router.back).not.toHaveBeenCalled();
   });
 

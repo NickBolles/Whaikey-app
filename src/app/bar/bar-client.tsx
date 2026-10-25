@@ -530,13 +530,20 @@ export function BarClient({
   }, [filteredOwn]);
 
   return (
-    <div className="px-4 pt-5 pb-10 flex flex-col gap-6">
-      <div className="flex flex-col gap-3">
-        <header className="flex items-baseline justify-between">
-          <h1 className="font-display text-[27px] leading-tight font-semibold">My bar</h1>
-          <span className="font-mono text-sm text-muted tabular-nums" aria-label={`${shelfTotal} bottles`}>
-            {shelfTotal}
-          </span>
+    <div className="px-3 pt-3 pb-8 flex flex-col gap-3">
+      <div className="flex flex-col gap-2">
+        <header className="flex items-center justify-between gap-2">
+          <h1 className="font-display text-[22px] leading-tight font-semibold">
+            My bar{" "}
+            <span className="font-mono text-sm font-normal text-muted tabular-nums" aria-label={`${shelfTotal} bottles`}>
+              · {shelfTotal}
+            </span>
+          </h1>
+          {/* Bar → Add (STORYBOARD §3.2): shelving many bottles is the batch
+              scanner's job; ＋ is for the one in your hand. */}
+          <Link href="/scan" className="btn-secondary flex min-h-11 items-center gap-1 px-3 text-sm font-medium">
+            <span aria-hidden>＋</span> Add
+          </Link>
         </header>
 
         {/* ALL filtering starts here, on one slim line, because everything
@@ -566,37 +573,15 @@ export function BarClient({
       {collection === "own" && (
         /* The only money surface on this page: spend and est. value stay inside
            the owner's own-collection view and never join a social projection. */
-        <section aria-label="Bar stats" className="card-flat flex divide-x divide-border-subtle">
-          <Stat value={String(stats.bottleCount)} label="bottles" />
-          <Stat value={String(stats.openCount)} label="open" />
-          <Stat value={money(stats.totalSpent)} label="spent" />
-          <Stat value={money(stats.estValue)} label="est. value" />
+        <section aria-label="Bar stats" className="stat-inline flex flex-wrap items-baseline gap-x-2 px-1">
+          <span><b>{stats.bottleCount}</b> bottles</span>
+          <span aria-hidden>·</span>
+          <span><b>{stats.openCount}</b> open</span>
+          <span aria-hidden>·</span>
+          <span><b>{money(stats.totalSpent)}</b> spent</span>
+          <span aria-hidden>·</span>
+          <span><b>{money(stats.estValue)}</b> est. value</span>
         </section>
-      )}
-
-      {/* Below the filter line so it inherits the narrowed rows; taps on the
-          wheel still land as removable tokens on that line. */}
-      {flavorFilterable && (
-        <FlavorMapSection
-          heat={activeFlavorHeat}
-          lens={effectiveLens}
-          weightByRating={weightByRating}
-          onWeightChange={setWeightByRating}
-          hasPublishedNotes={hasPublishedNotes}
-          canCompare={canCompare}
-          calibration={activeCalibration}
-          marks={marks}
-          rows={activeRows}
-          scope={flavorScope}
-          onLensChange={changeLens}
-          selectedFlavorIds={selectedFlavorIds}
-          onToggleFlavor={toggleFlavor}
-          onClearFlavors={() => setSelectedFlavorIds([])}
-          shownCount={filteredRows.length}
-          totalCount={activeRows.length}
-          rowNoun={collection === "tried" ? "tastings" : "bottles"}
-          topWedgeIds={palate.topWedgeIds}
-        />
       )}
 
       {filteredRows.length === 0 ? (
@@ -613,7 +598,7 @@ export function BarClient({
           <EmptyState collection={collection} />
         )
       ) : (
-        <ul className="flex flex-col gap-[9px]">
+        <ul className="ledger flex flex-col" aria-label="Bottles">
           {filteredRows.map((row) => {
             const own = row.relationship === "own";
             const meta = [
@@ -645,6 +630,18 @@ export function BarClient({
                     country: row.bottle.country,
                   }}
                   flavorTags={row.personalFlavorTags}
+                  action={
+                    row.relationship === "wishlist" ? null : (
+                      <Link
+                        href={`/pour?bottleId=${encodeURIComponent(row.bottleId)}`}
+                        aria-label={`Pour ${row.bottle.name}`}
+                        data-testid="bar-row-pour"
+                        className="btn-secondary flex min-h-11 items-center px-3 text-sm font-medium"
+                      >
+                        Pour
+                      </Link>
+                    )
+                  }
                   pours={
                     row.pourStats && row.pourStats.pourCount > 0
                       ? {
@@ -659,6 +656,32 @@ export function BarClient({
             );
           })}
         </ul>
+      )}
+
+      {/* Below the list (STORYBOARD D21: the first bottle is visible without
+          scrolling). It still inherits the filter line's narrowed rows, and
+          taps on the wheel still land as removable tokens on that line. */}
+      {flavorFilterable && (
+        <FlavorMapSection
+          heat={activeFlavorHeat}
+          lens={effectiveLens}
+          weightByRating={weightByRating}
+          onWeightChange={setWeightByRating}
+          hasPublishedNotes={hasPublishedNotes}
+          canCompare={canCompare}
+          calibration={activeCalibration}
+          marks={marks}
+          rows={activeRows}
+          scope={flavorScope}
+          onLensChange={changeLens}
+          selectedFlavorIds={selectedFlavorIds}
+          onToggleFlavor={toggleFlavor}
+          onClearFlavors={() => setSelectedFlavorIds([])}
+          shownCount={filteredRows.length}
+          totalCount={activeRows.length}
+          rowNoun={collection === "tried" ? "tastings" : "bottles"}
+          topWedgeIds={palate.topWedgeIds}
+        />
       )}
     </div>
   );
@@ -1017,15 +1040,6 @@ function bottleCount(n: number): string {
   return `${n} bottle${n === 1 ? "" : "s"}`;
 }
 
-/** One figure in the slim stats strip: a display numeral over an 11px label. */
-function Stat({ value, label }: { value: string; label: string }) {
-  return (
-    <div className="min-w-0 flex-1 px-2 py-3 text-center">
-      <div className="stat-number truncate text-lg leading-none">{value}</div>
-      <div className="mt-1 text-[11px] text-muted">{label}</div>
-    </div>
-  );
-}
 
 /**
  * One 40px row: the two collections that matter as a segment, and a single
