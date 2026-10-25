@@ -5,6 +5,7 @@ import { getSessionUser } from "@/lib/session";
 import { getClubView } from "@/lib/clubs";
 import { UserAvatar } from "@/components/user-avatar";
 import { ClubInvite, MemberRemove } from "@/components/social/club-actions";
+import { ClubChallengeForm } from "@/components/social/challenge-client";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +36,9 @@ export default async function ClubPage({ params }: { params: Promise<{ id: strin
       {admin && (
         <section className="card-flat p-3">
           <ClubInvite clubId={club.id} clubName={club.name} />
+          <div className="mt-3 border-t border-border-subtle pt-3">
+            <ClubChallengeForm clubId={club.id} />
+          </div>
         </section>
       )}
 

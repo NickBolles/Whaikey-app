@@ -413,3 +413,22 @@ test.describe("tasting night: guest link → rate → reveal", () => {
     await guestCtx.close();
   });
 });
+
+test.describe("challenges: breadth only", () => {
+  test.beforeEach(async ({ context, baseURL }) => {
+    await signIn(context, baseURL!, DEMO_SESSION_TOKEN);
+  });
+
+  test("/challenges lists this month's three curated challenges and joining one shows progress", async ({ page }) => {
+    await page.goto("/challenges");
+    await expect(page.getByRole("heading", { name: "This month" })).toBeVisible();
+    const cards = page.locator("li.card");
+    await expect(cards).toHaveCount(3);
+    const first = cards.first();
+    await first.getByRole("button", { name: "Join" }).click();
+    await expect(first.getByRole("button", { name: "Leave" })).toBeVisible({ timeout: 15000 });
+    await expect(first.getByText(/\d+ of \d+/)).toBeVisible();
+    // The friend board is opt-in and says what it counts.
+    await expect(page.getByText(/Never how much/)).toBeVisible();
+  });
+});

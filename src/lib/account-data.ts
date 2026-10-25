@@ -10,6 +10,9 @@ import {
   analyticsEvents,
   blocks,
   bottleSubmissions,
+  breadthBoardOptIns,
+  challengeParticipants,
+  challenges,
   bottles,
   chatMessages,
   chatSessions,
@@ -1166,6 +1169,63 @@ export const ACCOUNT_DATA: readonly DataSlice[] = [
     where: (db, userId) =>
       and(inArray(flightEntries.flightId, ownFlightIds(db, userId)), notInArraySeats(db, userId)),
     notExported: "Other people's words, not yours.",
+  },
+
+  // --- Social M2: challenges and the friend board (Track C, §7.12–7.13) ----
+  {
+    key: "club_challenges_started",
+    table: challenges,
+    description: "Club challenges you started: the name, the rule and its dates.",
+    onDelete: "unlinked",
+    why: "A club challenge belongs to the club; it stays for the members taking part and stops naming you.",
+    where: (_db, userId) => eq(challenges.createdBy, userId),
+    export: {
+      columns: ["slug", "title", "rule", "startsAt", "endsAt", "createdAt"],
+      rows: (db, userId) =>
+        db
+          .select({
+            slug: challenges.slug,
+            title: challenges.title,
+            rule: challenges.rule,
+            startsAt: challenges.startsAt,
+            endsAt: challenges.endsAt,
+            createdAt: challenges.createdAt,
+          })
+          .from(challenges)
+          .where(eq(challenges.createdBy, userId))
+          .orderBy(challenges.createdAt),
+    },
+  },
+  {
+    key: "challenges_joined",
+    table: challengeParticipants,
+    description: "Challenges you joined, and when you earned each crest.",
+    onDelete: "deleted",
+    why: "Your participation and crests.",
+    where: (_db, userId) => eq(challengeParticipants.userId, userId),
+    export: {
+      columns: ["challenge", "joinedAt", "completedAt"],
+      rows: (db, userId) =>
+        db
+          .select({ challenge: challenges.slug, joinedAt: challengeParticipants.joinedAt, completedAt: challengeParticipants.completedAt })
+          .from(challengeParticipants)
+          .innerJoin(challenges, eq(challenges.id, challengeParticipants.challengeId))
+          .where(eq(challengeParticipants.userId, userId))
+          .orderBy(challengeParticipants.joinedAt),
+    },
+  },
+  {
+    key: "friend_board_opt_in",
+    table: breadthBoardOptIns,
+    description: "Whether you opted in to the friends-only breadth board, and when.",
+    onDelete: "deleted",
+    why: "Your setting.",
+    where: (_db, userId) => eq(breadthBoardOptIns.userId, userId),
+    export: {
+      columns: ["optedInAt"],
+      rows: (db, userId) =>
+        db.select({ optedInAt: breadthBoardOptIns.optedInAt }).from(breadthBoardOptIns).where(eq(breadthBoardOptIns.userId, userId)),
+    },
   },
 ];
 

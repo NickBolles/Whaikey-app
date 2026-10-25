@@ -11,6 +11,7 @@ import { sweepTelemetry } from "@/lib/observability/metrics";
 import { drainPendingPushes, friendTastedDigest, sweepNotifications } from "@/lib/notify";
 import { sweepClubs } from "@/lib/clubs";
 import { sweepGuests } from "@/lib/flights";
+import { ensureCurated, evaluateAll } from "@/lib/challenges";
 
 export const dynamic = "force-dynamic";
 
@@ -108,6 +109,12 @@ export async function GET(request: Request): Promise<NextResponse> {
       ["flight-guests", () => sweepGuests(db, now)],
       // Clubs whose owner left or deleted their account get a new one; empty clubs go.
       ["clubs", () => sweepClubs(db)],
+      // This month's curated challenges exist, and crests are stamped for
+      // anyone who completed one without opening the page (D16).
+      ["challenges", async () => {
+        await ensureCurated(db, now);
+        await evaluateAll(db, now);
+      }],
     ];
 
     const { outcomes, failed } = await runIndependently(tasks);

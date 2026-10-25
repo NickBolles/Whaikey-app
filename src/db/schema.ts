@@ -2173,3 +2173,64 @@ export const flightEntries = pgTable(
   },
   (t) => [uniqueIndex("flight_entries_participant_slot_uq").on(t.participantId, t.slot), index("flight_entries_flight_idx").on(t.flightId)],
 );
+
+// ── Track C: breadth challenges and friend boards (§7.12–7.13, D16–D17) ──────
+
+/**
+ * A breadth challenge (D16). `rule` is one of the closed list of distinct-count
+ * kinds in `src/lib/challenges` — a unit test asserts every kind counts
+ * distinct things and saturates at its target, so none can be won by drinking
+ * more. Curated monthly rows have `createdBy` null; club challenges carry the
+ * club and the admin who made them.
+ */
+export interface ChallengeRule {
+  kind: string;
+  target: number;
+  /** Optional narrowing, e.g. { country: "Scotland" } or { region: "Islay" }. */
+  filter?: Record<string, string>;
+}
+
+export const challenges = pgTable(
+  "challenges",
+  {
+    id: id(),
+    slug: text("slug").notNull().unique(),
+    title: text("title").notNull(),
+    description: text("description"),
+    scope: text("scope").$type<"global" | "club">().notNull(),
+    clubId: text("club_id").references(() => clubs.id, { onDelete: "cascade" }),
+    rule: jsonb("rule").$type<ChallengeRule>().notNull(),
+    startsAt: timestamp("starts_at", { withTimezone: true, mode: "date" }).notNull(),
+    endsAt: timestamp("ends_at", { withTimezone: true, mode: "date" }).notNull(),
+    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("challenges_club_idx").on(t.clubId), index("challenges_window_idx").on(t.startsAt, t.endsAt)],
+);
+export type Challenge = typeof challenges.$inferSelect;
+
+export const challengeParticipants = pgTable(
+  "challenge_participants",
+  {
+    challengeId: text("challenge_id")
+      .notNull()
+      .references(() => challenges.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    joinedAt: timestamp("joined_at", { withTimezone: true, mode: "date" })
+      .$defaultFn(() => new Date())
+      .notNull(),
+    /** The crest: set once, when progress first reaches the target. */
+    completedAt: timestamp("completed_at", { withTimezone: true, mode: "date" }),
+  },
+  (t) => [primaryKey({ columns: [t.challengeId, t.userId] }), index("challenge_participants_user_idx").on(t.userId)],
+);
+
+/** Opt-in to the friends-only breadth board (D17). No row = not on any board. */
+export const breadthBoardOptIns = pgTable("breadth_board_opt_ins", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => user.id, { onDelete: "cascade" }),
+  optedInAt: createdAt(),
+});

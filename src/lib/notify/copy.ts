@@ -128,7 +128,7 @@ export function renderNotification(input: CopyInput): RenderedCopy {
     }
     case "challenge": {
       const title = str(d.challengeTitle, "a challenge");
-      const link = `/challenges/${str(d.slug, input.subjectId ?? "")}`;
+      const link = `/challenges#${str(d.slug, input.subjectId ?? "")}`;
       if (d.event === "completed") return { text: `You completed ${title} — new crest on your passport`, deepLink: link };
       if (d.event === "invite") return { text: `${who} invited you to ${title}`, deepLink: link };
       return { text: `${title} has an update`, deepLink: link };

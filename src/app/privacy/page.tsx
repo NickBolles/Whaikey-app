@@ -158,6 +158,12 @@ export default function PrivacyPage() {
             and keep only the name and their ratings, for 24 hours, unless they create an account.
           </li>
           <li>
+            <strong className="text-foreground">Challenges and the friend board</strong> — which
+            challenges you joined and when you earned each crest, club challenges you started, and
+            whether you opted in to the friends-only board. Progress is not stored; it is counted
+            from your notes when shown.
+          </li>
+          <li>
             <strong className="text-foreground">Anything you send us through support</strong> — the
             message itself, the contact address you offer with it, and which platform and app
             version you were on. It is kept so a person can act on it, which means anything you put
@@ -285,7 +291,7 @@ export default function PrivacyPage() {
           yours — account, sign-in methods and sessions, age answer, shelf, pours and tasting
           notes, share links, passport, concierge conversations, bottles you proposed, profile,
           who you follow and who follows you, who you blocked, cheers and comments you gave,
-          your notification inbox and settings, your clubs and tasting nights,
+          your notification inbox and settings, your clubs and tasting nights, your challenges and crests,
           reports you filed, support messages, and the AI and share-link records about you — as
           one JSON file or a zip of spreadsheets. What it leaves out, it names inside the file,
           with the reason. Three kinds of thing are always left out: credentials (session tokens,
@@ -331,7 +337,8 @@ export default function PrivacyPage() {
             reports you filed about other people&rsquo;s content, so a complaint still gets judged
             after you leave; a bottle you added that is now in the shared catalog, because other
             people&rsquo;s shelves point at it; a club you started, which stays with its other
-            members and no longer names you as founder; and, if you were ever a moderator, the
+            members and no longer names you as founder, and a club challenge you started, which stays
+            for the members taking part; and, if you were ever a moderator, the
             decisions you made.
           </li>
           <li>
