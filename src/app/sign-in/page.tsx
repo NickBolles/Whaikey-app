@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { signIn } from "@/lib/auth-client";
 import { startNativeSignIn } from "@/lib/native/auth";
+import { signInWithAppleNative } from "@/lib/native/apple-sign-in";
 import { safeReturnPath } from "@/lib/return-path";
 
 type Provider = "google" | "apple";
@@ -55,6 +56,28 @@ function SignInForm() {
     setPending(provider);
     setError(null);
     setRetried(true);
+
+    // On iOS, Apple gets the native sheet (ASAuthorization, guideline 4.8):
+    // no browser, and the id token is redeemed from inside the WebView. Any
+    // reason it can't run here — older shell, server without Apple's bundle
+    // id — reads "unavailable" and falls through to the browser flow below.
+    if (provider === "apple") {
+      const apple = await signInWithAppleNative();
+      if (apple.status === "signed-in") {
+        // A hard navigation: every render so far was made signed out.
+        window.location.href = nextPath;
+        return;
+      }
+      if (apple.status === "cancelled") {
+        setPending(null);
+        return;
+      }
+      if (apple.status === "failed") {
+        setError(apple.reason);
+        setPending(null);
+        return;
+      }
+    }
 
     // Inside the native shell, OAuth cannot run in the WebView — Google rejects
     // embedded user agents outright. Hand off to the system browser; the app is

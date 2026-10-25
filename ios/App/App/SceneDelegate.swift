@@ -38,5 +38,8 @@ class AppBridgeViewController: CAPBridgeViewController {
     override func capacitorDidLoad() {
         super.capacitorDidLoad()
         webView?.allowsBackForwardNavigationGestures = true
+        // App-target plugins are not discovered by `cap sync`; register them here.
+        // Native Sign in with Apple (src/lib/native/apple-sign-in.ts).
+        bridge?.registerPluginInstance(WhaikeyAppleSignInPlugin())
     }
 }

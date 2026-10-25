@@ -249,7 +249,12 @@ export default function PrivacyPage() {
         <p>
           <strong className="text-foreground">Deleting the account</strong> asks you to type a word
           to confirm, then happens at once, in one step that either completes or changes nothing.
-          It cannot be undone and there is no grace period. Every device is signed out.
+          It cannot be undone and there is no grace period. Every device is signed out. It can be
+          done in Settings or, without the app, at{" "}
+          <Link href="/delete-account" className="text-accent">
+            /delete-account
+          </Link>
+          .
         </p>
         <ul className="list-disc pl-5 flex flex-col gap-1.5">
           <li>
