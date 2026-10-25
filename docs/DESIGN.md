@@ -1,6 +1,8 @@
 # Whaikey Design System
 
-The feel: **a well-lit whiskey lounge, not a dashboard.** Clean and sleek, warm and a little fancy — never sterile. Think aged oak, amber glass, brass hardware, cream paper labels.
+The feel: **compact, dense, premium — a collector's ledger in a well-lit whiskey lounge.** Clean and sleek, warm and a little fancy — never sterile, and never roomy for its own sake. Think aged oak, amber glass, brass hardware, cream paper labels, and a tasting book where every line earns its place. More of the shelf, the journal and the bottle fits on one screen than in a typical consumer app; premium comes from type, colour and alignment, not from whitespace.
+
+> **Amended 2026-10 (owner direction: "compact, dense, premium").** The previous rhythm (page `px-4`, sections `gap-6`/`mt-8`, cards `p-4`/`p-5`, `rounded-2xl` everywhere, emoji-led empty states) read as a roomy lounge and pushed primary actions below the fold on Home, Bar, Pour and Bottle. Rules 1, 4 and 6 are replaced and the **Density** section below is new. **Migration:** new and touched UI uses the dense rhythm immediately; the recipes in `globals.css` (`.card`, `.card-flat`, list rows) change in the Track B density PR (B0), which regenerates every affected baseline in one go. Until that PR lands, do not hand-roll dense variants per screen — use the existing recipes with the new spacing classes. Accessibility floors (rule 8's 44px hit areas, the 12px type floor, contrast) do not move.
 
 ## Type
 
@@ -16,7 +18,8 @@ The feel: **a well-lit whiskey lounge, not a dashboard.** Clean and sleek, warm 
 
 - **Display: Fraunces** (`--font-display`, class `font-display`) — headings, big numerals, brand wordmark. Optical sizing on; use weight 600 for headings, 500 for numerals.
 - **Body: Geist Sans** — everything else.
-- Section labels: 11px, uppercase, `tracking-[0.14em]`, `text-muted`.
+- Section labels: 11px (10.5px allowed in dense headers), uppercase, `tracking-[0.14em]`, `text-muted`.
+- **Sizes (dense scale):** body 14px (`text-sm`), meta 12px (`text-xs`) — **12px is the floor** for anything a person reads; page titles Fraunces 20–22px; stat numerals Fraunces 18–24px. Numbers in tables and stats use `tabular-nums`.
 
 ## Color tokens (globals.css)
 
@@ -43,14 +46,28 @@ The feel: **a well-lit whiskey lounge, not a dashboard.** Clean and sleek, warm 
 - `.section-label` — the small-caps label style.
 - `.stat-number` — `font-display` numeral styling for stats.
 
+## Density (2026-10)
+
+| Token | Dense value | Was |
+|---|---|---|
+| Page padding | `px-3` (12px) | `px-4` |
+| Section spacing | `gap-3` / `mt-4` | `gap-6` / `mt-8` |
+| Card padding | `p-3`; `p-2.5` for list cards | `p-4` / `p-5` |
+| List row | 40px visual height, one line of identity + one muted meta line; `.tap-target` keeps the 44px hit area | ~56–64px |
+| Card radius | `rounded-xl` cards, `rounded-lg` controls/inputs, `rounded-full` chips | `rounded-2xl` / `rounded-xl` |
+| Stats | inline stat lines (`label value · label value`) before stat tiles; tiles only for the one or two numbers a screen is about | tiles |
+| Empty state | one line + one action, inline where the content would be | emoji + serif line + muted line + action |
+
+Principles: **content before chrome** (no decorative headers or hero padding above the primary action); **one screen, one job, above the fold** (STORYBOARD's rule, now achievable); **show more rows, not bigger rows** (lists default to compact density; the roomy variant is the exception and needs a reason); **progressive detail** (secondary detail behind a tap on the row, not stacked under it). Density never trades away legibility: if a dense layout needs type under 12px or hit areas under 44px, it is the wrong layout.
+
 ## Rules
 
-1. Radii: `rounded-2xl` cards, `rounded-xl` buttons/inputs, `rounded-full` chips. Nothing square.
+1. Radii: `rounded-xl` cards, `rounded-lg` buttons/inputs, `rounded-full` chips (Density table). Nothing square. *(Amended 2026-10; was `rounded-2xl` / `rounded-xl`.)*
 2. One accent moment per screen — the primary action gets the gradient; everything else stays quiet.
 3. Hairlines over shadows; shadows only on the primary button and sticky bars.
-4. Spacing rhythm: page padding `px-4`, sections `gap-6`/`mt-8`, intra-card `p-4`/`p-5`.
+4. Spacing rhythm: page padding `px-3`, sections `gap-3`/`mt-4`, intra-card `p-3` (Density table). *(Amended 2026-10; was `px-4`, `gap-6`/`mt-8`, `p-4`/`p-5`.)*
 5. Icons: lucide, `size={18}` inline / `size={20}` nav, `strokeWidth={1.8}`; amber only when the element is active/accent.
-6. Empty states: an emoji or icon, one serif line, one muted line, one clear action.
+6. Empty states: one line saying what will be here, and one clear action, in place of the content — an icon is optional, an emoji block is not used. *(Amended 2026-10; was emoji + serif line + muted line + action.)*
 7. Text never touches an edge — SVG labels included (radar/wheel need internal padding).
 8. Touch targets ≥ 44px. Where a control is deliberately compact — the Bar's filter bar, the wheel's lens — add `.tap-target` instead of raising its height: it grows the hit area to 44px and leaves the layout alone. **Check the ancestor can hold it:** an `overflow-x-auto` row clips the other axis too, so a scroller needs the vertical room or it silently trims the hit area back to the height of its chips — the class ends up applied and buying nothing. Focus states: `focus-visible:ring-2 ring-accent/60` (offset on dark).
 9. Motion: 150–200ms color/opacity transitions only. Respect reduced motion.
