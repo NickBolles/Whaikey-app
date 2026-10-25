@@ -488,6 +488,13 @@ test.describe("signed in (demo collector)", () => {
     await expect(page).toHaveScreenshot(shot("flight-revealed"), { fullPage: true, mask: [page.getByRole("img", { name: /QR code/ })] });
   });
 
+  test("challenges: three curated breadth challenges and the opt-in board", async ({ page }) => {
+    await page.goto("/challenges");
+    await expect(page.getByRole("heading", { name: "This month" })).toBeVisible();
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("challenges"), { fullPage: true });
+  });
+
   test("friends: following, followers, and a mutual", async ({ page }) => {
     await page.goto("/friends/people");
     // exact: the redesigned page adds a "Find friends" h2 alongside the h1.
