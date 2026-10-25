@@ -24,6 +24,13 @@ const bodySchema = z.object({
    * Telemetry only; lets /admin/scan show which path resolved label scans.
    */
   via: z.enum(["ocr", "ai", "search"]).optional(),
+  /**
+   * True when the client shelved the only own-DB match without asking the
+   * person. The shelf write still happens, but nobody checked the bottle: it
+   * is neither a barcode vote (no teach/strengthen) nor a confirmation in
+   * scan telemetry, so it is no evidence that our top match was right.
+   */
+  auto: z.boolean().optional(),
 });
 
 /**
@@ -87,23 +94,27 @@ export async function POST(request: Request) {
         })()
       : null;
     const teach: TeachResult | null =
-      upc && bottle.status !== "user_submitted" ? await teachBarcode(db, user, upc, input.bottleId) : null;
+      upc && !input.auto && bottle.status !== "user_submitted"
+        ? await teachBarcode(db, user, upc, input.bottleId)
+        : null;
     const mapping = teach?.mapping ?? null;
-    await recordScanEvent(db, {
-      // No barcode means the bottle was picked from a label read or a search.
-      kind: upc ? "barcode" : "label",
-      outcome: "confirmed",
-      source: upc
-        ? confirmRank != null
-          ? "own"
-          : "none"
-        : input.via === "ocr"
-          ? "ocr"
-          : input.via === "ai"
-            ? "ai"
-            : "none",
-      confirmRank,
-    });
+    if (!input.auto) {
+      await recordScanEvent(db, {
+        // No barcode means the bottle was picked from a label read or a search.
+        kind: upc ? "barcode" : "label",
+        outcome: "confirmed",
+        source: upc
+          ? confirmRank != null
+            ? "own"
+            : "none"
+          : input.via === "ocr"
+            ? "ocr"
+            : input.via === "ai"
+              ? "ai"
+              : "none",
+        confirmRank,
+      });
+    }
 
     let userBottle: schema.UserBottle | null = null;
     let created = false;

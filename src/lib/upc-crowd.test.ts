@@ -290,3 +290,19 @@ describe("communitySuggestions ordering", () => {
     expect(list[0]).toMatchObject({ id: mine.id, mine: true });
   });
 });
+
+describe("agreeing with an existing mapping", () => {
+  it("strengthens it but earns no trust", async () => {
+    const a = await createTestUser(db, { createdAt: OLD });
+    for (let i = 0; i < TRUSTED_MIN_PROMOTED + 1; i++) {
+      const b = await createTestBottle(db, { name: `Known ${i}` });
+      const code = `0802440021${String(40 + i).padStart(2, "0")}`;
+      await db.insert(schema.bottleUpcs).values({ id: uid("m"), upc: code, bottleId: b.id, source: "iowa", confirmedCount: 0 });
+      const r = await teachBarcode(db, a, code, b.id, { now: NOW });
+      expect(r.state).toBe("strengthened");
+    }
+    const rows = await db.select().from(schema.upcConfirmations).where(eq(schema.upcConfirmations.userId, a.id));
+    expect(rows.every((row) => row.status === "agreed")).toBe(true);
+    expect(await isTrustedTeacher(db, a, NOW)).toBe(false);
+  });
+});

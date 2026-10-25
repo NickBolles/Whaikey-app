@@ -76,7 +76,11 @@ async function accountOf(db: DB, userId: string) {
   return row ?? null;
 }
 
-/** Operators, and accounts ≥30 days old with ≥5 claims borne out and none rejected. */
+/**
+ * Operators, and accounts ≥30 days old with ≥5 claims borne out (`promoted`:
+ * a claim on an unmapped barcode that became the mapping — not `agreed`
+ * confirmations of an existing one) and none rejected.
+ */
 export async function isTrustedTeacher(db: DB, actor: Actor, now = new Date()): Promise<boolean> {
   // A fresh object: `isOperator` is a type guard and would narrow `actor` itself to never.
   if (isOperator({ id: actor.id })) return true;
@@ -208,12 +212,16 @@ export async function teachBarcode(
     if (previous?.bottleId === bottleId) {
       return { state: "strengthened", confirmations: existing.confirmedCount, required, mapping: existing, taught: false };
     }
+    // `agreed`, not `promoted`: agreeing with a mapping that already exists
+    // is no evidence of judgement, so it must not count toward
+    // `isTrustedTeacher` (otherwise re-scanning five known bottles would buy
+    // the right to publish unvoted claims).
     await db
       .insert(upcConfirmations)
-      .values({ id: crypto.randomUUID(), upc, bottleId, userId: actor.id, status: "promoted", createdAt: now, updatedAt: now })
+      .values({ id: crypto.randomUUID(), upc, bottleId, userId: actor.id, status: "agreed", createdAt: now, updatedAt: now })
       .onConflictDoUpdate({
         target: [upcConfirmations.upc, upcConfirmations.userId],
-        set: { bottleId, status: "promoted", updatedAt: now },
+        set: { bottleId, status: "agreed", updatedAt: now },
       });
     const [mapping] = await db
       .update(bottleUpcs)

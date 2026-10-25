@@ -10,6 +10,15 @@
  *   pnpm ingest enrich [--limit N] [--batch-size N] [--no-web] [--dry-run]
  *   pnpm ingest prune            # delete imported bottles untouched by users
  *
+ * Catalog sources (iowa, cola, oregon, …) also accept:
+ *   --summary FILE   write a SourceRunSummary JSON (src/lib/ingest/sync-summary.ts)
+ *                    that the weekly workflow rolls up into its report
+ *   --allow-empty    a 0-candidate result is OK (short COLA windows); without
+ *                    it, 0 candidates exits 1 — that is how the Oregon header
+ *                    rename stayed invisible for seven weeks
+ * A source that is unavailable (HTML/parking page instead of data —
+ * SourceUnavailableError) exits 0 with status "degraded" and a warning.
+ *
  * Sources:
  *   iowa   — Iowa Liquor Products open dataset (CC-BY 4.0): names, categories,
  *            ABV, 750ml state retail price, UPCs. Full-catalog sync, ~4k
@@ -65,6 +74,8 @@ import {
   type CatalogSourceManifest,
 } from "../src/lib/ingest";
 import { AiNotConfiguredError } from "../src/lib/ai/client";
+import { SourceUnavailableError, type IngestReport } from "../src/lib/ingest/types";
+import { summaryFromReport, type SourceRunSummary } from "../src/lib/ingest/sync-summary";
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
@@ -124,7 +135,18 @@ async function main(): Promise<void> {
           `${report.fromNotes} from user notes, ${report.fromAi} from the model, ` +
           `${report.rejected} rejected across ${report.batches} batches.`,
       );
+      // Enrichment has no "empty" failure mode: a catalog where every bottle
+      // already has a profile is the goal, so 0 work is ok.
+      await writeSummary({
+        source: "enrich",
+        status: "ok",
+        scanned: report.candidates,
+        candidates: report.fromNotes + report.fromAi,
+        dryRun: report.dryRun,
+        message: `${report.fromNotes} profiles from user notes, ${report.fromAi} from the model, ${report.rejected} rejected${limit != null ? ` (limit ${limit})` : ""}`,
+      });
     } catch (err) {
+      await writeSummary({ source: "enrich", status: "failed", message: err instanceof Error ? err.message : String(err) });
       if (err instanceof AiNotConfiguredError) {
         console.error(
           "No AI key is set. Set OPENROUTER_API_KEY (preferred) or ANTHROPIC_API_KEY (see .env.example) and re-run: pnpm ingest enrich",
@@ -142,45 +164,71 @@ async function main(): Promise<void> {
     return;
   }
 
-  const before = await countBottles(db);
+  const fetchers: Record<string, { label: string; run: () => Promise<{ scanned: number; candidates: CatalogCandidates }> }> = {
+    iowa: { label: "Iowa Liquor Products dataset", run: () => fetchIowaCandidates() },
+    oregon: { label: "Oregon OLCC monthly pricing", run: () => fetchOregonCandidates() },
+    utah: { label: "Utah DABS product list", run: () => fetchUtahCandidates() },
+    bc: { label: "BC Liquor price list", run: () => fetchBcCandidates() },
+    systembolaget: { label: "Systembolaget assortment mirror", run: () => fetchSystembolagetCandidates() },
+    whiskyedition: { label: "WHISKY:EDITION review catalog", run: () => fetchWhiskyEditionCandidates() },
+    vinmonopolet: {
+      label: "Vinmonopolet products API (needs VINMONOPOLET_API_KEY)",
+      run: () => fetchVinmonopoletCandidates(),
+    },
+    cola: {
+      label: "TTB COLA whiskey approvals",
+      run: async () => {
+        const since = hasFlag("full") ? COLA_FULL_HISTORY_START : arg("since");
+        const until = arg("until") ?? new Date().toISOString().slice(0, 10);
+        if (!since) {
+          console.error("cola requires --since YYYY-MM-DD or --full (backfill from 1999-01-01)");
+          process.exit(1);
+        }
+        console.log(`  range ${since}..${until}${hasFlag("full") ? " (full history)" : ""}`);
+        return colaRecordsToCandidates(await fetchColaRecords({ since, until }));
+      },
+    },
+  };
 
-  if (source === "iowa") {
-    console.log("Downloading Iowa Liquor Products dataset…");
-    const { scanned, candidates } = await fetchIowaCandidates();
-    const report = await ingestCandidates(db, "iowa", candidates, { dryRun, scanned });
-    printReport(report, before, await countBottles(db));
-    return;
-  }
-
-  const simpleSources = {
-    oregon: { label: "Oregon OLCC monthly pricing", fetch: fetchOregonCandidates },
-    utah: { label: "Utah DABS product list", fetch: fetchUtahCandidates },
-    bc: { label: "BC Liquor price list", fetch: fetchBcCandidates },
-    systembolaget: { label: "Systembolaget assortment mirror", fetch: fetchSystembolagetCandidates },
-    whiskyedition: { label: "WHISKY:EDITION review catalog", fetch: fetchWhiskyEditionCandidates },
-    vinmonopolet: { label: "Vinmonopolet products API (needs VINMONOPOLET_API_KEY)", fetch: fetchVinmonopoletCandidates },
-  } as const;
-  if (source && source in simpleSources) {
-    const entry = simpleSources[source as keyof typeof simpleSources];
+  if (source && source in fetchers) {
+    const entry = fetchers[source];
+    const before = await countBottles(db);
+    const started = Date.now();
     console.log(`Downloading ${entry.label}…`);
-    const { scanned, candidates } = await entry.fetch();
-    const report = await ingestCandidates(db, source, candidates, { dryRun, scanned });
-    printReport(report, before, await countBottles(db));
-    return;
-  }
-
-  if (source === "cola") {
-    const since = hasFlag("full") ? COLA_FULL_HISTORY_START : arg("since");
-    const until = arg("until") ?? new Date().toISOString().slice(0, 10);
-    if (!since) {
-      console.error("cola requires --since YYYY-MM-DD or --full (backfill from 1999-01-01)");
-      process.exit(1);
+    let summary: SourceRunSummary;
+    try {
+      const { scanned, candidates } = await entry.run();
+      const report = await ingestCandidates(db, source, candidates, { dryRun, scanned });
+      const after = await countBottles(db);
+      printReport(report, before, after);
+      summary = summaryFromReport(report, {
+        catalogBefore: before,
+        catalogAfter: after,
+        durationMs: Date.now() - started,
+        allowEmpty: hasFlag("allow-empty"),
+      });
+      if (summary.status === "empty") {
+        annotate("error", `[${source}] ${summary.message}`);
+        process.exitCode = 1;
+      }
+    } catch (err) {
+      const unavailable = err instanceof SourceUnavailableError;
+      summary = {
+        source,
+        status: unavailable ? "degraded" : "failed",
+        catalogBefore: before,
+        catalogAfter: before,
+        durationMs: Date.now() - started,
+        message: describeError(err),
+        dryRun,
+      };
+      await writeSummary(summary);
+      if (!unavailable) throw err;
+      // Not ours to fix: report it, keep the run going, exit 0.
+      annotate("warning", `[${source}] source unavailable — ${summary.message}`);
+      return;
     }
-    console.log(`Fetching TTB COLA whiskey approvals ${since}..${until}${hasFlag("full") ? " (full history)" : ""}…`);
-    const records = await fetchColaRecords({ since, until });
-    const { scanned, candidates } = colaRecordsToCandidates(records);
-    const report = await ingestCandidates(db, "cola", candidates, { dryRun, scanned });
-    printReport(report, before, await countBottles(db));
+    await writeSummary(summary);
     return;
   }
 
@@ -190,8 +238,35 @@ async function main(): Promise<void> {
   process.exit(1);
 }
 
+type CatalogCandidates = Parameters<typeof ingestCandidates>[2];
+
+/** One line for the summary: undici's "fetch failed" hides the useful part in `cause`. */
+function describeError(err: unknown): string {
+  if (!(err instanceof Error)) return String(err);
+  const cause = err.cause as { code?: string; message?: string } | undefined;
+  const detail = cause?.code ?? cause?.message;
+  return detail && !err.message.includes(detail) ? `${err.message} (${detail})` : err.message;
+}
+
+/** A GitHub Actions annotation when running there; a plain log line otherwise. */
+function annotate(level: "warning" | "error", message: string): void {
+  if (process.env.GITHUB_ACTIONS) console.log(`::${level}::${message}`);
+  else console[level === "error" ? "error" : "warn"](message);
+}
+
+/** The summary last written, so a later finalization failure can override it. */
+let writtenSummary: SourceRunSummary | null = null;
+
+/** Persist the run summary when --summary FILE was given. */
+async function writeSummary(summary: SourceRunSummary): Promise<void> {
+  const path = arg("summary");
+  if (!path) return;
+  writtenSummary = summary;
+  await writeFile(path, `${JSON.stringify(summary, null, 2)}\n`, "utf8");
+}
+
 function printReport(
-  report: Awaited<ReturnType<typeof ingestCandidates>>,
+  report: IngestReport,
   before: number,
   after: number,
 ): void {
@@ -212,7 +287,17 @@ main()
     if (ingestDb && !hasFlag("dry-run")) await refreshCatalogTotals(ingestDb);
   })
   .then(() => process.exit(process.exitCode ?? 0))
-  .catch((err) => {
+  .catch(async (err) => {
     console.error(err);
+    // A failure after the source summary was written (e.g. the catalog-totals
+    // refresh losing its connection) must not leave an "ok" summary behind:
+    // the workflow trusts summaries, not step outcomes.
+    if (writtenSummary && writtenSummary.status !== "failed") {
+      await writeSummary({
+        ...writtenSummary,
+        status: "failed",
+        message: `finalization failed after import: ${describeError(err)}`,
+      }).catch(() => {});
+    }
     process.exit(1);
   });

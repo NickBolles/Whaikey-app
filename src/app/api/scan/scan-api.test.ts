@@ -330,6 +330,15 @@ describe("scan telemetry (M0.5)", () => {
     ]);
   });
 
+  it("does not count an automatic single-match add as a confirmation", async () => {
+    setSessionUser(user);
+    const bottle = await createTestBottle(db, { name: "Eagle Rare 10 Year" });
+    await confirmUpcMapping(db, UPC, bottle.id);
+    const res = await confirmPost(jsonRequest("/api/scan/confirm", "POST", { upc: UPC, bottleId: bottle.id, auto: true }));
+    expect(res.status).toBeLessThan(300);
+    expect((await events()).filter((e) => e.outcome === "confirmed")).toHaveLength(0);
+  });
+
   it("records a barcode-less confirmation as a label/search pick", async () => {
     setSessionUser(user);
     const bottle = await createTestBottle(db, { name: "Eagle Rare 10 Year" });

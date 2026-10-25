@@ -8,8 +8,21 @@
 #             run partial instead of blocking the rest
 #   - cola:   TTB label approvals for the last 8 days (registry maintenance
 #             can interrupt this source, and the run reports any interruption)
-#   - optional API enrichment: manual opt-in only. Subscription-backed catalog
-#             review lives in subscription-catalog-verification.yml.
+#   - enrich: flavor profiles for bottles without one. Runs weekly on the
+#             schedule, offline (--no-web) and capped by the repo variable
+#             CATALOG_ENRICH_LIMIT (default 100 bottles ≈ 4 model batches;
+#             set it to 0 to turn scheduled enrichment off). Manual runs keep
+#             the skip_enrich switch. Subscription-backed catalog review lives
+#             in subscription-catalog-verification.yml.
+#
+# Health and alerting: every source writes a summary (status, rows, candidates,
+# new bottles/barcodes); scripts/catalog-sync-report.ts rolls them up with
+# deltas against the previous run into the step summary and the
+# `catalog-sync-summary` artifact. A source returning 0 candidates fails the
+# run (that is how Oregon's header rename hid for seven weeks); a source that
+# is offline (HTML/parking page instead of data) is "degraded": the run stays
+# green with a warning. Either way a scheduled run opens — or comments on — a
+# `catalog-sync` issue, and closes it when a run comes back healthy.
 #
 # Requires repo secrets: DATABASE_URL (Postgres/Supabase pooler URL) and, for
 # the enrich step, OPENROUTER_API_KEY (preferred) or ANTHROPIC_API_KEY. Without DATABASE_URL the run stops early
@@ -36,6 +49,12 @@ on:
     # TTB's Sunday maintenance window.
     - cron: "0 9 * * 1"
 
+permissions:
+  contents: read
+  # Alert issue (open / comment / close) and the previous run's summary artifact.
+  issues: write
+  actions: read
+
 concurrency:
   group: catalog-sync
   cancel-in-progress: false
@@ -43,6 +62,9 @@ concurrency:
 jobs:
   sync:
     runs-on: ubuntu-latest
+    env:
+      SUMMARY_DIR: ${{ github.workspace }}/.catalog-sync/sources
+      REPORT_DIR: ${{ github.workspace }}/.catalog-sync/report
     steps:
       - name: Check configuration
         env:
@@ -60,46 +82,52 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: mkdir -p "$SUMMARY_DIR" "$REPORT_DIR"
 
-      - name: Sync Iowa Liquor Products
+      - id: iowa
+        name: Sync Iowa Liquor Products
+        continue-on-error: true
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: pnpm ingest iowa
+        run: pnpm ingest iowa --summary "$SUMMARY_DIR/iowa.json"
 
       - id: oregon
         name: Sync Oregon OLCC pricing
         continue-on-error: true
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: pnpm ingest oregon
+        run: pnpm ingest oregon --summary "$SUMMARY_DIR/oregon.json"
 
       - id: utah
         name: Sync Utah DABS product list
         continue-on-error: true
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: pnpm ingest utah
+        run: pnpm ingest utah --summary "$SUMMARY_DIR/utah.json"
 
       - id: bc
         name: Sync BC Liquor price list
         continue-on-error: true
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: pnpm ingest bc
+        run: pnpm ingest bc --summary "$SUMMARY_DIR/bc.json"
 
       - id: systembolaget
         name: Sync Systembolaget assortment mirror
         continue-on-error: true
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: pnpm ingest systembolaget
+        run: pnpm ingest systembolaget --summary "$SUMMARY_DIR/systembolaget.json"
 
       - id: whiskyedition
         name: Sync WHISKY:EDITION review catalog
+        # thewhiskyedition.com has served a STRATO "Domain not available"
+        # page since Sept 2026; the adapter reports that as `degraded` (exit 0)
+        # rather than failing the run, and the alert issue tracks it.
         continue-on-error: true
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: pnpm ingest whiskyedition
+        run: pnpm ingest whiskyedition --summary "$SUMMARY_DIR/whiskyedition.json"
 
       - id: vinmonopolet
         name: Sync Vinmonopolet products
@@ -110,19 +138,20 @@ jobs:
         run: |
           if [ -z "$VINMONOPOLET_API_KEY" ]; then
             echo "VINMONOPOLET_API_KEY secret is not set — skipping the Vinmonopolet source."
+            echo '{"source":"vinmonopolet","status":"skipped","message":"VINMONOPOLET_API_KEY secret is not set"}' > "$SUMMARY_DIR/vinmonopolet.json"
             exit 0
           fi
-          pnpm ingest vinmonopolet
+          pnpm ingest vinmonopolet --summary "$SUMMARY_DIR/vinmonopolet.json"
 
       - id: cola
         name: Sync TTB COLA approvals (last 8 days)
         if: ${{ inputs.cola_scope != 'full-history' }}
-        # Preserve the failure outcome so the final step can report a partial sync.
         continue-on-error: true
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           NODE_EXTRA_CA_CERTS: ${{ github.workspace }}/.github/certificates/entrust-ov-tls-issuing-rsa-ca-2.pem
-        run: pnpm ingest cola --since "$(date -u -d '8 days ago' +%F)"
+        # An 8-day window can legitimately hold no new whiskey labels.
+        run: pnpm ingest cola --since "$(date -u -d '8 days ago' +%F)" --allow-empty --summary "$SUMMARY_DIR/cola.json"
 
       - id: cola-full-history
         name: Backfill full TTB whiskey COLA history
@@ -133,31 +162,101 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           NODE_EXTRA_CA_CERTS: ${{ github.workspace }}/.github/certificates/entrust-ov-tls-issuing-rsa-ca-2.pem
-        run: pnpm ingest cola --full
+        run: pnpm ingest cola --full --summary "$SUMMARY_DIR/cola.json"
 
       - id: enrich
-        name: Enrich flavor profiles
-        # A full backfill can add a large number of bottles. Seed first, then
-        # explicitly dispatch a separate enrichment run when desired.
-        # Keep bulk enrichment offline by default: direct Anthropic web search
-        # can add one paid search per bottle at this catalog scale.
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.skip_enrich != true && inputs.cola_scope != 'full-history' }}
+        name: Enrich flavor profiles (capped)
+        # Weekly on the schedule, so newly imported bottles get a profile and
+        # can be recommended/compared. Offline (--no-web: no paid search
+        # calls) and capped by CATALOG_ENRICH_LIMIT bottles per run; 0 turns
+        # it off. Manual runs honour skip_enrich. Never after a full backfill.
+        if: ${{ inputs.cola_scope != 'full-history' && !(github.event_name == 'workflow_dispatch' && inputs.skip_enrich) }}
         continue-on-error: true
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ENRICH_LIMIT: ${{ vars.CATALOG_ENRICH_LIMIT || '100' }}
         run: |
-          if [ -z "$OPENROUTER_API_KEY" ] && [ -z "$ANTHROPIC_API_KEY" ]; then
-            echo "OPENROUTER_API_KEY and ANTHROPIC_API_KEY secrets are not set — skipping enrichment."
+          case "$ENRICH_LIMIT" in (*[!0-9]*|'') echo "::error::CATALOG_ENRICH_LIMIT must be a non-negative integer"; exit 1;; esac
+          if [ "$ENRICH_LIMIT" -eq 0 ]; then
+            echo '{"source":"enrich","status":"skipped","message":"CATALOG_ENRICH_LIMIT is 0"}' > "$SUMMARY_DIR/enrich.json"
             exit 0
           fi
-          pnpm ingest enrich --no-web
+          if [ -z "$OPENROUTER_API_KEY" ] && [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "OPENROUTER_API_KEY and ANTHROPIC_API_KEY secrets are not set — skipping enrichment."
+            echo '{"source":"enrich","status":"skipped","message":"no AI key secret is set"}' > "$SUMMARY_DIR/enrich.json"
+            exit 0
+          fi
+          pnpm ingest enrich --no-web --limit "$ENRICH_LIMIT" --summary "$SUMMARY_DIR/enrich.json"
 
-      - name: Report incomplete catalog sync
-        if: ${{ always() && (steps.oregon.outcome == 'failure' || steps.utah.outcome == 'failure' || steps.bc.outcome == 'failure' || steps.systembolaget.outcome == 'failure' || steps.whiskyedition.outcome == 'failure' || steps.vinmonopolet.outcome == 'failure' || steps.cola.outcome == 'failure' || steps.cola-full-history.outcome == 'failure' || steps.enrich.outcome == 'failure') }}
+      - name: Fetch the previous run's summary
+        if: ${{ always() }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          echo "## Catalog sync incomplete" >> "$GITHUB_STEP_SUMMARY"
-          echo "One or more optional source steps failed after the Iowa import. Read the failed step logs and remediate the source or credential before rerunning." >> "$GITHUB_STEP_SUMMARY"
-          echo "::error::Catalog sync completed only partially; inspect the failed source steps."
-          exit 1
+          for id in $(gh run list -R "$GITHUB_REPOSITORY" --workflow catalog-sync.yml --branch "${{ github.event.repository.default_branch }}" \
+                        --status completed --limit 10 --json databaseId --jq '.[].databaseId'); do
+            [ "$id" = "$GITHUB_RUN_ID" ] && continue
+            if gh run download "$id" -R "$GITHUB_REPOSITORY" -n catalog-sync-summary -D "$RUNNER_TEMP/previous" 2>/dev/null; then
+              echo "Comparing against run $id"
+              break
+            fi
+          done
+
+      - id: report
+        name: Catalog sync report
+        if: ${{ always() }}
+        run: |
+          expected="iowa,oregon,utah,bc,systembolaget,whiskyedition,vinmonopolet,cola"
+          if [ "${{ steps.enrich.outcome }}" != "skipped" ]; then expected="$expected,enrich"; fi
+          previous=()
+          if [ -f "$RUNNER_TEMP/previous/report/summary.json" ]; then previous=(--previous "$RUNNER_TEMP/previous/report/summary.json"); fi
+          pnpm exec tsx scripts/catalog-sync-report.ts --dir "$SUMMARY_DIR" --out "$REPORT_DIR" \
+            --expected "$expected" "${previous[@]}" \
+            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: catalog-sync-summary
+          path: .catalog-sync/
+          include-hidden-files: true
+          retention-days: 90
+          if-no-files-found: warn
+
+      - name: Alert issue
+        # Scheduled runs only: a manual run is somebody already looking.
+        if: ${{ always() && github.event_name == 'schedule' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STATUS: ${{ steps.report.outputs.status || 'failed' }}
+        run: |
+          label=catalog-sync
+          gh label create "$label" -R "$GITHUB_REPOSITORY" --color B60205 --description "Weekly catalog sync health" 2>/dev/null || true
+          open=$(gh issue list -R "$GITHUB_REPOSITORY" --label "$label" --state open --limit 1 --json number --jq '.[0].number // empty')
+          body="$REPORT_DIR/summary.md"
+          [ -f "$body" ] || { echo "The catalog sync report did not run. See ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" > "$RUNNER_TEMP/body.md"; body="$RUNNER_TEMP/body.md"; }
+          if [ "$STATUS" = "ok" ]; then
+            if [ -n "$open" ]; then
+              gh issue comment "$open" -R "$GITHUB_REPOSITORY" --body-file "$body"
+              gh issue close "$open" -R "$GITHUB_REPOSITORY" --reason completed
+            fi
+          elif [ -n "$open" ]; then
+            gh issue comment "$open" -R "$GITHUB_REPOSITORY" --body-file "$body"
+          else
+            gh issue create -R "$GITHUB_REPOSITORY" --label "$label" \
+              --title "Catalog sync $STATUS ($(date -u +%F))" --body-file "$body"
+          fi
+
+      - name: Fail on a failed or empty source
+        if: ${{ always() }}
+        env:
+          STATUS: ${{ steps.report.outputs.status || 'failed' }}
+        run: |
+          case "$STATUS" in
+            ok) echo "Catalog sync healthy." ;;
+            degraded) echo "::warning::Catalog sync degraded: a third-party source is unavailable (see the summary)." ;;
+            *) echo "::error::Catalog sync failed: a source failed or produced 0 candidates (see the summary)."; exit 1 ;;
+          esac

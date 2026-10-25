@@ -1840,10 +1840,12 @@ export type ScanEvent = typeof scanEvents.$inferSelect;
  * `status`:
  * - `pending`  counted toward promotion
  * - `promoted` the mapping it voted for is in `bottle_upcs`
+ * - `agreed`   confirmed a barcode that was already mapped; strengthens the
+ *              mapping but is no track record (it earns no trust)
  * - `rejected` an operator ruled the claim wrong; it no longer counts, and it
  *              counts against the account's trust
  */
-export const UPC_CONFIRMATION_STATUSES = ["pending", "promoted", "rejected"] as const;
+export const UPC_CONFIRMATION_STATUSES = ["pending", "promoted", "agreed", "rejected"] as const;
 export type UpcConfirmationStatus = (typeof UPC_CONFIRMATION_STATUSES)[number];
 
 export const upcConfirmations = pgTable(
