@@ -649,10 +649,19 @@ test.describe("policies, support and the queue", () => {
     // A signed-in account that is not on the allowlist — 404, not 403: a 403
     // would confirm the surface exists and that there is a list to get onto.
     await signIn(context, baseURL!, SCAN_SESSION_TOKEN);
-    for (const path of ["/admin/reports", "/admin/submissions"]) {
+    for (const path of ["/admin/reports", "/admin/submissions", "/admin/scan"]) {
       const res = await page.goto(path);
       expect(res?.status()).toBe(404);
     }
+  });
+
+  test("an operator sees the scan funnel and catalog coverage", async ({ page, context, baseURL }) => {
+    await signIn(context, baseURL!, OPERATOR_SESSION_TOKEN);
+    const res = await page.goto("/admin/scan?days=7");
+    expect(res?.status()).toBe(200);
+    await expect(page.getByRole("heading", { name: /scan & coverage/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /catalog coverage/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /scan funnel · last 7 days/i })).toBeVisible();
   });
 
   test("an operator can promote a submitted bottle, and its submitter is told", async ({

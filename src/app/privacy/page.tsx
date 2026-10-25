@@ -100,6 +100,13 @@ export default function PrivacyPage() {
             anywhere else in the app is recorded.
           </li>
           <li>
+            <strong className="text-foreground">How scanning went</strong> — whether a scan was recognised
+            (barcode or label), where the answer came from, how long it took, and whether the bottle
+            you confirmed was the one we suggested. Not attached to you: no account, device or
+            address is stored with it, nor any photo or label text. When we did not know a
+            barcode, the product&rsquo;s barcode number is kept so we can add that bottle.
+          </li>
+          <li>
             <strong className="text-foreground">Your age answer</strong> — the date of birth and
             market you gave the gate, once, and whether it met the minimum.
           </li>
@@ -185,8 +192,8 @@ export default function PrivacyPage() {
           rate-limit counters are dropped after a couple of days, and phone lookups are pruned.
         </p>
         <p>
-          The AI meter readings, the four share-link events, and cheers you have taken back are
-          kept for 90 days and then deleted. That is the window the numbers are actually read
+          The AI meter readings, the four share-link events, scan outcomes, and cheers you have
+          taken back are kept for 90 days and then deleted. That is the window the numbers are actually read
           over — a week for the health checks, a month for the sharing ones — and past it they
           answer nothing anyone is asking. It is swept, not just intended: the same job that
           prunes everything above does this too.

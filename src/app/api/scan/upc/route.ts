@@ -10,6 +10,7 @@ import {
   normalizeUpc,
   resolveUpc,
 } from "@/lib/scan";
+import { recordScanEvent } from "@/lib/observability/scan-telemetry";
 
 export const runtime = "nodejs";
 export const maxDuration = 15;
@@ -28,8 +29,9 @@ const bodySchema = z.object({
  *               only populated when matches is empty,
  *   externalName: what the external source called the product (or null),
  * }
- * Nothing here writes: mappings are only stored when the user confirms
- * (POST /api/scan/confirm) — confirm-or-correct keeps the data honest.
+ * Nothing here writes catalog data: mappings are only stored when the user
+ * confirms (POST /api/scan/confirm) — confirm-or-correct keeps the data
+ * honest. One anonymous `scan_events` row records the outcome (M0.5).
  */
 export async function POST(request: Request) {
   return withErrorHandling(async () => {
@@ -50,21 +52,41 @@ export async function POST(request: Request) {
     }
 
     const db = getDb();
+    const started = Date.now();
     const matches = await resolveUpc(db, upc);
     if (matches.length > 0) {
+      await recordScanEvent(db, {
+        kind: "barcode",
+        outcome: "matched",
+        source: "own",
+        resultCount: matches.length,
+        latencyMs: Date.now() - started,
+      });
       return NextResponse.json({ upc, matches, candidates: [], externalName: null });
     }
 
     let externalName: string | null = null;
+    let provider: "whiskyapi" | "upcitemdb" | "openfoodfacts" | null = null;
     let candidates: Awaited<ReturnType<typeof candidatesFromExternalName>> = [];
     if (isExternalLookupEnabled()) {
       const product = await lookupExternalUpc(upc);
       if (product) {
         externalName = product.name;
+        provider = product.provider;
         candidates = await candidatesFromExternalName(db, product.name, user.id);
       }
     }
 
+    await recordScanEvent(db, {
+      kind: "barcode",
+      outcome: candidates.length > 0 ? "candidates" : "miss",
+      // A provider that named the product but matched nothing is still a miss,
+      // attributed to the provider so its usefulness can be judged.
+      source: provider ?? "none",
+      upc,
+      resultCount: candidates.length,
+      latencyMs: Date.now() - started,
+    });
     return NextResponse.json({ upc, matches: [], candidates, externalName });
   });
 }
