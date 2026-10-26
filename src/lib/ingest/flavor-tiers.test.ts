@@ -194,6 +194,19 @@ describe("runFreePass", () => {
     expect(await prov(db, c.id)).toBeUndefined();
   });
 
+  it("withdraws a keyword profile built from notes once a contributor withdraws", async () => {
+    const b = await createTestBottle(db, { flavorProfile: null });
+    const text = "Honey, vanilla, toasted oak, cinnamon and dried cherry.";
+    for (let i = 0; i < 3; i++) await addNote(db, b.id, null, text);
+    await runFreePass(db);
+    expect((await prov(db, b.id))!.tier).toBe("keyword");
+    const [pour] = await db.select().from(pours).where(eq(pours.bottleId, b.id)).limit(1);
+    await db.update(pours).set({ visibility: "private" }).where(eq(pours.id, pour.id));
+    expect((await runFreePass(db)).keywordWithdrawn).toBe(1);
+    expect(await prof(db, b.id)).toBeNull();
+    expect(await prov(db, b.id)).toBeUndefined();
+  });
+
   it("dry run writes nothing", async () => {
     const b = await createTestBottle(db, { flavorProfile: null, description: "honey, vanilla, toasted oak, cinnamon" });
     const report = await runFreePass(db, { dryRun: true });
