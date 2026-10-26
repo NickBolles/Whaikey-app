@@ -379,7 +379,7 @@ test.describe("signed in (demo collector)", () => {
     await page.goto("/pour");
     await expect(page.getByRole("group", { name: "Unknown barcode" })).toBeVisible({ timeout: 15_000 });
     await settle(page);
-    await expect(page).toHaveScreenshot(shot("pour-unknown-barcode"), { fullPage: true, mask: [page.getByTestId("pour-viewfinder").locator("video")] });
+    await expect(page).toHaveScreenshot(shot("pour-unknown-barcode"), { fullPage: true });
   });
 
   test("pour flow: keep scanning beside the picked bottle", async ({ page }) => {
@@ -406,7 +406,7 @@ test.describe("signed in (demo collector)", () => {
     await expect(page.getByTestId("pour-bottle")).toBeVisible();
     await expect(page.getByRole("button", { name: /Stop camera/ })).toBeVisible();
     await settle(page);
-    await expect(page).toHaveScreenshot(shot("pour-keep-scanning"), { fullPage: true, mask: [page.getByTestId("pour-viewfinder").locator("video")] });
+    await expect(page).toHaveScreenshot(shot("pour-keep-scanning"), { fullPage: true });
   });
 
   test("history journal", async ({ page }) => {
