@@ -23,6 +23,7 @@ import { ShelfActions } from "./shelf-actions";
 import { ShelfDetails } from "./shelf-details";
 import { originLabel } from "@/lib/origin";
 import { YourPours, type YourPourItem } from "./your-pours";
+import { appNow } from "@/lib/clock";
 import { getEnrichmentView, LIVE_REASONS } from "@/lib/enrich/queue";
 import { LiveEnrichment, SourcedNotes } from "@/components/live-enrichment";
 
@@ -97,7 +98,7 @@ export default async function BottleDetailPage({
     enrichJob != null &&
     LIVE_REASONS.has(enrichJob.reason) &&
     ((enrichJob.state !== "done" && enrichJob.state !== "failed") ||
-      (enrichJob.finishedAt != null && Date.now() - Date.parse(enrichJob.finishedAt) < LIVE_PANEL_LINGER_MS));
+      (enrichJob.finishedAt != null && appNow().getTime() - Date.parse(enrichJob.finishedAt) < LIVE_PANEL_LINGER_MS));
   const sourcedNotes = !showLive ? (enrichment?.fields.notes ?? null) : null;
 
   // Personal taste-match: cosine similarity of the signed palate vs this

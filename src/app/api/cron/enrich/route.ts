@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/db";
-import { runBatch, BATCH_TIERS } from "@/lib/enrich/batch";
+import { runBatch, BATCH_TIERS, CHUNK_MS } from "@/lib/enrich/batch";
 import { kick } from "@/lib/enrich/kick";
 import { enrichLive } from "@/lib/enrich/providers";
 import { reportingErrors } from "@/lib/observability/errors";
@@ -8,8 +8,6 @@ import { reportingErrors } from "@/lib/observability/errors";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-/** Work time per invocation, leaving room to record the run and answer. */
-const CHUNK_MS = 52_000;
 /** Chunks per day the schedule may chain (each is one invocation). */
 const MAX_CHAIN = 12;
 

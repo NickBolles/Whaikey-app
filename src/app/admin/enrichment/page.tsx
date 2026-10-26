@@ -35,7 +35,7 @@ function H2({ id, children }: { id: string; children: React.ReactNode }) {
 }
 
 /**
- * Flavor enrichment (docs/DATA_SOURCES.md §2.4b) — operator only. Coverage by
+ * Flavor enrichment (docs/DATA_SOURCES.md §2.4c) — operator only. Coverage by
  * provenance tier, the live queue, recent batch runs, estimated spend per day
  * and per run, and the controls: daily cap, pause, run a batch now, retry
  * failures, re-enrich one bottle. Nothing here names a person.

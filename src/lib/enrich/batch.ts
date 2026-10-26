@@ -5,11 +5,11 @@ import { buildEnrichPrompt, type EnrichableBottle } from "@/lib/ingest/enrich";
 import { parseModelResults, runFreePass, writeTieredProfiles } from "@/lib/ingest/flavor-tiers";
 import { canSpend, getSettings, recordCall, updateSettings } from "./budget";
 import { getEnrichProvider, ProviderCallError } from "./providers";
-import { dueJobIds, requeueBottle, runJobToCompletion } from "./queue";
+import { dueJobIds, requeueBottle, runJobToCompletion, STEP_HEADROOM_MS } from "./queue";
 
 /**
  * Scheduled / operator-started enrichment in bounded chunks
- * (docs/DATA_SOURCES.md §2.4b). One chunk fits one function invocation; the
+ * (docs/DATA_SOURCES.md §2.4c). One chunk fits one function invocation; the
  * daily cron chains a few chunks, the admin page runs one per click.
  *
  * Tiers, cheapest first:
@@ -29,6 +29,9 @@ import { dueJobIds, requeueBottle, runJobToCompletion } from "./queue";
 export const BATCH_TIERS = ["queue", "keyword", "missing", "web"] as const;
 export type BatchTier = (typeof BATCH_TIERS)[number];
 export const MISSING_BATCH_SIZE = 25;
+export const MISSING_TIMEOUT_MS = 40_000;
+/** Work time for one chunk inside a 60 s function (leaves room to record the run and answer). */
+export const CHUNK_MS = 55_000;
 /** How long the web tier waits before refreshing the same bottle again. */
 export const WEB_REFRESH_AFTER_DAYS = 30;
 
@@ -62,7 +65,7 @@ export async function runBatch(
       }
       if (tier === "queue") {
         for (const id of await dueJobIds(db, 20)) {
-          if (timeLeft() < 60_000) {
+          if (timeLeft() < STEP_HEADROOM_MS) {
             stopReason = "deadline";
             break;
           }
@@ -102,7 +105,7 @@ type Stop = "done" | "deadline" | "budget" | "paused" | "disabled";
 async function missingTier(db: DB, runId: string, deadline: number, bump: (k: string, n?: number) => void): Promise<Stop> {
   let wrapped = false;
   for (;;) {
-    if (deadline - Date.now() < 45_000) return "deadline";
+    if (deadline - Date.now() < MISSING_TIMEOUT_MS + 2_000) return "deadline";
     const gate = await canSpend(db, "batch-quick");
     if (!gate.ok) return gate.reason;
     const provider = getEnrichProvider();
@@ -150,7 +153,7 @@ async function missingTier(db: DB, runId: string, deadline: number, bump: (k: st
         prompt: buildEnrichPrompt(batch, false),
         model,
         web: false,
-        timeoutMs: 40_000,
+        timeoutMs: MISSING_TIMEOUT_MS,
         maxOutputTokens: 4_000,
       });
       await recordCall(db, { runId, step: "batch-quick", provider: provider.name, model, bottles: batch.length, usage: res.usage, ok: true, latencyMs: Date.now() - started });
@@ -180,7 +183,7 @@ async function missingTier(db: DB, runId: string, deadline: number, bump: (k: st
 
 async function webTier(db: DB, runId: string, deadline: number, bump: (k: string, n?: number) => void): Promise<Stop> {
   for (;;) {
-    if (deadline - Date.now() < 60_000) return "deadline";
+    if (deadline - Date.now() < STEP_HEADROOM_MS) return "deadline";
     const gate = await canSpend(db, "batch-web");
     if (!gate.ok) return gate.reason;
     const [candidate] = rowsOf<{ id: string }>(

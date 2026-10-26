@@ -15,7 +15,6 @@ export type WedgeProfile = Record<string, number>;
 export function cleanPhrase(value: unknown, max = 200): string | null {
   if (typeof value !== "string") return null;
   const text = value
-    // eslint-disable-next-line no-control-regex
     .replace(/[\u0000-\u001f\u007f]/g, " ")
     .replace(/<[^>]*>/g, " ")
     .replace(/[*_`#>]+/g, "")

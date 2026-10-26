@@ -4,7 +4,7 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import { bottles } from "@/db/schema";
 import { readJsonWithinLimit } from "@/lib/body-limit";
-import { BATCH_TIERS, runBatch } from "@/lib/enrich/batch";
+import { BATCH_TIERS, CHUNK_MS, runBatch } from "@/lib/enrich/batch";
 import { updateSettings } from "@/lib/enrich/budget";
 import { kick } from "@/lib/enrich/kick";
 import { enrichLive } from "@/lib/enrich/providers";
@@ -44,7 +44,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       case "run": {
         // Free tiers (keyword) run even when model calls are blocked; the
         // budget gate stops each model tier and the run records why.
-        return NextResponse.json(await runBatch(db, { trigger: "admin", tiers: input.tiers, budgetMs: 50_000 }));
+        return NextResponse.json(await runBatch(db, { trigger: "admin", tiers: input.tiers, budgetMs: CHUNK_MS }));
       }
       case "retry-failed":
         return NextResponse.json({ requeued: await retryFailedJobs(db) });

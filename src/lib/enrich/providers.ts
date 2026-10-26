@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { textFromContent } from "@/lib/ai/json";
 
 /**
- * Model providers for in-app enrichment (docs/DATA_SOURCES.md §2.4b).
+ * Model providers for in-app enrichment (docs/DATA_SOURCES.md §2.4c).
  *
  * Server-side only, from Vercel functions, with an API key:
  *

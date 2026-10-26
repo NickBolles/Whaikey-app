@@ -21,7 +21,7 @@ import { enrichLive, getEnrichProvider, ProviderCallError } from "./providers";
 import { parseQuickResult, parseWebResult, profileHeadline, type WebDetails } from "./validate";
 
 /**
- * In-app enrichment for bottles (docs/DATA_SOURCES.md §2.4b).
+ * In-app enrichment for bottles (docs/DATA_SOURCES.md §2.4c).
  *
  * Adding a bottle writes a job; a Vercel function runs it ONE STEP PER
  * INVOCATION — keyword (free) → quick model profile → web model notes — so no
@@ -50,7 +50,9 @@ export const ENRICH_PARKED_BACKOFF_MS = 10 * 60_000;
 export const ENRICH_STALE_QUEUE_MS = 45_000;
 /** Per-step model budgets, inside a 60 s function. */
 export const QUICK_TIMEOUT_MS = 20_000;
-export const WEB_TIMEOUT_MS = 50_000;
+export const WEB_TIMEOUT_MS = 45_000;
+/** Time a drain needs left before it starts another step (the web step is the long one). */
+export const STEP_HEADROOM_MS = WEB_TIMEOUT_MS + 3_000;
 
 export type EnrichmentReason = "new_bottle" | "scan" | "import" | "refresh" | "admin";
 /** Reasons whose progress is shown live on the bottle page. */
@@ -201,11 +203,6 @@ async function promptBottle(db: DB, bottleId: string): Promise<PromptBottle | nu
   return row ?? null;
 }
 
-/**
- * Lease up to `max` claimable jobs: queued and due, or running with a lapsed
- * lease. One running job per submitter at a time, so one person adding twenty
- * bottles can't hold up everyone else's first one.
-
 const STEP_STARTED: Record<EnrichmentStep, string> = {
   keyword: "Reading what's already on file",
   quick: "Sketching a quick flavor profile",
@@ -302,7 +299,8 @@ export async function runNextStep(db: DB, jobId: string, opts: { runId?: string 
         return { ran: "keyword", next: null };
       }
     }
-    const gate = await canSpend(db, step === "quick" ? "quick" : "web", now);
+    const modelStep: "quick" | "web" = step === "quick" ? "quick" : "web";
+    const gate = await canSpend(db, modelStep, now);
     if (!gate.ok) {
       await unlease(db, job.id, { waitingReason: gate.reason, notBefore: new Date(now.getTime() + ENRICH_PARKED_BACKOFF_MS) });
       if (job.waitingReason !== gate.reason) {
@@ -310,8 +308,8 @@ export async function runNextStep(db: DB, jobId: string, opts: { runId?: string 
       }
       return { ran: null, reason: "parked" };
     }
-    await appendEvent(db, job.id, { kind: "step_started", step, message: STEP_STARTED[step] });
-    const ok = await runModelStep(db, job, step, opts.runId ?? null);
+    await appendEvent(db, job.id, { kind: "step_started", step, message: STEP_STARTED[modelStep] });
+    const ok = await runModelStep(db, job, modelStep, opts.runId ?? null);
     if (!ok) {
       const attempts = job.attempts + 1;
       if (attempts >= ENRICH_MAX_ATTEMPTS) {
@@ -340,7 +338,7 @@ export async function runNextStep(db: DB, jobId: string, opts: { runId?: string 
 /** Run up to `maxSteps` steps back to back while time allows (cron/admin drain). */
 export async function runJobToCompletion(db: DB, jobId: string, deadline: number, runId: string | null = null): Promise<number> {
   let steps = 0;
-  while (Date.now() + WEB_TIMEOUT_MS + 5_000 < deadline) {
+  while (deadline - Date.now() >= STEP_HEADROOM_MS) {
     const r = await runNextStep(db, jobId, { runId });
     if (!r.ran) break;
     steps += 1;
@@ -601,7 +599,6 @@ async function fillEmptyDetails(
     .where(eq(bottles.id, bottleId));
   return filled;
 }
-
 
 export interface EnrichmentView {
   job: {

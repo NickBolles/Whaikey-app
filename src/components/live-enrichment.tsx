@@ -163,8 +163,8 @@ export function LiveEnrichment({ bottleId, initial }: { bottleId: string; initia
   const [view, setView] = useState<View>(initial);
   const router = useRouter();
   const seqRef = useRef(initial.events.reduce((m, e) => Math.max(m, e.seq), 0));
-  const startedRef = useRef(initial.job?.createdAt ? Date.parse(initial.job.createdAt) : Date.now());
-  const [now, setNow] = useState(() => Date.now());
+  const started = view.job?.createdAt ? Date.parse(view.job.createdAt) : null;
+  const [now, setNow] = useState<number | null>(null);
   const open = view.job != null && view.job.state !== "done" && view.job.state !== "failed";
 
   useEffect(() => {
@@ -202,13 +202,14 @@ export function LiveEnrichment({ bottleId, initial }: { bottleId: string; initia
   useEffect(() => {
     if (!open) return;
     const id = setInterval(() => setNow(Date.now()), 1000);
+    // First reading on the next tick too, so server and client render alike.
     return () => clearInterval(id);
   }, [open]);
 
   if (!view.job) return null;
   const rows = deriveRows(view);
   const status = statusLine(view);
-  const elapsed = Math.max(0, Math.round((now - startedRef.current) / 1000));
+  const elapsed = now != null && started != null ? Math.max(0, Math.round((now - started) / 1000)) : 0;
   const done = view.job.state === "done";
   const chip = done ? "Done" : view.job.state === "failed" ? "Later" : view.job.waiting ? "Queued" : "Live";
 

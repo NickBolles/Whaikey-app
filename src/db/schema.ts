@@ -1469,7 +1469,7 @@ export const bottleFlavorProvenance = pgTable(
 );
 
 /**
- * In-app enrichment queue (src/lib/enrich/, docs/DATA_SOURCES.md §2.4b).
+ * In-app enrichment queue (src/lib/enrich/, docs/DATA_SOURCES.md §2.4c).
  *
  * A bottle a user adds gets one job; a Vercel function runs it one step per
  * invocation (keyword → quick model → web model, API-key provider) and the

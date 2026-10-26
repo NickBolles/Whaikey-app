@@ -34,7 +34,9 @@ export async function getSettings(db: DB): Promise<EnrichSettings> {
 
 export async function updateSettings(db: DB, patch: Partial<EnrichSettings>): Promise<EnrichSettings> {
   const current = await getSettings(db);
-  const next = { ...current, ...patch };
+  // An omitted field keeps its value (`{ paused: false }` must not reset the cap).
+  const defined = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) as Partial<EnrichSettings>;
+  const next = { ...current, ...defined };
   await db
     .insert(enrichmentSettings)
     .values({ id: "global", paused: next.paused, dailyBudgetUsd: next.dailyBudgetUsd, missingCursor: next.missingCursor, updatedAt: new Date() })
