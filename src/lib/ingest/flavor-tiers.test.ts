@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import type { DB } from "@/db";
 import { bottleFlavorProvenance, bottlePopularityDaily, bottles, criticNotes, pours, tastingNotes, userBottles, userProfiles } from "@/db/schema";
@@ -7,12 +7,15 @@ import { WEDGE_IDS } from "@/lib/flavor-wheel";
 import { createTestBottle, createTestUser, setupTestDb, uid } from "@/test/helpers";
 import {
   applyModelResults,
+  ensureFlavorProvenanceTable,
   exportModelCandidates,
   flavorCoverage,
+  isTransientDbError,
   isValidWedgeProfile,
   keywordProfile,
   parseModelResults,
   runFreePass,
+  withDbRetry,
   writeTieredProfiles,
   type ProfileWrite,
 } from "./flavor-tiers";
@@ -342,5 +345,61 @@ describe("model export/apply", () => {
     );
     expect(writes).toEqual([]);
     expect(rejected).toBe(4);
+  });
+});
+
+describe("statement-timeout hardening", () => {
+  let db: DB;
+  beforeEach(async () => { db = await setupTestDb(); });
+
+  it("classifies timeouts, lock timeouts, deadlocks and serialization failures as transient", () => {
+    for (const code of ["57014", "55P03", "40P01", "40001"]) expect(isTransientDbError({ code })).toBe(true);
+    expect(isTransientDbError({ code: "23505" })).toBe(false);
+    expect(isTransientDbError(new Error("boom"))).toBe(false);
+    expect(isTransientDbError(null)).toBe(false);
+  });
+
+  it("retries transient errors with backoff and gives up on the rest", async () => {
+    const flaky = vi.fn()
+      .mockRejectedValueOnce(Object.assign(new Error("canceling statement due to statement timeout"), { code: "57014" }))
+      .mockResolvedValueOnce("ok");
+    await expect(withDbRetry(flaky, { baseDelayMs: 1 })).resolves.toBe("ok");
+    expect(flaky).toHaveBeenCalledTimes(2);
+
+    const fatal = vi.fn().mockRejectedValue(Object.assign(new Error("dup"), { code: "23505" }));
+    await expect(withDbRetry(fatal, { baseDelayMs: 1 })).rejects.toThrow("dup");
+    expect(fatal).toHaveBeenCalledTimes(1);
+
+    const stuck = vi.fn().mockRejectedValue(Object.assign(new Error("timeout"), { code: "57014" }));
+    await expect(withDbRetry(stuck, { attempts: 3, baseDelayMs: 1 })).rejects.toThrow("timeout");
+    expect(stuck).toHaveBeenCalledTimes(3);
+  });
+
+  it("issues no DDL when the provenance schema already exists (no ACCESS EXCLUSIVE lock per call)", async () => {
+    await ensureFlavorProvenanceTable(db);
+    const execute = vi.spyOn(db, "execute");
+    const transaction = vi.spyOn(db, "transaction");
+    await ensureFlavorProvenanceTable(db);
+    await flavorCoverage(db);
+    const statements = execute.mock.calls.map((c) => JSON.stringify(c[0]));
+    expect(statements.some((s) => /ALTER TABLE|CREATE (TABLE|INDEX)/.test(s))).toBe(false);
+    expect(transaction).not.toHaveBeenCalled();
+    execute.mockRestore();
+    transaction.mockRestore();
+  });
+
+  it("writes in small per-chunk transactions and a re-run resumes idempotently", async () => {
+    const list = [];
+    for (let i = 0; i < 7; i++) list.push(await createTestBottle(db, { flavorProfile: null }));
+    const transaction = vi.spyOn(db, "transaction");
+    const first = await writeTieredProfiles(db, list.map((b) => write(b.id)), 3);
+    expect(new Set(first)).toEqual(new Set(list.map((b) => b.id)));
+    expect(transaction).toHaveBeenCalledTimes(3);
+    transaction.mockRestore();
+    // Same results again (a re-dispatched apply): same tier rewrites in place, nothing duplicated.
+    const again = await writeTieredProfiles(db, list.map((b) => write(b.id)), 3);
+    expect(again).toHaveLength(7);
+    const cov = await flavorCoverage(db);
+    expect(cov.byTier.model).toBe(7);
   });
 });

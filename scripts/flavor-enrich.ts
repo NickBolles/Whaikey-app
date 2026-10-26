@@ -23,6 +23,7 @@ import {
   exportModelCandidates,
   flavorCoverage,
   runFreePass,
+  withDbRetry,
   type ModelResultBatch,
 } from "../src/lib/ingest/flavor-tiers";
 
@@ -52,15 +53,27 @@ async function writeSummary(summary: unknown): Promise<void> {
   if (path) await writeFile(path, `${JSON.stringify(summary, null, 2)}\n`, "utf8");
 }
 
+/**
+ * Before/after coverage is a report, not the job: a slow or timed-out
+ * coverage read must never fail (or mask) a pass that already wrote its rows.
+ */
+async function coverageOrNull(db: Parameters<typeof flavorCoverage>[0]): Promise<Awaited<ReturnType<typeof flavorCoverage>> | { error: string }> {
+  try {
+    return await withDbRetry(() => flavorCoverage(db), { attempts: 2 });
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 async function main(): Promise<void> {
   const db = createDb(resolveDbUrl());
   const started = Date.now();
   try {
     if (command === "free") {
       const { dryRun } = mode();
-      const before = await flavorCoverage(db);
+      const before = await coverageOrNull(db);
       const report = await runFreePass(db, { dryRun });
-      const after = await flavorCoverage(db);
+      const after = await coverageOrNull(db);
       await writeSummary({ command, report, before, after, seconds: Math.round((Date.now() - started) / 1000) });
     } else if (command === "export") {
       const out = value("out");
@@ -71,16 +84,16 @@ async function main(): Promise<void> {
         upgradeKeyword: flag("upgrade-keyword"),
       });
       await writeFile(out, JSON.stringify(result), "utf8");
-      await writeSummary({ command, counts: result.counts, batches: result.batches.length, coverage: await flavorCoverage(db) });
+      await writeSummary({ command, counts: result.counts, batches: result.batches.length, coverage: await coverageOrNull(db) });
     } else if (command === "apply") {
       const input = value("in");
       if (!input) throw new Error("--in FILE is required");
       const { dryRun } = mode();
       const parsed = JSON.parse(await readFile(input, "utf8")) as { batches?: ModelResultBatch[] };
       if (!Array.isArray(parsed.batches)) throw new Error("results file has no batches array");
-      const before = await flavorCoverage(db);
+      const before = await coverageOrNull(db);
       const report = await applyModelResults(db, parsed.batches, { dryRun });
-      const after = await flavorCoverage(db);
+      const after = await coverageOrNull(db);
       await writeSummary({ command, report, before, after, seconds: Math.round((Date.now() - started) / 1000) });
     } else if (command === "coverage") {
       await writeSummary({ command, coverage: await flavorCoverage(db) });

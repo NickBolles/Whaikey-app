@@ -55,31 +55,89 @@ export interface ProfileWrite {
   allowLegacy?: boolean;
 }
 
-/** Idempotent DDL, identical to the drizzle migration, so a branch run never needs `migrateDb`. */
+/**
+ * Postgres errors worth one more try: statement/lock timeouts (57014 / 55P03),
+ * deadlocks and serialization failures. Supabase's pooler can hand a CLI a
+ * short session timeout, and another writer (the in-app enrichment queue)
+ * can hold the rows for a moment.
+ */
+export function isTransientDbError(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code;
+  return code === "57014" || code === "55P03" || code === "40P01" || code === "40001";
+}
+
+/** Run `fn`, retrying transient Postgres errors with a short backoff. Each attempt must be idempotent. */
+export async function withDbRetry<T>(fn: () => Promise<T>, opts: { attempts?: number; baseDelayMs?: number } = {}): Promise<T> {
+  const attempts = Math.max(1, opts.attempts ?? 4);
+  const base = opts.baseDelayMs ?? 500;
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (attempt >= attempts || !isTransientDbError(error)) throw error;
+      await new Promise((resolve) => setTimeout(resolve, base * 2 ** (attempt - 1)));
+    }
+  }
+}
+
+/** Is this a hosted Postgres handle (postgres-js) rather than PGlite? Only there do `SET LOCAL` timeouts matter. */
+function isHostedPostgres(db: DB): boolean {
+  // postgres-js's client is the tagged-template function; PGlite's is an object.
+  return typeof (db as unknown as { $client?: unknown }).$client === "function";
+}
+
+const ensured = new WeakSet<object>();
+
+/**
+ * Idempotent DDL, identical to the drizzle migration, so a branch run never
+ * needs `migrateDb`. Reads the catalog first and only issues DDL for what is
+ * actually missing: `ALTER TABLE … ADD COLUMN IF NOT EXISTS` takes an ACCESS
+ * EXCLUSIVE lock *before* it finds the column already there, so running it
+ * on every call queued behind any open reader/writer of the table (the app,
+ * the in-app queue) until the statement timed out. Once per handle.
+ */
 export async function ensureFlavorProvenanceTable(db: DB): Promise<void> {
-  await db.execute(sql`CREATE TABLE IF NOT EXISTS "bottle_flavor_provenance" (
-    "bottle_id" text PRIMARY KEY NOT NULL
-      CONSTRAINT "bottle_flavor_provenance_bottle_id_bottles_id_fk" REFERENCES "bottles"("id") ON DELETE cascade,
-    "tier" text NOT NULL,
-    "confidence" double precision NOT NULL,
-    "method" text NOT NULL,
-    "model" text,
-    "pass" text NOT NULL,
-    "input_hash" text,
-    "enriched_at" timestamp with time zone DEFAULT now() NOT NULL
-  )`);
-  await db.execute(sql`CREATE INDEX IF NOT EXISTS "bottle_flavor_provenance_tier_idx" ON "bottle_flavor_provenance" USING btree ("tier")`);
-  await db.execute(sql`ALTER TABLE "bottle_flavor_provenance" ADD COLUMN IF NOT EXISTS "replaced_legacy_profile" jsonb`);
-  await db.execute(sql`CREATE TABLE IF NOT EXISTS "bottle_popularity_daily" (
-    "bottle_id" text NOT NULL
-      CONSTRAINT "bottle_popularity_daily_bottle_id_bottles_id_fk" REFERENCES "bottles"("id") ON DELETE cascade,
-    "day" text NOT NULL,
-    "searches" integer DEFAULT 0 NOT NULL,
-    "views" integer DEFAULT 0 NOT NULL,
-    "scans" integer DEFAULT 0 NOT NULL,
-    CONSTRAINT "bottle_popularity_daily_bottle_id_day_pk" PRIMARY KEY("bottle_id","day")
-  )`);
-  await db.execute(sql`CREATE INDEX IF NOT EXISTS "bottle_popularity_daily_day_idx" ON "bottle_popularity_daily" USING btree ("day")`);
+  if (ensured.has(db as object)) return;
+  const [state] = rowsOf<{ prov: boolean; replaced: boolean; tier_idx: boolean; pop: boolean; pop_idx: boolean }>(await db.execute(sql`
+    SELECT to_regclass('bottle_flavor_provenance') IS NOT NULL AS prov,
+           EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_schema = current_schema() AND table_name = 'bottle_flavor_provenance' AND column_name = 'replaced_legacy_profile') AS replaced,
+           to_regclass('bottle_flavor_provenance_tier_idx') IS NOT NULL AS tier_idx,
+           to_regclass('bottle_popularity_daily') IS NOT NULL AS pop,
+           to_regclass('bottle_popularity_daily_day_idx') IS NOT NULL AS pop_idx`));
+  const ok = (v: unknown) => v === true || v === "t" || v === 1;
+  if (state && ok(state.prov) && ok(state.replaced) && ok(state.tier_idx) && ok(state.pop) && ok(state.pop_idx)) {
+    ensured.add(db as object);
+    return;
+  }
+  await withDbRetry(() => db.transaction(async (tx) => {
+    // Fail fast on a busy table instead of queueing every reader behind us.
+    if (isHostedPostgres(db)) await tx.execute(sql`SET LOCAL lock_timeout = '5s'`);
+    await tx.execute(sql`CREATE TABLE IF NOT EXISTS "bottle_flavor_provenance" (
+      "bottle_id" text PRIMARY KEY NOT NULL
+        CONSTRAINT "bottle_flavor_provenance_bottle_id_bottles_id_fk" REFERENCES "bottles"("id") ON DELETE cascade,
+      "tier" text NOT NULL,
+      "confidence" double precision NOT NULL,
+      "method" text NOT NULL,
+      "model" text,
+      "pass" text NOT NULL,
+      "input_hash" text,
+      "enriched_at" timestamp with time zone DEFAULT now() NOT NULL
+    )`);
+    await tx.execute(sql`CREATE INDEX IF NOT EXISTS "bottle_flavor_provenance_tier_idx" ON "bottle_flavor_provenance" USING btree ("tier")`);
+    await tx.execute(sql`ALTER TABLE "bottle_flavor_provenance" ADD COLUMN IF NOT EXISTS "replaced_legacy_profile" jsonb`);
+    await tx.execute(sql`CREATE TABLE IF NOT EXISTS "bottle_popularity_daily" (
+      "bottle_id" text NOT NULL
+        CONSTRAINT "bottle_popularity_daily_bottle_id_bottles_id_fk" REFERENCES "bottles"("id") ON DELETE cascade,
+      "day" text NOT NULL,
+      "searches" integer DEFAULT 0 NOT NULL,
+      "views" integer DEFAULT 0 NOT NULL,
+      "scans" integer DEFAULT 0 NOT NULL,
+      CONSTRAINT "bottle_popularity_daily_bottle_id_day_pk" PRIMARY KEY("bottle_id","day")
+    )`);
+    await tx.execute(sql`CREATE INDEX IF NOT EXISTS "bottle_popularity_daily_day_idx" ON "bottle_popularity_daily" USING btree ("day")`);
+  }));
+  ensured.add(db as object);
 }
 
 /** Strict 8-wedge validation: exactly the wheel's wedge ids, integers 0-10, not all zero. */
@@ -96,14 +154,20 @@ function rankSql(column: SQL): SQL {
   return sql`CASE ${column} WHEN 'keyword' THEN 1 WHEN 'model' THEN 2 WHEN 'model_web' THEN 3 WHEN 'community' THEN 4 ELSE 99 END`;
 }
 
+/** Rows per write transaction: small enough to stay far inside a pooler statement timeout. */
+export const WRITE_CHUNK_SIZE = 50;
+
 /**
- * Write profiles in one statement per chunk. The guard lives in SQL so it
+ * Write profiles in one statement per chunk, one short transaction per chunk
+ * (so a long apply commits as it goes and a re-run resumes: already-written
+ * rows are skipped or rewritten identically by the tier guard). The guard lives in SQL so it
  * holds against whatever is in the row *now*: a profile lands only when the
  * bottle has none, or its recorded tier ranks ≤ the new tier. Legacy
  * profiles (no provenance row) and higher tiers are left alone. Returns the
  * ids that were actually written.
  */
-export async function writeTieredProfiles(db: DB, writes: ProfileWrite[], chunkSize = 400): Promise<string[]> {
+export async function writeTieredProfiles(db: DB, writes: ProfileWrite[], chunkSize = WRITE_CHUNK_SIZE): Promise<string[]> {
+  const hosted = isHostedPostgres(db);
   const written: string[] = [];
   for (const w of writes) {
     if (!isValidWedgeProfile(w.profile)) throw new Error(`invalid profile for ${w.bottleId}`);
@@ -123,7 +187,13 @@ export async function writeTieredProfiles(db: DB, writes: ProfileWrite[], chunkS
     // a lower tier queued behind a higher-tier writer sees the new provenance
     // and stays out. `prev` reads the rows as they were before the write, so a
     // replaced legacy profile is kept in provenance.
-    const result = await db.transaction(async (tx) => {
+    const result = await withDbRetry(() => db.transaction(async (tx) => {
+      // A pooler session can carry a short default; one chunk is small, so
+      // give it an explicit, bounded budget and fail fast on a held row.
+      if (hosted) {
+        await tx.execute(sql`SET LOCAL statement_timeout = '60s'`);
+        await tx.execute(sql`SET LOCAL lock_timeout = '10s'`);
+      }
       const ids = [...new Set(chunk.map((w) => w.bottleId))].sort();
       await tx.execute(sql`SELECT id FROM bottles WHERE id IN (${sql.join(ids.map((id) => sql`${id}`), sql`, `)}) ORDER BY id FOR UPDATE`);
       return tx.execute(sql`
@@ -152,7 +222,7 @@ export async function writeTieredProfiles(db: DB, writes: ProfileWrite[], chunkS
         enriched_at = excluded.enriched_at
       RETURNING bottle_id
     `);
-    });
+    }));
     const rows = (Array.isArray(result) ? result : (result as { rows?: unknown[] }).rows ?? []) as Array<{ bottle_id: string }>;
     for (const row of rows) written.push(row.bottle_id);
   }
