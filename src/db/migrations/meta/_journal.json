@@ -351,6 +351,13 @@
       "when": 1792966069027,
       "tag": "0049_social_share_card_keys",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1793022958513,
+      "tag": "0050_social_outings",
+      "breakpoints": true
     }
   ]
 }

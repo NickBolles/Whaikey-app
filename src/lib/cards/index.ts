@@ -11,7 +11,7 @@ import { shareCardKeys } from "@/db/schema";
  * mint one for somebody else. The image is rendered from live data, so a card
  * for a deleted account or a withdrawn flight stops rendering.
  */
-export const CARD_KINDS = ["passport", "palate", "wrapped", "flight"] as const;
+export const CARD_KINDS = ["passport", "palate", "wrapped", "flight", "outing"] as const;
 export type CardKind = (typeof CARD_KINDS)[number];
 export const CARD_FORMATS = { story: { width: 1080, height: 1920 }, link: { width: 1200, height: 630 } } as const;
 export type CardFormat = keyof typeof CARD_FORMATS;
@@ -53,5 +53,5 @@ export async function revokeAllCards(db: Pick<DB, "insert">, userId: string): Pr
     .onConflictDoUpdate({ target: shareCardKeys.userId, set: { epoch: sql`${shareCardKeys.epoch} + 1`, rotatedAt: new Date() } });
 }
 
-/** Whose epoch signs a card: the subject for personal cards, the sharing taster for flight results. */
-export const cardOwner = (kind: CardKind, subject: string, extra: string) => (kind === "flight" ? extra : subject);
+/** Whose epoch signs a card: the subject for personal cards, the sharing taster for flight and outing recaps. */
+export const cardOwner = (kind: CardKind, subject: string, extra: string) => (kind === "flight" || kind === "outing" ? extra : subject);

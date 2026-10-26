@@ -42,6 +42,10 @@ export default async function ClubPage({ params }: { params: Promise<{ id: strin
         </section>
       )}
 
+      <Link href={`/outings/new?club=${club.id}`} className="card-flat tap-target block p-3 text-sm font-medium text-accent">
+        Plan a distillery outing with the club →
+      </Link>
+
       <section aria-labelledby="club-nights" className="flex flex-col gap-2">
         <div className="flex items-baseline justify-between">
           <h2 id="club-nights" className="section-label">

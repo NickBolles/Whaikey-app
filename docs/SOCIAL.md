@@ -14,6 +14,14 @@ Companion to [PLAN.md](../PLAN.md), [FEATURES.md](./FEATURES.md) and [COMPETITOR
 >
 > **The test for every new mechanic is still the one in §3.2:** *can someone win this by drinking less of more?* Challenges and boards enforce it in code (a rule-kind lint test; distinct-count and saturating keys only), and notification templates are checked against a banned-copy list.
 
+> **Amendment 2026-10-26 — distillery visits unfrozen; "Challenges" renamed (owner direction).** The owner is taking friends to a distillery and wants the app on the trip; he also pointed out that "Challenges" reads as *we're challenging you to drink more*. Both are owner decisions that override the earlier text:
+>
+> **Unfrozen, buildable now:** **distillery visits** (D14 moves from "future" to "now", and the PLAN §5.4 freeze on visits is lifted), shipped first as **Outings** — a group trip to a distillery with a shared feed and a recap (§7.15, D22). The original freeze reason (geolocation in the native shell) no longer gates anything, because outings and visits **do not read device location at all**: the host types the distillery and the day. A later location-assisted check-in still follows §8.3 to the letter.
+>
+> **Renamed:** breadth challenges are called **Trails** in every user-facing surface (D23). The mechanic and its lint test are unchanged; tables, API routes and rule kinds keep the internal `challenge` name.
+>
+> **Guardrails on outings and visits, binding:** destinations only, never venues — a bar, restaurant, festival or shop can't be an outing, and nothing counts visit frequency; no proximity mechanics, geofences or "you're near a distillery" copy; an outing records *what you met* (bottle, rating, descriptors, note) and has **no amount, volume or per-person count anywhere** — not in the feed, the recap, the share card or the export; no "who's tasting now" — the feed is visible only to people on the trip, carries no live-presence signal, and no notification fires per tasting (only the invite and the recap); the ride card is a single dismissible line of planning help, never a notification, never repeated, never about how much anyone has had; guests pass the same 21+ birth-date check as tasting nights (D20) and their rows are swept at 24 h; every §3.1 ban, the read-path invariant (§13), blocks, suspension and the host's hide apply as they do to tasting nights.
+
 **How to read this doc:** §1–§4 are the argument. §5 (user stories) and §6 (pages & flow) are what we're building and where it lives. §7 details each feature. §8–§12 are the operating rules. §13 is the phase plan, §14 the decisions, §15 the risks — and **§16 is the agent-ready build spec for S1**, which is implementable today with zero open decisions.
 
 ---
@@ -331,7 +339,7 @@ The existing backlog item (2 oz samples, who owes whom) is a *social* feature an
 
 ---
 
-### 7.12 Challenges — breadth only (added 2026-10, D16)
+### 7.12 Challenges — breadth only (added 2026-10, D16; shown to users as **Trails**, D23)
 
 Strava's monthly challenges are joinable goals with a badge at the end; ours count **distinct things met in a window**, never amounts.
 
@@ -349,6 +357,12 @@ Rivalry with friends is encouraged (§3.2); ranking by consumption is banned (§
 ### 7.14 Wrapped / Year in Review (added 2026-10, D19)
 
 `/wrapped/[year]`: countries, regions, distilleries and descriptors discovered; best new find; how your palate moved; your taste twin; flights attended. **No counts of pours, ml, nights, or spend**, and nothing about time of day. Private by default; shareable as a card (§7.10).
+
+### 7.15 Outings — a group distillery visit (added 2026-10-26, D22)
+
+A host plans an outing (distillery name, optional place, the day; optionally a club, whose members get an invite) and shares a link/QR. Friends join with an account or as a **24 h guest** after the 21+ birth-date check — the tasting-night guest model (D20), reused. During the visit everyone logs what they tasted **against the outing**: a catalog bottle, their own pending submission (linked only for them), or just a name — "Cask 1142, barrel-proof sample" — so distillery-only bottlings need no catalog row; a signed-in taster can also add the bottle to the catalog through the normal add-a-bottle flow, which returns to the outing with it picked. Logging on an outing is not a pour: a signed-in taster can choose *Add to my journal*, which opens the ordinary pour sheet.
+
+The outing page has a shared feed of tastings and short notes (people on the trip only; refreshed by an opaque poll, no presence). When the host ends it, everyone gets the **recap**: the bottles the group explored together, the **favourite by consensus** (highest average where two or more people rated it, one voice per person per bottle), and the **flavour spread** across families as percentages. The recap never shows counts of pours per person, amounts or volumes; it is exportable as CSV and shareable as a card (§7.10) by anyone on it with an account. The host can hide any item and delete the outing; anyone can remove their own. A visit badge on the passport (US-20, FEATURES §11.8 — distinct destinations only) is the natural follow-up and is not part of the first slice.
 
 ## 8. Privacy model
 
@@ -499,6 +513,8 @@ The first draft left 14 questions open "for a human call before S1 code." Under 
 | D18 | Notifications | **Sender + inbox + per-category prefs + quiet hours** (§7.5 note); banned-copy test on templates; never a pour nudge or a cadence reminder. |
 | D19 | Wrapped | **Breadth-framed, private by default, shareable as a card** (§7.14); no pour, volume, nights or spend counts. |
 | D20 | Flight guests | A guest joins by link/QR and may **view and rate for 24 hours without an account**; notes are kept only if they create one. Guest entries are deleted at 24 h otherwise. |
+| D22 | Distillery visits / Outings (owner direction, 2026-10-26) | **Unfrozen.** Outings (§7.15) ship first: host-typed destination and day, no device location, accounts or 24 h 21+ guests, a shared feed for people on the trip, a consensus/breadth recap with **no per-person counts or amounts**, an optional one-line ride card. Destinations only, never venues, never frequency, never proximity (amendment above). |
+| D23 | "Challenges" renamed (owner direction, 2026-10-26) | User-facing name is **Trails** — exploration, not a dare to drink. One copy constant (`src/lib/challenges/term.ts`); `/challenges` redirects to `/trails`. Alternates shortlisted: Expeditions, Field Guides, Explorations, Passport Stamps, Quests. Internals keep `challenge`. |
 | D21 | Shelf and wishlist sharing (resolves Q1) | **Opt-in, friends-only by default, revocable**, projection strips price, value, fill level and purchase data. A public shelf link is a separate opt-in, like pour shares. |
 
 ### Still open (genuinely)
