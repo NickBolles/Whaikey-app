@@ -1,5 +1,6 @@
 "use client";
 
+import { notifySocialInteraction } from "@/lib/native/push-offer";
 import { useState } from "react";
 import Link from "next/link";
 import { Check, UserCheck, UserPlus } from "lucide-react";
@@ -46,6 +47,7 @@ export function AddConfirmClient({ target }: { target: AddTarget }) {
       }
       setNeedsProfile(false);
       setFollowState(body.state);
+      notifySocialInteraction("follow");
     } catch {
       setError("Couldn't follow — try again.");
     } finally {

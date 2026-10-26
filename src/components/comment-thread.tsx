@@ -1,5 +1,6 @@
 "use client";
 
+import { notifySocialInteraction } from "@/lib/native/push-offer";
 import { useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { CornerDownRight, Flag, MessageCircle, Pencil, Send, Trash2 } from "lucide-react";
@@ -463,6 +464,7 @@ export function CommentThread({ pourId, initialComments, viewerSignedIn, viewerC
       if (!res.ok) throw new Error("Couldn't post that comment.");
       const created = (await res.json()) as SerializedComment;
       setComments((prev) => [...prev, created]);
+      notifySocialInteraction("comment");
       return true;
     } catch {
       setComposerHint("error");
