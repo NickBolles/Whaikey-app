@@ -45,9 +45,11 @@ export async function updateSettings(db: DB, patch: Partial<EnrichSettings>): Pr
     .values({ id: "global", paused: next.paused, dailyBudgetUsd: next.dailyBudgetUsd, missingCursor: next.missingCursor, updatedAt: new Date() })
     .onConflictDoUpdate({
       target: enrichmentSettings.id,
-      set: { paused: next.paused, dailyBudgetUsd: next.dailyBudgetUsd, missingCursor: next.missingCursor, updatedAt: new Date() },
+      // Only the supplied fields: a concurrent cursor update must not write a
+      // stale pause/cap back over the operator's change (or vice versa).
+      set: { ...defined, updatedAt: new Date() },
     });
-  return next;
+  return getSettings(db);
 }
 
 export function utcDayStart(now = new Date()): Date {
