@@ -449,7 +449,7 @@ export function PourScanSlot({
         </p>
       )}
       <div
-        className={`card-viewfinder relative overflow-hidden rounded-lg border border-border bg-black/60 ${compact ? "h-[96px]" : "h-[150px]"}`}
+        className={`card-viewfinder relative overflow-hidden rounded-lg border border-border bg-black/60 ${compact ? "h-[124px]" : "h-[150px]"}`}
         data-testid="pour-viewfinder"
       >
         {showVideo && <video ref={videoRef} muted playsInline aria-hidden className="absolute inset-0 h-full w-full object-cover" />}
