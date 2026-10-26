@@ -4,6 +4,7 @@ import { getDb } from "@/db";
 import { WHISKEY_CATEGORIES } from "@/db/schema";
 import { getSessionUser, withErrorHandling } from "@/lib/session";
 import { searchBottles } from "@/lib/search";
+import { noteBottleSignals, SEARCH_HITS_COUNTED } from "@/lib/popularity";
 
 const paramsSchema = z.object({
   q: z.string().optional().default(""),
@@ -35,7 +36,13 @@ export async function GET(req: Request): Promise<NextResponse> {
     // viewer a submitter cannot find the bottle they just added, which is the
     // dead end again one step further along.
     const user = await getSessionUser();
-    const results = await searchBottles(getDb(), q, { category, viewerId: user?.id });
+    const db = getDb();
+    const results = await searchBottles(db, q, { category, viewerId: user?.id });
+    // Popularity: the head of a real query's results gets +1 "search" on its
+    // anonymous daily tally (src/lib/popularity.ts). No query text, no user.
+    if (q.trim().length >= 3) {
+      noteBottleSignals(db, results.slice(0, SEARCH_HITS_COUNTED).map((r) => r.id), "search", req.headers.get("user-agent"));
+    }
     return NextResponse.json({ results });
   }) as Promise<NextResponse>;
 }

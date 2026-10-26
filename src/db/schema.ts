@@ -1443,8 +1443,10 @@ export const bottleClaims = pgTable(
  * bottle whose profile was written by the tiered backfill. Tiers rank
  * keyword < model < model_web < community, and a write only lands over an
  * equal-or-lower tier — never over a higher one. A profile with NO row here
- * predates tracking (seed data or the old enrich step) and is never
- * overwritten by the backfill.
+ * predates tracking (seed data or the old enrich step) and is only
+ * overwritten by a web-grounded refresh of a top-popular bottle with no
+ * community notes (src/lib/popularity.ts), which keeps the old profile in
+ * `replacedLegacyProfile`.
  */
 export const FLAVOR_PROFILE_TIERS = ["keyword", "model", "model_web", "community"] as const;
 export type FlavorProfileTier = (typeof FLAVOR_PROFILE_TIERS)[number];
@@ -1463,6 +1465,12 @@ export const bottleFlavorProvenance = pgTable(
     pass: text("pass").notNull(),
     /** Hash of the inputs the profile was derived from (free pass re-runs only on change). */
     inputHash: text("input_hash"),
+    /**
+     * The untracked (legacy) profile this write replaced, when a top-popular
+     * refresh was allowed over it (src/lib/popularity.ts) — kept so the
+     * overwrite can be audited or rolled back. Null for every other write.
+     */
+    replacedLegacyProfile: jsonb("replaced_legacy_profile").$type<Record<string, number>>(),
     enrichedAt: timestamp("enriched_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
   },
   (t) => [index("bottle_flavor_provenance_tier_idx").on(t.tier)],
@@ -1595,6 +1603,26 @@ export const enrichmentSettings = pgTable("enrichment_settings", {
   missingCursor: text("missing_cursor"),
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
 });
+
+/**
+ * Anonymous per-bottle daily tallies that feed the popularity score
+ * (src/lib/popularity.ts): how often a catalog bottle came up near the top of
+ * a search, had its page opened, or was the answer to a barcode scan.
+ * Aggregate counts only — no user, session, IP or query-text column — so no
+ * row can be attributed to anyone. Swept after TELEMETRY_RETENTION_DAYS.
+ */
+export const bottlePopularityDaily = pgTable(
+  "bottle_popularity_daily",
+  {
+    bottleId: text("bottle_id").notNull().references(() => bottles.id, { onDelete: "cascade" }),
+    /** UTC day, "YYYY-MM-DD". */
+    day: text("day").notNull(),
+    searches: integer("searches").notNull().default(0),
+    views: integer("views").notNull().default(0),
+    scans: integer("scans").notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.bottleId, t.day] }), index("bottle_popularity_daily_day_idx").on(t.day)],
+);
 
 export type BottleEnrichmentJob = typeof bottleEnrichmentJobs.$inferSelect;
 export type BottleEnrichmentEvent = typeof bottleEnrichmentEvents.$inferSelect;

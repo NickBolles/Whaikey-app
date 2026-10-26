@@ -3,6 +3,7 @@ import type { DB } from "@/db";
 import { bottles, distilleries, enrichmentRuns } from "@/db/schema";
 import { buildEnrichPrompt, type EnrichableBottle } from "@/lib/ingest/enrich";
 import { parseModelResults, runFreePass, writeTieredProfiles } from "@/lib/ingest/flavor-tiers";
+import { LEGACY_REFRESH_SAFE, POPULAR_REFRESH_TOP, popularitySql } from "@/lib/popularity";
 import { canSpend, getSettings, recordCall, updateSettings } from "./budget";
 import { getEnrichProvider, ProviderCallError } from "./providers";
 import { dueJobIds, requeueBottle, runJobToCompletion, STEP_HEADROOM_MS } from "./queue";
@@ -18,8 +19,10 @@ import { dueJobIds, requeueBottle, runJobToCompletion, STEP_HEADROOM_MS } from "
  *   missing — bottles with no profile, 25 per quick-model call; resumes from
  *             `enrichment_settings.missing_cursor`, so a bottle the model
  *             keeps failing on is passed over rather than retried forever
- *   web     — the most popular bottles still below `model_web`, one web call
- *             each, as `refresh` jobs (so they're visible and retryable)
+ *   web     — the most popular / most searched bottles (src/lib/popularity.ts)
+ *             still below `model_web` — including untracked legacy profiles
+ *             inside the top POPULAR_REFRESH_TOP — one web call each, as
+ *             `refresh` jobs (so they're visible and retryable)
  *
  * Every selection is "what still needs it", so re-running is idempotent and
  * a stopped chunk resumes where it left off. Every model call passes the
@@ -188,23 +191,21 @@ async function webTier(db: DB, runId: string, deadline: number, bump: (k: string
     if (!gate.ok) return gate.reason;
     const [candidate] = rowsOf<{ id: string }>(
       await db.execute(sql`
-        WITH pop AS (
-          SELECT bottle_id, SUM(w) AS popularity FROM (
-            SELECT bottle_id, 20 AS w FROM pours
-            UNION ALL SELECT bottle_id, 10 FROM user_bottles
-            UNION ALL SELECT bottle_id, 2 FROM (SELECT DISTINCT bottle_id, source FROM price_history) ph
-            UNION ALL SELECT DISTINCT bottle_id, 1 FROM bottle_upcs
-          ) s GROUP BY bottle_id
+        WITH pop AS (${popularitySql()}),
+        top AS (
+          SELECT pop.bottle_id, pop.popularity FROM pop JOIN bottles b ON b.id = pop.bottle_id
+          WHERE b.status <> 'user_submitted'
+          ORDER BY pop.popularity DESC, pop.bottle_id LIMIT ${POPULAR_REFRESH_TOP}
         )
-        SELECT b.id FROM bottles b
-        JOIN pop ON pop.bottle_id = b.id
+        SELECT b.id FROM top
+        JOIN bottles b ON b.id = top.bottle_id
         LEFT JOIN bottle_flavor_provenance p ON p.bottle_id = b.id
         LEFT JOIN bottle_enrichment_jobs j ON j.bottle_id = b.id
-        WHERE b.status <> 'user_submitted'
-          AND (b.flavor_profile IS NULL OR p.tier IN ('keyword', 'model'))
+        WHERE (b.flavor_profile IS NULL OR p.tier IN ('keyword', 'model')
+               OR (p.bottle_id IS NULL AND ${LEGACY_REFRESH_SAFE}))
           AND (j.id IS NULL OR (j.state IN ('done', 'failed')
                AND j.finished_at < now() - make_interval(days => ${WEB_REFRESH_AFTER_DAYS}::int)))
-        ORDER BY pop.popularity DESC, b.id
+        ORDER BY top.popularity DESC, b.id
         LIMIT 1`),
     );
     if (!candidate) return "done";

@@ -1,6 +1,6 @@
 import { and, desc, eq, gte, sql } from "drizzle-orm";
 import type { DB } from "@/db";
-import { enrichmentCalls, enrichmentSettings } from "@/db/schema";
+import { bottleFlavorProvenance, enrichmentCalls, enrichmentSettings, FLAVOR_PROFILE_TIERS, type FlavorProfileTier } from "@/db/schema";
 import { recordAiUsage, usdForTokens } from "@/lib/ai/usage";
 import { reportInBackground } from "@/lib/observability/errors";
 import { enrichEnabledByEnv, getEnrichProvider, type CallUsage, type EnrichProviderName } from "./providers";
@@ -168,6 +168,56 @@ export async function spendByDay(db: DB, days = 14, now = new Date()): Promise<D
     by.set(day, d);
   }
   return [...by.values()].sort((a, b) => b.day.localeCompare(a.day));
+}
+
+export function utcMonthStart(now = new Date()): Date {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+}
+
+/** The last `days` UTC days, oldest first, as "YYYY-MM-DD". */
+export function lastUtcDays(days: number, now = new Date()): string[] {
+  const start = utcDayStart(now).getTime();
+  return Array.from({ length: days }, (_, i) => new Date(start - (days - 1 - i) * 86_400_000).toISOString().slice(0, 10));
+}
+
+export interface DayEnriched {
+  day: string;
+  byTier: Record<FlavorProfileTier, number>;
+  total: number;
+}
+
+/**
+ * Profiles written per UTC day by tier, oldest first, every day present (zeros
+ * included) — the admin chart. Counted from provenance, so it covers every
+ * writer (in-app live/refresh and the bulk Codex pass) and each bottle once,
+ * on the day of its latest write.
+ */
+export async function enrichedByDay(db: DB, days = 30, now = new Date()): Promise<DayEnriched[]> {
+  const since = new Date(utcDayStart(now).getTime() - (days - 1) * 86_400_000);
+  const rows = await db
+    .select({
+      day: sql<string>`to_char(${bottleFlavorProvenance.enrichedAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD')`,
+      tier: bottleFlavorProvenance.tier,
+      n: sql<number>`count(*)::int`,
+    })
+    .from(bottleFlavorProvenance)
+    .where(gte(bottleFlavorProvenance.enrichedAt, since))
+    .groupBy(sql`1`, bottleFlavorProvenance.tier);
+  const zero = () => Object.fromEntries(FLAVOR_PROFILE_TIERS.map((t) => [t, 0])) as Record<FlavorProfileTier, number>;
+  const by = new Map(lastUtcDays(days, now).map((day) => [day, { day, byTier: zero(), total: 0 }]));
+  for (const r of rows) {
+    const d = by.get(r.day);
+    if (!d || !FLAVOR_PROFILE_TIERS.includes(r.tier)) continue;
+    d.byTier[r.tier] += Number(r.n);
+    d.total += Number(r.n);
+  }
+  return [...by.values()];
+}
+
+/** Spend per UTC day for the chart: oldest first, every day present. */
+export async function spendSeries(db: DB, days = 30, now = new Date()): Promise<Array<{ day: string; usd: number; calls: number }>> {
+  const spent = new Map((await spendByDay(db, days, now)).map((d) => [d.day, d]));
+  return lastUtcDays(days, now).map((day) => ({ day, usd: spent.get(day)?.usd ?? 0, calls: spent.get(day)?.calls ?? 0 }));
 }
 
 /** USD per run id, for the recent-runs table. */

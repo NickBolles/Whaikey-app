@@ -64,6 +64,17 @@ describe("GET /api/bottles/search", () => {
     expect(body.results[0]).toHaveProperty("flavorProfile");
   });
 
+  it("counts the head of a real query's results on the anonymous popularity tally", async () => {
+    const { settleKicks } = await import("@/lib/enrich/kick");
+    const eagle = await createTestBottle(db, { name: "Eagle Rare 10 Year" });
+    const res = await searchGET(searchRequest("?q=eagle"));
+    expect(res.status).toBe(200);
+    await searchGET(searchRequest("?q=ea")); // too short to count
+    await settleKicks();
+    const rows = await db.select().from(schema.bottlePopularityDaily);
+    expect(rows).toEqual([expect.objectContaining({ bottleId: eagle.id, searches: 1, views: 0, scans: 0 })]);
+  });
+
   it("returns popular bottles (alphabetical) for an empty q", async () => {
     await createTestBottle(db, { name: "Bravo Bourbon" });
     await createTestBottle(db, { name: "Alpha Bourbon" });
