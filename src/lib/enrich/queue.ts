@@ -15,7 +15,7 @@ import {
 import { catalogVisibleTo } from "@/lib/catalog-visibility";
 import { keywordInputHash, keywordProfile, TIER_CONFIDENCE, writeTieredProfiles, type KeywordInputs } from "@/lib/ingest/flavor-tiers";
 import { reportInBackground } from "@/lib/observability/errors";
-import { canSpend, recordCall } from "./budget";
+import { recordCall, releaseReservation, reserveSpend } from "./budget";
 import { quickPrompt, webPrompt, type PromptBottle } from "./prompts";
 import { enrichLive, getEnrichProvider, ProviderCallError } from "./providers";
 import { parseQuickResult, parseWebResult, profileHeadline, type WebDetails } from "./validate";
@@ -300,7 +300,7 @@ export async function runNextStep(db: DB, jobId: string, opts: { runId?: string 
       }
     }
     const modelStep: "quick" | "web" = step === "quick" ? "quick" : "web";
-    const gate = await canSpend(db, modelStep, now);
+    const gate = await reserveSpend(db, modelStep, now);
     if (!gate.ok) {
       await unlease(db, job.id, { waitingReason: gate.reason, notBefore: new Date(now.getTime() + ENRICH_PARKED_BACKOFF_MS) });
       if (job.waitingReason !== gate.reason) {
@@ -309,7 +309,13 @@ export async function runNextStep(db: DB, jobId: string, opts: { runId?: string 
       return { ran: null, reason: "parked" };
     }
     await appendEvent(db, job.id, { kind: "step_started", step, message: STEP_STARTED[modelStep] });
-    const ok = await runModelStep(db, job, modelStep, opts.runId ?? null);
+    let ok: boolean;
+    try {
+      ok = await runModelStep(db, job, modelStep, opts.runId ?? null);
+    } finally {
+      // After recordCall has written the real usage, so the cap never has a gap.
+      await releaseReservation(db, gate.reservationId);
+    }
     if (!ok) {
       const attempts = job.attempts + 1;
       if (attempts >= ENRICH_MAX_ATTEMPTS) {

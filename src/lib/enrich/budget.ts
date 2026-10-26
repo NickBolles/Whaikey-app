@@ -1,6 +1,6 @@
-import { and, desc, eq, gte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, lt, sql } from "drizzle-orm";
 import type { DB } from "@/db";
-import { enrichmentCalls, enrichmentSettings } from "@/db/schema";
+import { enrichmentCalls, enrichmentReservations, enrichmentSettings } from "@/db/schema";
 import { recordAiUsage, usdForTokens } from "@/lib/ai/usage";
 import { reportInBackground } from "@/lib/observability/errors";
 import { enrichEnabledByEnv, getEnrichProvider, type CallUsage, type EnrichProviderName } from "./providers";
@@ -75,14 +75,67 @@ export async function spendSince(db: DB, since = utcDayStart()): Promise<number>
 
 export type GateResult = { ok: true } | { ok: false; reason: "disabled" | "paused" | "budget" };
 
-/** May a model call of this kind run now? */
+/** A hold outlives any single call's budget (the longest step is under a minute). */
+export const RESERVATION_TTL_MS = 3 * 60_000;
+/** Serializes gate decisions across instances (pg_advisory_xact_lock key). */
+const BUDGET_LOCK_KEY = 72_105_517;
+
+/** Estimated USD held by calls that are still in flight. */
+async function reservedUsd(db: DB, now: Date): Promise<number> {
+  const [row] = await db
+    .select({ total: sql<number | null>`sum(${enrichmentReservations.usd})` })
+    .from(enrichmentReservations)
+    .where(gte(enrichmentReservations.expiresAt, now));
+  return Number(row?.total ?? 0);
+}
+
+/**
+ * May a model call of this kind run now? A read-only pre-check (also counts
+ * in-flight holds); the call itself must go through `reserveSpend`.
+ */
 export async function canSpend(db: DB, step: CallStep, now = new Date()): Promise<GateResult> {
   if (!enrichEnabledByEnv() || !getEnrichProvider()) return { ok: false, reason: "disabled" };
   const settings = await getSettings(db);
   if (settings.paused) return { ok: false, reason: "paused" };
-  const spent = await spendSince(db, utcDayStart(now));
+  const spent = (await spendSince(db, utcDayStart(now))) + (await reservedUsd(db, now));
   if (spent + CALL_ESTIMATE_USD[step] > settings.dailyBudgetUsd) return { ok: false, reason: "budget" };
   return { ok: true };
+}
+
+export type Reservation = { ok: true; reservationId: string } | { ok: false; reason: "disabled" | "paused" | "budget" };
+
+/**
+ * The hard cap, atomically: under one advisory lock, recorded spend plus every
+ * in-flight hold plus this call's worst case must fit, and if it does the
+ * estimate is held until `releaseReservation` (after `recordCall`) or expiry.
+ * Two concurrent calls can no longer both spend the same remaining allowance.
+ */
+export async function reserveSpend(db: DB, step: CallStep, now = new Date()): Promise<Reservation> {
+  if (!enrichEnabledByEnv() || !getEnrichProvider()) return { ok: false, reason: "disabled" };
+  const settings = await getSettings(db);
+  if (settings.paused) return { ok: false, reason: "paused" };
+  const estimate = CALL_ESTIMATE_USD[step];
+  return db.transaction(async (tx) => {
+    const t = tx as unknown as DB;
+    await t.execute(sql`SELECT pg_advisory_xact_lock(${BUDGET_LOCK_KEY})`);
+    await t.delete(enrichmentReservations).where(lt(enrichmentReservations.expiresAt, now));
+    const spent = (await spendSince(t, utcDayStart(now))) + (await reservedUsd(t, now));
+    if (spent + estimate > settings.dailyBudgetUsd) return { ok: false, reason: "budget" } as const;
+    const reservationId = crypto.randomUUID();
+    await t.insert(enrichmentReservations).values({ id: reservationId, usd: estimate, expiresAt: new Date(now.getTime() + RESERVATION_TTL_MS) });
+    return { ok: true, reservationId } as const;
+  });
+}
+
+/** Drop a hold once the call's usage is recorded (or the call never happened). */
+export async function releaseReservation(db: DB, reservationId: string | null | undefined): Promise<void> {
+  if (!reservationId) return;
+  try {
+    await db.delete(enrichmentReservations).where(eq(enrichmentReservations.id, reservationId));
+  } catch (err) {
+    // A leaked hold only over-counts until it expires; never fail the step for it.
+    reportInBackground(err, { where: "enrich/release-reservation" });
+  }
 }
 
 export async function recordCall(

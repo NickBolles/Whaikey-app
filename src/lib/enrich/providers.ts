@@ -1,4 +1,5 @@
-import Anthropic from "@anthropic-ai/sdk";
+import type Anthropic from "@anthropic-ai/sdk";
+import { activeAiProvider, getAnthropic } from "@/lib/ai/client";
 import { textFromContent } from "@/lib/ai/json";
 
 /**
@@ -8,7 +9,9 @@ import { textFromContent } from "@/lib/ai/json";
  *
  *   ENRICH_PROVIDER = openai | anthropic | auto (default auto: OpenAI when
  *                     OPENAI_API_KEY is set, else Anthropic when
- *                     ANTHROPIC_API_KEY is set)
+ *                     the shared AI client talks to Anthropic directly —
+ *                     ANTHROPIC_API_KEY set and no OpenRouter key, because
+ *                     OpenRouter does not run Anthropic's hosted web search)
  *   ENRICH_ENABLED  = "true" to let anything call a model. Default off, so a
  *                     deployment that merely HAS a key (ANTHROPIC_API_KEY is
  *                     already set for chat) spends nothing until the owner
@@ -125,12 +128,13 @@ export function openAiProvider(apiKey: string, fetchImpl: typeof fetch = fetch):
 }
 
 // ---------------------------------------------------------------------------
-// Anthropic (its own client on ANTHROPIC_API_KEY — not the chat client, which
-// prefers OpenRouter and has a route-sized timeout)
+// Anthropic, through the shared client seam (src/lib/ai/client.ts: gateway
+// config + setAnthropicForTests). Each request passes its own step-sized
+// timeout, overriding the client's route-sized default.
 // ---------------------------------------------------------------------------
 
-export function anthropicProvider(apiKey: string, client?: Anthropic): EnrichProvider {
-  const anthropic = client ?? new Anthropic({ apiKey, maxRetries: 0 });
+export function anthropicProvider(client?: Anthropic): EnrichProvider {
+  const anthropic = client ?? getAnthropic();
   return {
     name: "anthropic",
     quickModel: process.env.ENRICH_ANTHROPIC_QUICK_MODEL || "claude-haiku-4-5",
@@ -195,7 +199,7 @@ export function selectedProviderName(): EnrichProviderName | null {
   if (testProvider !== undefined) return testProvider?.name ?? null;
   const pref = (process.env.ENRICH_PROVIDER ?? "auto").toLowerCase();
   const hasOpenAi = !!process.env.OPENAI_API_KEY;
-  const hasAnthropic = !!process.env.ANTHROPIC_API_KEY;
+  const hasAnthropic = activeAiProvider() === "anthropic";
   if (pref === "openai") return hasOpenAi ? "openai" : null;
   if (pref === "anthropic") return hasAnthropic ? "anthropic" : null;
   if (hasOpenAi) return "openai";
@@ -207,7 +211,7 @@ export function getEnrichProvider(): EnrichProvider | null {
   if (testProvider !== undefined) return testProvider;
   const name = selectedProviderName();
   if (name === "openai") return openAiProvider(process.env.OPENAI_API_KEY as string);
-  if (name === "anthropic") return anthropicProvider(process.env.ANTHROPIC_API_KEY as string);
+  if (name === "anthropic") return anthropicProvider();
   return null;
 }
 

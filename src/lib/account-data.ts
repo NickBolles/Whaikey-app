@@ -1459,6 +1459,7 @@ export const NOT_LINKED: Readonly<Record<string, string>> = {
   bottle_enrichment_jobs: "Catalog enrichment queue for a bottle (state, steps, sourced notes); no user column — the requester is the bottle's own submitter, and the job is deleted with the bottle.",
   bottle_enrichment_events: "Progress lines for a bottle's enrichment job; no user column.",
   enrichment_calls: "Token and search counts per enrichment model call; no user column.",
+  enrichment_reservations: "In-flight enrichment spend holds (estimated USD, expiry); no user column.",
   enrichment_runs: "Scheduled/operator enrichment batch runs; no user column.",
   enrichment_settings: "Operator enrichment settings (pause, daily budget); no user column.",
   catalog_sources: "Where catalog data came from; no user column.",

@@ -179,6 +179,7 @@ const INVENTORY: Record<string, Verdict> = {
   bottle_enrichment_jobs: { notPersonal: "Catalog enrichment queue state for a bottle." },
   bottle_enrichment_events: { notPersonal: "Progress lines for a bottle's catalog enrichment." },
   enrichment_calls: { notPersonal: "Token counts per catalog enrichment call." },
+  enrichment_reservations: { notPersonal: "In-flight catalog enrichment spend holds." },
   enrichment_runs: { notPersonal: "Catalog enrichment batch runs." },
   enrichment_settings: { notPersonal: "Operator enrichment settings." },
   catalog_sources: { notPersonal: "Where catalog data came from." },

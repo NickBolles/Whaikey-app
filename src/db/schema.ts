@@ -1642,6 +1642,20 @@ export const enrichmentSettings = pgTable("enrichment_settings", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
 });
 
+/**
+ * In-flight spend holds: a model call reserves its worst-case estimate here
+ * (under an advisory lock) before it starts, and the hold is dropped once the
+ * call's usage is recorded. Concurrent calls therefore can't all pass the
+ * daily cap on the same remaining allowance. Holds expire, so a crashed call
+ * frees its slice. No user column.
+ */
+export const enrichmentReservations = pgTable("enrichment_reservations", {
+  id: text("id").primaryKey(),
+  usd: doublePrecision("usd").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+});
+
 export type BottleEnrichmentJob = typeof bottleEnrichmentJobs.$inferSelect;
 export type BottleEnrichmentEvent = typeof bottleEnrichmentEvents.$inferSelect;
 

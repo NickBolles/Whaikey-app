@@ -3,7 +3,7 @@ import type { DB } from "@/db";
 import { bottles, distilleries, enrichmentRuns } from "@/db/schema";
 import { buildEnrichPrompt, type EnrichableBottle } from "@/lib/ingest/enrich";
 import { parseModelResults, runFreePass, writeTieredProfiles } from "@/lib/ingest/flavor-tiers";
-import { canSpend, getSettings, recordCall, updateSettings } from "./budget";
+import { canSpend, getSettings, recordCall, releaseReservation, reserveSpend, updateSettings } from "./budget";
 import { getEnrichProvider, ProviderCallError } from "./providers";
 import { dueJobIds, requeueBottle, runJobToCompletion, STEP_HEADROOM_MS } from "./queue";
 
@@ -147,6 +147,8 @@ async function missingTier(db: DB, runId: string, deadline: number, bump: (k: st
       userNotes: [],
     }));
     const model = provider.quickModel;
+    const hold = await reserveSpend(db, "batch-quick");
+    if (!hold.ok) return hold.reason;
     const started = Date.now();
     try {
       const res = await provider.complete({
@@ -176,6 +178,8 @@ async function missingTier(db: DB, runId: string, deadline: number, bump: (k: st
         latencyMs: Date.now() - started,
       });
       bump("missingFailedCalls");
+    } finally {
+      await releaseReservation(db, hold.reservationId);
     }
     await updateSettings(db, { missingCursor: rows[rows.length - 1].id });
   }

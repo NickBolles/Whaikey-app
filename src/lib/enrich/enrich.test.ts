@@ -10,14 +10,16 @@ import {
   enrichmentRuns,
 } from "@/db/schema";
 import { createTestBottle, createTestUser, setupTestDb, uid } from "@/test/helpers";
+import { setAnthropicForTests } from "@/lib/ai/client";
 import { runBatch } from "./batch";
-import { canSpend, DEFAULT_DAILY_BUDGET_USD, getSettings, spendByDay, spendByRun, spendSince, updateSettings } from "./budget";
+import { canSpend, DEFAULT_DAILY_BUDGET_USD, getSettings, releaseReservation, reserveSpend, RESERVATION_TTL_MS, spendByDay, spendByRun, spendSince, updateSettings } from "./budget";
 import { settleKicks } from "./kick";
 import { quickPrompt, webPrompt } from "./prompts";
 import {
   anthropicProvider,
   enrichEnabledByEnv,
   enrichLive,
+  getEnrichProvider,
   openAiProvider,
   selectedProviderName,
   setEnrichProviderForTests,
@@ -125,6 +127,26 @@ describe("provider selection", () => {
     expect(enrichLive()).toBe(true);
   });
 
+  it("Anthropic enrichment goes through the shared AI client, and only when it talks to Anthropic directly", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "");
+    vi.stubEnv("ANTHROPIC_API_KEY", "ak-test");
+    vi.stubEnv("OPENROUTER_API_KEY", "or-test");
+    // OpenRouter can't run the hosted web search, so it isn't an enrichment provider.
+    expect(selectedProviderName()).toBeNull();
+    vi.stubEnv("OPENROUTER_API_KEY", "");
+    const create = vi.fn().mockResolvedValue({ stop_reason: "end_turn", content: [{ type: "text", text: "ok" }], usage: { input_tokens: 1, output_tokens: 1 } });
+    setAnthropicForTests({ messages: { create } } as never);
+    try {
+      const p = getEnrichProvider();
+      expect(p?.name).toBe("anthropic");
+      await p!.complete({ prompt: "x", model: p!.quickModel, web: false, timeoutMs: 10_000, maxOutputTokens: 10 });
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(create.mock.calls[0][1]).toMatchObject({ timeout: expect.any(Number), maxRetries: 0 });
+    } finally {
+      setAnthropicForTests(null);
+    }
+  });
+
   it("an existing chat key alone spends nothing until ENRICH_ENABLED=true", () => {
     delete process.env.ENRICH_ENABLED;
     vi.stubEnv("OPENAI_API_KEY", "");
@@ -178,7 +200,7 @@ describe("anthropicProvider", () => {
         content: [{ type: "text", text: "part two" }],
         usage: { input_tokens: 50, output_tokens: 20, cache_read_input_tokens: 5 },
       });
-    const p = anthropicProvider("ak", { messages: { create } } as never);
+    const p = anthropicProvider({ messages: { create } } as never);
     const res = await p.complete({ prompt: "x", model: p.webModel, web: true, timeoutMs: 10_000, maxOutputTokens: 100 });
     expect(create).toHaveBeenCalledTimes(2);
     expect(res.text).toContain("part two");
@@ -186,7 +208,7 @@ describe("anthropicProvider", () => {
   });
 
   it("wraps SDK failures", async () => {
-    const p = anthropicProvider("ak", { messages: { create: vi.fn().mockRejectedValue(new Error("overloaded")) } } as never);
+    const p = anthropicProvider({ messages: { create: vi.fn().mockRejectedValue(new Error("overloaded")) } } as never);
     await expect(p.complete({ prompt: "x", model: p.quickModel, web: false, timeoutMs: 10_000, maxOutputTokens: 100 })).rejects.toThrow(/anthropic: overloaded/);
   });
 });
@@ -318,6 +340,21 @@ describe("live jobs", () => {
     expect((await getSettings(db)).dailyBudgetUsd).toBe(0);
     await updateSettings(db, { dailyBudgetUsd: DEFAULT_DAILY_BUDGET_USD });
     expect(await canSpend(db, "web")).toEqual({ ok: true });
+  });
+
+  it("holds each call's estimate so concurrent calls can't share the last of the cap", async () => {
+    setEnrichProviderForTests(fakeProvider().provider);
+    await updateSettings(db, { dailyBudgetUsd: 0.3 });
+    const [a, b] = await Promise.all([reserveSpend(db, "web"), reserveSpend(db, "web")]);
+    expect([a.ok, b.ok].sort()).toEqual([false, true]);
+    expect(await canSpend(db, "web")).toEqual({ ok: false, reason: "budget" });
+    const held = a.ok ? a : b;
+    await releaseReservation(db, held.ok ? held.reservationId : null);
+    expect(await canSpend(db, "web")).toEqual({ ok: true });
+    // An abandoned hold expires.
+    const stale = await reserveSpend(db, "web", new Date(Date.now() - RESERVATION_TTL_MS - 1_000));
+    expect(stale.ok).toBe(true);
+    expect((await reserveSpend(db, "web")).ok).toBe(true);
   });
 
   it("retries a failing model step, then gives up; the operator can requeue failures", async () => {
