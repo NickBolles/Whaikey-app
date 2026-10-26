@@ -56,7 +56,8 @@ export default function PrivacyPage() {
           </li>
           <li>
             <strong className="text-foreground">Your journal</strong> — pours, ratings, tasting
-            notes, flavour tags, the bottles on your shelf, and what you paid.
+            notes, flavour tags, the bottles on your shelf, and what you paid. Also the private
+            tags you add to pours, which only you ever see.
           </li>
           <li>
             <strong className="text-foreground">Your concierge conversations</strong> — every

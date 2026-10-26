@@ -63,6 +63,7 @@ export default async function HistoryPage({
     createdAt: pour.createdAt.toISOString(),
     visibility: pour.visibility,
     editedAt: pour.editedAt ? pour.editedAt.toISOString() : null,
+    tags: pour.tags,
     note: pour.note
       ? {
           nose: pour.note.nose,

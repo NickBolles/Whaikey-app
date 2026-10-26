@@ -491,6 +491,45 @@ export const pours = pgTable(
 );
 
 /**
+ * A person's own words for grouping pours ("tasting night", "gift", "blind").
+ * Private to their author: never projected to another user, never feeds a
+ * community number. `key` is the normalized form (trimmed, lower-cased) that
+ * makes "Gift" and "gift " one tag; `name` keeps the spelling first used.
+ */
+export const tags = pgTable(
+  "tags",
+  {
+    id: id(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    key: text("key").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("tags_user_key_idx").on(t.userId, t.key)],
+);
+
+/** Which of the author's tags are on which of their pours. */
+export const pourTags = pgTable(
+  "pour_tags",
+  {
+    pourId: text("pour_id")
+      .notNull()
+      .references(() => pours.id, { onDelete: "cascade" }),
+    tagId: text("tag_id")
+      .notNull()
+      .references(() => tags.id, { onDelete: "cascade" }),
+    /** Denormalized owner, so deletion and export slice without a join. */
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.pourId, t.tagId] }), index("pour_tags_tag_idx").on(t.tagId), index("pour_tags_user_idx").on(t.userId)],
+);
+
+/**
  * flavorTags: JSON mapping leaf descriptor ids from the flavor wheel to
  * intensity 1-3, e.g. {"vanilla":3,"green-apple":1}.
  */

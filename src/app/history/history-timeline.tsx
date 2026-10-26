@@ -23,6 +23,8 @@ export interface TimelinePour {
   visibility: PourVisibility;
   /** ISO time of the owner's last edit of the entry, or null. */
   editedAt?: string | null;
+  /** The author's private tags. */
+  tags?: string[];
   note: {
     nose: string | null;
     palate: string | null;
@@ -121,6 +123,11 @@ function PourRow({ pour }: { pour: TimelinePour }) {
               .join(" · ")}
           </div>
           {snippet && <p className="mt-1 line-clamp-2 font-display text-[13px] italic leading-snug text-quote/85">{snippet}</p>}
+          {pour.tags && pour.tags.length > 0 && (
+            <p className="mt-0.5 truncate text-xs text-accent/90" aria-label="Tags">
+              {pour.tags.map((t) => `#${t}`).join(" ")}
+            </p>
+          )}
           {shownTags.length > 0 && (
             <ul className="mt-1 flex flex-wrap gap-1" aria-label="Flavor tags">
               {shownTags.map(([leafId, intensity]) => (

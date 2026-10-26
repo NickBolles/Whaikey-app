@@ -406,3 +406,22 @@ describe("PourFlow — keep scanning", () => {
     expect(screen.getByRole("button", { name: "Clear rating" })).toBeInTheDocument();
   });
 });
+
+describe("PourFlow — tags", () => {
+  it("sends the tags row with the pour and keeps it in the draft", async () => {
+    prev = "/bar";
+    const fetchMock = stubFetch(async (url, init) => {
+      const href = String(url);
+      if (href === "/api/tags") return ok({ tags: [{ name: "blind", uses: 3 }] });
+      if (href === "/api/pours" && init?.method === "POST") return ok({ pour: { id: "p1" } });
+      return ok({});
+    });
+    renderFlow({ initialBottle: { id: "b1", name: "Test Bourbon" } });
+    fireEvent.click(await screen.findByRole("button", { name: "Add tag blind" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Save pour" }));
+    });
+    const post = fetchMock.mock.calls.find(([u, i]) => u === "/api/pours" && i?.method === "POST");
+    expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({ bottleId: "b1", tags: ["blind"] });
+  });
+});

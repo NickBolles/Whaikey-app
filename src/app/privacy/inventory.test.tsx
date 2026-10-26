@@ -76,6 +76,8 @@ const INVENTORY: Record<string, Verdict> = {
   tasting_notes: { disclosed: "pours, ratings, tasting", sharedWith: ["pours"] },
   user_bottles: { disclosed: "the bottles on your shelf, and what you paid" },
   pour_shares: { disclosed: "any share links you create" },
+  tags: { disclosed: "private tags you add to pours", sharedWith: ["pour_tags"] },
+  pour_tags: { disclosed: "private tags you add to pours", sharedWith: ["tags"] },
   // Was `notPersonal: "Tier definitions … identical for everyone"` — a claim
   // about the schema that the schema contradicts (user_id, family, value,
   // tier, achieved_at: one row per person per badge). See the file docstring:
