@@ -118,7 +118,7 @@ function PourRow({ pour }: { pour: TimelinePour }) {
               .filter(Boolean)
               .join(" · ")}
           </div>
-          {snippet && <p className="mt-1 line-clamp-2 text-xs italic text-foreground/75">{snippet}</p>}
+          {snippet && <p className="mt-1 line-clamp-2 font-display text-[13px] italic leading-snug text-quote/85">{snippet}</p>}
           {shownTags.length > 0 && (
             <ul className="mt-1 flex flex-wrap gap-1" aria-label="Flavor tags">
               {shownTags.map(([leafId, intensity]) => (

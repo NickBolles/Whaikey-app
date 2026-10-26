@@ -12,8 +12,8 @@ export default function manifest(): MetadataRoute.Manifest {
     description: "AI-native whiskey tracking: your bar, your palate, your pours.",
     start_url: "/",
     display: "standalone",
-    background_color: "#14100b",
-    theme_color: "#14100b",
+    background_color: "#120e0a",
+    theme_color: "#120e0a",
     orientation: "portrait",
     categories: ["food", "lifestyle"],
     icons: [

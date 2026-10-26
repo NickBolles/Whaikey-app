@@ -81,6 +81,29 @@ describe("FriendsModule", () => {
   });
 });
 
+describe("FeedCard types (Ledger × Paper)", () => {
+  it("sets a written note as a pull-quote with the bottle as its byline", () => {
+    render(<FriendsModule items={[item()]} hasProfile hasFollows />);
+    expect(document.querySelector("[data-feed-card]")).toHaveAttribute("data-feed-card", "note");
+    expect(screen.getByText("Tasting note")).toBeInTheDocument();
+    expect(screen.getByTestId("pull-quote")).toHaveTextContent("Campfire and iodine, but sweeter than I remembered.");
+  });
+
+  it("renders a bare rating as a ledger line, not a quote", () => {
+    render(<FriendsModule items={[item({ freeform: "" })]} hasProfile hasFollows />);
+    expect(screen.queryByTestId("pull-quote")).toBeNull();
+    expect(screen.getByText("Rated")).toBeInTheDocument();
+    expect(document.querySelector("[data-feed-card]")).toHaveAttribute("data-feed-card", "rating");
+    expect(screen.getByRole("link", { name: "Lagavulin 16" })).toHaveAttribute("href", "/bottles/bottle-1");
+  });
+
+  it("keeps a two-word note as a plain line rather than a framed quote", () => {
+    render(<FriendsModule items={[item({ freeform: "Smoky, sweet." })]} hasProfile hasFollows />);
+    expect(screen.queryByTestId("pull-quote")).toBeNull();
+    expect(screen.getByText("“Smoky, sweet.”")).toBeInTheDocument();
+  });
+});
+
 describe("FriendsModule — taste twins (US-16)", () => {
   it("marks a note from someone who tastes like you", () => {
     render(
