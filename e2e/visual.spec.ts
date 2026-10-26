@@ -365,6 +365,66 @@ test.describe("signed in (demo collector)", () => {
     await expect(page).toHaveScreenshot(shot("pour-edit"), { fullPage: true });
   });
 
+  test("pour flow: unknown barcode card", async ({ page }) => {
+    // A fake camera whose detector reads a barcode the catalog lacks; the
+    // lookup is stubbed to a miss with a product-database name.
+    await page.addInitScript(() => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 640;
+      canvas.height = 360;
+      const draw = () => {
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          ctx.fillStyle = "#241a12";
+          ctx.fillRect(0, 0, 640, 360);
+        }
+      };
+      draw();
+      setInterval(draw, 100);
+      const stream = canvas.captureStream(10);
+      Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia: async () => stream } });
+      (window as unknown as { BarcodeDetector: unknown }).BarcodeDetector = class {
+        async detect() {
+          return [{ rawValue: "012345678905" }];
+        }
+      };
+    });
+    await page.route("**/api/scan/upc", (route) =>
+      route.fulfill({ json: { upc: "012345678905", matches: [], candidates: [], externalName: "OLD FORESTER 1920 750ML" } }),
+    );
+    await page.goto("/pour");
+    await expect(page.getByRole("group", { name: "Unknown barcode" })).toBeVisible({ timeout: 15_000 });
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("pour-unknown-barcode"), { fullPage: true });
+  });
+
+  test("pour flow: keep scanning beside the picked bottle", async ({ page }) => {
+    await page.addInitScript(() => {
+      delete (window as { BarcodeDetector?: unknown }).BarcodeDetector;
+      const canvas = document.createElement("canvas");
+      canvas.width = 640;
+      canvas.height = 360;
+      const draw = () => {
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          ctx.fillStyle = "#241a12";
+          ctx.fillRect(0, 0, 640, 360);
+        }
+      };
+      draw();
+      setInterval(draw, 100);
+      const stream = canvas.captureStream(10);
+      Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia: async () => stream } });
+    });
+    await page.goto("/pour");
+    await page.getByRole("button", { name: /Keep scanning/ }).click();
+    await page.getByRole("list", { name: "Recent bottles" }).getByText(/Eagle Rare 10/i).first().click();
+    await expect(page.getByTestId("pour-bottle")).toBeVisible();
+    await expect(page.getByRole("button", { name: /Stop camera/ })).toBeVisible();
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("pour-keep-scanning"), { fullPage: true });
+  });
+
   test("history journal", async ({ page }) => {
     await page.goto("/history");
     await expect(page.getByText(/Lagavulin/i).first()).toBeVisible();

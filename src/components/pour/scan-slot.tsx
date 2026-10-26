@@ -2,15 +2,22 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Camera, CameraOff, ScanLine, Search } from "lucide-react";
+import { Camera, CameraOff, Repeat, ScanLine, Search, X } from "lucide-react";
 import { isNativeApp } from "@/lib/native/platform";
 import { startNativeScan, type NativeScanSession } from "@/lib/native/barcode";
 import { haptic } from "@/lib/native/haptics";
+import { ToggleSwitch } from "@/components/toggle-switch";
 import { identifyLabel } from "@/lib/label-scan";
 import { bottleMeta, decideScan, productCode, type ScanBottle, type ScanDecision, type UpcLookup } from "./scan-decision";
 
-/** D16: the camera pauses itself after ~2 minutes of logging. */
+/** D16: the camera pauses itself after ~2 minutes with nothing read. */
 export const CAMERA_AUTO_PAUSE_MS = 120_000;
+/**
+ * Keep-scanning hard cap: however busy the tasting, the camera stops after
+ * this long and needs one tap to resume — a phone left face-up on the bar
+ * must not drain overnight because something kept reading barcodes.
+ */
+export const CAMERA_MAX_SESSION_MS = 15 * 60_000;
 const DETECT_INTERVAL_MS = 300;
 const BARCODE_FORMATS = ["upc_a", "upc_e", "ean_13", "ean_8", "itf", "code_128"];
 
@@ -30,6 +37,32 @@ export interface PickMeta {
   /** How the bottle got into the slot — "barcode" earns the "Not it?" row. */
   via: "barcode" | "label" | "search" | "recent";
   alternatives?: ScanBottle[];
+}
+
+/** An unknown barcode and everything the sheet could read about it. */
+interface UnknownBarcode {
+  upc: string;
+  /** What a product database calls it, when one knew the code but not the bottle. */
+  externalName: string | null;
+  /** What the label photo read, once one was snapped. */
+  labelText: string | null;
+}
+
+interface TeachResponse {
+  teach?: { state: string; confirmations: number; required: number; taught: boolean } | null;
+}
+
+/** The sentence a crowd-confirm outcome earns (same flow as the scanner, #100). */
+export function teachMessage(bottleName: string, data: TeachResponse | null): string {
+  const teach = data?.teach;
+  if (teach?.taught) return `You taught Whaikey this barcode — ${bottleName}`;
+  if (teach?.state === "pending") {
+    const left = Math.max(0, (teach.required ?? 2) - (teach.confirmations ?? 1));
+    return left > 0
+      ? `Barcode saved for ${bottleName} — ${left} more confirmation${left === 1 ? "" : "s"} adds it for everyone`
+      : `Barcode saved for ${bottleName} — waiting for review`;
+  }
+  return `Thanks — barcode noted for ${bottleName}`;
 }
 
 interface SearchResult {
@@ -60,9 +93,23 @@ function toBottle(r: SearchResult): ScanBottle {
 export function PourScanSlot({
   onPick,
   missingNotice = false,
+  compact = false,
+  keepScanning,
+  onKeepScanningChange,
+  onNotice,
+  round = 0,
 }: {
   onPick: (bottle: ScanBottle, meta: PickMeta) => void;
   missingNotice?: boolean;
+  /** A bottle is already in the sheet: show only the live viewfinder (keep-scanning). */
+  compact?: boolean;
+  /** Keep the camera running after a pick (fast multi-pour logging). Absent ⇒ no toggle. */
+  keepScanning?: boolean;
+  onKeepScanningChange?: (next: boolean) => void;
+  /** Outcome lines the sheet should toast (e.g. what teaching a barcode did). */
+  onNotice?: (message: string) => void;
+  /** Bumped by the sheet after each saved pour so the same bottle can be read again. */
+  round?: number;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -73,7 +120,20 @@ export function PourScanSlot({
   const [canDetect, setCanDetect] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [choice, setChoice] = useState<Extract<ScanDecision, { kind: "choose" }> | null>(null);
-  const [missUpc, setMissUpc] = useState<string | null>(null);
+  const [miss, setMiss] = useState<UnknownBarcode | null>(null);
+  const [teach, setTeach] = useState(true);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const missRef = useRef<UnknownBarcode | null>(null);
+  useEffect(() => {
+    missRef.current = miss;
+  }, [miss]);
+  /** Pauses the running camera; set by the camera effect for the idle timer. */
+  const pauseRef = useRef<(() => void) | null>(null);
+  const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const armIdle = useCallback(() => {
+    if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+    idleTimerRef.current = setTimeout(() => pauseRef.current?.(), CAMERA_AUTO_PAUSE_MS);
+  }, []);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<ScanBottle[]>([]);
   const [searching, setSearching] = useState(false);
@@ -105,6 +165,13 @@ export function PourScanSlot({
     };
   }, []);
 
+  // The sheet passes a fresh `onPick` every render; reading it through a ref
+  // keeps the camera effect from restarting on every keystroke in the sheet.
+  const onPickRef = useRef(onPick);
+  useEffect(() => {
+    onPickRef.current = onPick;
+  }, [onPick]);
+
   const resolveBarcode = useCallback(
     async (raw: string) => {
       const code = productCode(raw);
@@ -125,17 +192,25 @@ export function PourScanSlot({
         }
         if (!res.ok) throw new Error(String(res.status));
         const decision = decideScan((await res.json()) as UpcLookup);
+        // Something was read: the idle clock starts over (keep-scanning).
+        armIdle();
         if (decision.kind === "exact") {
           haptic("lock");
           setStatus(null);
-          onPick(decision.bottle, { via: "barcode", alternatives: decision.alternatives });
+          setMiss(null);
+          // An exact read supersedes any earlier suggestions.
+          setChoice(null);
+          onPickRef.current(decision.bottle, { via: "barcode", alternatives: decision.alternatives });
         } else if (decision.kind === "choose") {
           haptic("tap");
           setStatus(null);
+          setMiss(null);
           setChoice(decision);
         } else {
+          haptic("tap");
           setStatus(null);
-          setMissUpc(decision.upc);
+          setChoice(null);
+          setMiss({ upc: decision.upc, externalName: decision.externalName, labelText: null });
         }
       } catch {
         seenRef.current.delete(code);
@@ -144,7 +219,7 @@ export function PourScanSlot({
         busyRef.current = false;
       }
     },
-    [onPick],
+    [armIdle],
   );
 
   const stopCamera = useCallback(() => {
@@ -159,14 +234,18 @@ export function PourScanSlot({
     let cancelled = false;
     let interval: ReturnType<typeof setInterval> | null = null;
     let native: NativeScanSession | null = null;
-    const pauseTimer = setTimeout(() => {
+    const pause = () => {
       if (cancelled) return;
       cancelled = true;
       if (interval) clearInterval(interval);
       void native?.stop();
       stopCamera();
       setCamera("paused");
-    }, CAMERA_AUTO_PAUSE_MS);
+    };
+    pauseRef.current = pause;
+    // Idle pause (re-armed by every read) and a hard cap that nothing extends.
+    armIdle();
+    const capTimer = setTimeout(pause, CAMERA_MAX_SESSION_MS);
 
     (async () => {
       if (isNativeApp()) {
@@ -227,12 +306,56 @@ export function PourScanSlot({
 
     return () => {
       cancelled = true;
-      clearTimeout(pauseTimer);
+      clearTimeout(capTimer);
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+      if (pauseRef.current === pause) pauseRef.current = null;
       if (interval) clearInterval(interval);
       void native?.stop();
       stopCamera();
     };
-  }, [attempt, resolveBarcode, stopCamera]);
+  }, [attempt, resolveBarcode, stopCamera, armIdle]);
+
+  // A saved pour starts a new round: the bottle just logged may be read again.
+  useEffect(() => {
+    seenRef.current.clear();
+    if (round > 0) armIdle();
+  }, [round, armIdle]);
+
+  /** Stop control: the camera goes off now, and keep-scanning with it. */
+  function stopNow() {
+    pauseRef.current?.();
+    onKeepScanningChange?.(false);
+  }
+
+  /**
+   * Every pick goes through here. While an unknown barcode is on the card and
+   * "Teach this barcode" is on, the pick is also a crowd confirmation of that
+   * barcode → bottle (the scanner's #100 flow, two agreeing people add it for
+   * everyone). It never shelves anything.
+   */
+  function finish(b: ScanBottle, meta: PickMeta) {
+    const unknown = missRef.current;
+    if (unknown && teach) {
+      void fetch("/api/scan/confirm", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ upc: unknown.upc, bottleId: b.id }),
+      })
+        .then((res) => (res.ok ? (res.json() as Promise<TeachResponse>) : Promise.reject(new Error(String(res.status)))))
+        .then((data) => onNotice?.(teachMessage(b.name, data)))
+        .catch(() => onNotice?.(`Couldn't save barcode ${unknown.upc} — you can teach it from the scanner later.`));
+    }
+    setMiss(null);
+    setChoice(null);
+    armIdle();
+    onPick(b, meta);
+  }
+
+  function pickBottleForUnknown() {
+    const guess = miss?.labelText ?? miss?.externalName ?? "";
+    if (guess && query.trim().length < 2) onQuery(guess);
+    searchRef.current?.focus();
+  }
 
   async function snapLabel() {
     const video = videoRef.current;
@@ -248,6 +371,8 @@ export function PourScanSlot({
       const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
       const result = await identifyLabel(dataUrl, "image/jpeg");
       setLabelVia(result.via);
+      // An unknown barcode's card shows what the label read alongside it.
+      if (missRef.current) setMiss({ ...missRef.current, labelText: result.guess ?? null });
       if (result.candidates.length > 0) {
         setStatus(null);
         setChoice({ kind: "choose", upc: "", options: result.candidates.slice(0, 3).map(toBottle), externalName: result.guess ?? null });
@@ -269,12 +394,20 @@ export function PourScanSlot({
    */
   function pickSuggestion(b: ScanBottle) {
     const upc = choice?.upc || null;
-    void fetch("/api/scan/confirm", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(upc ? { upc, bottleId: b.id } : { bottleId: b.id, via: labelVia ?? undefined }),
-    }).catch(() => {});
-    onPick(b, { via: upc ? "barcode" : "label" });
+    // With an unknown barcode on the card, `finish` sends the barcode confirm.
+    if (!(missRef.current && teach) || upc) {
+      void fetch("/api/scan/confirm", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(upc ? { upc, bottleId: b.id } : { bottleId: b.id, via: labelVia ?? undefined }),
+      }).catch(() => {});
+    }
+    if (upc) {
+      setChoice(null);
+      onPick(b, { via: "barcode" });
+      return;
+    }
+    finish(b, { via: "label" });
   }
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -315,11 +448,33 @@ export function PourScanSlot({
           We couldn’t load that bottle. Scan or type it instead.
         </p>
       )}
-      <div className="card-viewfinder relative h-[150px] overflow-hidden rounded-lg border border-border bg-black/60" data-testid="pour-viewfinder">
+      <div
+        className={`card-viewfinder relative overflow-hidden rounded-lg border border-border bg-black/60 ${compact ? "h-[124px]" : "h-[150px]"}`}
+        data-testid="pour-viewfinder"
+      >
         {showVideo && <video ref={videoRef} muted playsInline aria-hidden className="absolute inset-0 h-full w-full object-cover" />}
         {/* Framing corners: decorative, the same guide the full scanner draws. */}
         <span aria-hidden className="pointer-events-none absolute inset-x-[18%] inset-y-4 rounded-md border border-accent/50" />
         <span aria-hidden className="pointer-events-none absolute inset-x-[18%] top-1/2 h-px bg-accent/70" />
+        {camera === "on" && (onKeepScanningChange || compact) && (
+          <div className="absolute inset-x-0 top-0 flex justify-end gap-1.5 p-1.5">
+            {onKeepScanningChange && (
+              <button
+                type="button"
+                aria-pressed={Boolean(keepScanning)}
+                onClick={() => onKeepScanningChange(!keepScanning)}
+                className={`chip flex min-h-11 items-center gap-1.5 px-3 text-xs ${keepScanning ? "chip-active font-medium" : "bg-black/50"}`}
+              >
+                <Repeat size={14} strokeWidth={1.8} aria-hidden /> Keep scanning
+              </button>
+            )}
+            {keepScanning && (
+              <button type="button" onClick={stopNow} className="chip flex min-h-11 items-center gap-1.5 bg-black/50 px-3 text-xs">
+                <CameraOff size={14} strokeWidth={1.8} aria-hidden /> Stop camera
+              </button>
+            )}
+          </div>
+        )}
         <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-2 bg-gradient-to-t from-black/80 to-transparent px-2.5 pb-2 pt-6 text-xs">
           <p role="status" aria-live="polite" className="min-w-0 text-foreground/90">
             {status ??
@@ -330,7 +485,9 @@ export function PourScanSlot({
                     ? "Point at the barcode — or snap the label."
                     : "Snap the label to identify it."
                   : camera === "paused"
-                    ? "Camera paused to save battery."
+                    ? keepScanning
+                      ? "Camera paused to save battery — tap Resume for the next bottle."
+                      : "Camera paused to save battery."
                     : "Camera is off — type a name below.")}
           </p>
           {camera === "on" && engine === "web" && (
@@ -383,17 +540,64 @@ export function PourScanSlot({
         </div>
       )}
 
-      {missUpc && (
-        <p className="rounded-lg border border-border bg-surface px-2.5 py-2 text-xs text-muted">
-          We don’t know barcode {missUpc} yet. Type the name below, or{" "}
-          <Link href="/scan" className="text-accent underline-offset-2 hover:underline">teach the scanner</Link> — two confirmations add it for everyone.
-        </p>
+      {miss && (
+        <section
+          role="group"
+          aria-label="Unknown barcode"
+          data-testid="unknown-barcode"
+          className="flex flex-col gap-2 rounded-lg border border-accent/40 bg-surface px-2.5 py-2"
+        >
+          <div className="flex items-start justify-between gap-2">
+            <p className="text-sm font-medium">We don’t know this barcode yet</p>
+            <button
+              type="button"
+              aria-label="Dismiss unknown barcode"
+              onClick={() => setMiss(null)}
+              className="-mr-1 -mt-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-muted hover:text-foreground"
+            >
+              <X size={16} strokeWidth={1.8} aria-hidden />
+            </button>
+          </div>
+          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
+            <dt className="text-muted">Barcode</dt>
+            <dd className="font-mono tabular-nums">{miss.upc}</dd>
+            {miss.externalName && (
+              <>
+                <dt className="text-muted">Product lookup</dt>
+                <dd className="min-w-0 break-words">{miss.externalName}</dd>
+              </>
+            )}
+            <dt className="text-muted">Label reads</dt>
+            <dd className="min-w-0 break-words">
+              {miss.labelText ? `“${miss.labelText}”` : <span className="text-muted">not read yet</span>}
+            </dd>
+          </dl>
+          <div className="flex flex-wrap gap-1.5">
+            <button type="button" onClick={pickBottleForUnknown} className="chip chip-active flex min-h-11 items-center gap-1.5 px-3 text-xs font-medium">
+              <Search size={14} strokeWidth={1.8} aria-hidden /> Pick bottle
+            </button>
+            {camera === "on" && engine === "web" && !miss.labelText && (
+              <button type="button" onClick={() => void snapLabel()} className="chip flex min-h-11 items-center gap-1.5 px-3 text-xs">
+                <ScanLine size={14} strokeWidth={1.8} aria-hidden /> Read the label
+              </button>
+            )}
+          </div>
+          <ToggleSwitch
+            label="Teach this barcode"
+            hint="The bottle you pick counts as a confirmation — two agreeing people add it for everyone."
+            checked={teach}
+            onChange={setTeach}
+          />
+        </section>
       )}
 
+      {(!compact || miss) && (
+        <>
       <label className="relative block">
         <span className="sr-only">Or type a bottle name</span>
         <Search size={16} strokeWidth={1.8} aria-hidden className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
         <input
+          ref={searchRef}
           type="search"
           value={query}
           onChange={(e) => onQuery(e.target.value)}
@@ -408,7 +612,7 @@ export function PourScanSlot({
         <ul className="ledger" aria-label="Search results">
           {results.map((b) => (
             <li key={b.id}>
-              <button type="button" onClick={() => onPick(b, { via: "search" })} className="ledger-row w-full text-left">
+              <button type="button" onClick={() => finish(b, { via: "search" })} className="ledger-row w-full text-left">
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-medium">{b.name}</span>
                   <span className="block truncate text-xs text-muted">{bottleMeta(b) || b.category}</span>
@@ -428,13 +632,15 @@ export function PourScanSlot({
           <ul className="flex flex-wrap gap-1.5" aria-label="Recent bottles">
             {recent.map((b) => (
               <li key={b.id}>
-                <button type="button" onClick={() => onPick(b, { via: "recent" })} className="chip min-h-11 px-3 text-xs text-foreground/90 hover:bg-surface-raised">
+                <button type="button" onClick={() => finish(b, { via: "recent" })} className="chip min-h-11 px-3 text-xs text-foreground/90 hover:bg-surface-raised">
                   {b.name}
                 </button>
               </li>
             ))}
           </ul>
         </div>
+      )}
+        </>
       )}
     </section>
   );

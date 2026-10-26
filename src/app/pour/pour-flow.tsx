@@ -56,6 +56,8 @@ const VISIBILITY_SUMMARY: Record<PourVisibility, string> = {
  * After Save a toast carries Undo and the sheet returns where you came from —
  * there is no "Poured." page any more.
  */
+const KEEP_SCANNING_KEY = "whaikey:pour-keep-scanning";
+
 /** A logged pour opened for editing (journal ⋯ → Edit). */
 export interface EditEntry {
   id: string;
@@ -93,6 +95,24 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
   const editing = editEntry != null;
   const [bottle, setBottle] = useState<ScanBottle | null>(editEntry?.bottle ?? initialBottle);
   const [pickedVia, setPickedVia] = useState<PickMeta | null>(null);
+  // Keep-scanning (tastings): the camera stays up after a pick and a saved
+  // pour resets the sheet for the next bottle instead of leaving. Per-tab and
+  // off by default — a running camera is a battery cost the user opts into.
+  const [keepScanning, setKeepScanningState] = useState(false);
+  const [scanRound, setScanRound] = useState(0);
+  useEffect(() => {
+    try {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot restore from sessionStorage, which the server render can't see
+      if (!editing && sessionStorage.getItem(KEEP_SCANNING_KEY) === "1") setKeepScanningState(true);
+    } catch {}
+  }, [editing]);
+  const setKeepScanning = (next: boolean) => {
+    setKeepScanningState(next);
+    try {
+      if (next) sessionStorage.setItem(KEEP_SCANNING_KEY, "1");
+      else sessionStorage.removeItem(KEEP_SCANNING_KEY);
+    } catch {}
+  };
   const [notItOpen, setNotItOpen] = useState(false);
   const [rating, setRating] = useState<number | null>(editEntry?.rating ?? null);
   const [servingStyle, setServingStyle] = useState<ServingStyle | null>((editEntry?.servingStyle as ServingStyle | null) ?? null);
@@ -195,7 +215,54 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
     else router.push("/");
   }
 
+  // What the sheet holds right now, for toast actions created earlier.
+  const currentRef = useRef({ bottleId: bottle?.id ?? null, round: scanRound });
+  useEffect(() => {
+    currentRef.current = { bottleId: bottle?.id ?? null, round: scanRound };
+  }, [bottle, scanRound]);
+
   function pick(next: ScanBottle, meta: PickMeta) {
+    // Keep-scanning: the same bottle read again is not a new pick.
+    if (bottle && bottle.id === next.id) return;
+    // Keep-scanning: another bottle came into view mid-entry. Never move a
+    // rating or note typed for one bottle onto another — ask instead.
+    if (bottle && entryHasContent()) {
+      const forBottle = bottle.id;
+      const round = scanRound;
+      toast.show({
+        message: `Read ${next.name} — save this pour first, or switch`,
+        action: {
+          label: "Switch",
+          onClick: () => {
+            // A stale toast (that pour was saved, or the bottle changed since)
+            // must not wipe whatever is being entered now.
+            if (currentRef.current.bottleId !== forBottle || currentRef.current.round !== round) return;
+            clearEntry();
+            applyPick(next, meta);
+          },
+        },
+      });
+      // No new round here: B stays "seen" so it can't re-prompt every frame;
+      // saving this pour starts the next round and B reads again then.
+      return;
+    }
+    applyPick(next, meta);
+  }
+
+  function entryHasContent(): boolean {
+    return Boolean(
+      rating != null ||
+        servingStyle ||
+        nose.trim() ||
+        palate.trim() ||
+        finish.trim() ||
+        freeform.trim() ||
+        companions.trim() ||
+        Object.keys(flavorTags).length > 0,
+    );
+  }
+
+  function applyPick(next: ScanBottle, meta: PickMeta) {
     setBottle(next);
     setPickedVia(meta);
     setNotItOpen(false);
@@ -206,6 +273,8 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
         undo: () => {
           setBottle(null);
           setPickedVia(null);
+          // The slot may still be mounted (keep scanning): re-arm that barcode.
+          setScanRound((n) => n + 1);
         },
       });
     }
@@ -321,7 +390,13 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
           : undefined,
         action: { label: "Journal", onClick: () => router.push("/history") },
       });
-      leave();
+      if (keepScanning) {
+        // Ready for the next bottle: the sheet stays, the camera stays on,
+        // size and visibility carry over (they rarely change mid-tasting).
+        resetForNext();
+      } else {
+        leave();
+      }
       router.refresh();
     } catch (err) {
       // No signal where the whiskey is (PLAN.md §4.2): queue rather than lose
@@ -340,6 +415,29 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
       setSubmitting(false);
     }
   };
+
+  /** The per-bottle fields; size and visibility carry over. */
+  function clearEntry() {
+    setRating(null);
+    setServingStyle(null);
+    setNose("");
+    setPalate("");
+    setFinish("");
+    setFreeform("");
+    setFlavorTags({});
+    setCompanions("");
+    setDetailOpen(false);
+  }
+
+  function resetForNext() {
+    setBottle(null);
+    setPickedVia(null);
+    setNotItOpen(false);
+    clearEntry();
+    setDraftRestored(false);
+    finishedRef.current = false;
+    setScanRound((n) => n + 1);
+  }
 
   function discard() {
     finishedRef.current = true;
@@ -361,9 +459,20 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
           </div>
         </header>
 
-        {!bottle ? (
-          <PourScanSlot onPick={pick} missingNotice={initialBottleMissing} />
-        ) : (
+        {(!bottle || (keepScanning && !editing)) && (
+          <div className={bottle ? "mb-2" : undefined}>
+            <PourScanSlot
+              onPick={pick}
+              missingNotice={!bottle && initialBottleMissing}
+              compact={Boolean(bottle)}
+              keepScanning={keepScanning}
+              onKeepScanningChange={setKeepScanning}
+              onNotice={(message) => toast.show({ message })}
+              round={scanRound}
+            />
+          </div>
+        )}
+        {bottle && (
           <section aria-label="Bottle" className="flex flex-col gap-1.5">
             {pickedVia?.via === "barcode" && (
               <p className="flex items-center justify-between gap-2 text-xs">
@@ -398,7 +507,7 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
             {notItOpen && (
               <div className="flex flex-wrap gap-1.5" role="group" aria-label="Other bottles with this barcode">
                 {(pickedVia?.alternatives ?? []).map((alt) => (
-                  <button key={alt.id} type="button" onClick={() => pick(alt, { via: "search" })} className="chip min-h-11 px-3 text-xs text-foreground/90">
+                  <button key={alt.id} type="button" onClick={() => applyPick(alt, { via: "search" })} className="chip min-h-11 px-3 text-xs text-foreground/90">
                     {alt.name}
                   </button>
                 ))}

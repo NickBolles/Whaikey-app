@@ -13,13 +13,19 @@ vi.mock("@/lib/nav-history", () => ({ previousPath: () => prev }));
 // The camera slot is exercised on its own; here it only has to hand the sheet
 // a bottle the way an exact barcode or a search pick would.
 vi.mock("@/components/pour/scan-slot", () => ({
-  PourScanSlot: ({ onPick }: { onPick: (b: unknown, m: unknown) => void }) => (
-    <div>
+  PourScanSlot: ({ onPick, keepScanning, onKeepScanningChange, round }: { onPick: (b: unknown, m: unknown) => void; keepScanning?: boolean; onKeepScanningChange?: (v: boolean) => void; round?: number }) => (
+    <div data-testid="fake-slot" data-round={round}>
+      <button type="button" aria-pressed={Boolean(keepScanning)} onClick={() => onKeepScanningChange?.(!keepScanning)}>
+        fake keep scanning
+      </button>
       <button type="button" onClick={() => onPick({ id: "blantons", name: "Blanton's Original", distillery: "Buffalo Trace", abv: 46.5 }, { via: "barcode", alternatives: [{ id: "blantons-gold", name: "Blanton's Gold" }] })}>
         fake barcode hit
       </button>
       <button type="button" onClick={() => onPick({ id: "eagle", name: "Eagle Rare 10" }, { via: "search" })}>
         fake search pick
+      </button>
+      <button type="button" onClick={() => onPick({ id: "lagavulin", name: "Lagavulin 16" }, { via: "search" })}>
+        fake second pick
       </button>
     </div>
   ),
@@ -310,5 +316,93 @@ describe("PourFlow — editing a logged pour", () => {
     });
     expect(screen.getByRole("alert")).toHaveTextContent("A moderator hid this note.");
     expect(back).not.toHaveBeenCalled();
+  });
+});
+
+describe("PourFlow — keep scanning", () => {
+  beforeEach(() => window.sessionStorage.clear());
+
+  it("keeps the camera slot up after a pick and resets for the next bottle after Save", async () => {
+    prev = "/bar";
+    stubFetch(async (url, init) => {
+      const href = String(url);
+      if (href === "/api/pours" && init?.method === "POST") return ok({ pour: { id: "p1" } });
+      return ok({});
+    });
+    renderFlow();
+    await act(async () => {});
+    fireEvent.click(screen.getByRole("button", { name: "fake keep scanning" }));
+    expect(window.sessionStorage.getItem("whaikey:pour-keep-scanning")).toBe("1");
+    fireEvent.click(screen.getByRole("button", { name: "fake search pick" }));
+    // The slot stays mounted beside the picked bottle.
+    expect(screen.getByTestId("fake-slot")).toBeInTheDocument();
+    expect(screen.getByTestId("pour-bottle")).toHaveTextContent("Eagle Rare 10");
+    fireEvent.click(screen.getByRole("button", { name: "Rate 4 stars" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Save pour" }));
+    });
+    expect(back).not.toHaveBeenCalled();
+    expect(push).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("pour-bottle")).not.toBeInTheDocument();
+    expect(screen.getByTestId("fake-slot")).toHaveAttribute("data-round", "1");
+    expect(await screen.findByText(/Poured Eagle Rare 10/)).toBeInTheDocument();
+  });
+
+  it("without keep scanning a pick replaces the slot and Save leaves as before", async () => {
+    prev = "/bar";
+    stubFetch(async (url, init) => (String(url) === "/api/pours" && init?.method === "POST" ? ok({ pour: { id: "p1" } }) : ok({})));
+    renderFlow();
+    await act(async () => {});
+    fireEvent.click(screen.getByRole("button", { name: "fake search pick" }));
+    expect(screen.queryByTestId("fake-slot")).not.toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Save pour" }));
+    });
+    expect(back).toHaveBeenCalled();
+  });
+
+  it("another bottle read mid-entry never inherits the first one's rating — it asks", async () => {
+    window.sessionStorage.setItem("whaikey:pour-keep-scanning", "1");
+    stubFetch(async () => ok({}));
+    renderFlow();
+    await act(async () => {});
+    fireEvent.click(screen.getByRole("button", { name: "fake search pick" }));
+    fireEvent.click(screen.getByRole("button", { name: "Rate 4 stars" }));
+    fireEvent.click(screen.getByRole("button", { name: "fake second pick" }));
+    expect(screen.getByTestId("pour-bottle")).toHaveTextContent("Eagle Rare 10");
+    expect(await screen.findByText(/Read Lagavulin 16 — save this pour first/)).toBeInTheDocument();
+    // The rejected read does not start a new round (that would re-prompt every frame).
+    expect(screen.getByTestId("fake-slot")).toHaveAttribute("data-round", "0");
+    fireEvent.click(screen.getByRole("button", { name: "Switch" }));
+    expect(screen.getByTestId("pour-bottle")).toHaveTextContent("Lagavulin 16");
+    expect(screen.getByRole("button", { name: "Rate 4 stars" })).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("with nothing entered yet, another bottle simply replaces the first", async () => {
+    window.sessionStorage.setItem("whaikey:pour-keep-scanning", "1");
+    stubFetch(async () => ok({}));
+    renderFlow();
+    await act(async () => {});
+    fireEvent.click(screen.getByRole("button", { name: "fake search pick" }));
+    fireEvent.click(screen.getByRole("button", { name: "fake second pick" }));
+    expect(screen.getByTestId("pour-bottle")).toHaveTextContent("Lagavulin 16");
+  });
+
+  it("a Switch left over from a saved pour does nothing to the next one", async () => {
+    window.sessionStorage.setItem("whaikey:pour-keep-scanning", "1");
+    stubFetch(async (url, init) => (String(url) === "/api/pours" && init?.method === "POST" ? ok({ pour: { id: "p1" } }) : ok({})));
+    renderFlow();
+    await act(async () => {});
+    fireEvent.click(screen.getByRole("button", { name: "fake search pick" }));
+    fireEvent.click(screen.getByRole("button", { name: "Rate 4 stars" }));
+    fireEvent.click(screen.getByRole("button", { name: "fake second pick" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Save pour" }));
+    });
+    fireEvent.click(screen.getByRole("button", { name: "fake search pick" }));
+    fireEvent.click(screen.getByRole("button", { name: "Rate 3 stars" }));
+    fireEvent.click(screen.getByRole("button", { name: "Switch" }));
+    expect(screen.getByTestId("pour-bottle")).toHaveTextContent("Eagle Rare 10");
+    expect(screen.getByRole("button", { name: "Clear rating" })).toBeInTheDocument();
   });
 });
