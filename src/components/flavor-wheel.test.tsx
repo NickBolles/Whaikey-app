@@ -68,8 +68,8 @@ describe("FlavorWheel", () => {
     const byText = (t: string) =>
       Array.from(container.querySelectorAll("text")).find((n) => n.textContent === t)!;
     // Hot sweet wedge / hot pale vanilla leaf -> dark ink.
-    expect(byText("Sweet")).toHaveAttribute("fill", "#16110c");
-    expect(byText("Vanilla")).toHaveAttribute("fill", "#16110c");
+    expect(byText("Sweet")).toHaveAttribute("fill", "#101a14");
+    expect(byText("Vanilla")).toHaveAttribute("fill", "#101a14");
     // Ghosted floral wedge and the mid-dark cherry leaf keep the cream ink.
     expect(byText("Floral")).toHaveAttribute("fill", "var(--foreground)");
     expect(byText("Cherry")).toHaveAttribute("fill", "var(--foreground)");

@@ -38,7 +38,7 @@ test.describe("settings: sign out, export and delete", () => {
       page.waitForEvent("download"),
       page.getByRole("link", { name: /download json/i }).click(),
     ]);
-    expect(json.suggestedFilename()).toMatch(/^whaikey-export-\d{4}-\d{2}-\d{2}\.json$/);
+    expect(json.suggestedFilename()).toMatch(/^caskfolk-export-\d{4}-\d{2}-\d{2}\.json$/);
     const exported = JSON.parse(fs.readFileSync((await json.path())!, "utf8"));
     expect(exported.format).toBe("whaikey-account-export");
     expect(exported.data.account[0].email).toBe("account-user@whaikey.app");
@@ -53,7 +53,7 @@ test.describe("settings: sign out, export and delete", () => {
       page.waitForEvent("download"),
       page.getByRole("link", { name: /download csv/i }).click(),
     ]);
-    expect(zip.suggestedFilename()).toMatch(/^whaikey-export-\d{4}-\d{2}-\d{2}\.zip$/);
+    expect(zip.suggestedFilename()).toMatch(/^caskfolk-export-\d{4}-\d{2}-\d{2}\.zip$/);
     const bytes = fs.readFileSync((await zip.path())!);
     // A zip's local-file-header signature, "PK\x03\x04".
     expect([...bytes.subarray(0, 4)]).toEqual([0x50, 0x4b, 0x03, 0x04]);
