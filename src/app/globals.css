@@ -1,12 +1,25 @@
 @import "tailwindcss";
 
 :root {
-  --background: #14100b;
-  --surface: #1f1912;
-  --surface-raised: #2a2117;
-  --border: #392e20;
-  --foreground: #f4ecdd;
-  --muted: #a3927a;
+  /* Ledger × Paper, dark (docs/DESIGN.md, amended 2026-10-26): Paper's layout
+     printed on oak — paper becomes the dark ground, ink becomes cream, and the
+     ink rules become warm brass hairlines so the masthead's double rule still
+     reads as print. Amber stays the one action colour. */
+  --background: #120e0a;
+  --surface: #1a140e;
+  --surface-raised: #231b12;
+  --border: #3a2e20;
+  /* Paper's ink rule, in the dark: the masthead double rule, the bottle spec
+     strip and pull-quote frames. Stronger than --border, never a fill. */
+  --rule: #5a4733;
+  --foreground: #f2e9d8;
+  --muted: #a5937a;
+  /* The editorial voice — section kickers and quote marks. Softer than the
+     accent so a label never competes with the screen's one primary action. */
+  --editorial: #d9a25a;
+  /* Pull-quote text: a touch warmer than --foreground, the one large italic
+     line on a card. */
+  --quote: #f2e3c4;
   --accent: #e8a13c;
   --accent-deep: #b96f1e;
   --danger: #e05d5d;
@@ -25,6 +38,9 @@
   --color-surface-raised: var(--surface-raised);
   --color-border-subtle: var(--border);
   --color-border: var(--border);
+  --color-rule: var(--rule);
+  --color-editorial: var(--editorial);
+  --color-quote: var(--quote);
   --color-foreground: var(--foreground);
   --color-muted: var(--muted);
   --color-accent: var(--accent);
@@ -41,7 +57,7 @@
 
 body {
   background:
-    radial-gradient(120% 60% at 50% -10%, rgba(232, 161, 60, 0.07), transparent 60%),
+    radial-gradient(120% 60% at 50% -10%, rgba(232, 161, 60, 0.06), transparent 60%),
     var(--background);
   color: var(--foreground);
   font-family: var(--font-sans), system-ui, sans-serif;
@@ -61,7 +77,10 @@ body {
   background: linear-gradient(180deg, var(--surface-raised), var(--surface));
   border: 1px solid var(--border);
   border-radius: 0.75rem;
-  box-shadow: inset 0 1px 0 rgba(244, 236, 221, 0.04);
+  /* Paper's printed-card cue, in the dark: a hard 3px offset, no blur. */
+  box-shadow:
+    inset 0 1px 0 rgba(244, 236, 221, 0.04),
+    3px 3px 0 rgba(0, 0, 0, 0.55);
 }
 
 .card-flat {
@@ -171,11 +190,83 @@ body {
 }
 
 .section-label {
+  /* Paper's kicker: serif small caps in the editorial brass. */
+  font-family: var(--font-fraunces), Georgia, serif;
   font-size: 11px;
   text-transform: uppercase;
-  letter-spacing: 0.14em;
-  color: var(--muted);
+  letter-spacing: 0.16em;
+  color: var(--editorial);
   font-weight: 600;
+}
+
+/* --- Editorial recipes (Ledger × Paper) --- */
+
+/* The masthead's double rule: under the app header and around a bottle's
+   pull-quote. Print, not chrome. */
+.rule-double {
+  border-color: var(--rule);
+  border-style: double;
+}
+
+/* A small serif kicker above a title or a feed card ("Tasting note",
+   "Badge earned"). Same voice as .section-label, sized to sit inline. */
+.kicker {
+  font-family: var(--font-fraunces), Georgia, serif;
+  font-size: 11px;
+  line-height: 1.2;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--editorial);
+  font-weight: 600;
+}
+
+/* The pull-quote (src/components/pull-quote.tsx): a tasting note set as the
+   one large italic line on a card, hung off an amber rule with a ghosted
+   opening mark. Paper's signature move, kept legible at 390px. */
+.pull-quote {
+  position: relative;
+  margin: 0;
+  padding: 0.125rem 0 0.125rem 0.875rem;
+  border-left: 2px solid var(--accent);
+}
+.pull-quote > blockquote {
+  margin: 0;
+  font-family: var(--font-fraunces), Georgia, serif;
+  font-style: italic;
+  font-weight: 400;
+  font-size: 18px;
+  line-height: 1.28;
+  color: var(--quote);
+  overflow-wrap: anywhere;
+}
+.pull-quote::before {
+  content: "\201C";
+  position: absolute;
+  left: -0.125rem;
+  top: -0.875rem;
+  font-family: var(--font-fraunces), Georgia, serif;
+  font-style: italic;
+  font-weight: 600;
+  font-size: 40px;
+  line-height: 1;
+  color: var(--accent);
+  opacity: 0.45;
+  pointer-events: none;
+}
+/* Centred between double rules: the bottle page's editorial moment. */
+.pull-quote-center {
+  border-left: 0;
+  border-top: 3px double var(--rule);
+  border-bottom: 3px double var(--rule);
+  padding: 0.625rem 0.25rem 0.5rem;
+  text-align: center;
+}
+.pull-quote-center::before {
+  content: none;
+}
+.pull-quote-center > blockquote {
+  font-size: 20px;
+  line-height: 1.25;
 }
 
 .stat-number {

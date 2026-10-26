@@ -4,6 +4,8 @@ The feel: **compact, dense, premium — a collector's ledger in a well-lit whisk
 
 > **Amended 2026-10 (owner direction: "compact, dense, premium").** The previous rhythm (page `px-4`, sections `gap-6`/`mt-8`, cards `p-4`/`p-5`, `rounded-2xl` everywhere, emoji-led empty states) read as a roomy lounge and pushed primary actions below the fold on Home, Bar, Pour and Bottle. Rules 1, 4 and 6 are replaced and the **Density** section below is new. **Migration:** new and touched UI uses the dense rhythm immediately; the recipes in `globals.css` (`.card`, `.card-flat`, list rows) change in the Track B density PR (B0), which regenerates every affected baseline in one go. Until that PR lands, do not hand-roll dense variants per screen — use the existing recipes with the new spacing classes. Accessibility floors (rule 8's 44px hit areas, the 12px type floor, contrast) do not move.
 
+> **Amended 2026-10-26 (owner direction: "Ledger × Paper").** The app keeps Ledger's density and takes Paper's layout and editorial voice, dark first: a double-rule masthead under an italic serif wordmark, serif small-caps section kickers in an editorial brass, Paper's hard-offset card shadow, and **pull-quotes** for tasting notes (feed, bottle page, journal). Tokens below are the dark Paper palette; the light variant lives on the design board (artifacts `whaikey-hybrid-20261026`) and is not shipped. Passport badge art and the flavor wheel are unchanged by owner request. See **Editorial** below.
+
 ## Type
 
 > **Fonts are pinned, deliberately.** The `.woff2` files live in `src/app/fonts/`
@@ -25,11 +27,14 @@ The feel: **compact, dense, premium — a collector's ledger in a well-lit whisk
 
 | Token | Use |
 |---|---|
-| `--background` #14100b | page base (has a soft amber radial vignette overlay) |
-| `--surface` / `--surface-raised` | cards / elevated cards — use the `.card` class, not raw bg |
-| `--border` #392e20 | hairlines (always 1px, warm) |
-| `--foreground` #f4ecdd | primary text (warm cream) |
-| `--muted` #a3927a | secondary text |
+| `--background` #120e0a | page base — Paper's ground, in oak (soft amber radial vignette overlay) |
+| `--surface` #1a140e / `--surface-raised` #231b12 | cards / elevated cards — use the `.card` class, not raw bg |
+| `--border` #3a2e20 | hairlines (always 1px, warm) |
+| `--rule` #5a4733 | Paper's ink rule: masthead double rule, pull-quote frames, `.rule-double` — never a fill |
+| `--foreground` #f2e9d8 | primary text (warm cream) |
+| `--muted` #a5937a | secondary text |
+| `--editorial` #d9a25a | section kickers, `.kicker` — the editorial voice, softer than the accent |
+| `--quote` #f2e3c4 | pull-quote text |
 | `--accent` #e8a13c → `--accent-deep` #b96f1e | brass/amber; gradients via `.btn-primary`, `.text-gradient-amber` |
 | `--danger`, `--success` | sparingly |
 | `--taste-shared` #9db463 · `--taste-blind` #69a3bd · `--taste-signature` #bb8ad0 | the three calibration buckets on the Compare wheel — olive/slate/plum |
@@ -60,11 +65,19 @@ The feel: **compact, dense, premium — a collector's ledger in a well-lit whisk
 
 Principles: **content before chrome** (no decorative headers or hero padding above the primary action); **one screen, one job, above the fold** (STORYBOARD's rule, now achievable); **show more rows, not bigger rows** (lists default to compact density; the roomy variant is the exception and needs a reason); **progressive detail** (secondary detail behind a tap on the row, not stacked under it). Density never trades away legibility: if a dense layout needs type under 12px or hit areas under 44px, it is the wrong layout.
 
+## Editorial (Ledger × Paper, 2026-10-26)
+
+- **Masthead:** the app header sits on the page ground with a 3px double rule in `--rule` (`.rule-double border-b-[3px]`) and an italic Fraunces wordmark.
+- **Kickers:** `.section-label` and `.kicker` are Fraunces, 11px, uppercase, `tracking-[0.16em]`, `--editorial`. A bottle's origin is the kicker above its name.
+- **Pull-quotes** (`src/components/pull-quote.tsx`): a written tasting note is the one large italic line on its surface — 18px (hang, amber left rule + ghosted opening mark) on feed cards, 20px centred between double rules on the bottle page. Only for notes of at least `PULL_QUOTE_MIN_CHARS` (24); shorter text stays an ordinary line. Never more than one centred pull-quote per screen.
+- **Feed card types:** the shape says what happened before you read it. Written note → *Tasting note* kicker + pull-quote with the bottle as byline. Rating without text → *Rated* kicker + a ledger line with a 20px serif score. New types (badge earned, tasting night, trail) follow the same kicker + body recipe and the SOCIAL.md ban list.
+- **Search → Add this bottle:** whenever a typed query has results, a framed block above the list and a closing button under it offer "Add this bottle", prefilled from the query (48px, primary). This is a deliberate second accent on that one screen (owner direction).
+
 ## Rules
 
 1. Radii: `rounded-xl` cards, `rounded-lg` buttons/inputs, `rounded-full` chips (Density table). Nothing square. *(Amended 2026-10; was `rounded-2xl` / `rounded-xl`.)*
 2. One accent moment per screen — the primary action gets the gradient; everything else stays quiet.
-3. Hairlines over shadows; shadows only on the primary button and sticky bars.
+3. Hairlines over shadows; shadows only on the primary button, sticky bars and `.card`'s hard 3px Paper offset (no blur — it reads as print, not elevation). *(Amended 2026-10-26.)*
 4. Spacing rhythm: page padding `px-3`, sections `gap-3`/`mt-4`, intra-card `p-3` (Density table). *(Amended 2026-10; was `px-4`, `gap-6`/`mt-8`, `p-4`/`p-5`.)*
 5. Icons: lucide, `size={18}` inline / `size={20}` nav, `strokeWidth={1.8}`; amber only when the element is active/accent.
 6. Empty states: one line saying what will be here, and one clear action, in place of the content — an icon is optional, an emoji block is not used. *(Amended 2026-10; was emoji + serif line + muted line + action.)*

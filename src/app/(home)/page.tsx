@@ -16,6 +16,8 @@ import { HomeHero } from "@/components/home-hero";
 import { QuickPourButton } from "@/components/quick-pour-button";
 import { RecommendationRail } from "@/components/recommendation-rail";
 import { FriendsModule, type FriendFeedItem } from "@/components/friends-module";
+import { LatestBadgeCard, pickLatestBadge } from "@/components/latest-badge-card";
+import { getPassport } from "@/lib/passport";
 import { ChevronRight, GraduationCap, Star } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -77,7 +79,9 @@ export default async function HomePage() {
   // states can tell "no friends yet" apart from "friends, quiet week". The
   // feed itself gates on accepted follows too (it returns nothing without
   // one), so it rides the same round rather than waiting on `following`.
-  const [onboarding, dashboard, recentPours, ownProfile, following, friendFeed] = await Promise.all([
+  // The viewer's own passport feeds Home's "Badge earned" card (read only:
+  // stamping a tier stays the job of opening the passport itself).
+  const [onboarding, dashboard, recentPours, ownProfile, following, friendFeed, passport] = await Promise.all([
     cookieStore.get(ONBOARDING_COOKIE) ? false : needsOnboarding(db, user.id),
     getDashboard(db, user.id, appNow()),
     db
@@ -96,6 +100,7 @@ export default async function HomePage() {
     getOwnProfile(db, user.id),
     listFollowing(db, user.id),
     getFriendFeed(db, user.id, { limit: 3 }),
+    getPassport(db, user.id),
   ]);
   if (onboarding) redirect("/welcome");
 
@@ -131,6 +136,7 @@ export default async function HomePage() {
     palateMatchPercent: matchByUserId.get(f.author.userId) ?? null,
   }));
 
+  const latestBadge = pickLatestBadge(passport);
   const bottleCount = dashboard.shelfTotal;
   const pourCount = dashboard.totalPours;
 
@@ -145,6 +151,8 @@ export default async function HomePage() {
       {/* Discovery pairs with tonight's pick: both answer "what's next?" —
           which is Home's job. My Bar stays about the bottles you own. */}
       {bottleCount > 0 && <RecommendationRail mode="discovery" title="For your palate" />}
+
+      {latestBadge && <LatestBadgeCard badge={latestBadge} />}
 
       <FriendsModule items={friendFeedItems} hasProfile={hasProfile} hasFollows={hasFollows} />
 

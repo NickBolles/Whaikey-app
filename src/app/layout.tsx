@@ -62,7 +62,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#14100b",
+  themeColor: "#120e0a",
   width: "device-width",
   initialScale: 1,
   // The native shell draws under the notch and home indicator; the layout pays

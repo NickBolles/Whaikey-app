@@ -6,6 +6,7 @@ import { BookmarkPlus, MessageCircle, Star, Wine } from "lucide-react";
 import { CheersButton } from "@/components/cheers-button";
 import { PalateMatchChip } from "@/components/palate-match-chip";
 import { UserAvatar } from "@/components/user-avatar";
+import { PullQuote, isQuotable } from "@/components/pull-quote";
 import { FLAVOR_WHEEL, leafLabel, wedgeForLeaf } from "@/lib/flavor-wheel";
 import { compareFlavorNotes } from "@/lib/flavor-compare";
 
@@ -170,25 +171,24 @@ export function FeedCard({ item }: { item: FriendFeedItem }) {
     ? relativeDate(item.createdAt)
     : new Date(item.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 
+  // Card type (Ledger × Paper): a written note is set as a pull-quote — the
+  // feed's editorial moment — while a rating with little or no text reads as
+  // one ledger line with a big serif score. Same data, same actions; the
+  // shape tells you what kind of activity it is before you read it.
+  const quotable = isQuotable(snippet);
+  const kind = quotable ? "Tasting note" : item.rating != null ? "Rated" : "Tasting note";
+
   return (
-    <li className="card-flat flex flex-col gap-3 p-4">
+    <li className="card-flat flex flex-col gap-2.5 p-3" data-feed-card={quotable ? "note" : "rating"}>
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2.5">
           <UserAvatar name={item.author.displayName || item.author.handle} image={item.author.avatarUrl} size={28} />
           <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-x-1.5 text-sm">
-              <Link href={`/u/${item.author.handle}`} className="font-medium hover:text-accent transition-colors">
+            <div className="kicker">{kind}</div>
+            <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-muted">
+              <Link href={`/u/${item.author.handle}`} className="text-sm font-medium text-foreground hover:text-accent transition-colors">
                 @{item.author.handle}
               </Link>
-              <span className="text-muted">·</span>
-              <Link
-                href={`/bottles/${item.bottleId}`}
-                className="min-w-0 truncate text-muted hover:text-foreground transition-colors"
-              >
-                {item.bottleName}
-              </Link>
-            </div>
-            <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-muted">
               <span>{[item.servingStyle, dateLabel].filter(Boolean).join(" · ")}</span>
               {item.palateMatchPercent != null && (
                 <PalateMatchChip matchPercent={item.palateMatchPercent} />
@@ -199,12 +199,31 @@ export function FeedCard({ item }: { item: FriendFeedItem }) {
         {item.rating != null && (
           <span className="flex shrink-0 items-center gap-1 text-accent">
             <Star size={13} fill="currentColor" aria-hidden />
-            <span className="stat-number text-base leading-none">{item.rating.toFixed(1)}</span>
+            <span className={`stat-number leading-none ${quotable ? "text-base" : "text-xl"}`}>{item.rating.toFixed(1)}</span>
           </span>
         )}
       </div>
 
-      {snippet && <p className="text-sm italic text-muted">&ldquo;{snippet}&rdquo;</p>}
+      {quotable ? (
+        <PullQuote
+          text={snippet}
+          byline={
+            <Link href={`/bottles/${item.bottleId}`} className="font-semibold text-foreground hover:text-accent transition-colors">
+              {item.bottleName}
+            </Link>
+          }
+        />
+      ) : (
+        <div className="min-w-0">
+          <Link
+            href={`/bottles/${item.bottleId}`}
+            className="block truncate font-display text-[15px] font-semibold leading-snug hover:text-accent transition-colors"
+          >
+            {item.bottleName}
+          </Link>
+          {snippet && <p className="mt-0.5 font-display text-[13px] italic text-foreground/80">&ldquo;{snippet}&rdquo;</p>}
+        </div>
+      )}
 
       {tags.length > 0 && (
         <ul className="flex flex-wrap gap-1.5" aria-label="Flavor tags">

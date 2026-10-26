@@ -38,12 +38,13 @@ export function AppHeader({
   if (isChromeless(pathname)) return null;
 
   return (
-    <header className="border-b border-border-subtle bg-surface">
+    // Paper's masthead: a double rule under a plain ground, not a chrome bar.
+    <header className="rule-double border-b-[3px] bg-background">
       <div className="flex h-12 items-center justify-between gap-2 pl-3 pr-1">
         {isTabRoute(pathname) ? (
           <Link
             href="/"
-            className="font-display text-lg font-semibold text-foreground rounded-xl focus-visible:ring-2 focus-visible:ring-accent/60"
+            className="font-display text-xl font-semibold italic tracking-tight text-foreground rounded-xl focus-visible:ring-2 focus-visible:ring-accent/60"
           >
             <span aria-hidden className="mr-1.5">
               🥃

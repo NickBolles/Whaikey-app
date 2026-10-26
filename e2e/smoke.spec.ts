@@ -105,10 +105,24 @@ test.describe("signed-out smoke", () => {
   test("bottle detail renders from a search result", async ({ page }) => {
     await page.goto("/search");
     await page.getByRole("searchbox").first().fill("lagavulin 16");
-    const result = page.getByText(/Lagavulin 16/i).first();
+    // Scoped to the results: the "Add this bottle" block above them repeats
+    // the query ("Add “lagavulin 16”") and is not a result.
+    const result = page.getByRole("region", { name: "Search results" }).getByText(/Lagavulin 16/i).first();
     await result.click();
     await expect(page).toHaveURL(/\/bottles\//);
     await expect(page.getByText(/Lagavulin/i).first()).toBeVisible();
+  });
+
+  // Owner direction 2026-10-26: adding the bottle in your hand is one tap from
+  // the results, at the top and at the end, carrying what you typed.
+  test("search results offer Add this bottle at the top and the end, prefilled", async ({ page }) => {
+    await page.goto("/search");
+    await page.getByRole("searchbox").first().fill("eagle rare");
+    const results = page.getByRole("region", { name: "Search results" });
+    await expect(results.locator("a[href^='/bottles/']").first()).toBeVisible();
+    await expect(page.getByRole("link", { name: "Add “eagle rare”" })).toBeVisible();
+    await page.getByRole("region", { name: "Add this bottle" }).getByRole("link", { name: "Add this bottle" }).click();
+    await expect(page).toHaveURL(/\/bottles\/new\?source=search&name=eagle%20rare$/);
   });
 
   // The visual baselines cannot police this. Three 19px crests are ~0.4% of a
@@ -117,7 +131,7 @@ test.describe("signed-out smoke", () => {
   test("a bottle's passport stamps ride its detail page and its search card", async ({ page }) => {
     await page.goto("/search");
     await page.getByRole("searchbox").first().fill("lagavulin 16");
-    const card = page.locator("a[href^='/bottles/']").first();
+    const card = page.getByRole("region", { name: "Search results" }).locator("a[href^='/bottles/']").first();
     await expect(card).toBeVisible();
     // Country, region, style — decorative, so the origin is not read twice.
     await expect(card.locator("[aria-hidden='true'] svg")).toHaveCount(3);
@@ -164,7 +178,7 @@ test.describe("app shell", () => {
     await page.getByRole("link", { name: "Search" }).click();
     await expect(page).toHaveURL(/\/search$/);
     await page.getByRole("searchbox").first().fill("lagavulin 16");
-    await page.locator("a[href^='/bottles/']").first().click();
+    await page.getByRole("region", { name: "Search results" }).locator("a[href^='/bottles/']").first().click();
     await expect(page).toHaveURL(/\/bottles\//);
 
     const back = page.getByTestId("header-back");
@@ -180,13 +194,13 @@ test.describe("app shell", () => {
     await page.getByRole("link", { name: "Search" }).click();
     await expect(page).toHaveURL(/\/search$/);
     await page.getByRole("searchbox").first().fill("eagle rare");
-    await page.locator("a[href^='/bottles/']").first().click();
+    await page.getByRole("region", { name: "Search results" }).locator("a[href^='/bottles/']").first().click();
     await expect(page.getByTestId("header-back")).toHaveAccessibleName("Back to Explore");
 
     await page.goBack();
     await expect(page).toHaveURL(/\/search/);
     await page.getByRole("searchbox").first().fill("lagavulin");
-    await page.locator("a[href^='/bottles/']").first().click();
+    await page.getByRole("region", { name: "Search results" }).locator("a[href^='/bottles/']").first().click();
     // Unwound, not pushed: back still names Explore, not the bottle left behind.
     await expect(page.getByTestId("header-back")).toHaveAccessibleName("Back to Explore");
   });
