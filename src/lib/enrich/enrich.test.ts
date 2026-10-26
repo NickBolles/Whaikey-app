@@ -404,6 +404,19 @@ describe("live jobs", () => {
     expect((await recentJobs(db))[0].bottleName).toBe(bottle.name);
   });
 
+  it("re-enrich never resets a job whose step is running right now", async () => {
+    const { bottle } = await newBottle();
+    const jobId = await requeueBottle(db, bottle.id, "admin");
+    const lease = new Date(Date.now() + 60_000);
+    await db.update(bottleEnrichmentJobs).set({ state: "running", leaseExpiresAt: lease, stepsDone: ["keyword"] }).where(eq(bottleEnrichmentJobs.id, jobId));
+    expect(await requeueBottle(db, bottle.id, "admin")).toBe(jobId);
+    expect(await job(jobId)).toMatchObject({ state: "running", stepsDone: ["keyword"] });
+    // Once the lease lapses, it can be reopened.
+    await db.update(bottleEnrichmentJobs).set({ leaseExpiresAt: new Date(Date.now() - 1_000) }).where(eq(bottleEnrichmentJobs.id, jobId));
+    await requeueBottle(db, bottle.id, "admin");
+    expect(await job(jobId)).toMatchObject({ state: "queued", stepsDone: [] });
+  });
+
   it("sweeps old progress lines and telemetry", async () => {
     setEnrichProviderForTests(fakeProvider().provider);
     const { bottle } = await newBottle();

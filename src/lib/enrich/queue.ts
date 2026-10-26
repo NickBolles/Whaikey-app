@@ -167,8 +167,18 @@ export async function requeueBottle(
         claimedAt: null,
         createdAt: now,
       },
+      // A step that is running right now keeps its lease: resetting it would
+      // let a second worker claim the job and make duplicate paid calls.
+      setWhere: sql`NOT (${bottleEnrichmentJobs.state} = 'running' AND ${bottleEnrichmentJobs.leaseExpiresAt} >= ${ts(now)})`,
     })
     .returning({ id: bottleEnrichmentJobs.id });
+  if (!row) {
+    const [running] = await db
+      .select({ id: bottleEnrichmentJobs.id })
+      .from(bottleEnrichmentJobs)
+      .where(eq(bottleEnrichmentJobs.bottleId, bottleId));
+    return running.id;
+  }
   await appendEvent(db, row.id, { kind: "queued", message: "Queued — checking sources shortly" });
   return row.id;
 }
