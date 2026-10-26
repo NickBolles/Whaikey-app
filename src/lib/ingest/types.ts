@@ -95,3 +95,34 @@ export async function readJsonResponse(res: Response, source: string, url: strin
     throw new SourceUnavailableError(source, `${source} returned malformed JSON from ${url}: ${(err as Error).message}`);
   }
 }
+
+/**
+ * `fetch` that reports an unreachable host as SourceUnavailableError.
+ *
+ * When a third party's domain lapses, what we get back drifts over time: first
+ * a parking page with HTTP 200 (handled by readJsonResponse), then nothing at
+ * all — DNS stops resolving, or the parked host refuses the TLS handshake.
+ * WHISKY:EDITION reached that stage in Oct 2026 (`fetch failed` with
+ * ERR_SSL_SSL/TLS_ALERT_HANDSHAKE_FAILURE) and turned the weekly sync red
+ * again. undici rejects with a TypeError("fetch failed") whose `cause` carries
+ * the code; that is the third party being gone, not a bug on our side, so it
+ * is reported as degraded. Anything else (an AbortError, a bug in a mock)
+ * propagates unchanged.
+ */
+export async function fetchSource(
+  fetchImpl: typeof fetch,
+  url: string,
+  source: string,
+  init?: RequestInit,
+): Promise<Response> {
+  try {
+    return await fetchImpl(url, init);
+  } catch (err) {
+    if (err instanceof TypeError && /fetch failed/i.test(err.message)) {
+      const cause = err.cause as { code?: string; message?: string } | undefined;
+      const detail = cause?.code ?? cause?.message ?? "no response";
+      throw new SourceUnavailableError(source, `${source} is unreachable at ${url} (${detail})`);
+    }
+    throw err;
+  }
+}
