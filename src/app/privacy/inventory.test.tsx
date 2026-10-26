@@ -61,6 +61,7 @@ const INVENTORY: Record<string, Verdict> = {
   user: { disclosed: "the name, email address and" },
   session: { disclosed: "a session token plus the IP address" },
   account: { disclosed: "the tokens the provider issues for it" },
+  auth_provider_events: { disclosed: "we keep that notice from Apple with your account" },
   verification: { notPersonal: "Better Auth's short-lived sign-in challenges, not user content." },
   native_auth_requests: {
     disclosed: "native sign-in codes are deleted the moment they are used",
