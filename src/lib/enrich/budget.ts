@@ -9,7 +9,10 @@ import { enrichEnabledByEnv, getEnrichProvider, type CallUsage, type EnrichProvi
  * Spend control for enrichment: one settings row (pause, daily cap), one
  * `enrichment_calls` row per model call, and the gate every call passes
  * first. The cap is a HARD stop: a call is made only when today's spend plus
- * that call's worst-case estimate fits under it.
+ * that call's worst-case estimate fits under it — and the estimate is
+ * RESERVED (written as a pending row under a transaction-scoped advisory
+ * lock) before the call starts, so calls running at the same time on
+ * different bottles or chunks can't all pass the check on the same spend.
  */
 
 export const DEFAULT_DAILY_BUDGET_USD = 2;
@@ -53,7 +56,12 @@ export function utcDayStart(now = new Date()): Date {
 
 type CallRow = typeof enrichmentCalls.$inferSelect;
 
-export function callUsd(row: Pick<CallRow, "model" | "inputTokens" | "outputTokens" | "cachedInputTokens" | "webSearches" | "createdAt">): number {
+export function callUsd(
+  row: Pick<CallRow, "model" | "inputTokens" | "outputTokens" | "cachedInputTokens" | "webSearches" | "createdAt"> &
+    Partial<Pick<CallRow, "pending" | "reservedUsd">>,
+): number {
+  // An open reservation counts at its worst-case estimate.
+  if (row.pending) return row.reservedUsd ?? 0;
   return usdForTokens(
     row.model,
     {
@@ -85,9 +93,59 @@ export async function canSpend(db: DB, step: CallStep, now = new Date()): Promis
   return { ok: true };
 }
 
+/** Serializes every reservation across invocations (any constant works; this one is ours). */
+const BUDGET_LOCK_KEY = 4_120_717;
+
+export type ReserveResult = { ok: true; reservationId: string } | { ok: false; reason: "disabled" | "paused" | "budget" };
+
+/**
+ * The gate, atomically: under one lock, check pause and today's spend
+ * (completed calls + open reservations) + this call's estimate against the
+ * cap, and write the reservation. Pass the id to recordCall afterwards, or to
+ * releaseCall when no call was made.
+ */
+export async function reserveCall(
+  db: DB,
+  input: { step: CallStep; provider: EnrichProviderName; model: string; jobId?: string | null; runId?: string | null; bottles?: number },
+  now = new Date(),
+): Promise<ReserveResult> {
+  if (!enrichEnabledByEnv() || !getEnrichProvider()) return { ok: false, reason: "disabled" };
+  return db.transaction(async (tx) => {
+    const t = tx as unknown as DB;
+    await t.execute(sql`SELECT pg_advisory_xact_lock(${BUDGET_LOCK_KEY})`);
+    const settings = await getSettings(t);
+    if (settings.paused) return { ok: false, reason: "paused" } as const;
+    const spent = await spendSince(t, utcDayStart(now));
+    const estimate = CALL_ESTIMATE_USD[input.step];
+    if (spent + estimate > settings.dailyBudgetUsd) return { ok: false, reason: "budget" } as const;
+    const reservationId = crypto.randomUUID();
+    await t.insert(enrichmentCalls).values({
+      id: reservationId,
+      jobId: input.jobId ?? null,
+      runId: input.runId ?? null,
+      step: input.step,
+      provider: input.provider,
+      model: input.model,
+      bottles: input.bottles ?? 1,
+      ok: false,
+      pending: true,
+      reservedUsd: estimate,
+      createdAt: now,
+    });
+    return { ok: true, reservationId } as const;
+  });
+}
+
+/** Drop a reservation whose call was never made. */
+export async function releaseCall(db: DB, reservationId: string): Promise<void> {
+  await db.delete(enrichmentCalls).where(and(eq(enrichmentCalls.id, reservationId), eq(enrichmentCalls.pending, true)));
+}
+
 export async function recordCall(
   db: DB,
   input: {
+    /** The reservation this call made (reserveCall); its row becomes the call's record. */
+    reservationId?: string | null;
     jobId?: string | null;
     runId?: string | null;
     step: CallStep;
@@ -101,8 +159,29 @@ export async function recordCall(
   },
 ): Promise<void> {
   const u = input.usage ?? { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, webSearches: 0 };
+  let settledReservation = false;
   try {
-    await db.insert(enrichmentCalls).values({
+    if (input.reservationId) {
+      const settled = await db
+        .update(enrichmentCalls)
+        .set({
+          model: input.model,
+          bottles: input.bottles ?? 1,
+          inputTokens: u.inputTokens,
+          outputTokens: u.outputTokens,
+          cachedInputTokens: u.cachedInputTokens,
+          webSearches: u.webSearches,
+          ok: input.ok,
+          error: input.error?.slice(0, 300) ?? null,
+          latencyMs: input.latencyMs ?? null,
+          pending: false,
+          reservedUsd: 0,
+        })
+        .where(eq(enrichmentCalls.id, input.reservationId))
+        .returning({ id: enrichmentCalls.id });
+      settledReservation = settled.length > 0;
+    }
+    if (!settledReservation) await db.insert(enrichmentCalls).values({
       id: crypto.randomUUID(),
       jobId: input.jobId ?? null,
       runId: input.runId ?? null,

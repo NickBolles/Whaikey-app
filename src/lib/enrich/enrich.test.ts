@@ -17,6 +17,9 @@ import {
   enrichedByDay,
   getSettings,
   lastUtcDays,
+  recordCall,
+  releaseCall,
+  reserveCall,
   spendByDay,
   spendByRun,
   spendSeries,
@@ -118,6 +121,7 @@ describe("provider selection", () => {
     delete process.env.ENRICH_ENABLED;
     vi.stubEnv("OPENAI_API_KEY", "");
     vi.stubEnv("ANTHROPIC_API_KEY", "");
+    vi.stubEnv("OPENROUTER_API_KEY", "");
     expect(enrichEnabledByEnv()).toBe(false);
     expect(selectedProviderName()).toBeNull();
     expect(enrichLive()).toBe(false);
@@ -190,15 +194,31 @@ describe("anthropicProvider", () => {
         content: [{ type: "text", text: "part two" }],
         usage: { input_tokens: 50, output_tokens: 20, cache_read_input_tokens: 5 },
       });
-    const p = anthropicProvider("ak", { messages: { create } } as never);
+    const p = anthropicProvider({ messages: { create } } as never);
     const res = await p.complete({ prompt: "x", model: p.webModel, web: true, timeoutMs: 10_000, maxOutputTokens: 100 });
     expect(create).toHaveBeenCalledTimes(2);
     expect(res.text).toContain("part two");
     expect(res.usage).toEqual({ inputTokens: 150, outputTokens: 30, cachedInputTokens: 5, webSearches: 2 });
   });
 
+  it("goes through the shared client seam, and drops hosted search where OpenRouter can't run it", async () => {
+    const create = vi.fn().mockResolvedValue({ stop_reason: "end_turn", content: [{ type: "text", text: "{}" }], usage: { input_tokens: 1, output_tokens: 1 } });
+    const { setAnthropicForTests } = await import("@/lib/ai/client");
+    setAnthropicForTests({ messages: { create } } as never);
+    try {
+      vi.stubEnv("ANTHROPIC_API_KEY", "ak-test");
+      await anthropicProvider().complete({ prompt: "x", model: "m", web: true, timeoutMs: 10_000, maxOutputTokens: 10 });
+      expect(create.mock.calls[0][0]).toHaveProperty("tools");
+      vi.stubEnv("OPENROUTER_API_KEY", "or-test");
+      await anthropicProvider().complete({ prompt: "x", model: "m", web: true, timeoutMs: 10_000, maxOutputTokens: 10 });
+      expect(create.mock.calls[1][0]).not.toHaveProperty("tools");
+    } finally {
+      setAnthropicForTests(null);
+    }
+  });
+
   it("wraps SDK failures", async () => {
-    const p = anthropicProvider("ak", { messages: { create: vi.fn().mockRejectedValue(new Error("overloaded")) } } as never);
+    const p = anthropicProvider({ messages: { create: vi.fn().mockRejectedValue(new Error("overloaded")) } } as never);
     await expect(p.complete({ prompt: "x", model: p.quickModel, web: false, timeoutMs: 10_000, maxOutputTokens: 100 })).rejects.toThrow(/anthropic: overloaded/);
   });
 });
@@ -471,6 +491,29 @@ describe("batch runs", () => {
     expect(await read(noted.id)).toEqual(legacy);
     const [p] = await db.select().from(bottleFlavorProvenance).where(eq(bottleFlavorProvenance.bottleId, searched.id));
     expect(p).toMatchObject({ tier: "model_web", replacedLegacyProfile: legacy });
+  });
+});
+
+describe("budget reservations", () => {
+  it("concurrent calls cannot both pass the cap on the same spend; reservations settle or release", async () => {
+    setEnrichProviderForTests(fakeProvider().provider);
+    await updateSettings(db, { dailyBudgetUsd: 0.25 });
+    const input = { step: "web" as const, provider: "openai" as const, model: "gpt-6.1-sol" };
+    const [a, b] = await Promise.all([reserveCall(db, input), reserveCall(db, input)]);
+    expect([a.ok, b.ok].sort()).toEqual([false, true]);
+    expect([a, b].find((r) => !r.ok)).toEqual({ ok: false, reason: "budget" });
+    const held = [a, b].find((r) => r.ok) as { ok: true; reservationId: string };
+    // An open reservation counts at its estimate.
+    expect(await spendSince(db)).toBeCloseTo(0.2, 5);
+    await recordCall(db, { reservationId: held.reservationId, step: "web", provider: "openai", model: "gpt-6.1-sol", usage, ok: true });
+    const rows = await db.select().from(enrichmentCalls);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ id: held.reservationId, pending: false, reservedUsd: 0, inputTokens: 900, ok: true });
+    expect(await spendSince(db)).toBeLessThan(0.05);
+    const again = await reserveCall(db, { ...input, step: "quick" });
+    expect(again.ok).toBe(true);
+    await releaseCall(db, (again as { reservationId: string }).reservationId);
+    expect(await db.select().from(enrichmentCalls)).toHaveLength(1);
   });
 });
 

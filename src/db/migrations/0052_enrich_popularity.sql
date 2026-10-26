@@ -1,6 +1,6 @@
 -- Idempotent on purpose: the flavor backfill CLI (src/lib/ingest/flavor-tiers.ts,
--- ensureFlavorProvenanceTable) creates/extends these exact objects, so
--- production may already have them when this migration runs.
+-- ensureFlavorProvenanceTable) creates/extends the popularity table and the
+-- provenance column, so production may already have them when this runs.
 CREATE TABLE IF NOT EXISTS "bottle_popularity_daily" (
 	"bottle_id" text NOT NULL,
 	"day" text NOT NULL,
@@ -11,6 +11,8 @@ CREATE TABLE IF NOT EXISTS "bottle_popularity_daily" (
 );
 --> statement-breakpoint
 ALTER TABLE "bottle_flavor_provenance" ADD COLUMN IF NOT EXISTS "replaced_legacy_profile" jsonb;--> statement-breakpoint
+ALTER TABLE "enrichment_calls" ADD COLUMN IF NOT EXISTS "pending" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "enrichment_calls" ADD COLUMN IF NOT EXISTS "reserved_usd" double precision DEFAULT 0 NOT NULL;--> statement-breakpoint
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'bottle_popularity_daily_bottle_id_bottles_id_fk') THEN
     ALTER TABLE "bottle_popularity_daily" ADD CONSTRAINT "bottle_popularity_daily_bottle_id_bottles_id_fk" FOREIGN KEY ("bottle_id") REFERENCES "public"."bottles"("id") ON DELETE cascade ON UPDATE no action;

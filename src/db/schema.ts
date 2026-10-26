@@ -1569,6 +1569,15 @@ export const enrichmentCalls = pgTable(
     ok: boolean("ok").notNull(),
     error: text("error"),
     latencyMs: integer("latency_ms"),
+    /**
+     * A reservation: the row is written (inside a budget lock) BEFORE the
+     * call, holding `reservedUsd` — the call's worst-case estimate — against
+     * today's cap, so concurrent calls can't all pass the gate on the same
+     * spend. The call's real usage replaces it; a reservation whose call never
+     * reported back keeps counting (fails closed).
+     */
+    pending: boolean("pending").notNull().default(false),
+    reservedUsd: doublePrecision("reserved_usd").notNull().default(0),
     createdAt: createdAt(),
   },
   (t) => [index("enrichment_calls_created_idx").on(t.createdAt), index("enrichment_calls_run_idx").on(t.runId)],

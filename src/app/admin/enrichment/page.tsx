@@ -21,7 +21,7 @@ const when = (d: Date | null) => (d ? d.toISOString().replace("T", " ").slice(0,
 function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
     <div className="flex flex-col rounded-lg border border-border-subtle px-3 py-2">
-      <span className="text-[11px] uppercase tracking-wide text-muted">{label}</span>
+      <span className="text-xs uppercase tracking-wide text-muted">{label}</span>
       <span className="text-lg font-semibold tabular-nums">{value}</span>
       {hint && <span className="text-xs text-muted">{hint}</span>}
     </div>
@@ -30,7 +30,7 @@ function Stat({ label, value, hint }: { label: string; value: string; hint?: str
 
 function H2({ id, children }: { id: string; children: React.ReactNode }) {
   return (
-    <h2 id={id} className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+    <h2 id={id} className="text-xs font-semibold uppercase tracking-wide text-muted">
       {children}
     </h2>
   );

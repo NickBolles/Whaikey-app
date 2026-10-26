@@ -11,7 +11,7 @@ import type { DayEnriched } from "@/lib/enrich/budget";
 const W = 300;
 const H = 90;
 const PAD_TOP = 6;
-const PAD_BOTTOM = 14;
+const PAD_BOTTOM = 2;
 const PLOT_H = H - PAD_TOP - PAD_BOTTOM;
 
 const usd = (v: number) => `$${v < 1 ? v.toFixed(3) : v.toFixed(2)}`;
@@ -26,25 +26,16 @@ export const TIER_STYLE: Record<FlavorProfileTier, { label: string; className: s
 };
 const STACK_ORDER: FlavorProfileTier[] = ["keyword", "model", "model_web", "community"];
 
-function XLabels({ days }: { days: string[] }) {
+/** Date axis under a chart, in HTML so it keeps the 12px type floor at any width. */
+function DateAxis({ days }: { days: string[] }) {
   if (days.length === 0) return null;
-  const step = W / days.length;
-  const picks = [0, Math.floor((days.length - 1) / 2), days.length - 1];
+  const mid = days[Math.floor((days.length - 1) / 2)];
   return (
-    <>
-      {[...new Set(picks)].map((i, n) => (
-        <text
-          key={i}
-          x={n === 0 ? 3 : n === picks.length - 1 ? W - 3 : i * step + step / 2}
-          y={H - 2}
-          textAnchor={n === 0 ? "start" : n === picks.length - 1 ? "end" : "middle"}
-          className="fill-muted"
-          fontSize={9}
-        >
-          {short(days[i])}
-        </text>
-      ))}
-    </>
+    <div className="flex justify-between text-xs text-muted tabular-nums" aria-hidden="true">
+      <span>{short(days[0])}</span>
+      <span>{short(mid)}</span>
+      <span>{short(days[days.length - 1])}</span>
+    </div>
   );
 }
 
@@ -58,7 +49,15 @@ export function SpendChart({ series, capUsd }: { series: Array<{ day: string; us
   return (
     <figure className="flex flex-col gap-1" data-testid="enrich-spend-chart">
       <figcaption className="flex justify-between text-xs text-muted">
-        <span>Daily spend vs cap · last {series.length} days</span>
+        <span>
+          Daily spend · last {series.length} days ·{" "}
+          <span className="inline-flex items-center gap-1 text-danger">
+            <svg width="14" height="6" aria-hidden="true">
+              <line x1={0} x2={14} y1={3} y2={3} className="stroke-danger" strokeWidth={1.5} strokeDasharray="3 2" />
+            </svg>
+            cap {usd(capUsd)}
+          </span>
+        </span>
         <span className="tabular-nums">{usd(total)} total</span>
       </figcaption>
       <svg
@@ -83,12 +82,9 @@ export function SpendChart({ series, capUsd }: { series: Array<{ day: string; us
           );
         })}
         <line x1={0} x2={W} y1={y(capUsd)} y2={y(capUsd)} className="stroke-danger" strokeWidth={0.75} strokeDasharray="3 2" />
-        <text x={W - 2} y={y(capUsd) - 2} textAnchor="end" fontSize={9} className="fill-danger">
-          cap {usd(capUsd)}
-        </text>
         <line x1={0} x2={W} y1={PAD_TOP + PLOT_H} y2={PAD_TOP + PLOT_H} className="stroke-border" strokeWidth={0.5} />
-        <XLabels days={series.map((d) => d.day)} />
       </svg>
+      <DateAxis days={series.map((d) => d.day)} />
     </figure>
   );
 }
@@ -129,8 +125,8 @@ export function EnrichedChart({ series }: { series: DayEnriched[] }) {
           );
         })}
         <line x1={0} x2={W} y1={PAD_TOP + PLOT_H} y2={PAD_TOP + PLOT_H} className="stroke-border" strokeWidth={0.5} />
-        <XLabels days={series.map((d) => d.day)} />
       </svg>
+      <DateAxis days={series.map((d) => d.day)} />
       <ul className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted" aria-label="Tiers">
         {[...STACK_ORDER].reverse().map((t) => (
           <li key={t} className="flex items-center gap-1">

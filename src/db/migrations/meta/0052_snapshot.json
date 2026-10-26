@@ -1,5 +1,5 @@
 {
-  "id": "f16b467f-671d-480a-aa94-a17bf78a82fd",
+  "id": "40a2599e-f98f-48e3-807c-dc1021d5a510",
   "prevId": "1ce0ef90-958e-4e85-ad2f-9a71e1271a2c",
   "version": "7",
   "dialect": "postgresql",
@@ -3945,6 +3945,20 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": false
+        },
+        "pending": {
+          "name": "pending",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "reserved_usd": {
+          "name": "reserved_usd",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
         },
         "created_at": {
           "name": "created_at",

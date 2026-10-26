@@ -111,12 +111,12 @@ function RowIcon({ state }: { state: RowState }) {
 
 function ProfileBars({ profile }: { profile: Record<string, number> }) {
   return (
-    <div className="grid grid-cols-4 gap-x-3 gap-y-1.5" aria-label="Flavor profile so far">
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-3 gap-y-1.5" aria-label="Flavor profile so far">
       {FLAVOR_WHEEL.map((w) => {
         const v = Math.max(0, Math.min(10, profile[w.id] ?? 0));
         return (
           <div key={w.id} className="min-w-0">
-            <div className="flex items-baseline justify-between text-[10px] leading-none text-muted">
+            <div className="flex items-baseline justify-between text-xs leading-none text-muted">
               <span className="truncate">{w.label}</span>
               <span className="tabular-nums">{v}</span>
             </div>
@@ -137,13 +137,13 @@ export function SourcedNotes({ notes, sources }: { notes: NonNullable<View["fiel
       <dl className="grid grid-cols-[3.5rem_1fr] gap-x-2 gap-y-1 text-[13px] leading-snug">
         {rows.map((k) => (
           <div key={k} className="contents">
-            <dt className="text-[11px] uppercase tracking-[0.12em] text-muted pt-px">{k}</dt>
+            <dt className="text-xs uppercase tracking-[0.12em] text-muted pt-px">{k}</dt>
             <dd className="text-foreground/85">{notes[k]}</dd>
           </div>
         ))}
       </dl>
       {sources && sources.length > 0 && (
-        <p className="text-[11px] text-muted leading-relaxed">
+        <p className="text-xs text-muted leading-relaxed">
           AI summary of published notes ·{" "}
           {sources.map((s, i) => (
             <span key={s.url}>
@@ -217,14 +217,14 @@ export function LiveEnrichment({ bottleId, initial }: { bottleId: string; initia
     <section aria-label="Building this bottle's card" className="card p-3 flex flex-col gap-2.5" data-testid="live-enrichment">
       <div className="flex items-center justify-between gap-2">
         <h2 className="section-label">{done ? "Card built" : "Building this bottle's card"}</h2>
-        <span className={`chip px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] ${chip === "Live" || chip === "Done" ? "chip-active" : ""}`}>
+        <span className={`chip px-2 py-0.5 text-xs uppercase tracking-[0.12em] ${chip === "Live" || chip === "Done" ? "chip-active" : ""}`}>
           {chip === "Live" && <span aria-hidden className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-accent align-middle animate-pulse motion-reduce:animate-none" />}
           {chip}
         </span>
       </div>
       <p className="text-[13px] text-foreground/80 leading-snug" role="status" aria-live="polite">
         {status}
-        {open && elapsed > 0 && <span className="ml-1.5 text-[11px] text-muted tabular-nums">{elapsed}s</span>}
+        {open && elapsed > 0 && <span className="ml-1.5 text-xs text-muted tabular-nums">{elapsed}s</span>}
       </p>
       <ul className="flex flex-col divide-y divide-border/60 border-y border-border/60">
         {rows.map((r) => (

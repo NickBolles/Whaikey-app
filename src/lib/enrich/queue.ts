@@ -16,7 +16,7 @@ import { catalogVisibleTo } from "@/lib/catalog-visibility";
 import { keywordInputHash, keywordProfile, TIER_CONFIDENCE, writeTieredProfiles, type KeywordInputs } from "@/lib/ingest/flavor-tiers";
 import { reportInBackground } from "@/lib/observability/errors";
 import { inPopularTop, sweepPopularity } from "@/lib/popularity";
-import { canSpend, recordCall } from "./budget";
+import { recordCall, releaseCall, reserveCall } from "./budget";
 import { quickPrompt, webPrompt, type PromptBottle } from "./prompts";
 import { enrichLive, getEnrichProvider, ProviderCallError } from "./providers";
 import { parseQuickResult, parseWebResult, profileHeadline, type WebDetails } from "./validate";
@@ -302,7 +302,14 @@ export async function runNextStep(db: DB, jobId: string, opts: { runId?: string 
       }
     }
     const modelStep: "quick" | "web" = step === "quick" ? "quick" : "web";
-    const gate = await canSpend(db, modelStep, now);
+    const provider = getEnrichProvider();
+    const gate = provider
+      ? await reserveCall(
+          db,
+          { step: modelStep, provider: provider.name, model: modelStep === "quick" ? provider.quickModel : provider.webModel, jobId: job.id, runId: opts.runId ?? null },
+          now,
+        )
+      : ({ ok: false, reason: "disabled" } as const);
     if (!gate.ok) {
       await unlease(db, job.id, { waitingReason: gate.reason, notBefore: new Date(now.getTime() + ENRICH_PARKED_BACKOFF_MS) });
       if (job.waitingReason !== gate.reason) {
@@ -311,7 +318,7 @@ export async function runNextStep(db: DB, jobId: string, opts: { runId?: string 
       return { ran: null, reason: "parked" };
     }
     await appendEvent(db, job.id, { kind: "step_started", step, message: STEP_STARTED[modelStep] });
-    const ok = await runModelStep(db, job, modelStep, opts.runId ?? null);
+    const ok = await runModelStep(db, job, modelStep, opts.runId ?? null, gate.reservationId);
     if (!ok) {
       const attempts = job.attempts + 1;
       if (attempts >= ENRICH_MAX_ATTEMPTS) {
@@ -378,12 +385,22 @@ export async function jobIsDue(db: DB, bottleId: string, now = new Date()): Prom
   return row?.id ?? null;
 }
 
-async function runModelStep(db: DB, job: BottleEnrichmentJob, step: "quick" | "web", runId: string | null): Promise<boolean> {
+async function runModelStep(
+  db: DB,
+  job: BottleEnrichmentJob,
+  step: "quick" | "web",
+  runId: string | null,
+  reservationId: string,
+): Promise<boolean> {
   const provider = getEnrichProvider();
   const bottle = await promptBottle(db, job.bottleId);
-  if (!provider || !bottle) return false;
+  if (!provider || !bottle) {
+    await releaseCall(db, reservationId);
+    return false;
+  }
   const model = step === "quick" ? provider.quickModel : provider.webModel;
   const started = Date.now();
+  let recorded = false;
   let text: string;
   try {
     const res = await provider.complete({
@@ -395,9 +412,12 @@ async function runModelStep(db: DB, job: BottleEnrichmentJob, step: "quick" | "w
       maxSearches: 3,
     });
     text = res.text;
-    await recordCall(db, { jobId: job.id, runId, step, provider: provider.name, model, usage: res.usage, ok: true, latencyMs: Date.now() - started });
+    await recordCall(db, { reservationId, jobId: job.id, runId, step, provider: provider.name, model, usage: res.usage, ok: true, latencyMs: Date.now() - started });
+    recorded = true;
   } catch (err) {
-    await recordCall(db, {
+    // A failure after the call was recorded (parse/write) must not overwrite its usage.
+    if (!recorded) await recordCall(db, {
+      reservationId,
       jobId: job.id,
       runId,
       step,

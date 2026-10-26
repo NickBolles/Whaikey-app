@@ -22,7 +22,7 @@ describe("SpendChart", () => {
     );
     const img = screen.getByRole("img");
     expect(img.getAttribute("aria-label")).toContain("$2.90 in total, cap $2.00 per day, 1 day over the cap");
-    expect(container.querySelectorAll("rect")).toHaveLength(3);
+    expect(container.querySelectorAll("svg[role=img] rect")).toHaveLength(3);
     expect(container.querySelectorAll("rect.fill-danger")).toHaveLength(1);
     expect(screen.getByText("cap $2.00")).toBeTruthy();
     expect(container.querySelector("rect title")?.textContent).toBe("2026-10-24 · $0.000 · 0 calls");

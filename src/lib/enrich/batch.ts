@@ -4,7 +4,7 @@ import { bottles, distilleries, enrichmentRuns } from "@/db/schema";
 import { buildEnrichPrompt, type EnrichableBottle } from "@/lib/ingest/enrich";
 import { parseModelResults, runFreePass, writeTieredProfiles } from "@/lib/ingest/flavor-tiers";
 import { LEGACY_REFRESH_SAFE, POPULAR_REFRESH_TOP, popularitySql } from "@/lib/popularity";
-import { canSpend, getSettings, recordCall, updateSettings } from "./budget";
+import { canSpend, getSettings, recordCall, reserveCall, updateSettings } from "./budget";
 import { getEnrichProvider, ProviderCallError } from "./providers";
 import { dueJobIds, requeueBottle, runJobToCompletion, STEP_HEADROOM_MS } from "./queue";
 
@@ -150,7 +150,11 @@ async function missingTier(db: DB, runId: string, deadline: number, bump: (k: st
       userNotes: [],
     }));
     const model = provider.quickModel;
+    const reservation = await reserveCall(db, { step: "batch-quick", provider: provider.name, model, runId, bottles: batch.length });
+    if (!reservation.ok) return reservation.reason;
+    const reservationId = reservation.reservationId;
     const started = Date.now();
+    let recorded = false;
     try {
       const res = await provider.complete({
         prompt: buildEnrichPrompt(batch, false),
@@ -159,7 +163,8 @@ async function missingTier(db: DB, runId: string, deadline: number, bump: (k: st
         timeoutMs: MISSING_TIMEOUT_MS,
         maxOutputTokens: 4_000,
       });
-      await recordCall(db, { runId, step: "batch-quick", provider: provider.name, model, bottles: batch.length, usage: res.usage, ok: true, latencyMs: Date.now() - started });
+      await recordCall(db, { reservationId, runId, step: "batch-quick", provider: provider.name, model, bottles: batch.length, usage: res.usage, ok: true, latencyMs: Date.now() - started });
+      recorded = true;
       const { writes, rejected } = parseModelResults([
         { pass: "cheap", model, bottleIds: batch.map((b) => b.id), raw: res.text, completedAt: new Date().toISOString() },
       ]);
@@ -167,7 +172,9 @@ async function missingTier(db: DB, runId: string, deadline: number, bump: (k: st
       bump("missingWritten", written.length);
       bump("missingRejected", rejected);
     } catch (err) {
-      await recordCall(db, {
+      // A failure after the call was recorded (parse/write) must not overwrite its usage.
+      if (!recorded) await recordCall(db, {
+        reservationId,
         runId,
         step: "batch-quick",
         provider: provider.name,
