@@ -1,6 +1,13 @@
-import { and, desc, eq, gte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, lt, sql } from "drizzle-orm";
 import type { DB } from "@/db";
-import { bottleFlavorProvenance, enrichmentCalls, enrichmentSettings, FLAVOR_PROFILE_TIERS, type FlavorProfileTier } from "@/db/schema";
+import {
+  bottleFlavorProvenance,
+  enrichmentCalls,
+  enrichmentReservations,
+  enrichmentSettings,
+  FLAVOR_PROFILE_TIERS,
+  type FlavorProfileTier,
+} from "@/db/schema";
 import { recordAiUsage, usdForTokens } from "@/lib/ai/usage";
 import { reportInBackground } from "@/lib/observability/errors";
 import { enrichEnabledByEnv, getEnrichProvider, type CallUsage, type EnrichProviderName } from "./providers";
@@ -9,10 +16,7 @@ import { enrichEnabledByEnv, getEnrichProvider, type CallUsage, type EnrichProvi
  * Spend control for enrichment: one settings row (pause, daily cap), one
  * `enrichment_calls` row per model call, and the gate every call passes
  * first. The cap is a HARD stop: a call is made only when today's spend plus
- * that call's worst-case estimate fits under it — and the estimate is
- * RESERVED (written as a pending row under a transaction-scoped advisory
- * lock) before the call starts, so calls running at the same time on
- * different bottles or chunks can't all pass the check on the same spend.
+ * that call's worst-case estimate fits under it.
  */
 
 export const DEFAULT_DAILY_BUDGET_USD = 2;
@@ -58,14 +62,8 @@ export function utcDayStart(now = new Date()): Date {
 
 type CallRow = typeof enrichmentCalls.$inferSelect;
 
-export function callUsd(
-  row: Pick<CallRow, "model" | "inputTokens" | "outputTokens" | "cachedInputTokens" | "webSearches" | "createdAt"> &
-    Partial<Pick<CallRow, "pending" | "reservedUsd">>,
-): number {
-  // An open reservation counts at its worst-case estimate; a failed call
-  // whose usage never came back keeps its estimate on top of what is known.
-  if (row.pending) return row.reservedUsd ?? 0;
-  return (row.reservedUsd ?? 0) + usdForTokens(
+export function callUsd(row: Pick<CallRow, "model" | "inputTokens" | "outputTokens" | "cachedInputTokens" | "webSearches" | "createdAt">): number {
+  return usdForTokens(
     row.model,
     {
       inputTokens: row.inputTokens,
@@ -86,106 +84,72 @@ export async function spendSince(db: DB, since = utcDayStart()): Promise<number>
 
 export type GateResult = { ok: true } | { ok: false; reason: "disabled" | "paused" | "budget" };
 
-/** May a model call of this kind run now? */
+/** A hold outlives any single call's budget (the longest step is under a minute). */
+export const RESERVATION_TTL_MS = 3 * 60_000;
+/** Serializes gate decisions across instances (pg_advisory_xact_lock key). */
+const BUDGET_LOCK_KEY = 72_105_517;
+
+/** Estimated USD held by calls that are still in flight. */
+async function reservedUsd(db: DB, now: Date): Promise<number> {
+  const [row] = await db
+    .select({ total: sql<number | null>`sum(${enrichmentReservations.usd})` })
+    .from(enrichmentReservations)
+    .where(gte(enrichmentReservations.expiresAt, now));
+  return Number(row?.total ?? 0);
+}
+
+/**
+ * May a model call of this kind run now? A read-only pre-check (also counts
+ * in-flight holds); the call itself must go through `reserveSpend`.
+ */
 export async function canSpend(db: DB, step: CallStep, now = new Date()): Promise<GateResult> {
   if (!enrichEnabledByEnv() || !getEnrichProvider()) return { ok: false, reason: "disabled" };
   const settings = await getSettings(db);
   if (settings.paused) return { ok: false, reason: "paused" };
-  const spent = await spendSince(db, utcDayStart(now));
+  const spent = (await spendSince(db, utcDayStart(now))) + (await reservedUsd(db, now));
   if (spent + CALL_ESTIMATE_USD[step] > settings.dailyBudgetUsd) return { ok: false, reason: "budget" };
   return { ok: true };
 }
 
-/** Serializes every reservation across invocations (any constant works; this one is ours). */
-const BUDGET_LOCK_KEY = 4_120_717;
-
-export type ReserveResult = { ok: true; reservationId: string } | { ok: false; reason: "disabled" | "paused" | "budget" };
+export type Reservation = { ok: true; reservationId: string } | { ok: false; reason: "disabled" | "paused" | "budget" };
 
 /**
- * The gate, atomically: under one lock, check pause and today's spend
- * (completed calls + open reservations) + this call's estimate against the
- * cap, and write the reservation. Pass the id to recordCall afterwards, or to
- * releaseCall when no call was made.
+ * The hard cap, atomically: under one advisory lock, recorded spend plus every
+ * in-flight hold plus this call's worst case must fit, and if it does the
+ * estimate is held until `releaseReservation` (after `recordCall`) or expiry.
+ * Two concurrent calls can no longer both spend the same remaining allowance.
  */
-/** Input tokens a call may plausibly carry (prompt + hosted search results), for the worst case. */
-export const CALL_MAX_INPUT_TOKENS: Record<CallStep, number> = { quick: 4_000, web: 40_000, "batch-quick": 12_000, "batch-web": 40_000 };
-
-/**
- * Worst-case $ for one call: the step's floor, or what the chosen model would
- * charge at the call's own limits — whichever is higher, so a pricier model
- * override still can't slip past the cap.
- */
-export function callEstimateUsd(
-  step: CallStep,
-  model: string,
-  limits: { maxOutputTokens?: number; maxSearches?: number } = {},
-  at = new Date(),
-): number {
-  const bound = usdForTokens(
-    model,
-    {
-      inputTokens: CALL_MAX_INPUT_TOKENS[step],
-      outputTokens: limits.maxOutputTokens ?? 4_000,
-      cachedInputTokens: 0,
-      cacheWriteTokens: 0,
-      webSearchRequests: limits.maxSearches ?? 0,
-    },
-    at,
-  );
-  return Math.max(CALL_ESTIMATE_USD[step], bound);
-}
-
-export async function reserveCall(
-  db: DB,
-  input: {
-    step: CallStep;
-    provider: EnrichProviderName;
-    model: string;
-    jobId?: string | null;
-    runId?: string | null;
-    bottles?: number;
-    maxOutputTokens?: number;
-    maxSearches?: number;
-  },
-  now = new Date(),
-): Promise<ReserveResult> {
+export async function reserveSpend(db: DB, step: CallStep, now = new Date()): Promise<Reservation> {
   if (!enrichEnabledByEnv() || !getEnrichProvider()) return { ok: false, reason: "disabled" };
+  const settings = await getSettings(db);
+  if (settings.paused) return { ok: false, reason: "paused" };
+  const estimate = CALL_ESTIMATE_USD[step];
   return db.transaction(async (tx) => {
     const t = tx as unknown as DB;
     await t.execute(sql`SELECT pg_advisory_xact_lock(${BUDGET_LOCK_KEY})`);
-    const settings = await getSettings(t);
-    if (settings.paused) return { ok: false, reason: "paused" } as const;
-    const spent = await spendSince(t, utcDayStart(now));
-    const estimate = callEstimateUsd(input.step, input.model, { maxOutputTokens: input.maxOutputTokens, maxSearches: input.maxSearches }, now);
+    await t.delete(enrichmentReservations).where(lt(enrichmentReservations.expiresAt, now));
+    const spent = (await spendSince(t, utcDayStart(now))) + (await reservedUsd(t, now));
     if (spent + estimate > settings.dailyBudgetUsd) return { ok: false, reason: "budget" } as const;
     const reservationId = crypto.randomUUID();
-    await t.insert(enrichmentCalls).values({
-      id: reservationId,
-      jobId: input.jobId ?? null,
-      runId: input.runId ?? null,
-      step: input.step,
-      provider: input.provider,
-      model: input.model,
-      bottles: input.bottles ?? 1,
-      ok: false,
-      pending: true,
-      reservedUsd: estimate,
-      createdAt: now,
-    });
+    await t.insert(enrichmentReservations).values({ id: reservationId, usd: estimate, expiresAt: new Date(now.getTime() + RESERVATION_TTL_MS) });
     return { ok: true, reservationId } as const;
   });
 }
 
-/** Drop a reservation whose call was never made. */
-export async function releaseCall(db: DB, reservationId: string): Promise<void> {
-  await db.delete(enrichmentCalls).where(and(eq(enrichmentCalls.id, reservationId), eq(enrichmentCalls.pending, true)));
+/** Drop a hold once the call's usage is recorded (or the call never happened). */
+export async function releaseReservation(db: DB, reservationId: string | null | undefined): Promise<void> {
+  if (!reservationId) return;
+  try {
+    await db.delete(enrichmentReservations).where(eq(enrichmentReservations.id, reservationId));
+  } catch (err) {
+    // A leaked hold only over-counts until it expires; never fail the step for it.
+    reportInBackground(err, { where: "enrich/release-reservation" });
+  }
 }
 
 export async function recordCall(
   db: DB,
   input: {
-    /** The reservation this call made (reserveCall); its row becomes the call's record. */
-    reservationId?: string | null;
     jobId?: string | null;
     runId?: string | null;
     step: CallStep;
@@ -199,32 +163,8 @@ export async function recordCall(
   },
 ): Promise<void> {
   const u = input.usage ?? { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, webSearches: 0 };
-  // A failure with no usage (timeout, dropped connection) may still be billed:
-  // the reservation's estimate stays counted rather than reading as free.
-  const usageUnknown = !input.ok && u.inputTokens + u.outputTokens + u.cachedInputTokens === 0;
-  let settledReservation = false;
   try {
-    if (input.reservationId) {
-      const settled = await db
-        .update(enrichmentCalls)
-        .set({
-          model: input.model,
-          bottles: input.bottles ?? 1,
-          inputTokens: u.inputTokens,
-          outputTokens: u.outputTokens,
-          cachedInputTokens: u.cachedInputTokens,
-          webSearches: u.webSearches,
-          ok: input.ok,
-          error: input.error?.slice(0, 300) ?? null,
-          latencyMs: input.latencyMs ?? null,
-          pending: false,
-          ...(usageUnknown ? {} : { reservedUsd: 0 }),
-        })
-        .where(eq(enrichmentCalls.id, input.reservationId))
-        .returning({ id: enrichmentCalls.id });
-      settledReservation = settled.length > 0;
-    }
-    if (!settledReservation) await db.insert(enrichmentCalls).values({
+    await db.insert(enrichmentCalls).values({
       id: crypto.randomUUID(),
       jobId: input.jobId ?? null,
       runId: input.runId ?? null,

@@ -330,7 +330,7 @@ export function PourScanSlot({
   /**
    * Every pick goes through here. While an unknown barcode is on the card and
    * "Teach this barcode" is on, the pick is also a crowd confirmation of that
-   * barcode → bottle (the scanner's #100 flow, two agreeing people add it for
+   * barcode → bottle (the scanner's #100 flow, enough agreeing people add it for
    * everyone). It never shelves anything.
    */
   function finish(b: ScanBottle, meta: PickMeta) {
@@ -584,7 +584,7 @@ export function PourScanSlot({
           </div>
           <ToggleSwitch
             label="Teach this barcode"
-            hint="The bottle you pick counts as a confirmation — two agreeing people add it for everyone."
+            hint="The bottle you pick counts as a confirmation — once enough people agree, it’s added for everyone."
             checked={teach}
             onChange={setTeach}
           />

@@ -10,17 +10,17 @@ import {
   enrichmentRuns,
 } from "@/db/schema";
 import { createTestBottle, createTestUser, setupTestDb, uid } from "@/test/helpers";
+import { setAnthropicForTests } from "@/lib/ai/client";
 import { runBatch } from "./batch";
 import {
-  callEstimateUsd,
   canSpend,
   DEFAULT_DAILY_BUDGET_USD,
   enrichedByDay,
   getSettings,
   lastUtcDays,
-  recordCall,
-  releaseCall,
-  reserveCall,
+  releaseReservation,
+  reserveSpend,
+  RESERVATION_TTL_MS,
   spendByDay,
   spendByRun,
   spendSeries,
@@ -34,6 +34,7 @@ import {
   anthropicProvider,
   enrichEnabledByEnv,
   enrichLive,
+  getEnrichProvider,
   openAiProvider,
   selectedProviderName,
   setEnrichProviderForTests,
@@ -122,7 +123,6 @@ describe("provider selection", () => {
     delete process.env.ENRICH_ENABLED;
     vi.stubEnv("OPENAI_API_KEY", "");
     vi.stubEnv("ANTHROPIC_API_KEY", "");
-    vi.stubEnv("OPENROUTER_API_KEY", "");
     expect(enrichEnabledByEnv()).toBe(false);
     expect(selectedProviderName()).toBeNull();
     expect(enrichLive()).toBe(false);
@@ -140,6 +140,26 @@ describe("provider selection", () => {
     vi.stubEnv("ENRICH_PROVIDER", "auto");
     expect(selectedProviderName()).toBe("anthropic");
     expect(enrichLive()).toBe(true);
+  });
+
+  it("Anthropic enrichment goes through the shared AI client, and only when it talks to Anthropic directly", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "");
+    vi.stubEnv("ANTHROPIC_API_KEY", "ak-test");
+    vi.stubEnv("OPENROUTER_API_KEY", "or-test");
+    // OpenRouter can't run the hosted web search, so it isn't an enrichment provider.
+    expect(selectedProviderName()).toBeNull();
+    vi.stubEnv("OPENROUTER_API_KEY", "");
+    const create = vi.fn().mockResolvedValue({ stop_reason: "end_turn", content: [{ type: "text", text: "ok" }], usage: { input_tokens: 1, output_tokens: 1 } });
+    setAnthropicForTests({ messages: { create } } as never);
+    try {
+      const p = getEnrichProvider();
+      expect(p?.name).toBe("anthropic");
+      await p!.complete({ prompt: "x", model: p!.quickModel, web: false, timeoutMs: 10_000, maxOutputTokens: 10 });
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(create.mock.calls[0][1]).toMatchObject({ timeout: expect.any(Number), maxRetries: 0 });
+    } finally {
+      setAnthropicForTests(null);
+    }
   });
 
   it("an existing chat key alone spends nothing until ENRICH_ENABLED=true", () => {
@@ -202,22 +222,6 @@ describe("anthropicProvider", () => {
     expect(res.usage).toEqual({ inputTokens: 150, outputTokens: 30, cachedInputTokens: 5, webSearches: 2 });
   });
 
-  it("goes through the shared client seam, and drops hosted search where OpenRouter can't run it", async () => {
-    const create = vi.fn().mockResolvedValue({ stop_reason: "end_turn", content: [{ type: "text", text: "{}" }], usage: { input_tokens: 1, output_tokens: 1 } });
-    const { setAnthropicForTests } = await import("@/lib/ai/client");
-    setAnthropicForTests({ messages: { create } } as never);
-    try {
-      vi.stubEnv("ANTHROPIC_API_KEY", "ak-test");
-      await anthropicProvider().complete({ prompt: "x", model: "m", web: true, timeoutMs: 10_000, maxOutputTokens: 10 });
-      expect(create.mock.calls[0][0]).toHaveProperty("tools");
-      vi.stubEnv("OPENROUTER_API_KEY", "or-test");
-      await anthropicProvider().complete({ prompt: "x", model: "m", web: true, timeoutMs: 10_000, maxOutputTokens: 10 });
-      expect(create.mock.calls[1][0]).not.toHaveProperty("tools");
-    } finally {
-      setAnthropicForTests(null);
-    }
-  });
-
   it("wraps SDK failures", async () => {
     const p = anthropicProvider({ messages: { create: vi.fn().mockRejectedValue(new Error("overloaded")) } } as never);
     await expect(p.complete({ prompt: "x", model: p.quickModel, web: false, timeoutMs: 10_000, maxOutputTokens: 100 })).rejects.toThrow(/anthropic: overloaded/);
@@ -229,6 +233,10 @@ describe("validation", () => {
     expect(parseQuickResult(JSON.stringify([{ id: "other", profile: PROFILE }]), "b1")).toBeNull();
     expect(parseQuickResult(JSON.stringify([{ id: "b1", profile: PROFILE }]), "b1")).toEqual(PROFILE);
     expect(parseQuickResult("not json", "b1")).toBeNull();
+    // Out-of-scale or fractional scores are rejected, not clamped into range.
+    expect(parseQuickResult(JSON.stringify({ id: "b1", profile: { ...PROFILE, sweet: 60 } }), "b1")).toBeNull();
+    expect(parseQuickResult(JSON.stringify({ id: "b1", profile: { ...PROFILE, sweet: 6.5 } }), "b1")).toBeNull();
+    expect(parseWebResult(JSON.stringify({ profile: { ...PROFILE, woody: 80 }, notes: {}, sources: [] }))?.profile ?? null).toBeNull();
   });
 
   it("keeps notes and details only with a public https source", () => {
@@ -351,6 +359,21 @@ describe("live jobs", () => {
     expect((await getSettings(db)).dailyBudgetUsd).toBe(0);
     await updateSettings(db, { dailyBudgetUsd: DEFAULT_DAILY_BUDGET_USD });
     expect(await canSpend(db, "web")).toEqual({ ok: true });
+  });
+
+  it("holds each call's estimate so concurrent calls can't share the last of the cap", async () => {
+    setEnrichProviderForTests(fakeProvider().provider);
+    await updateSettings(db, { dailyBudgetUsd: 0.3 });
+    const [a, b] = await Promise.all([reserveSpend(db, "web"), reserveSpend(db, "web")]);
+    expect([a.ok, b.ok].sort()).toEqual([false, true]);
+    expect(await canSpend(db, "web")).toEqual({ ok: false, reason: "budget" });
+    const held = a.ok ? a : b;
+    await releaseReservation(db, held.ok ? held.reservationId : null);
+    expect(await canSpend(db, "web")).toEqual({ ok: true });
+    // An abandoned hold expires.
+    const stale = await reserveSpend(db, "web", new Date(Date.now() - RESERVATION_TTL_MS - 1_000));
+    expect(stale.ok).toBe(true);
+    expect((await reserveSpend(db, "web")).ok).toBe(true);
   });
 
   it("retries a failing model step, then gives up; the operator can requeue failures", async () => {
@@ -505,47 +528,7 @@ describe("batch runs", () => {
     expect(await read(noted.id)).toEqual(legacy);
     const [p] = await db.select().from(bottleFlavorProvenance).where(eq(bottleFlavorProvenance.bottleId, searched.id));
     expect(p).toMatchObject({ tier: "model_web", replacedLegacyProfile: legacy });
-  });
-});
-
-describe("budget reservations", () => {
-  it("concurrent calls cannot both pass the cap on the same spend; reservations settle or release", async () => {
-    setEnrichProviderForTests(fakeProvider().provider);
-    await updateSettings(db, { dailyBudgetUsd: 0.25 });
-    const input = { step: "web" as const, provider: "openai" as const, model: "gpt-6.1-sol" };
-    const [a, b] = await Promise.all([reserveCall(db, input), reserveCall(db, input)]);
-    expect([a.ok, b.ok].sort()).toEqual([false, true]);
-    expect([a, b].find((r) => !r.ok)).toEqual({ ok: false, reason: "budget" });
-    const held = [a, b].find((r) => r.ok) as { ok: true; reservationId: string };
-    // An open reservation counts at its estimate.
-    expect(await spendSince(db)).toBeCloseTo(0.2, 5);
-    await recordCall(db, { reservationId: held.reservationId, step: "web", provider: "openai", model: "gpt-6.1-sol", usage, ok: true });
-    const rows = await db.select().from(enrichmentCalls);
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ id: held.reservationId, pending: false, reservedUsd: 0, inputTokens: 900, ok: true });
-    expect(await spendSince(db)).toBeLessThan(0.05);
-    const again = await reserveCall(db, { ...input, step: "quick" });
-    expect(again.ok).toBe(true);
-    await releaseCall(db, (again as { reservationId: string }).reservationId);
-    expect(await db.select().from(enrichmentCalls)).toHaveLength(1);
-  });
-
-  it("prices the reservation at the chosen model's limits, never below the step floor", () => {
-    expect(callEstimateUsd("quick", "gpt-6-luna", { maxOutputTokens: 1_500 })).toBe(0.01);
-    expect(callEstimateUsd("quick", "claude-opus-5", { maxOutputTokens: 1_500 })).toBeGreaterThan(0.03);
-    expect(callEstimateUsd("web", "claude-sonnet-5", { maxOutputTokens: 4_000, maxSearches: 3 })).toBeGreaterThanOrEqual(0.2);
-  });
-
-  it("a failed call with no usage keeps its estimate counted", async () => {
-    setEnrichProviderForTests(fakeProvider().provider);
-    const r = await reserveCall(db, { step: "web", provider: "openai", model: "gpt-6.1-sol" });
-    expect(r.ok).toBe(true);
-    await recordCall(db, { reservationId: (r as { reservationId: string }).reservationId, step: "web", provider: "openai", model: "gpt-6.1-sol", usage: null, ok: false, error: "timeout" });
-    const [row] = await db.select().from(enrichmentCalls);
-    expect(row).toMatchObject({ pending: false, ok: false, reservedUsd: 0.2 });
-    expect(await spendSince(db)).toBeCloseTo(0.2, 5);
-  });
-});
+  });});
 
 describe("admin series", () => {
   it("spend and profiles per day cover every day, oldest first", async () => {

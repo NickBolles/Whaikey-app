@@ -431,6 +431,7 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
     setFreeform("");
     setFlavorTags({});
     setCompanions("");
+    setTags([]);
     setDetailOpen(false);
   }
 

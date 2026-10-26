@@ -72,3 +72,4 @@ next-env.d.ts
 /ios/App/App/google-services.json
 # server origin baked into the offline shell by scripts/native-sync.mjs
 /native/shell/config.js
+__pycache__/

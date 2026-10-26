@@ -1,5 +1,5 @@
 import type Anthropic from "@anthropic-ai/sdk";
-import { activeAiProvider, aiSupportsServerWebSearch, getAnthropic, isAiConfigured } from "@/lib/ai/client";
+import { activeAiProvider, getAnthropic } from "@/lib/ai/client";
 import { textFromContent } from "@/lib/ai/json";
 
 /**
@@ -9,7 +9,9 @@ import { textFromContent } from "@/lib/ai/json";
  *
  *   ENRICH_PROVIDER = openai | anthropic | auto (default auto: OpenAI when
  *                     OPENAI_API_KEY is set, else Anthropic when
- *                     ANTHROPIC_API_KEY is set)
+ *                     the shared AI client talks to Anthropic directly —
+ *                     ANTHROPIC_API_KEY set and no OpenRouter key, because
+ *                     OpenRouter does not run Anthropic's hosted web search)
  *   ENRICH_ENABLED  = "true" to let anything call a model. Default off, so a
  *                     deployment that merely HAS a key (ANTHROPIC_API_KEY is
  *                     already set for chat) spends nothing until the owner
@@ -126,23 +128,17 @@ export function openAiProvider(apiKey: string, fetchImpl: typeof fetch = fetch):
 }
 
 // ---------------------------------------------------------------------------
-// Anthropic Messages, through the app's one client seam (src/lib/ai/client.ts:
-// OpenRouter when OPENROUTER_API_KEY is set, direct Anthropic otherwise;
-// setAnthropicForTests in tests). Each request passes its own step-sized
-// timeout and no retries. OpenRouter does not accept Anthropic's hosted web
-// search, so there the web step runs without it — and an answer with no cited
-// source is stored at the quick tier, never as web-grounded.
+// Anthropic, through the shared client seam (src/lib/ai/client.ts: gateway
+// config + setAnthropicForTests). Each request passes its own step-sized
+// timeout, overriding the client's route-sized default.
 // ---------------------------------------------------------------------------
 
-export function anthropicProvider(client: Anthropic = getAnthropic()): EnrichProvider {
-  const anthropic = client;
-  const webSearch = aiSupportsServerWebSearch();
-  const openRouter = activeAiProvider() === "openrouter";
+export function anthropicProvider(client?: Anthropic): EnrichProvider {
+  const anthropic = client ?? getAnthropic();
   return {
     name: "anthropic",
-    // Model ids follow the client the seam picked (OpenRouter names differ).
-    quickModel: process.env.ENRICH_ANTHROPIC_QUICK_MODEL || (openRouter ? "anthropic/claude-haiku-4.5" : "claude-haiku-4-5"),
-    webModel: process.env.ENRICH_ANTHROPIC_WEB_MODEL || (openRouter ? "anthropic/claude-sonnet-4" : "claude-sonnet-5"),
+    quickModel: process.env.ENRICH_ANTHROPIC_QUICK_MODEL || "claude-haiku-4-5",
+    webModel: process.env.ENRICH_ANTHROPIC_WEB_MODEL || "claude-sonnet-5",
     async complete(input) {
       const usage: CallUsage = { ...ZERO };
       const messages: Array<{ role: "user" | "assistant"; content: unknown }> = [{ role: "user", content: input.prompt }];
@@ -159,7 +155,7 @@ export function anthropicProvider(client: Anthropic = getAnthropic()): EnrichPro
               model: input.model,
               max_tokens: input.maxOutputTokens,
               messages,
-              ...(input.web && webSearch
+              ...(input.web
                 ? { tools: [{ type: "web_search_20260209", name: "web_search", max_uses: input.maxSearches ?? 3 }] }
                 : {}),
             } as never,
@@ -203,8 +199,7 @@ export function selectedProviderName(): EnrichProviderName | null {
   if (testProvider !== undefined) return testProvider?.name ?? null;
   const pref = (process.env.ENRICH_PROVIDER ?? "auto").toLowerCase();
   const hasOpenAi = !!process.env.OPENAI_API_KEY;
-  // Anthropic-compatible client via the shared seam (direct key or OpenRouter).
-  const hasAnthropic = isAiConfigured();
+  const hasAnthropic = activeAiProvider() === "anthropic";
   if (pref === "openai") return hasOpenAi ? "openai" : null;
   if (pref === "anthropic") return hasAnthropic ? "anthropic" : null;
   if (hasOpenAi) return "openai";

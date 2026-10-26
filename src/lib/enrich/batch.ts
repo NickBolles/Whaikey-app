@@ -4,7 +4,7 @@ import { bottles, distilleries, enrichmentRuns } from "@/db/schema";
 import { buildEnrichPrompt, type EnrichableBottle } from "@/lib/ingest/enrich";
 import { parseModelResults, runFreePass, writeTieredProfiles } from "@/lib/ingest/flavor-tiers";
 import { LEGACY_REFRESH_SAFE, POPULAR_REFRESH_TOP, popularitySql } from "@/lib/popularity";
-import { canSpend, getSettings, recordCall, reserveCall, updateSettings } from "./budget";
+import { canSpend, getSettings, recordCall, releaseReservation, reserveSpend, updateSettings } from "./budget";
 import { getEnrichProvider, ProviderCallError } from "./providers";
 import { dueJobIds, requeueBottle, runJobToCompletion, STEP_HEADROOM_MS } from "./queue";
 
@@ -33,7 +33,6 @@ export const BATCH_TIERS = ["queue", "keyword", "missing", "web"] as const;
 export type BatchTier = (typeof BATCH_TIERS)[number];
 export const MISSING_BATCH_SIZE = 25;
 export const MISSING_TIMEOUT_MS = 40_000;
-export const MISSING_MAX_OUTPUT = 4_000;
 /** Work time for one chunk inside a 60 s function (leaves room to record the run and answer). */
 export const CHUNK_MS = 55_000;
 /** How long the web tier waits before refreshing the same bottle again. */
@@ -151,21 +150,18 @@ async function missingTier(db: DB, runId: string, deadline: number, bump: (k: st
       userNotes: [],
     }));
     const model = provider.quickModel;
-    const reservation = await reserveCall(db, { step: "batch-quick", provider: provider.name, model, runId, bottles: batch.length, maxOutputTokens: MISSING_MAX_OUTPUT });
-    if (!reservation.ok) return reservation.reason;
-    const reservationId = reservation.reservationId;
+    const hold = await reserveSpend(db, "batch-quick");
+    if (!hold.ok) return hold.reason;
     const started = Date.now();
-    let recorded = false;
     try {
       const res = await provider.complete({
         prompt: buildEnrichPrompt(batch, false),
         model,
         web: false,
         timeoutMs: MISSING_TIMEOUT_MS,
-        maxOutputTokens: MISSING_MAX_OUTPUT,
+        maxOutputTokens: 4_000,
       });
-      await recordCall(db, { reservationId, runId, step: "batch-quick", provider: provider.name, model, bottles: batch.length, usage: res.usage, ok: true, latencyMs: Date.now() - started });
-      recorded = true;
+      await recordCall(db, { runId, step: "batch-quick", provider: provider.name, model, bottles: batch.length, usage: res.usage, ok: true, latencyMs: Date.now() - started });
       const { writes, rejected } = parseModelResults([
         { pass: "cheap", model, bottleIds: batch.map((b) => b.id), raw: res.text, completedAt: new Date().toISOString() },
       ]);
@@ -173,9 +169,7 @@ async function missingTier(db: DB, runId: string, deadline: number, bump: (k: st
       bump("missingWritten", written.length);
       bump("missingRejected", rejected);
     } catch (err) {
-      // A failure after the call was recorded (parse/write) must not overwrite its usage.
-      if (!recorded) await recordCall(db, {
-        reservationId,
+      await recordCall(db, {
         runId,
         step: "batch-quick",
         provider: provider.name,
@@ -187,6 +181,8 @@ async function missingTier(db: DB, runId: string, deadline: number, bump: (k: st
         latencyMs: Date.now() - started,
       });
       bump("missingFailedCalls");
+    } finally {
+      await releaseReservation(db, hold.reservationId);
     }
     await updateSettings(db, { missingCursor: rows[rows.length - 1].id });
   }

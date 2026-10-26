@@ -117,33 +117,35 @@ class Guard:
 
 # --------------------------------------------------------------------------- github
 
-# Worker threads flush applies concurrently: dispatch + "which run is mine"
-# happen under one lock, and a run id is never handed out twice, so each
-# caller waits on (and downloads the artifact of) its own run.
-_DISPATCH_LOCK = threading.Lock()
-_CLAIMED_RUNS: set[int] = set()
+# `gh workflow run` returns no run id, so a dispatch is matched to "the newest
+# unclaimed run after it". Dispatch + identification are serialized and every
+# claimed id is remembered, so overlapping apply flushes (worker threads) can
+# never pick the same run or each other's.
+DISPATCH_LOCK = threading.Lock()
+CLAIMED_RUNS: set[int] = set()
 
 
 def dispatch_and_wait(ref: str, fields: dict[str, str], timeout_s: int = 3600) -> int:
+    started = time.time()
     args = ["gh", "workflow", "run", WORKFLOW, "-R", REPO, "--ref", ref]
     for k, v in fields.items():
         args += ["-f", f"{k}={v}"]
     run_id = None
-    with _DISPATCH_LOCK:
-        started = time.time()
+    with DISPATCH_LOCK:
+        before = time.time()
         sh(args)
         for _ in range(60):
             time.sleep(5)
             p = sh(["gh", "run", "list", "-R", REPO, "--workflow", WORKFLOW, "--event", "workflow_dispatch", "-L", "10",
                     "--json", "databaseId,createdAt,headBranch"])
-            mine = []
+            fresh = []
             for r in json.loads(p.stdout):
                 created = dt.datetime.fromisoformat(r["createdAt"].replace("Z", "+00:00")).timestamp()
-                if r["headBranch"] == ref and created >= started - 30 and r["databaseId"] not in _CLAIMED_RUNS:
-                    mine.append((created, r["databaseId"]))
-            if mine:
-                run_id = min(mine)[1]
-                _CLAIMED_RUNS.add(run_id)
+                if r["headBranch"] == ref and created >= before - 5 and r["databaseId"] not in CLAIMED_RUNS:
+                    fresh.append((created, r["databaseId"]))
+            if fresh:
+                run_id = min(fresh)[1]  # the first run after our dispatch is ours
+                CLAIMED_RUNS.add(run_id)
                 break
     if not run_id:
         raise RuntimeError("dispatched run did not appear")
@@ -327,6 +329,11 @@ def cmd_run(a: argparse.Namespace) -> int:
             summary["passes"].append(stats)
         flush(final=True)
         prune_assets()
+        failed = sum(int(p.get("batches_failed", 0)) for p in summary["passes"])
+        if failed:
+            # Successful batches are already applied; a failed batch still
+            # makes the run unsuccessful so the alert fires.
+            raise RuntimeError(f"{failed} model batch(es) failed; successful ones were applied")
         summary["status"] = "ok"
     except Exception as exc:
         summary["status"] = "failed"

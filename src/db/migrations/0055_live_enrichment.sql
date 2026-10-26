@@ -57,6 +57,13 @@ CREATE TABLE "enrichment_runs" (
 	"finished_at" timestamp with time zone
 );
 --> statement-breakpoint
+CREATE TABLE "enrichment_reservations" (
+	"id" text PRIMARY KEY NOT NULL,
+	"usd" double precision NOT NULL,
+	"expires_at" timestamp with time zone NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
 CREATE TABLE "enrichment_settings" (
 	"id" text PRIMARY KEY NOT NULL,
 	"paused" boolean DEFAULT false NOT NULL,

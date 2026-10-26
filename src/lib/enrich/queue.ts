@@ -16,7 +16,7 @@ import { catalogVisibleTo } from "@/lib/catalog-visibility";
 import { keywordInputHash, keywordProfile, TIER_CONFIDENCE, writeTieredProfiles, type KeywordInputs } from "@/lib/ingest/flavor-tiers";
 import { reportInBackground } from "@/lib/observability/errors";
 import { inPopularTop, sweepPopularity } from "@/lib/popularity";
-import { recordCall, releaseCall, reserveCall } from "./budget";
+import { recordCall, releaseReservation, reserveSpend } from "./budget";
 import { quickPrompt, webPrompt, type PromptBottle } from "./prompts";
 import { enrichLive, getEnrichProvider, ProviderCallError } from "./providers";
 import { parseQuickResult, parseWebResult, profileHeadline, type WebDetails } from "./validate";
@@ -53,10 +53,6 @@ export const ENRICH_STALE_QUEUE_MS = 45_000;
 /** Per-step model budgets, inside a 60 s function. */
 export const QUICK_TIMEOUT_MS = 20_000;
 export const WEB_TIMEOUT_MS = 45_000;
-/** Per-call limits — also what the budget reservation is priced at. */
-export const QUICK_MAX_OUTPUT = 1_500;
-export const WEB_MAX_OUTPUT = 4_000;
-export const WEB_MAX_SEARCHES = 3;
 /** Time a drain needs left before it starts another step (the web step is the long one). */
 export const STEP_HEADROOM_MS = WEB_TIMEOUT_MS + 3_000;
 
@@ -316,22 +312,7 @@ export async function runNextStep(db: DB, jobId: string, opts: { runId?: string 
       }
     }
     const modelStep: "quick" | "web" = step === "quick" ? "quick" : "web";
-    const provider = getEnrichProvider();
-    const gate = provider
-      ? await reserveCall(
-          db,
-          {
-            step: modelStep,
-            provider: provider.name,
-            model: modelStep === "quick" ? provider.quickModel : provider.webModel,
-            jobId: job.id,
-            runId: opts.runId ?? null,
-            maxOutputTokens: modelStep === "quick" ? QUICK_MAX_OUTPUT : WEB_MAX_OUTPUT,
-            maxSearches: modelStep === "web" ? WEB_MAX_SEARCHES : 0,
-          },
-          now,
-        )
-      : ({ ok: false, reason: "disabled" } as const);
+    const gate = await reserveSpend(db, modelStep, now);
     if (!gate.ok) {
       await unlease(db, job.id, { waitingReason: gate.reason, notBefore: new Date(now.getTime() + ENRICH_PARKED_BACKOFF_MS) });
       if (job.waitingReason !== gate.reason) {
@@ -340,7 +321,13 @@ export async function runNextStep(db: DB, jobId: string, opts: { runId?: string 
       return { ran: null, reason: "parked" };
     }
     await appendEvent(db, job.id, { kind: "step_started", step, message: STEP_STARTED[modelStep] });
-    const ok = await runModelStep(db, job, modelStep, opts.runId ?? null, gate.reservationId);
+    let ok: boolean;
+    try {
+      ok = await runModelStep(db, job, modelStep, opts.runId ?? null);
+    } finally {
+      // After recordCall has written the real usage, so the cap never has a gap.
+      await releaseReservation(db, gate.reservationId);
+    }
     if (!ok) {
       const attempts = job.attempts + 1;
       if (attempts >= ENRICH_MAX_ATTEMPTS) {
@@ -407,22 +394,12 @@ export async function jobIsDue(db: DB, bottleId: string, now = new Date()): Prom
   return row?.id ?? null;
 }
 
-async function runModelStep(
-  db: DB,
-  job: BottleEnrichmentJob,
-  step: "quick" | "web",
-  runId: string | null,
-  reservationId: string,
-): Promise<boolean> {
+async function runModelStep(db: DB, job: BottleEnrichmentJob, step: "quick" | "web", runId: string | null): Promise<boolean> {
   const provider = getEnrichProvider();
   const bottle = await promptBottle(db, job.bottleId);
-  if (!provider || !bottle) {
-    await releaseCall(db, reservationId);
-    return false;
-  }
+  if (!provider || !bottle) return false;
   const model = step === "quick" ? provider.quickModel : provider.webModel;
   const started = Date.now();
-  let recorded = false;
   let text: string;
   try {
     const res = await provider.complete({
@@ -430,16 +407,13 @@ async function runModelStep(
       model,
       web: step === "web",
       timeoutMs: step === "quick" ? QUICK_TIMEOUT_MS : WEB_TIMEOUT_MS,
-      maxOutputTokens: step === "quick" ? QUICK_MAX_OUTPUT : WEB_MAX_OUTPUT,
-      maxSearches: WEB_MAX_SEARCHES,
+      maxOutputTokens: step === "quick" ? 1_500 : 4_000,
+      maxSearches: 3,
     });
     text = res.text;
-    await recordCall(db, { reservationId, jobId: job.id, runId, step, provider: provider.name, model, usage: res.usage, ok: true, latencyMs: Date.now() - started });
-    recorded = true;
+    await recordCall(db, { jobId: job.id, runId, step, provider: provider.name, model, usage: res.usage, ok: true, latencyMs: Date.now() - started });
   } catch (err) {
-    // A failure after the call was recorded (parse/write) must not overwrite its usage.
-    if (!recorded) await recordCall(db, {
-      reservationId,
+    await recordCall(db, {
       jobId: job.id,
       runId,
       step,

@@ -1615,15 +1615,6 @@ export const enrichmentCalls = pgTable(
     ok: boolean("ok").notNull(),
     error: text("error"),
     latencyMs: integer("latency_ms"),
-    /**
-     * A reservation: the row is written (inside a budget lock) BEFORE the
-     * call, holding `reservedUsd` — the call's worst-case estimate — against
-     * today's cap, so concurrent calls can't all pass the gate on the same
-     * spend. The call's real usage replaces it; a reservation whose call never
-     * reported back keeps counting (fails closed).
-     */
-    pending: boolean("pending").notNull().default(false),
-    reservedUsd: doublePrecision("reserved_usd").notNull().default(0),
     createdAt: createdAt(),
   },
   (t) => [index("enrichment_calls_created_idx").on(t.createdAt), index("enrichment_calls_run_idx").on(t.runId)],
@@ -1657,6 +1648,20 @@ export const enrichmentSettings = pgTable("enrichment_settings", {
   /** Resume point (bottle id) for the batched missing-profile tier. */
   missingCursor: text("missing_cursor"),
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+});
+
+/**
+ * In-flight spend holds: a model call reserves its worst-case estimate here
+ * (under an advisory lock) before it starts, and the hold is dropped once the
+ * call's usage is recorded. Concurrent calls therefore can't all pass the
+ * daily cap on the same remaining allowance. Holds expire, so a crashed call
+ * frees its slice. No user column.
+ */
+export const enrichmentReservations = pgTable("enrichment_reservations", {
+  id: text("id").primaryKey(),
+  usd: doublePrecision("usd").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
 });
 
 /**
@@ -1943,7 +1948,7 @@ export const nativeAuthCodes = pgTable(
  * server — today Sign in with Apple's notifications (consent revoked, Apple ID
  * deleted, private-relay email turned off/on). `jti` is the provider's id for
  * the notification and makes a redelivery a no-op. `consent-revoked` and
- * `account-delete` also sign the account out (its sessions are deleted) and
+ * `account-deleted` (alias `account-delete`) also sign the account out (its sessions are deleted) and
  * stand as a flag on the account: the person told Apple to stop, and the app
  * should know that when they come back.
  */
