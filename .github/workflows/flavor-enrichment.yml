@@ -1,0 +1,165 @@
+# Tiered flavor-profile backfill against the production database
+# (docs/DATA_SOURCES.md §2.4, src/lib/ingest/flavor-tiers.ts).
+#
+# The DB secret lives here; the Codex subscription login lives on the operator
+# host (Hermes, scripts/flavor-codex-bridge.py). The two never meet:
+#
+#   mode=prepare  free pass (community roll-up + keyword matcher, no model)
+#                 → export prompt batches for the cheap/heavy model passes as
+#                   the `flavor-candidates` artifact
+#   mode=apply    download the host's raw model results (release asset on the
+#                 `flavor-enrichment-data` prerelease), validate every row
+#                 (wedge ids, 0-10 ints, ids from the exported batch, tier
+#                 guard) and write with provenance
+#   mode=coverage read-only coverage by tier
+#
+# Never runs drizzle migrations (the CLI creates its provenance table with
+# idempotent DDL), so it is safe to dispatch from a branch with `--ref`.
+# Failures open/comment a `flavor-enrichment` issue; a healthy run closes it.
+name: flavor enrichment
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "prepare (free pass + export) | apply | coverage"
+        type: choice
+        options: [prepare, apply, coverage]
+        default: prepare
+      dry_run:
+        description: "Compute and report without writing"
+        type: boolean
+        default: false
+      cheap_limit:
+        description: "prepare: max bottles exported for the cheap pass"
+        type: string
+        default: "5000"
+      heavy_top:
+        description: "prepare: top-N popular bottles exported for the heavy pass"
+        type: string
+        default: "2500"
+      upgrade_keyword:
+        description: "prepare: also send keyword-tier bottles to the cheap pass"
+        type: boolean
+        default: false
+      results_asset:
+        description: "apply: asset name on the flavor-enrichment-data release"
+        type: string
+        default: ""
+  pull_request:
+    paths:
+      - .github/workflows/flavor-enrichment.yml
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: flavor-enrichment
+  cancel-in-progress: false
+
+jobs:
+  lint:
+    # PR runs only validate the inputs below parse; they never touch the DB.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "flavor enrichment workflow registered"
+
+  run:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      OUT_DIR: ${{ github.workspace }}/.flavor
+      MODE: ${{ inputs.mode }}
+      DRY: ${{ inputs.dry_run && '--dry-run' || '--apply' }}
+      CHEAP_LIMIT: ${{ inputs.cheap_limit }}
+      HEAVY_TOP: ${{ inputs.heavy_top }}
+      RESULTS_ASSET: ${{ inputs.results_asset }}
+    steps:
+      - name: Validate inputs
+        run: |
+          test -n "$DATABASE_URL" || { echo "::error::DATABASE_URL secret is not set"; exit 1; }
+          case "$CHEAP_LIMIT" in (*[!0-9]*|'') echo "::error::cheap_limit must be an integer"; exit 1;; esac
+          case "$HEAVY_TOP" in (*[!0-9]*|'') echo "::error::heavy_top must be an integer"; exit 1;; esac
+          if [ "$MODE" = apply ]; then
+            case "$RESULTS_ASSET" in (flavor-results-*.json) ;; (*) echo "::error::results_asset must be flavor-results-*.json"; exit 1;; esac
+          fi
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: mkdir -p "$OUT_DIR"
+
+      - name: Free pass (community notes + keyword matcher)
+        if: inputs.mode == 'prepare'
+        run: pnpm flavor free $DRY --summary "$OUT_DIR/free.json"
+
+      - name: Export model-pass candidates
+        if: inputs.mode == 'prepare'
+        run: |
+          extra=""
+          if [ "${{ inputs.upgrade_keyword }}" = "true" ]; then extra="--upgrade-keyword"; fi
+          pnpm flavor export --out "$OUT_DIR/candidates.json" --cheap-limit "$CHEAP_LIMIT" --heavy-top "$HEAVY_TOP" $extra \
+            --summary "$OUT_DIR/export.json"
+
+      - name: Download model results
+        if: inputs.mode == 'apply'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download flavor-enrichment-data -R "$GITHUB_REPOSITORY" -p "$RESULTS_ASSET" -D "$OUT_DIR"
+
+      - name: Apply validated model results
+        if: inputs.mode == 'apply'
+        run: pnpm flavor apply --in "$OUT_DIR/$RESULTS_ASSET" $DRY --summary "$OUT_DIR/apply.json"
+
+      - name: Coverage
+        if: always()
+        run: pnpm flavor coverage --summary "$OUT_DIR/coverage.json"
+
+      - name: Step summary
+        if: always()
+        run: |
+          {
+            echo "## Flavor enrichment ($MODE${{ inputs.dry_run && ', dry run' || '' }})"
+            for f in free export apply coverage; do
+              [ -f "$OUT_DIR/$f.json" ] || continue
+              echo "### $f"; echo '```json'; cat "$OUT_DIR/$f.json"; echo '```'
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+          # Raw model text is not needed after apply; keep artifacts small.
+          rm -f "$OUT_DIR"/flavor-results-*.json
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: flavor-candidates
+          path: .flavor/
+          include-hidden-files: true
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Alert issue
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OUTCOME: ${{ job.status }}
+        run: |
+          label=flavor-enrichment
+          gh label create "$label" -R "$GITHUB_REPOSITORY" --color B60205 --description "Flavor-profile backfill health" 2>/dev/null || true
+          open=$(gh issue list -R "$GITHUB_REPOSITORY" --label "$label" --state open --limit 1 --json number --jq '.[0].number // empty')
+          url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          if [ "$OUTCOME" = "success" ]; then
+            if [ -n "$open" ]; then gh issue close "$open" -R "$GITHUB_REPOSITORY" --comment "Recovered: $url"; fi
+          elif [ -n "$open" ]; then
+            gh issue comment "$open" -R "$GITHUB_REPOSITORY" --body "Flavor enrichment $MODE failed again: $url"
+          else
+            gh issue create -R "$GITHUB_REPOSITORY" --label "$label" --title "Flavor enrichment $MODE failed ($(date -u +%F))" --body "See $url"
+          fi

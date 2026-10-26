@@ -1483,6 +1483,37 @@ export const bottleClaims = pgTable(
   ],
 );
 
+/**
+ * Provenance + confidence tier for `bottles.flavorProfile`
+ * (src/lib/ingest/flavor-tiers.ts, docs/DATA_SOURCES.md §2.4). One row per
+ * bottle whose profile was written by the tiered backfill. Tiers rank
+ * keyword < model < model_web < community, and a write only lands over an
+ * equal-or-lower tier — never over a higher one. A profile with NO row here
+ * predates tracking (seed data or the old enrich step) and is never
+ * overwritten by the backfill.
+ */
+export const FLAVOR_PROFILE_TIERS = ["keyword", "model", "model_web", "community"] as const;
+export type FlavorProfileTier = (typeof FLAVOR_PROFILE_TIERS)[number];
+
+export const bottleFlavorProvenance = pgTable(
+  "bottle_flavor_provenance",
+  {
+    bottleId: text("bottle_id").primaryKey().references(() => bottles.id, { onDelete: "cascade" }),
+    tier: text("tier").$type<FlavorProfileTier>().notNull(),
+    /** 0-1; recorded for consumers that want to down-weight estimates. */
+    confidence: doublePrecision("confidence").notNull(),
+    /** "keyword-matcher", "community-notes", or "codex:<model>". */
+    method: text("method").notNull(),
+    model: text("model"),
+    /** "free" | "cheap" | "heavy" — the backfill pass that wrote the profile. */
+    pass: text("pass").notNull(),
+    /** Hash of the inputs the profile was derived from (free pass re-runs only on change). */
+    inputHash: text("input_hash"),
+    enrichedAt: timestamp("enriched_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+  },
+  (t) => [index("bottle_flavor_provenance_tier_idx").on(t.tier)],
+);
+
 export const BOTTLE_MEDIA_KINDS = ["bottle", "distillery", "label"] as const;
 export type BottleMediaKind = (typeof BOTTLE_MEDIA_KINDS)[number];
 

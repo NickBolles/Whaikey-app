@@ -379,6 +379,13 @@
       "when": 1793047100401,
       "tag": "0053_auth_provider_events",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1793047123452,
+      "tag": "0054_flavor_provenance",
+      "breakpoints": true
     }
   ]
 }

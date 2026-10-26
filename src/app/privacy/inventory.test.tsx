@@ -175,6 +175,7 @@ const INVENTORY: Record<string, Verdict> = {
       "family, value, total, refreshed_at: counts of verified catalog bottles per country, region and style; no user column, and nothing a person logs is counted.",
   },
   bottle_verifications: { notPersonal: "Catalog QA state." },
+  bottle_flavor_provenance: { notPersonal: "Catalog flavor-profile provenance." },
   catalog_sources: { notPersonal: "Where catalog data came from." },
   bottle_resources: { notPersonal: "Links attached to catalog rows." },
   bottle_claims: { notPersonal: "Sourced factual claims about a bottle." },
