@@ -120,6 +120,11 @@ describe("outings (D22)", () => {
     // Everyone seated with an account hears the recap is ready (not the host).
     expect((await listInbox(db, friend.id)).map((n) => n.text)).toContain("The recap for Bourbon Trail Saturday is ready");
     expect(outingCsv(await getOutingView(db, ended, friend.id, friendSeat))).toContain("Cask 1142 sample");
+    const many = await createOuting(db, host.id, input);
+    const manySeat = (await findOutingSeat(db, many.id, { userId: host.id }))!;
+    await addTasting(db, many, manySeat, { label: "Busy dram", flavorTags: { vanilla: 3, oak: 2, cherry: 2, honey: 1, "dark-fruit": 1 } });
+    const csv = outingCsv(await getOutingView(db, many, host.id, manySeat));
+    for (const d of ["Vanilla", "Oak", "Cherry", "Honey", "Dark fruit"]) expect(csv).toContain(d);
   });
 
   it("one voice per person per bottle: a second taste never weighs the consensus", () => {

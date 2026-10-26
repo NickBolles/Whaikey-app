@@ -667,7 +667,8 @@ export async function outingStamp(db: DB, outing: schema.Outing, viewerUserId: s
 
 /** The outing as CSV — for anyone on it. Names, ratings, descriptors, notes; no amounts exist to export. */
 export function outingCsv(view: OutingView): string {
-  const rows = view.feed.map((f) => [f.kind, f.who, f.label ?? "", f.rating ?? "", (f.tags ?? []).join("; "), f.text ?? "", f.createdAt.toISOString()]);
+  // Every descriptor recorded, not the three the feed shows.
+  const rows = view.feed.map((f) => [f.kind, f.who, f.label ?? "", f.rating ?? "", tagNames(f.flavorTags ?? null, 8).join("; "), f.text ?? "", f.createdAt.toISOString()]);
   return toCsv(["kind", "who", "bottle", "rating", "descriptors", "note", "at"], rows);
 }
 
