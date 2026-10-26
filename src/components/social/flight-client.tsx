@@ -18,7 +18,22 @@ async function post(url: string, method: string, body: unknown) {
 }
 
 /** Signed-out guest: name + birth date (21+ check, D20), then a 24 h seat. */
-export function GuestJoinForm({ code, markets }: { code: string; markets: ReadonlyArray<{ code: string; label: string }> }) {
+export function GuestJoinForm({
+  code,
+  markets,
+  endpoint = "/api/flights/join",
+  intro = "Join as a guest — no account needed tonight. Your ratings are kept for 24 hours unless you create one.",
+  submitLabel = "Join the tasting",
+  closedCopy = "This tasting night is closed or the link is wrong.",
+}: {
+  code: string;
+  markets: ReadonlyArray<{ code: string; label: string }>;
+  /** Shared with outings (D22): same 21+ check, same 24 h seat, different table. */
+  endpoint?: string;
+  intro?: string;
+  submitLabel?: string;
+  closedCopy?: string;
+}) {
   const router = useRouter();
   const [guestName, setGuestName] = useState("");
   const [birthDate, setBirthDate] = useState("");
@@ -29,16 +44,16 @@ export function GuestJoinForm({ code, markets }: { code: string; markets: Readon
     e.preventDefault();
     setBusy(true);
     setError(null);
-    const res = await post("/api/flights/join", "POST", { code, guest: { guestName, birthDate, market } }).catch(() => null);
+    const res = await post(endpoint, "POST", { code, guest: { guestName, birthDate, market } }).catch(() => null);
     setBusy(false);
     if (res?.ok) router.refresh();
     else if (res?.status === 403) setError("Whaikey is only for people of legal drinking age where you live.");
     else if (res?.status === 400) setError("Check your name and birth date.");
-    else setError("This tasting night is closed or the link is wrong.");
+    else setError(closedCopy);
   }
   return (
     <form onSubmit={submit} className="card flex flex-col gap-3 p-4">
-      <p className="text-sm">Join as a guest — no account needed tonight. Your ratings are kept for 24 hours unless you create one.</p>
+      <p className="text-sm">{intro}</p>
       <label className="flex flex-col gap-1 text-sm">
         First name
         <input value={guestName} onChange={(e) => setGuestName(e.target.value)} maxLength={30} required className="rounded-lg border border-border-subtle bg-surface px-3 py-2" />
@@ -59,7 +74,7 @@ export function GuestJoinForm({ code, markets }: { code: string; markets: Readon
       </label>
       <p className="text-[11px] text-muted">We check your age and don&rsquo;t store your birth date.</p>
       <button type="submit" disabled={busy} className="btn-primary py-2.5 disabled:opacity-60">
-        {busy ? "Joining…" : "Join the tasting"}
+        {busy ? "Joining…" : submitLabel}
       </button>
       {error && (
         <p role="status" className="text-sm text-muted">

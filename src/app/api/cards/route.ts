@@ -5,12 +5,14 @@ import { requireUser, withErrorHandling } from "@/lib/session";
 import { cardEpoch, cardPath } from "@/lib/cards";
 import { findTaster, visibleFlightByCode } from "@/lib/flights";
 import { wrappedAvailable } from "@/lib/wrapped";
+import { findOutingSeat, visibleOutingByCode } from "@/lib/outings";
 
 const schema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("palate") }).strict(),
   z.object({ kind: z.literal("passport") }).strict(),
   z.object({ kind: z.literal("wrapped"), year: z.number().int() }).strict(),
   z.object({ kind: z.literal("flight"), code: z.string().min(1).max(32) }).strict(),
+  z.object({ kind: z.literal("outing"), code: z.string().min(1).max(32) }).strict(),
 ]);
 
 /**
@@ -40,6 +42,16 @@ export async function POST(req: Request) {
       // the credential that seats someone at the table.
       subject = flight.id;
       // Rendered as the person who shared it: their blocks shape the results.
+      extra = user.id;
+    }
+    if (input.kind === "outing") {
+      const db = getDb();
+      const outing = await visibleOutingByCode(db, input.code, user.id);
+      if (!outing || outing.state !== "ended" || !(await findOutingSeat(db, outing.id, { userId: user.id }))) {
+        return NextResponse.json({ error: "not_found" }, { status: 404 });
+      }
+      // Same as a flight: the outing's id, never its join code, rendered as the sharer.
+      subject = outing.id;
       extra = user.id;
     }
     const epoch = await cardEpoch(getDb(), user.id);

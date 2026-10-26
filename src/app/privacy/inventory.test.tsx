@@ -145,10 +145,14 @@ const INVENTORY: Record<string, Verdict> = {
   flight_bottles: { disclosed: "Tasting nights", sharedWith: ["flights", "flight_participants", "flight_entries"] },
   flight_participants: { disclosed: "Tasting nights", sharedWith: ["flights", "flight_bottles", "flight_entries"] },
   flight_entries: { disclosed: "Tasting nights", sharedWith: ["flights", "flight_bottles", "flight_participants"] },
-  challenges: { disclosed: "Challenges and the friend board", sharedWith: ["challenge_participants", "breadth_board_opt_ins"] },
-  challenge_participants: { disclosed: "Challenges and the friend board", sharedWith: ["challenges", "breadth_board_opt_ins"] },
+  outings: { disclosed: "Outings", sharedWith: ["outing_participants", "outing_tastings", "outing_notes"] },
+  outing_participants: { disclosed: "Outings", sharedWith: ["outings", "outing_tastings", "outing_notes"] },
+  outing_tastings: { disclosed: "Outings", sharedWith: ["outings", "outing_participants", "outing_notes"] },
+  outing_notes: { disclosed: "Outings", sharedWith: ["outings", "outing_participants", "outing_tastings"] },
+  challenges: { disclosed: "Trails and the friend board", sharedWith: ["challenge_participants", "breadth_board_opt_ins"] },
+  challenge_participants: { disclosed: "Trails and the friend board", sharedWith: ["challenges", "breadth_board_opt_ins"] },
   share_card_keys: { disclosed: "Share cards" },
-  breadth_board_opt_ins: { disclosed: "Challenges and the friend board", sharedWith: ["challenges", "challenge_participants"] },
+  breadth_board_opt_ins: { disclosed: "Trails and the friend board", sharedWith: ["challenges", "challenge_participants"] },
 
   // --- Catalog: about bottles, not about people ---
   distilleries: { notPersonal: "Catalog reference data." },

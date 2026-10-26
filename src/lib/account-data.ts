@@ -25,6 +25,10 @@ import {
   flightEntries,
   flightParticipants,
   flights,
+  outingNotes,
+  outingParticipants,
+  outingTastings,
+  outings,
   follows,
   moderationActions,
   nativeAuthCodes,
@@ -118,6 +122,12 @@ const ownSeatIds = (db: DB, userId: string) =>
   db.select({ id: flightParticipants.id }).from(flightParticipants).where(eq(flightParticipants.userId, userId));
 
 const notInArraySeats = (db: DB, userId: string) => notInArray(flightEntries.participantId, ownSeatIds(db, userId));
+
+const ownOutingIds = (db: DB, userId: string) =>
+  db.select({ id: outings.id }).from(outings).where(eq(outings.hostId, userId));
+
+const ownOutingSeatIds = (db: DB, userId: string) =>
+  db.select({ id: outingParticipants.id }).from(outingParticipants).where(eq(outingParticipants.userId, userId));
 
 const ownChatIds = (db: DB, userId: string) =>
   db.select({ id: chatSessions.id }).from(chatSessions).where(eq(chatSessions.userId, userId));
@@ -1172,13 +1182,131 @@ export const ACCOUNT_DATA: readonly DataSlice[] = [
     notExported: "Other people's words, not yours.",
   },
 
+  // --- Outings: group distillery visits (§7.15, D22) ----------------------
+  {
+    key: "outings_hosted",
+    table: outings,
+    description: "Outings you planned: the name, the distillery and where it is, the day, and when you ended it.",
+    onDelete: "deleted",
+    why: "Yours; the outing and everything logged on it go with you.",
+    where: (_db, userId) => eq(outings.hostId, userId),
+    export: {
+      // Not the join code: it is the outing's invite.
+      columns: ["id", "title", "distilleryName", "location", "visitOn", "state", "createdAt", "endedAt"],
+      rows: (db, userId) =>
+        db
+          .select({
+            id: outings.id,
+            title: outings.title,
+            distilleryName: outings.distilleryName,
+            location: outings.location,
+            visitOn: outings.visitOn,
+            state: outings.state,
+            createdAt: outings.createdAt,
+            endedAt: outings.endedAt,
+          })
+          .from(outings)
+          .where(eq(outings.hostId, userId))
+          .orderBy(outings.createdAt),
+    },
+  },
+  {
+    key: "outing_seats",
+    table: outingParticipants,
+    description: "The outings you joined, and when.",
+    onDelete: "deleted",
+    why: "Your place on the trip; the outing carries on for everyone else.",
+    where: (_db, userId) => eq(outingParticipants.userId, userId),
+    export: {
+      columns: ["outingId", "joinedAt"],
+      rows: (db, userId) =>
+        db
+          .select({ outingId: outingParticipants.outingId, joinedAt: outingParticipants.joinedAt })
+          .from(outingParticipants)
+          .where(eq(outingParticipants.userId, userId))
+          .orderBy(outingParticipants.joinedAt),
+    },
+  },
+  {
+    key: "outing_guests",
+    table: outingParticipants,
+    description: "Other people on the outings you planned, including guests.",
+    onDelete: "deleted",
+    why: "They joined an outing that is deleted with you.",
+    where: (db, userId) => and(inArray(outingParticipants.outingId, ownOutingIds(db, userId)), sql`${outingParticipants.userId} is distinct from ${userId}`),
+    notExported: "Other people's places on the trip, not yours.",
+  },
+  {
+    key: "outing_tastings",
+    table: outingTastings,
+    description: "What you logged on outings: the bottle or the name you typed, your rating, descriptors and note.",
+    onDelete: "deleted",
+    why: "Your words; the outing's feed and recap lose your rows.",
+    where: (db, userId) => inArray(outingTastings.participantId, ownOutingSeatIds(db, userId)),
+    export: {
+      columns: ["outingId", "bottleId", "label", "rating", "flavorTags", "note", "createdAt", "updatedAt"],
+      rows: (db, userId) =>
+        db
+          .select({
+            outingId: outingTastings.outingId,
+            bottleId: outingTastings.bottleId,
+            label: outingTastings.label,
+            rating: outingTastings.rating,
+            flavorTags: outingTastings.flavorTags,
+            note: outingTastings.note,
+            createdAt: outingTastings.createdAt,
+            updatedAt: outingTastings.updatedAt,
+          })
+          .from(outingTastings)
+          .where(inArray(outingTastings.participantId, ownOutingSeatIds(db, userId)))
+          .orderBy(outingTastings.createdAt),
+    },
+  },
+  {
+    key: "outing_tastings_by_others",
+    table: outingTastings,
+    description: "What other people logged on the outings you planned.",
+    onDelete: "deleted",
+    why: "They belong to an outing that is deleted with you.",
+    where: (db, userId) =>
+      and(inArray(outingTastings.outingId, ownOutingIds(db, userId)), notInArray(outingTastings.participantId, ownOutingSeatIds(db, userId))),
+    notExported: "Other people's words, not yours.",
+  },
+  {
+    key: "outing_notes",
+    table: outingNotes,
+    description: "Notes you posted on outing feeds.",
+    onDelete: "deleted",
+    why: "Your words.",
+    where: (db, userId) => inArray(outingNotes.participantId, ownOutingSeatIds(db, userId)),
+    export: {
+      columns: ["outingId", "body", "createdAt"],
+      rows: (db, userId) =>
+        db
+          .select({ outingId: outingNotes.outingId, body: outingNotes.body, createdAt: outingNotes.createdAt })
+          .from(outingNotes)
+          .where(inArray(outingNotes.participantId, ownOutingSeatIds(db, userId)))
+          .orderBy(outingNotes.createdAt),
+    },
+  },
+  {
+    key: "outing_notes_by_others",
+    table: outingNotes,
+    description: "Notes other people posted on the outings you planned.",
+    onDelete: "deleted",
+    why: "They belong to an outing that is deleted with you.",
+    where: (db, userId) =>
+      and(inArray(outingNotes.outingId, ownOutingIds(db, userId)), notInArray(outingNotes.participantId, ownOutingSeatIds(db, userId))),
+    notExported: "Other people's words, not yours.",
+  },
+
   // --- Social M2: challenges and the friend board (Track C, §7.12–7.13) ----
   {
     key: "club_challenges_started",
     table: challenges,
-    description: "Club challenges you started: the name, the rule and its dates.",
+    description: "Club trails you started: the name, the rule and its dates.",
     onDelete: "unlinked",
-    why: "A club challenge belongs to the club; it stays for the members taking part and stops naming you.",
+    why: "A club trail belongs to the club; it stays for the members taking part and stops naming you.",
     where: (_db, userId) => eq(challenges.createdBy, userId),
     export: {
       columns: ["slug", "title", "rule", "startsAt", "endsAt", "createdAt"],
@@ -1200,7 +1328,7 @@ export const ACCOUNT_DATA: readonly DataSlice[] = [
   {
     key: "challenges_joined",
     table: challengeParticipants,
-    description: "Challenges you joined, and when you earned each crest.",
+    description: "Trails you joined, and when you earned each crest.",
     onDelete: "deleted",
     why: "Your participation and crests.",
     where: (_db, userId) => eq(challengeParticipants.userId, userId),

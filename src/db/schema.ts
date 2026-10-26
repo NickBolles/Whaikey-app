@@ -1947,6 +1947,7 @@ export const NOTIFICATION_CATEGORIES = [
   "club",
   "flight",
   "challenge",
+  "outing",
 ] as const;
 export type NotificationCategory = (typeof NOTIFICATION_CATEGORIES)[number];
 
@@ -2172,6 +2173,113 @@ export const flightEntries = pgTable(
     updatedAt: updatedAt(),
   },
   (t) => [uniqueIndex("flight_entries_participant_slot_uq").on(t.participantId, t.slot), index("flight_entries_flight_idx").on(t.flightId)],
+);
+
+// ── Outings: a group distillery visit (docs/SOCIAL.md §7.15, D22) ──────────
+
+export const OUTING_STATES = ["open", "ended"] as const;
+export type OutingState = (typeof OUTING_STATES)[number];
+
+/**
+ * An outing (D22): a host plans a group trip to a distillery, friends join by
+ * link/QR (accounts, or a 24 h guest seat exactly like a tasting night), and
+ * everyone logs what they tasted against the outing. A destination, never a
+ * venue: no location is read from a device and nothing here counts how much
+ * or how often anyone drank. `visitOn` is the calendar day (YYYY-MM-DD) the
+ * host typed; `distilleryId` is set only when the name matched the catalog.
+ */
+export const outings = pgTable(
+  "outings",
+  {
+    id: id(),
+    hostId: text("host_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    clubId: text("club_id").references(() => clubs.id, { onDelete: "set null" }),
+    title: text("title").notNull(),
+    distilleryName: text("distillery_name").notNull(),
+    distilleryId: text("distillery_id").references(() => distilleries.id, { onDelete: "set null" }),
+    location: text("location"),
+    visitOn: text("visit_on").notNull(),
+    /** Show the plan-your-ride card on the outing page (on by default). */
+    rideReminder: boolean("ride_reminder").notNull().default(true),
+    state: text("state").$type<OutingState>().notNull().default("open"),
+    joinCode: text("join_code").notNull().unique(),
+    createdAt: createdAt(),
+    endedAt: timestamp("ended_at", { withTimezone: true, mode: "date" }),
+  },
+  (t) => [index("outings_host_idx").on(t.hostId), index("outings_club_idx").on(t.clubId)],
+);
+export type Outing = typeof outings.$inferSelect;
+
+/** Who is on the trip — an account, or a 24 h guest seat (same rules as `flight_participants`). */
+export const outingParticipants = pgTable(
+  "outing_participants",
+  {
+    id: id(),
+    outingId: text("outing_id")
+      .notNull()
+      .references(() => outings.id, { onDelete: "cascade" }),
+    userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
+    guestTokenHash: text("guest_token_hash").unique(),
+    guestName: text("guest_name"),
+    joinedAt: timestamp("joined_at", { withTimezone: true, mode: "date" })
+      .$defaultFn(() => new Date())
+      .notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }),
+  },
+  (t) => [
+    uniqueIndex("outing_participants_outing_user_uq").on(t.outingId, t.userId),
+    index("outing_participants_user_idx").on(t.userId),
+    index("outing_participants_expires_idx").on(t.expiresAt),
+  ],
+);
+
+/**
+ * One thing someone tasted on the outing. `bottleId` when it is in the
+ * catalog (or the taster's own submission); `label` is always the name shown,
+ * so a distillery-only cask sample needs no catalog row at all. No amount
+ * column, by design: an outing records what you met, not how much.
+ */
+export const outingTastings = pgTable(
+  "outing_tastings",
+  {
+    id: id(),
+    outingId: text("outing_id")
+      .notNull()
+      .references(() => outings.id, { onDelete: "cascade" }),
+    participantId: text("participant_id")
+      .notNull()
+      .references(() => outingParticipants.id, { onDelete: "cascade" }),
+    bottleId: text("bottle_id").references(() => bottles.id, { onDelete: "set null" }),
+    label: text("label").notNull(),
+    rating: doublePrecision("rating"),
+    flavorTags: jsonb("flavor_tags").$type<Record<string, number>>(),
+    note: text("note"),
+    /** Set by the host removing it from the outing feed (moderation hook). */
+    hiddenAt: timestamp("hidden_at", { withTimezone: true, mode: "date" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("outing_tastings_outing_idx").on(t.outingId), index("outing_tastings_participant_idx").on(t.participantId)],
+);
+
+/** A line on the outing's shared feed ("the warehouse tour was the highlight"). */
+export const outingNotes = pgTable(
+  "outing_notes",
+  {
+    id: id(),
+    outingId: text("outing_id")
+      .notNull()
+      .references(() => outings.id, { onDelete: "cascade" }),
+    participantId: text("participant_id")
+      .notNull()
+      .references(() => outingParticipants.id, { onDelete: "cascade" }),
+    body: text("body").notNull(),
+    hiddenAt: timestamp("hidden_at", { withTimezone: true, mode: "date" }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("outing_notes_outing_idx").on(t.outingId), index("outing_notes_participant_idx").on(t.participantId)],
 );
 
 // ── Track C: breadth challenges and friend boards (§7.12–7.13, D16–D17) ──────
