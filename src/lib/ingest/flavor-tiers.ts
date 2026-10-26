@@ -334,7 +334,8 @@ interface CandidateRow {
 
 const HEAVY_PROMPT_SUFFIX = [
   "",
-  "You have a web search tool. For each bottle, run at most one search (e.g. \"<bottle name> tasting notes review\") when you do not already know the specific bottling well, and ground the profile in published tasting notes.",
+  "You have a web search tool. For each bottle, run at most one search (e.g. \"<bottle name> tasting notes review\") and ground the profile in published tasting notes.",
+  "Add a \"sources\" array to each object: the https URLs of the published tasting notes or reviews you actually used for that bottle. Use [] when you found none — never invent a URL.",
   "Your final message must be the STRICT JSON array only.",
 ].join("\n");
 
@@ -419,6 +420,25 @@ export interface ApplyReport {
 
 const MODEL_ID = /^[a-z0-9][a-z0-9._-]{1,63}$/i;
 
+/** At least one cited public https page (same rule as the live web step's sources). */
+export function hasPublicHttpsSource(value: unknown): boolean {
+  if (!Array.isArray(value)) return false;
+  return value.some((item) => {
+    const raw = typeof item === "string" ? item : (item as { url?: unknown } | null)?.url;
+    if (typeof raw !== "string" || raw.length > 500) return false;
+    try {
+      const url = new URL(raw.trim());
+      const host = url.hostname.toLowerCase();
+      return (
+        url.protocol === "https:" && !url.username && !url.password &&
+        host.includes(".") && !/^[\d.]+$/.test(host) && !host.includes(":") && !host.endsWith(".local")
+      );
+    } catch {
+      return false;
+    }
+  });
+}
+
 /** Turn raw model batches into guarded profile writes. Ids outside the batch, bad shapes and duplicates are dropped. */
 export function parseModelResults(results: ModelResultBatch[]): { writes: ProfileWrite[]; rejected: number } {
   // One write per bottle: a bottle can appear in a cheap AND a heavy batch;
@@ -436,12 +456,15 @@ export function parseModelResults(results: ModelResultBatch[]): { writes: Profil
     const seen = new Set<string>();
     for (const entry of entries) {
       if (typeof entry !== "object" || entry === null) continue;
-      const { id, profile } = entry as { id?: unknown; profile?: unknown };
+      const { id, profile, sources } = entry as { id?: unknown; profile?: unknown; sources?: unknown };
       if (typeof id !== "string" || !allowed.has(id) || seen.has(id)) continue;
       const clean = cleanProfile(profile);
       if (!clean || !isValidWedgeProfile(clean)) continue;
       seen.add(id);
-      const tier: FlavorProfileTier = batch.pass === "heavy" ? "model_web" : "model";
+      // Web-grounded only with cited evidence: a heavy answer without a public
+      // https source is the model's recall and is stored at the quick tier
+      // (so it can never replace a legacy profile either).
+      const tier: FlavorProfileTier = batch.pass === "heavy" && hasPublicHttpsSource(sources) ? "model_web" : "model";
       const prev = best.get(id);
       if (prev && TIER_RANK[prev.tier] >= TIER_RANK[tier]) continue;
       best.set(id, {

@@ -515,6 +515,16 @@ describe("budget reservations", () => {
     await releaseCall(db, (again as { reservationId: string }).reservationId);
     expect(await db.select().from(enrichmentCalls)).toHaveLength(1);
   });
+
+  it("a failed call with no usage keeps its estimate counted", async () => {
+    setEnrichProviderForTests(fakeProvider().provider);
+    const r = await reserveCall(db, { step: "web", provider: "openai", model: "gpt-6.1-sol" });
+    expect(r.ok).toBe(true);
+    await recordCall(db, { reservationId: (r as { reservationId: string }).reservationId, step: "web", provider: "openai", model: "gpt-6.1-sol", usage: null, ok: false, error: "timeout" });
+    const [row] = await db.select().from(enrichmentCalls);
+    expect(row).toMatchObject({ pending: false, ok: false, reservedUsd: 0.2 });
+    expect(await spendSince(db)).toBeCloseTo(0.2, 5);
+  });
 });
 
 describe("admin series", () => {

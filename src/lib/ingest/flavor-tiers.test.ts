@@ -197,7 +197,7 @@ describe("model export/apply", () => {
     expect(cheap[0].prompt).toContain(quiet.id);
 
     const report = await applyModelResults(db, [
-      { pass: "heavy", model: "gpt-6.1-sol", bottleIds: [popular.id], raw: JSON.stringify([{ id: popular.id, profile: profile({ woody: 8 }) }]), completedAt: "" },
+      { pass: "heavy", model: "gpt-6.1-sol", bottleIds: [popular.id], raw: JSON.stringify([{ id: popular.id, profile: profile({ woody: 8 }), sources: ["https://reviews.example.com/r"] }]), completedAt: "" },
       {
         pass: "cheap", model: "gpt-6-luna", bottleIds: [quiet.id],
         raw: "```json\n" + JSON.stringify([{ id: quiet.id, profile: profile() }, { id: "invented", profile: profile() }]) + "\n```",
@@ -223,7 +223,7 @@ describe("model export/apply", () => {
     expect(exported.batches.filter((b) => b.pass === "cheap")).toEqual([]);
     expect(exported.counts).toMatchObject({ heavy: 1, heavyLegacy: 1 });
 
-    const raw = (ids: string[]) => JSON.stringify(ids.map((id) => ({ id, profile: profile({ peaty: 1 }) })));
+    const raw = (ids: string[]) => JSON.stringify(ids.map((id) => ({ id, profile: profile({ peaty: 1 }), sources: ["https://reviews.example.com/r"] })));
     // A results file that claims more than the export offered still only replaces the top set.
     const ids = [searched.id, quietLegacy.id, notedLegacy.id];
     const report = await applyModelResults(db, [{ pass: "heavy", model: "gpt-6.1-sol", bottleIds: ids, raw: raw(ids), completedAt: "" }], { legacyTop: 1 });
@@ -235,13 +235,25 @@ describe("model export/apply", () => {
   });
 
   it("keeps the higher tier when a bottle is in both a cheap and a heavy batch", () => {
-    const raw = (n: number) => JSON.stringify([{ id: "a", profile: profile({ sweet: n }) }]);
+    const raw = (n: number) => JSON.stringify([{ id: "a", profile: profile({ sweet: n }), sources: ["https://reviews.example.com/r"] }]);
     const { writes } = parseModelResults([
       { pass: "heavy", model: "gpt-6.1-sol", bottleIds: ["a"], raw: raw(9), completedAt: "" },
       { pass: "cheap", model: "gpt-6-luna", bottleIds: ["a"], raw: raw(2), completedAt: "" },
     ]);
     expect(writes).toHaveLength(1);
     expect(writes[0]).toMatchObject({ tier: "model_web", profile: { sweet: 9 } });
+  });
+
+  it("a heavy answer without a cited https source is recall, stored at the quick tier", async () => {
+    const legacy = await createTestBottle(db, { flavorProfile: profile({ peaty: 9 }) });
+    await db.insert(bottlePopularityDaily).values({ bottleId: legacy.id, day: utcDay(), searches: 30 });
+    const fresh = await createTestBottle(db, { flavorProfile: null });
+    const ids = [legacy.id, fresh.id];
+    const raw = JSON.stringify(ids.map((id) => ({ id, profile: profile({ peaty: 1 }), sources: ["http://insecure.example/x", "not a url"] })));
+    const report = await applyModelResults(db, [{ pass: "heavy", model: "gpt-6.1-sol", bottleIds: ids, raw, completedAt: "" }]);
+    expect(report).toMatchObject({ written: 1, legacyReplaced: 0 });
+    expect((await prof(db, legacy.id))!.peaty).toBe(9);
+    expect(await prov(db, fresh.id)).toMatchObject({ tier: "model", pass: "heavy" });
   });
 
   it("drops ids outside the batch, bad shapes, and unknown passes", () => {

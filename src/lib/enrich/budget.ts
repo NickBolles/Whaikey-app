@@ -60,9 +60,10 @@ export function callUsd(
   row: Pick<CallRow, "model" | "inputTokens" | "outputTokens" | "cachedInputTokens" | "webSearches" | "createdAt"> &
     Partial<Pick<CallRow, "pending" | "reservedUsd">>,
 ): number {
-  // An open reservation counts at its worst-case estimate.
+  // An open reservation counts at its worst-case estimate; a failed call
+  // whose usage never came back keeps its estimate on top of what is known.
   if (row.pending) return row.reservedUsd ?? 0;
-  return usdForTokens(
+  return (row.reservedUsd ?? 0) + usdForTokens(
     row.model,
     {
       inputTokens: row.inputTokens,
@@ -159,6 +160,9 @@ export async function recordCall(
   },
 ): Promise<void> {
   const u = input.usage ?? { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, webSearches: 0 };
+  // A failure with no usage (timeout, dropped connection) may still be billed:
+  // the reservation's estimate stays counted rather than reading as free.
+  const usageUnknown = !input.ok && u.inputTokens + u.outputTokens + u.cachedInputTokens === 0;
   let settledReservation = false;
   try {
     if (input.reservationId) {
@@ -175,7 +179,7 @@ export async function recordCall(
           error: input.error?.slice(0, 300) ?? null,
           latencyMs: input.latencyMs ?? null,
           pending: false,
-          reservedUsd: 0,
+          ...(usageUnknown ? {} : { reservedUsd: 0 }),
         })
         .where(eq(enrichmentCalls.id, input.reservationId))
         .returning({ id: enrichmentCalls.id });

@@ -1,5 +1,5 @@
 import type Anthropic from "@anthropic-ai/sdk";
-import { aiSupportsServerWebSearch, getAnthropic, isAiConfigured } from "@/lib/ai/client";
+import { activeAiProvider, aiSupportsServerWebSearch, getAnthropic, isAiConfigured } from "@/lib/ai/client";
 import { textFromContent } from "@/lib/ai/json";
 
 /**
@@ -137,10 +137,12 @@ export function openAiProvider(apiKey: string, fetchImpl: typeof fetch = fetch):
 export function anthropicProvider(client: Anthropic = getAnthropic()): EnrichProvider {
   const anthropic = client;
   const webSearch = aiSupportsServerWebSearch();
+  const openRouter = activeAiProvider() === "openrouter";
   return {
     name: "anthropic",
-    quickModel: process.env.ENRICH_ANTHROPIC_QUICK_MODEL || "claude-haiku-4-5",
-    webModel: process.env.ENRICH_ANTHROPIC_WEB_MODEL || "claude-sonnet-5",
+    // Model ids follow the client the seam picked (OpenRouter names differ).
+    quickModel: process.env.ENRICH_ANTHROPIC_QUICK_MODEL || (openRouter ? "anthropic/claude-haiku-4.5" : "claude-haiku-4-5"),
+    webModel: process.env.ENRICH_ANTHROPIC_WEB_MODEL || (openRouter ? "anthropic/claude-sonnet-4" : "claude-sonnet-5"),
     async complete(input) {
       const usage: CallUsage = { ...ZERO };
       const messages: Array<{ role: "user" | "assistant"; content: unknown }> = [{ role: "user", content: input.prompt }];
