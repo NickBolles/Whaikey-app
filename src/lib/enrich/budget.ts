@@ -105,9 +105,46 @@ export type ReserveResult = { ok: true; reservationId: string } | { ok: false; r
  * cap, and write the reservation. Pass the id to recordCall afterwards, or to
  * releaseCall when no call was made.
  */
+/** Input tokens a call may plausibly carry (prompt + hosted search results), for the worst case. */
+export const CALL_MAX_INPUT_TOKENS: Record<CallStep, number> = { quick: 4_000, web: 40_000, "batch-quick": 12_000, "batch-web": 40_000 };
+
+/**
+ * Worst-case $ for one call: the step's floor, or what the chosen model would
+ * charge at the call's own limits — whichever is higher, so a pricier model
+ * override still can't slip past the cap.
+ */
+export function callEstimateUsd(
+  step: CallStep,
+  model: string,
+  limits: { maxOutputTokens?: number; maxSearches?: number } = {},
+  at = new Date(),
+): number {
+  const bound = usdForTokens(
+    model,
+    {
+      inputTokens: CALL_MAX_INPUT_TOKENS[step],
+      outputTokens: limits.maxOutputTokens ?? 4_000,
+      cachedInputTokens: 0,
+      cacheWriteTokens: 0,
+      webSearchRequests: limits.maxSearches ?? 0,
+    },
+    at,
+  );
+  return Math.max(CALL_ESTIMATE_USD[step], bound);
+}
+
 export async function reserveCall(
   db: DB,
-  input: { step: CallStep; provider: EnrichProviderName; model: string; jobId?: string | null; runId?: string | null; bottles?: number },
+  input: {
+    step: CallStep;
+    provider: EnrichProviderName;
+    model: string;
+    jobId?: string | null;
+    runId?: string | null;
+    bottles?: number;
+    maxOutputTokens?: number;
+    maxSearches?: number;
+  },
   now = new Date(),
 ): Promise<ReserveResult> {
   if (!enrichEnabledByEnv() || !getEnrichProvider()) return { ok: false, reason: "disabled" };
@@ -117,7 +154,7 @@ export async function reserveCall(
     const settings = await getSettings(t);
     if (settings.paused) return { ok: false, reason: "paused" } as const;
     const spent = await spendSince(t, utcDayStart(now));
-    const estimate = CALL_ESTIMATE_USD[input.step];
+    const estimate = callEstimateUsd(input.step, input.model, { maxOutputTokens: input.maxOutputTokens, maxSearches: input.maxSearches }, now);
     if (spent + estimate > settings.dailyBudgetUsd) return { ok: false, reason: "budget" } as const;
     const reservationId = crypto.randomUUID();
     await t.insert(enrichmentCalls).values({

@@ -53,6 +53,10 @@ export const ENRICH_STALE_QUEUE_MS = 45_000;
 /** Per-step model budgets, inside a 60 s function. */
 export const QUICK_TIMEOUT_MS = 20_000;
 export const WEB_TIMEOUT_MS = 45_000;
+/** Per-call limits — also what the budget reservation is priced at. */
+export const QUICK_MAX_OUTPUT = 1_500;
+export const WEB_MAX_OUTPUT = 4_000;
+export const WEB_MAX_SEARCHES = 3;
 /** Time a drain needs left before it starts another step (the web step is the long one). */
 export const STEP_HEADROOM_MS = WEB_TIMEOUT_MS + 3_000;
 
@@ -306,7 +310,15 @@ export async function runNextStep(db: DB, jobId: string, opts: { runId?: string 
     const gate = provider
       ? await reserveCall(
           db,
-          { step: modelStep, provider: provider.name, model: modelStep === "quick" ? provider.quickModel : provider.webModel, jobId: job.id, runId: opts.runId ?? null },
+          {
+            step: modelStep,
+            provider: provider.name,
+            model: modelStep === "quick" ? provider.quickModel : provider.webModel,
+            jobId: job.id,
+            runId: opts.runId ?? null,
+            maxOutputTokens: modelStep === "quick" ? QUICK_MAX_OUTPUT : WEB_MAX_OUTPUT,
+            maxSearches: modelStep === "web" ? WEB_MAX_SEARCHES : 0,
+          },
           now,
         )
       : ({ ok: false, reason: "disabled" } as const);
@@ -408,8 +420,8 @@ async function runModelStep(
       model,
       web: step === "web",
       timeoutMs: step === "quick" ? QUICK_TIMEOUT_MS : WEB_TIMEOUT_MS,
-      maxOutputTokens: step === "quick" ? 1_500 : 4_000,
-      maxSearches: 3,
+      maxOutputTokens: step === "quick" ? QUICK_MAX_OUTPUT : WEB_MAX_OUTPUT,
+      maxSearches: WEB_MAX_SEARCHES,
     });
     text = res.text;
     await recordCall(db, { reservationId, jobId: job.id, runId, step, provider: provider.name, model, usage: res.usage, ok: true, latencyMs: Date.now() - started });

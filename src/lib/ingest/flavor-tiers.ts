@@ -117,9 +117,15 @@ export async function writeTieredProfiles(db: DB, writes: ProfileWrite[], chunkS
       ),
       sql`, `,
     );
-    // `prev` reads the rows as they were before this statement (one snapshot),
-    // so a legacy profile that gets replaced is kept in provenance.
-    const result = await db.execute(sql`
+    // Lock the bottles first (id order, so concurrent writers can't deadlock),
+    // then guard + write in a statement whose snapshot starts after the lock:
+    // a lower tier queued behind a higher-tier writer sees the new provenance
+    // and stays out. `prev` reads the rows as they were before the write, so a
+    // replaced legacy profile is kept in provenance.
+    const result = await db.transaction(async (tx) => {
+      const ids = [...new Set(chunk.map((w) => w.bottleId))].sort();
+      await tx.execute(sql`SELECT id FROM bottles WHERE id IN (${sql.join(ids.map((id) => sql`${id}`), sql`, `)}) ORDER BY id FOR UPDATE`);
+      return tx.execute(sql`
       WITH v(bottle_id, profile, tier, confidence, method, model, pass, input_hash, allow_legacy) AS (VALUES ${values}),
       prev AS (
         SELECT b.id, b.flavor_profile AS old_profile, p.tier AS old_tier
@@ -145,6 +151,7 @@ export async function writeTieredProfiles(db: DB, writes: ProfileWrite[], chunkS
         enriched_at = excluded.enriched_at
       RETURNING bottle_id
     `);
+    });
     const rows = (Array.isArray(result) ? result : (result as { rows?: unknown[] }).rows ?? []) as Array<{ bottle_id: string }>;
     for (const row of rows) written.push(row.bottle_id);
   }

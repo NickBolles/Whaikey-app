@@ -33,6 +33,7 @@ export const BATCH_TIERS = ["queue", "keyword", "missing", "web"] as const;
 export type BatchTier = (typeof BATCH_TIERS)[number];
 export const MISSING_BATCH_SIZE = 25;
 export const MISSING_TIMEOUT_MS = 40_000;
+export const MISSING_MAX_OUTPUT = 4_000;
 /** Work time for one chunk inside a 60 s function (leaves room to record the run and answer). */
 export const CHUNK_MS = 55_000;
 /** How long the web tier waits before refreshing the same bottle again. */
@@ -150,7 +151,7 @@ async function missingTier(db: DB, runId: string, deadline: number, bump: (k: st
       userNotes: [],
     }));
     const model = provider.quickModel;
-    const reservation = await reserveCall(db, { step: "batch-quick", provider: provider.name, model, runId, bottles: batch.length });
+    const reservation = await reserveCall(db, { step: "batch-quick", provider: provider.name, model, runId, bottles: batch.length, maxOutputTokens: MISSING_MAX_OUTPUT });
     if (!reservation.ok) return reservation.reason;
     const reservationId = reservation.reservationId;
     const started = Date.now();
@@ -161,7 +162,7 @@ async function missingTier(db: DB, runId: string, deadline: number, bump: (k: st
         model,
         web: false,
         timeoutMs: MISSING_TIMEOUT_MS,
-        maxOutputTokens: 4_000,
+        maxOutputTokens: MISSING_MAX_OUTPUT,
       });
       await recordCall(db, { reservationId, runId, step: "batch-quick", provider: provider.name, model, bottles: batch.length, usage: res.usage, ok: true, latencyMs: Date.now() - started });
       recorded = true;

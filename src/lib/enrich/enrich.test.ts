@@ -12,6 +12,7 @@ import {
 import { createTestBottle, createTestUser, setupTestDb, uid } from "@/test/helpers";
 import { runBatch } from "./batch";
 import {
+  callEstimateUsd,
   canSpend,
   DEFAULT_DAILY_BUDGET_USD,
   enrichedByDay,
@@ -514,6 +515,12 @@ describe("budget reservations", () => {
     expect(again.ok).toBe(true);
     await releaseCall(db, (again as { reservationId: string }).reservationId);
     expect(await db.select().from(enrichmentCalls)).toHaveLength(1);
+  });
+
+  it("prices the reservation at the chosen model's limits, never below the step floor", () => {
+    expect(callEstimateUsd("quick", "gpt-6-luna", { maxOutputTokens: 1_500 })).toBe(0.01);
+    expect(callEstimateUsd("quick", "claude-opus-5", { maxOutputTokens: 1_500 })).toBeGreaterThan(0.03);
+    expect(callEstimateUsd("web", "claude-sonnet-5", { maxOutputTokens: 4_000, maxSearches: 3 })).toBeGreaterThanOrEqual(0.2);
   });
 
   it("a failed call with no usage keeps its estimate counted", async () => {
