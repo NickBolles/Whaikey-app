@@ -418,7 +418,8 @@ export interface ApplyReport {
   dryRun: boolean;
 }
 
-const MODEL_ID = /^[a-z0-9][a-z0-9._-]{1,63}$/i;
+// Provider-qualified ids ("anthropic/claude-haiku-4.5") are fine; anything else odd is not.
+const MODEL_ID = /^[a-z0-9][a-z0-9._-]{1,63}(\/[a-z0-9][a-z0-9._-]{1,63})?$/i;
 
 /** At least one cited public https page (same rule as the live web step's sources). */
 export function hasPublicHttpsSource(value: unknown): boolean {

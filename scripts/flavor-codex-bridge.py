@@ -117,24 +117,34 @@ class Guard:
 
 # --------------------------------------------------------------------------- github
 
+# Worker threads flush applies concurrently: dispatch + "which run is mine"
+# happen under one lock, and a run id is never handed out twice, so each
+# caller waits on (and downloads the artifact of) its own run.
+_DISPATCH_LOCK = threading.Lock()
+_CLAIMED_RUNS: set[int] = set()
+
+
 def dispatch_and_wait(ref: str, fields: dict[str, str], timeout_s: int = 3600) -> int:
-    started = time.time()
     args = ["gh", "workflow", "run", WORKFLOW, "-R", REPO, "--ref", ref]
     for k, v in fields.items():
         args += ["-f", f"{k}={v}"]
-    sh(args)
     run_id = None
-    for _ in range(60):
-        time.sleep(5)
-        p = sh(["gh", "run", "list", "-R", REPO, "--workflow", WORKFLOW, "--event", "workflow_dispatch", "-L", "5",
-                "--json", "databaseId,createdAt,headBranch"])
-        for r in json.loads(p.stdout):
-            created = dt.datetime.fromisoformat(r["createdAt"].replace("Z", "+00:00")).timestamp()
-            if r["headBranch"] == ref and created >= started - 30:
-                run_id = r["databaseId"]
+    with _DISPATCH_LOCK:
+        started = time.time()
+        sh(args)
+        for _ in range(60):
+            time.sleep(5)
+            p = sh(["gh", "run", "list", "-R", REPO, "--workflow", WORKFLOW, "--event", "workflow_dispatch", "-L", "10",
+                    "--json", "databaseId,createdAt,headBranch"])
+            mine = []
+            for r in json.loads(p.stdout):
+                created = dt.datetime.fromisoformat(r["createdAt"].replace("Z", "+00:00")).timestamp()
+                if r["headBranch"] == ref and created >= started - 30 and r["databaseId"] not in _CLAIMED_RUNS:
+                    mine.append((created, r["databaseId"]))
+            if mine:
+                run_id = min(mine)[1]
+                _CLAIMED_RUNS.add(run_id)
                 break
-        if run_id:
-            break
     if not run_id:
         raise RuntimeError("dispatched run did not appear")
     log(f"workflow run {run_id} ({fields.get('mode')}) started")

@@ -244,6 +244,12 @@ describe("model export/apply", () => {
     expect(writes[0]).toMatchObject({ tier: "model_web", profile: { sweet: 9 } });
   });
 
+  it("accepts provider-qualified model ids but not arbitrary strings", () => {
+    const raw = JSON.stringify([{ id: "a", profile: profile() }]);
+    expect(parseModelResults([{ pass: "cheap", model: "anthropic/claude-haiku-4.5", bottleIds: ["a"], raw, completedAt: "" }]).writes).toHaveLength(1);
+    expect(parseModelResults([{ pass: "cheap", model: "a/b/c d", bottleIds: ["a"], raw, completedAt: "" }]).writes).toHaveLength(0);
+  });
+
   it("a heavy answer without a cited https source is recall, stored at the quick tier", async () => {
     const legacy = await createTestBottle(db, { flavorProfile: profile({ peaty: 9 }) });
     await db.insert(bottlePopularityDaily).values({ bottleId: legacy.id, day: utcDay(), searches: 30 });
