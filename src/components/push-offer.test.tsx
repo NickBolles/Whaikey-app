@@ -83,4 +83,15 @@ describe("PushOffer", () => {
     });
     expect(screen.getByText(/off for Whaikey in your phone's settings/)).toBeInTheDocument();
   });
+
+  it("an unavailable result keeps the offer alive instead of ending it", async () => {
+    enablePush.mockResolvedValueOnce("unavailable");
+    render(<PushOffer />);
+    await interact();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Turn on" }));
+    });
+    expect(screen.getByText(/try again from Settings/)).toBeInTheDocument();
+    expect(loadOfferState().done).toBe(false);
+  });
 });

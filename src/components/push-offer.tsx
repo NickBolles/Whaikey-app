@@ -49,6 +49,12 @@ export function PushOffer() {
     setBusy(true);
     const state = await enablePush().catch(() => "unavailable" as const);
     setBusy(false);
+    if (state === "unavailable") {
+      // Nothing was decided (plugin missing or the request threw): keep the
+      // offer alive for a later interaction instead of ending it.
+      setNote("Couldn't turn notifications on just now — you can try again from Settings.");
+      return;
+    }
     saveOfferState({ ...loadOfferState(), done: true });
     if (state === "denied") {
       setNote("Notifications are off for Whaikey in your phone's settings.");
