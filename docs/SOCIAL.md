@@ -144,7 +144,7 @@ The stories are the contract: each phase in §13 ships a coherent subset, and §
 - **US-5 — Follow.** *As a user, I want to follow a friend (with approval if their account is private), so their notes can reach me.*
   ✓ Follow, unfollow, approve/deny requests; mutual follow derives "friends."
 - **US-6 — Visibility without friction.** *As a logger, I want to choose who can see a pour at log time without extra taps in the core loop.*
-  ✓ Visibility selector lives behind "add detail" on the pour sheet; default is my saved preference (ships as Only me); logging speed is unchanged.
+  ✓ Visibility selector lives behind "add detail" on the pour sheet; default is my saved preference (Friends for new accounts, D2 amended); logging speed is unchanged.
 - **US-7 — Friends on Home.** *As a user, I want to see my friends' recent notes on Home, each framed as a comparison or a discovery, so opening the app is interesting on days I don't pour.*
   ✓ Home shows a "From your friends" module; each card carries "you tasted this too" or "add to wishlist"; empty state invites, doesn't nag.
 - **US-8 — Same Dram.** *As a taster, on a bottle page I want to see me vs. the producer vs. my friends in one flavor space — "where Sarah writes clove, you write cinnamon."*
@@ -370,7 +370,7 @@ Alcohol consumption is sensitive personal data — in some jobs, families, juris
 
 **Principles:**
 
-1. **Private by default, at every level.** Visibility is opt-in per pour, with a "default visibility for new pours" preference that ships as **Only me**. **No system action — migration, default change, or feature launch — ever raises the visibility of existing data.** The *owner* may: an explicit, confirmed "make my past pours friends-visible" bulk action is their right, and refusing to build it would be its own kind of paternalism. The ban is on defaults and dark patterns, not on the user's own choices.
+1. **Private by default, at every level.** Visibility is opt-in per pour, with a "default visibility for new pours" preference that ships as **Friends for accounts created after 2026-10-25** (Only me for earlier accounts; D2 amended). **No system action — migration, default change, or feature launch — ever raises the visibility of existing data.** The *owner* may: an explicit, confirmed "make my past pours friends-visible" bulk action is their right, and refusing to build it would be its own kind of paternalism. The ban is on defaults and dark patterns, not on the user's own choices.
 2. **Money never travels.** Purchase price, collection value, spend, and cost-per-pour are excluded from every social projection — no exceptions, no toggle in v1. This is both a privacy and a safety property (a public high-value collection is a burglary target). Enforced structurally: social read paths use a projection type that doesn't carry these columns, mirroring how `getPublicPourShare()` is written today.
 3. **Location is coarse, opt-in, and momentary.** Venue tagging (if built) is a named place chosen by the user. Device location may be used for exactly one thing — confirming you are at a distillery you're checking into (§11.8) — under these rules, which are the price of using it at all:
    - **Foreground and on-tap only.** The fix is requested when the user taps to check in, never in the background, never on app open, never while the app is closed. No always-on permission is ever requested.
@@ -494,7 +494,7 @@ The first draft left 14 questions open "for a human call before S1 code." Under 
 | # | Decision | Call |
 |---|---|---|
 | D1 | Graph shape | **Asymmetric follow** as the graph; mutual follow derived as "friends" gates intimate surfaces. Private accounts turn follows into requests. |
-| D2 | Default visibility for new pours | **Only me**, with a user-settable default. The system never raises visibility of existing data; the owner explicitly can, including in bulk (§8, principle 1). |
+| D2 | Default visibility for new pours | **Amended 2026-10-25 (owner): Friends for accounts created from now on** (a `user_social_prefs` row seeded at sign-up); accounts that existed before keep **Only me**, and no existing pour changes. User-settable in Settings either way; a pour is still held private until its author has a social profile. The system never raises visibility of existing data; the owner explicitly can, including in bulk (§8, principle 1). |
 | D3 | Public per-user counts | Never a sortable rank; coarse buckets/rates/sets fine (§3.3). |
 | D4 | Reaction name | **"Cheers."** |
 | D5 | Feed ordering | Chronological with a light own-bottles boost; no engagement ranking. Revisit only if sparsity, not attention, is the problem. |
@@ -522,7 +522,7 @@ The first draft left 14 questions open "for a human call before S1 code." Under 
 | # | Question | Current lean |
 |---|---|---|
 | ~~Q1~~ | ~~Whole-shelf sharing — when, and to whom?~~ | **Resolved 2026-10 as D21** (owner direction): opt-in, friends-only by default, prices/value/fill stripped. |
-| Q3 | Default visibility for **new** pours: D2 here says *Only me*; STORYBOARD D19 (2026-09 owner review) says *Friends* for new accounts; the code still ships `private`. | **Owner call before WP-7 ships.** Lean: Friends for new accounts (a feed needs content), with the first-run screen stating it and one tap to change; never applied retroactively. |
+| Q3 | Default visibility for **new** pours | **Resolved 2026-10-25 (owner): Friends for new accounts only**, never applied retroactively (D2 amended). |
 | Q2 | Jurisdiction rules for user-generated alcohol content in launch markets | Checklist review before S4 public discovery (§11). |
 
 **Research still open:** whether Whiskey Social / DramIt's feeds actually retain users or are ghost towns (the honest failure mode for whiskey social — the category may simply be less social than beer); and whether club-level blind flights work over distance or need co-location. The third research question from the first draft — how much bottle overlap two users need before comparison is interesting — is no longer a desk question: **S1 measures it directly** (§12), which is the main reason S1 is scoped the way it is.

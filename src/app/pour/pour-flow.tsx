@@ -130,7 +130,8 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
   const [freeform, setFreeform] = useState(editEntry?.note.freeform ?? "");
   const [flavorTags, setFlavorTags] = useState<Record<string, number>>(editEntry?.note.flavorTags ?? {});
   // Default visibility is the account's saved preference, "Only me" until it
-  // loads (owner decision on D19 is pending: do not widen the default here).
+  // loads. D19 (owner, 2026-10-25): new accounts' saved preference is Friends,
+  // seeded at sign-up; the sheet itself never widens past the saved preference.
   const [visibility, setVisibility] = useState<PourVisibility>(editEntry?.visibility ?? "private");
   const visibilityDirtyRef = useRef(editing);
   const [visibilityChosen, setVisibilityChosen] = useState(false);

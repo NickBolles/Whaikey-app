@@ -52,9 +52,10 @@ describe("shouldPromote", () => {
   });
 
   it("reads the threshold from env with sane bounds", () => {
-    expect(upcConfirmationsRequired({})).toBe(2);
-    expect(upcConfirmationsRequired({ WHAIKEY_UPC_CONFIRMATIONS_REQUIRED: "3" })).toBe(3);
-    expect(upcConfirmationsRequired({ WHAIKEY_UPC_CONFIRMATIONS_REQUIRED: "0" })).toBe(2);
+    // Owner decision: three agreeing people by default.
+    expect(upcConfirmationsRequired({})).toBe(3);
+    expect(upcConfirmationsRequired({ WHAIKEY_UPC_CONFIRMATIONS_REQUIRED: "2" })).toBe(2);
+    expect(upcConfirmationsRequired({ WHAIKEY_UPC_CONFIRMATIONS_REQUIRED: "0" })).toBe(3);
   });
 });
 
@@ -63,18 +64,20 @@ describe("teachBarcode", () => {
     const bottle = await createTestBottle(db);
     const a = await veteran();
     const r = await teachBarcode(db, a, UPC, bottle.id, { now: NOW });
-    expect(r).toMatchObject({ state: "pending", confirmations: 1, required: 2, mapping: null });
+    expect(r).toMatchObject({ state: "pending", confirmations: 1, required: 3, mapping: null });
     expect(await resolveUpc(db, UPC)).toEqual([]);
   });
 
-  it("two independent eligible accounts verify it", async () => {
+  it("three independent eligible accounts verify it (two are not enough)", async () => {
     const bottle = await createTestBottle(db);
     await teachBarcode(db, await veteran(), UPC, bottle.id, { now: NOW });
+    const two = await teachBarcode(db, await veteran(), UPC, bottle.id, { now: NOW });
+    expect(two).toMatchObject({ state: "pending", confirmations: 2 });
     const r = await teachBarcode(db, await veteran(), UPC, bottle.id, { now: NOW });
-    expect(r).toMatchObject({ state: "verified", confirmations: 2, taught: true });
+    expect(r).toMatchObject({ state: "verified", confirmations: 3, taught: true });
     const matches = await resolveUpc(db, UPC);
     expect(matches.map((m) => m.id)).toEqual([bottle.id]);
-    expect(matches[0]).toMatchObject({ source: "user", confirmedCount: 2 });
+    expect(matches[0]).toMatchObject({ source: "user", confirmedCount: 3 });
     const votes = await db.select().from(schema.upcConfirmations);
     expect(votes.every((v) => v.status === "promoted")).toBe(true);
   });
@@ -105,12 +108,15 @@ describe("teachBarcode", () => {
     const wrong = await createTestBottle(db, { name: "Wrong" });
     await teachBarcode(db, await veteran(), UPC, wrong.id, { now: NOW });
     await teachBarcode(db, await veteran(), UPC, right.id, { now: NOW });
-    const tie = await teachBarcode(db, await veteran(), UPC, wrong.id, { now: NOW });
-    // wrong 2 vs right 1 → 2 ≥ 2×1 → promoted; reflects a real 2:1 crowd.
-    expect(tie.state).toBe("verified");
+    await teachBarcode(db, await veteran(), UPC, right.id, { now: NOW });
+    await teachBarcode(db, await veteran(), UPC, wrong.id, { now: NOW });
+    // right 2 vs wrong 2 → below the count and no clear lead.
     const r = await teachBarcode(db, await veteran(), UPC, right.id, { now: NOW });
-    // right 2 vs wrong 2 → not a clear lead.
+    // right 3 vs wrong 2 → 3 < 2×2 → still not a clear 2:1 lead.
     expect(r.state).toBe("pending");
+    const lead = await teachBarcode(db, await veteran(), UPC, right.id, { now: NOW });
+    // right 4 vs wrong 2 → 4 ≥ 2×2 → promoted.
+    expect(lead.state).toBe("verified");
   });
 
   it("changing your mind moves your vote", async () => {
@@ -259,12 +265,11 @@ describe("operator moderation", () => {
 
   it("published claims stay listed for operator rejection", async () => {
     const bottle = await createTestBottle(db, { name: "Live" });
-    await teachBarcode(db, await veteran(), UPC, bottle.id, { now: NOW });
-    await teachBarcode(db, await veteran(), UPC, bottle.id, { now: NOW });
+    for (let i = 0; i < 3; i++) await teachBarcode(db, await veteran(), UPC, bottle.id, { now: NOW });
     expect(await listPendingBarcodes(db, NOW)).toHaveLength(0);
     const live = await listPromotedBarcodes(db, NOW);
     expect(live).toHaveLength(1);
-    expect(live[0]).toMatchObject({ upc: UPC, bottleId: bottle.id, votes: 2 });
+    expect(live[0]).toMatchObject({ upc: UPC, bottleId: bottle.id, votes: 3 });
   });
 
   it("reject never deletes seed/import mappings", async () => {
