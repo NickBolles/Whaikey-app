@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { requireUser, withErrorHandling } from "@/lib/session";
-import { inviteFriends, listInvitableFriends, outingByCode } from "@/lib/outings";
+import { inviteFriends, listInvitableFriends, visibleOutingByCode } from "@/lib/outings";
 
 const schema = z.object({ userIds: z.array(z.string().min(1).max(64)).min(1).max(50) }).strict();
 type Ctx = { params: Promise<{ code: string }> };
@@ -10,7 +10,8 @@ type Ctx = { params: Promise<{ code: string }> };
 async function hostOuting(code: string) {
   const user = await requireUser();
   const db = getDb();
-  const outing = await outingByCode(db, code);
+  // The visible read (viewer suspension included), then host-only.
+  const outing = await visibleOutingByCode(db, code, user.id);
   return { db, user, outing: outing && outing.hostId === user.id ? outing : null };
 }
 

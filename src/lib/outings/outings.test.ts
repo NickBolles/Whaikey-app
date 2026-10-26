@@ -195,6 +195,9 @@ describe("outings (D22)", () => {
 
     // Suspension hides the account's rows from everyone else.
     await db.update(schema.userProfiles).set({ suspendedAt: new Date() }).where(eq(schema.userProfiles.userId, friend.id));
+    // … and a suspended viewer reads nobody's outing, nor lists any.
+    expect(await visibleOutingByCode(db, outing.joinCode, friend.id)).toBeNull();
+    expect(await listMyOutings(db, friend.id)).toEqual([]);
     const hostView = await getOutingView(db, outing, host.id, await findOutingSeat(db, outing.id, { userId: host.id }));
     expect(hostView.feed).toHaveLength(0);
     await db.update(schema.userProfiles).set({ suspendedAt: null }).where(eq(schema.userProfiles.userId, friend.id));

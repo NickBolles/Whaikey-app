@@ -9,7 +9,7 @@ import { FLAVOR_WHEEL, leafLabel, wedgeForLeaf } from "@/lib/flavor-wheel";
 import { getRole, newCode, toCsv } from "@/lib/clubs";
 import { GUEST_HOURS, guestJoinSchema, hashGuestToken } from "@/lib/flights";
 import { notify } from "@/lib/notify";
-import { acceptedFollowSql } from "@/lib/social";
+import { acceptedFollowSql, isSuspended } from "@/lib/social";
 
 /**
  * Outings — a group distillery visit (docs/SOCIAL.md §7.15, D22).
@@ -170,6 +170,9 @@ export async function outingByCode(db: DB, code: string) {
 
 /** The host-side read-path check (§13), identical to a tasting night's. */
 export async function outingVisibleTo(db: DB, outing: schema.Outing, viewerUserId: string | null): Promise<boolean> {
+  // Viewer side first: a suspended account reads nobody else's data — and an
+  // outing, even one it hosts, is mostly other people's (social.ts suspendedViewer).
+  if (viewerUserId && (await isSuspended(db, viewerUserId))) return false;
   if (viewerUserId === outing.hostId) return true;
   if (!(await reachable(db, outing.hostId))) return false;
   if (viewerUserId && (await blockedEither(db, outing.hostId, viewerUserId))) return false;
@@ -680,6 +683,7 @@ function hostVisibleSql(viewerId: string) {
 }
 
 export async function listMyOutings(db: DB, userId: string) {
+  if (await isSuspended(db, userId)) return [];
   return db
     .select({
       title: schema.outings.title,
