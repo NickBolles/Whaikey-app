@@ -34,6 +34,9 @@ export function parseQuickResult(raw: string, bottleId: string): WedgeProfile | 
     const { id, profile } = entry as { id?: unknown; profile?: unknown };
     // A single-bottle prompt; an entry naming a different id is not ours.
     if (id !== undefined && id !== bottleId) continue;
+    // Raw output must already be valid: clamping first would turn a 0–100
+    // scale into a "valid" 0–10 profile.
+    if (!isValidWedgeProfile(profile)) continue;
     const clean = cleanProfile(profile);
     if (clean && isValidWedgeProfile(clean)) return clean;
   }
@@ -141,7 +144,7 @@ export function parseWebResult(raw: string): WebResult | null {
   const obj = Array.isArray(parsed) ? parsed[0] : parsed;
   if (typeof obj !== "object" || obj === null) return null;
   const v = obj as Record<string, unknown>;
-  const cleaned = cleanProfile(v.profile);
+  const cleaned = isValidWedgeProfile(v.profile) ? cleanProfile(v.profile) : null;
   const profile = cleaned && isValidWedgeProfile(cleaned) ? cleaned : null;
   const sources = cleanSources(v.sources);
   let notes: WebResult["notes"] = null;

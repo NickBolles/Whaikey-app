@@ -168,6 +168,32 @@ describe("runFreePass", () => {
     for (const b of [priv, stepped, two]) expect(await prof(db, b.id)).toBeNull();
   });
 
+  it("counts the people behind the tagged notes, and withdraws a community profile that falls below the floor", async () => {
+    const b = await createTestBottle(db, { flavorProfile: null });
+    // One person's two tagged notes + two people with text only: not a community of three.
+    const solo = await createTestUser(db);
+    await db.insert(userProfiles).values({ userId: solo.id, handle: `h${solo.id.slice(-8)}`, displayName: "Solo", isPublic: true, socialEnabled: true });
+    for (let i = 0; i < 2; i++) {
+      const pourId = uid("pour");
+      await db.insert(pours).values({ id: pourId, userId: solo.id, bottleId: b.id, rating: 4, visibility: "public" });
+      await db.insert(tastingNotes).values({ id: uid("note"), pourId, flavorTags: { vanilla: 3, caramel: 2 } });
+    }
+    await addNote(db, b.id, null, "nice");
+    await addNote(db, b.id, null, "fine");
+    expect((await runFreePass(db)).community).toBe(0);
+
+    const c = await createTestBottle(db, { flavorProfile: null });
+    for (let i = 0; i < 3; i++) await addNote(db, c.id, { vanilla: 3, caramel: 2 });
+    await runFreePass(db);
+    expect((await prov(db, c.id))!.tier).toBe("community");
+    // One contributor steps back: the profile is withdrawn on the next pass.
+    const [pour] = await db.select().from(pours).where(eq(pours.bottleId, c.id)).limit(1);
+    await db.update(userProfiles).set({ socialEnabled: false }).where(eq(userProfiles.userId, pour.userId));
+    expect((await runFreePass(db)).communityWithdrawn).toBe(1);
+    expect(await prof(db, c.id)).toBeNull();
+    expect(await prov(db, c.id)).toBeUndefined();
+  });
+
   it("dry run writes nothing", async () => {
     const b = await createTestBottle(db, { flavorProfile: null, description: "honey, vanilla, toasted oak, cinnamon" });
     const report = await runFreePass(db, { dryRun: true });

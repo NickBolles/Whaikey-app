@@ -179,6 +179,8 @@ export function keywordProfile(inputs: KeywordInputs): Record<string, number> | 
 export interface FreePassReport {
   bottles: number;
   community: number;
+  /** Community profiles withdrawn because their eligible contributors fell below the floor. */
+  communityWithdrawn: number;
   keyword: number;
   keywordUnchanged: number;
   skippedHigherOrLegacy: number;
@@ -223,23 +225,35 @@ export async function runFreePass(db: DB, opts: { dryRun?: boolean; now?: Date }
   );
   const notesBy = new Map<string, typeof notes>();
   for (const n of notes) notesBy.set(n.bottle_id, [...(notesBy.get(n.bottle_id) ?? []), n]);
-  // The floor counts people, not notes: three notes from one person are one opinion.
-  for (const [bottleId, list] of notesBy) {
-    if (new Set(list.map((n) => n.user_id)).size < MIN_COMMUNITY_RATERS) notesBy.delete(bottleId);
-  }
+  // The floor counts people, not notes (three notes from one person are one
+  // opinion), and it counts the people behind the notes each path actually uses.
+  const people = (list: typeof notes) => new Set(list.map((n) => n.user_id)).size;
+  const floored = (list: typeof notes) => (people(list) >= MIN_COMMUNITY_RATERS ? list : []);
   const criticsBy = new Map<string, typeof critics>();
   for (const c of critics) criticsBy.set(c.bottle_id, [...(criticsBy.get(c.bottle_id) ?? []), c]);
 
   const report: FreePassReport = {
-    bottles: catalog.length, community: 0, keyword: 0, keywordUnchanged: 0, skippedHigherOrLegacy: 0, written: 0,
+    bottles: catalog.length, community: 0, communityWithdrawn: 0, keyword: 0, keywordUnchanged: 0, skippedHigherOrLegacy: 0, written: 0,
     dryRun: opts.dryRun ?? false,
   };
   const writes: ProfileWrite[] = [];
+  const withdrawn: string[] = [];
   for (const row of catalog) {
     // Legacy profiles (seed data / pre-tracking enrichment) are never touched.
     if (row.has_profile && row.tier == null) { report.skippedHigherOrLegacy += 1; continue; }
-    const bottleNotes = notesBy.get(row.id) ?? [];
-    const community = profileFromNotes(bottleNotes.map((n) => ({ flavorTags: n.flavor_tags, nose: n.nose, palate: n.palate, finish: n.finish })));
+    const eligible = notesBy.get(row.id) ?? [];
+    const tagged = floored(eligible.filter((n) => n.flavor_tags != null && Object.keys(n.flavor_tags).length > 0));
+    const withText = floored(eligible.filter((n) => n.nose || n.palate || n.finish || n.freeform || (n.flavor_tags != null && Object.keys(n.flavor_tags).length > 0)));
+    const community = profileFromNotes(tagged.map((n) => ({ flavorTags: n.flavor_tags, nose: n.nose, palate: n.palate, finish: n.finish })));
+    if (!community && row.tier === "community") {
+      // Its contributors withdrew (made the pour private, stepped back, deleted
+      // the note) and it fell below the floor: stop serving it, and let the
+      // lower tiers fill the bottle again.
+      withdrawn.push(row.id);
+      report.communityWithdrawn += 1;
+      row.tier = null;
+      row.input_hash = null;
+    }
     if (community) {
       const hash = createHash("sha1").update(JSON.stringify(community)).digest("hex").slice(0, 16);
       if (row.tier === "community" && row.input_hash === hash) continue;
@@ -252,7 +266,7 @@ export async function runFreePass(db: DB, opts: { dryRun?: boolean; now?: Date }
       description: row.description,
       producerFlavorTags: row.producer_flavor_tags,
       criticNotes: (criticsBy.get(row.id) ?? []).map((c) => ({ note: c.note, flavorTags: c.flavor_tags })),
-      userNotes: bottleNotes.map((n) => ({ text: [n.nose, n.palate, n.finish, n.freeform].filter(Boolean).join(". "), flavorTags: n.flavor_tags })),
+      userNotes: withText.map((n) => ({ text: [n.nose, n.palate, n.finish, n.freeform].filter(Boolean).join(". "), flavorTags: n.flavor_tags })),
     };
     const hash = keywordInputHash(inputs);
     if (row.tier === "keyword" && row.input_hash === hash) { report.keywordUnchanged += 1; continue; }
@@ -262,7 +276,17 @@ export async function runFreePass(db: DB, opts: { dryRun?: boolean; now?: Date }
     const strong = inputs.producerFlavorTags != null || inputs.criticNotes.length > 0;
     writes.push({ bottleId: row.id, profile, tier: "keyword", confidence: strong ? 0.4 : TIER_CONFIDENCE.keyword, method: "keyword-matcher", model: null, pass: "free", inputHash: hash });
   }
-  if (!report.dryRun) report.written = (await writeTieredProfiles(db, writes)).length;
+  if (!report.dryRun) {
+    for (let i = 0; i < withdrawn.length; i += 500) {
+      const ids = sql.join(withdrawn.slice(i, i + 500).map((id) => sql`${id}`), sql`, `);
+      await db.execute(sql`
+        UPDATE bottles SET flavor_profile = NULL
+        WHERE id IN (${ids})
+          AND EXISTS (SELECT 1 FROM bottle_flavor_provenance p WHERE p.bottle_id = bottles.id AND p.tier = 'community')`);
+      await db.execute(sql`DELETE FROM bottle_flavor_provenance WHERE tier = 'community' AND bottle_id IN (${ids})`);
+    }
+    report.written = (await writeTieredProfiles(db, writes)).length;
+  }
   return report;
 }
 

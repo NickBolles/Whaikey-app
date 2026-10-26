@@ -218,6 +218,10 @@ describe("validation", () => {
     expect(parseQuickResult(JSON.stringify([{ id: "other", profile: PROFILE }]), "b1")).toBeNull();
     expect(parseQuickResult(JSON.stringify([{ id: "b1", profile: PROFILE }]), "b1")).toEqual(PROFILE);
     expect(parseQuickResult("not json", "b1")).toBeNull();
+    // Out-of-scale or fractional scores are rejected, not clamped into range.
+    expect(parseQuickResult(JSON.stringify({ id: "b1", profile: { ...PROFILE, sweet: 60 } }), "b1")).toBeNull();
+    expect(parseQuickResult(JSON.stringify({ id: "b1", profile: { ...PROFILE, sweet: 6.5 } }), "b1")).toBeNull();
+    expect(parseWebResult(JSON.stringify({ profile: { ...PROFILE, woody: 80 }, notes: {}, sources: [] }))?.profile ?? null).toBeNull();
   });
 
   it("keeps notes and details only with a public https source", () => {
