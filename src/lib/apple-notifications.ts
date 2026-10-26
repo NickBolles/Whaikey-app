@@ -13,7 +13,8 @@ import { appleConfig } from "@/lib/apple-sign-in";
  * https://appleid.apple.com, `aud` is our client id, and the `events` claim is
  * a JSON string: `{ type, sub, email?, is_private_email?, event_time }` where
  * type is `email-disabled` | `email-enabled` | `consent-revoked` |
- * `account-delete`.
+ * `account-deleted` (Apple's documented spelling; `account-delete`, seen in
+ * older docs and samples, is kept as an alias).
  *
  * Nothing is trusted before the signature checks out against Apple's key for
  * the header's `kid`, with RS256 only. Inert until Apple is configured: with
@@ -26,8 +27,10 @@ export const APPLE_KEYS_URL = "https://appleid.apple.com/auth/keys";
 export const MAX_NOTIFICATION_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const KEYS_TTL_MS = 60 * 60 * 1000;
 
-export const APPLE_EVENT_TYPES = ["email-disabled", "email-enabled", "consent-revoked", "account-delete"] as const;
+export const APPLE_EVENT_TYPES = ["email-disabled", "email-enabled", "consent-revoked", "account-deleted", "account-delete"] as const;
 export type AppleEventType = (typeof APPLE_EVENT_TYPES)[number];
+/** Events that end the Apple link: the account is signed out and flagged. */
+const SIGN_OUT_TYPES: ReadonlySet<string> = new Set(["consent-revoked", "account-deleted", "account-delete"]);
 
 export interface AppleNotification {
   jti: string;
@@ -172,7 +175,7 @@ export async function handleAppleNotification(db: DB, n: AppleNotification): Pro
     if (inserted.length === 0) return { duplicate: true, userId, signedOut: false };
 
     let signedOut = false;
-    if (userId && (n.type === "consent-revoked" || n.type === "account-delete")) {
+    if (userId && SIGN_OUT_TYPES.has(n.type)) {
       await tx.delete(schema.session).where(eq(schema.session.userId, userId));
       signedOut = true;
     }
@@ -187,7 +190,7 @@ export async function appleRevocationFor(db: DB, userId: string): Promise<{ type
     .from(schema.authProviderEvents)
     .where(and(eq(schema.authProviderEvents.userId, userId), eq(schema.authProviderEvents.providerId, "apple")));
   const flagged = rows
-    .filter((r) => r.type === "consent-revoked" || r.type === "account-delete")
+    .filter((r) => SIGN_OUT_TYPES.has(r.type))
     .sort((a, b) => b.at.getTime() - a.at.getTime());
   return flagged[0] ?? null;
 }

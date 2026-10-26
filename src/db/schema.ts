@@ -1906,7 +1906,7 @@ export const nativeAuthCodes = pgTable(
  * server — today Sign in with Apple's notifications (consent revoked, Apple ID
  * deleted, private-relay email turned off/on). `jti` is the provider's id for
  * the notification and makes a redelivery a no-op. `consent-revoked` and
- * `account-delete` also sign the account out (its sessions are deleted) and
+ * `account-deleted` (alias `account-delete`) also sign the account out (its sessions are deleted) and
  * stand as a flag on the account: the person told Apple to stop, and the app
  * should know that when they come back.
  */

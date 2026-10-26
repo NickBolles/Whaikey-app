@@ -137,6 +137,13 @@ describe("handleAppleNotification", () => {
     expect(await appleRevocationFor(db, user.id)).toBeNull();
   });
 
+  it("Apple's documented account-deleted spelling signs the account out and flags it", async () => {
+    const res = await handleAppleNotification(db, { jti: "j-4", type: "account-deleted", sub: "apple-sub-1", email: null, eventTime: null });
+    expect(res).toEqual({ duplicate: false, userId: user.id, signedOut: true });
+    expect(await db.query.session.findMany({ where: (s, { eq }) => eq(s.userId, user.id) })).toHaveLength(0);
+    expect((await appleRevocationFor(db, user.id))?.type).toBe("account-deleted");
+  });
+
   it("a subject we don't know is recorded with no account and touches nothing", async () => {
     const res = await handleAppleNotification(db, { jti: "j-3", type: "account-delete", sub: "someone-else", email: null, eventTime: null });
     expect(res).toEqual({ duplicate: false, userId: null, signedOut: false });
