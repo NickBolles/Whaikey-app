@@ -147,16 +147,21 @@ export function anthropicProvider(client?: Anthropic): EnrichProvider {
       try {
         // Hosted search runs a server-side loop that can pause; resume it a
         // couple of times within the step's budget.
+        // Continuations share ONE output/search allowance with the first
+        // request, so a resumed turn can't spend past what the hold priced.
         for (let turn = 0; turn < 3; turn++) {
           const left = input.timeoutMs - (Date.now() - started);
           if (left < 2_000) break;
+          const outputLeft = input.maxOutputTokens - usage.outputTokens;
+          if (outputLeft < 200) break;
+          const searchesLeft = (input.maxSearches ?? 3) - usage.webSearches;
           const response = await anthropic.messages.create(
             {
               model: input.model,
-              max_tokens: input.maxOutputTokens,
+              max_tokens: outputLeft,
               messages,
-              ...(input.web
-                ? { tools: [{ type: "web_search_20260209", name: "web_search", max_uses: input.maxSearches ?? 3 }] }
+              ...(input.web && searchesLeft > 0
+                ? { tools: [{ type: "web_search_20260209", name: "web_search", max_uses: searchesLeft }] }
                 : {}),
             } as never,
             { timeout: left, maxRetries: 0 },

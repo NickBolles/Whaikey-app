@@ -216,8 +216,10 @@ describe("anthropicProvider", () => {
         usage: { input_tokens: 50, output_tokens: 20, cache_read_input_tokens: 5 },
       });
     const p = anthropicProvider({ messages: { create } } as never);
-    const res = await p.complete({ prompt: "x", model: p.webModel, web: true, timeoutMs: 10_000, maxOutputTokens: 100 });
+    const res = await p.complete({ prompt: "x", model: p.webModel, web: true, timeoutMs: 10_000, maxOutputTokens: 1_000, maxSearches: 3 });
     expect(create).toHaveBeenCalledTimes(2);
+    // The continuation only gets what the first request left of the allowance.
+    expect(create.mock.calls[1][0]).toMatchObject({ max_tokens: 990, tools: [{ max_uses: 1 }] });
     expect(res.text).toContain("part two");
     expect(res.usage).toEqual({ inputTokens: 150, outputTokens: 30, cachedInputTokens: 5, webSearches: 2 });
   });
