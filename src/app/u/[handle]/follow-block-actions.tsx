@@ -1,5 +1,6 @@
 "use client";
 
+import { notifySocialInteraction } from "@/lib/native/push-offer";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { MoreHorizontal, UserCheck, UserPlus, UserX } from "lucide-react";
@@ -49,6 +50,7 @@ export function FollowBlockActions({
       const body = (await res.json().catch(() => null)) as { state?: FollowState } | null;
       if (!res.ok || !body?.state) throw new Error("Couldn't follow.");
       setFollowState(body.state);
+      notifySocialInteraction("follow");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't follow.");
     } finally {

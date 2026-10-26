@@ -1,5 +1,6 @@
 "use client";
 
+import { notifySocialInteraction } from "@/lib/native/push-offer";
 import { useState } from "react";
 import Link from "next/link";
 import { Wine } from "lucide-react";
@@ -55,6 +56,7 @@ export function CheersButton({
       if (!res.ok) throw new Error("Couldn't update that.");
       const body = (await res.json().catch(() => null)) as { cheersCount?: number } | null;
       if (body && typeof body.cheersCount === "number") setCount(Math.max(0, body.cheersCount));
+      if (nextCheered) notifySocialInteraction("cheers");
     } catch {
       setCheered(previousCheered);
       setCount(previousCount);
