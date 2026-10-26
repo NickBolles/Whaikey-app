@@ -12,6 +12,7 @@ import { drainPendingPushes, friendTastedDigest, sweepNotifications } from "@/li
 import { sweepClubs } from "@/lib/clubs";
 import { sweepGuests } from "@/lib/flights";
 import { ensureCurated, evaluateAll } from "@/lib/challenges";
+import { sweepEnrichment } from "@/lib/enrich/queue";
 
 export const dynamic = "force-dynamic";
 
@@ -109,6 +110,8 @@ export async function GET(request: Request): Promise<NextResponse> {
       ["flight-guests", () => sweepGuests(db, now)],
       // Clubs whose owner left or deleted their account get a new one; empty clubs go.
       ["clubs", () => sweepClubs(db)],
+      // Enrichment progress lines past 30 days, call/run telemetry past 90.
+      ["enrichment", () => sweepEnrichment(db, now)],
       // This month's curated challenges exist, and crests are stamped for
       // anyone who completed one without opening the page (D16).
       ["challenges", async () => {
