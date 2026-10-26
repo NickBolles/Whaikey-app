@@ -11,7 +11,7 @@ export interface CatalogCandidate {
   name: string;
   category: WhiskeyCategory;
   /** Data source tag, recorded in the ingest report and UPC rows. */
-  source: "iowa" | "cola" | "oregon" | "utah" | "bc" | "systembolaget" | "whiskyedition" | "vinmonopolet";
+  source: "iowa" | "cola" | "oregon" | "utah" | "bc" | "systembolaget" | "vinmonopolet";
   /**
    * Normalized English country name ("Scotland", "USA"), when the source
    * states one. Adapters translate source vocabularies (Swedish names,
@@ -54,7 +54,7 @@ export interface IngestReport {
  * third party taking its API offline is not something a rerun or a code fix
  * on our side can repair, so the CLI reports the source as `degraded`, the
  * workflow stays green-with-warning and opens an issue, and the rest of the
- * catalog keeps syncing. WHISKY:EDITION's domain lapsing into a STRATO
+ * catalog keeps syncing. A review API's domain lapsing into a STRATO
  * "Domain not available" page is the case that motivated it: seven weekly
  * runs went red for a reason nobody on this side could change.
  */
@@ -74,7 +74,7 @@ export class SourceUnavailableError extends Error {
  * `res.json()` on an HTML page throws `Unexpected token '<'`, which names
  * neither the source nor what the page was. This checks the content type and
  * the first byte, and puts the page's <title> into the message, so the log
- * says "WHISKY:EDITION returned HTML (STRATO - Domain not available)".
+ * says "<source> returned HTML (STRATO - Domain not available)".
  */
 export async function readJsonResponse(res: Response, source: string, url: string): Promise<unknown> {
   const text = await res.text();
@@ -102,7 +102,7 @@ export async function readJsonResponse(res: Response, source: string, url: strin
  * When a third party's domain lapses, what we get back drifts over time: first
  * a parking page with HTTP 200 (handled by readJsonResponse), then nothing at
  * all — DNS stops resolving, or the parked host refuses the TLS handshake.
- * WHISKY:EDITION reached that stage in Oct 2026 (`fetch failed` with
+ * The (since removed) WHISKY:EDITION source reached that stage in Oct 2026 (`fetch failed` with
  * ERR_SSL_SSL/TLS_ALERT_HANDSHAKE_FAILURE) and turned the weekly sync red
  * again. undici rejects with a TypeError("fetch failed") whose `cause` carries
  * the code; that is the third party being gone, not a bug on our side, so it

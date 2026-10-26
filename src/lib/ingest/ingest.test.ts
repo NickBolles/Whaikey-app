@@ -46,9 +46,9 @@ describe("ingestCandidates", () => {
   });
 
   it("stores the source's country and drops a region that repeats it", async () => {
-    await ingestCandidates(db, "whiskyedition", [
-      candidate({ name: "Imported Peated Malt", source: "whiskyedition", category: "scotch-single-malt", country: "Scotland", region: "Islay" }),
-      candidate({ name: "Imported Blend", source: "whiskyedition", category: "scotch-blended", country: "Scotland", region: "Scotland" }),
+    await ingestCandidates(db, "systembolaget", [
+      candidate({ name: "Imported Peated Malt", source: "systembolaget", category: "scotch-single-malt", country: "Scotland", region: "Islay" }),
+      candidate({ name: "Imported Blend", source: "systembolaget", category: "scotch-blended", country: "Scotland", region: "Scotland" }),
     ]);
     const [malt] = await db.select().from(bottles).where(eq(bottles.id, "imported-peated-malt"));
     expect(malt).toMatchObject({ country: "Scotland", region: "Islay" });
@@ -72,13 +72,13 @@ describe("ingestCandidates", () => {
     await ingestCandidates(db, "bc", [
       candidate({ name: "BC Import Rye", source: "bc", category: "rye", upcs: ["080244002145"] }),
     ]);
-    await ingestCandidates(db, "whiskyedition", [
-      candidate({ name: "Edition Malt", source: "whiskyedition", upcs: ["083664004607"] }),
+    await ingestCandidates(db, "systembolaget", [
+      candidate({ name: "Swedish Malt", source: "systembolaget", upcs: ["083664004607"] }),
     ]);
     const [bcUpc] = await db.select().from(bottleUpcs).where(eq(bottleUpcs.upc, "080244002145"));
     expect(bcUpc).toMatchObject({ bottleId: "bc-import-rye", source: "bc" });
-    const [editionUpc] = await db.select().from(bottleUpcs).where(eq(bottleUpcs.upc, "083664004607"));
-    expect(editionUpc).toMatchObject({ bottleId: "edition-malt", source: "seed" });
+    const [swedishUpc] = await db.select().from(bottleUpcs).where(eq(bottleUpcs.upc, "083664004607"));
+    expect(swedishUpc).toMatchObject({ bottleId: "swedish-malt", source: "seed" });
   });
 
   it("never duplicates a curated bottle: matches by name and by alias", async () => {
