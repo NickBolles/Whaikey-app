@@ -153,7 +153,9 @@ export function anthropicProvider(client?: Anthropic): EnrichProvider {
           const left = input.timeoutMs - (Date.now() - started);
           if (left < 2_000) break;
           const outputLeft = input.maxOutputTokens - usage.outputTokens;
-          if (outputLeft < 200) break;
+          // The floor only guards continuations: the first turn always runs
+          // with whatever the step priced (tests and small steps use < 200).
+          if (outputLeft <= 0 || (turn > 0 && outputLeft < 200)) break;
           const searchesLeft = (input.maxSearches ?? 3) - usage.webSearches;
           const response = await anthropic.messages.create(
             {
