@@ -41,6 +41,8 @@ import {
   session,
   shareCardKeys,
   tastingNotes,
+  tags,
+  pourTags,
   upcConfirmations,
   user,
   userBottles,
@@ -355,6 +357,41 @@ export const ACCOUNT_DATA: readonly DataSlice[] = [
           .innerJoin(pours, eq(pours.id, tastingNotes.pourId))
           .where(eq(pours.userId, userId))
           .orderBy(tastingNotes.createdAt, tastingNotes.id),
+    },
+  },
+  {
+    key: "tags",
+    table: tags,
+    description: "The private tags you made for your pours.",
+    onDelete: "deleted",
+    why: "Yours alone: never shown to anyone else and never counted in anything shared.",
+    where: (_db, userId) => eq(tags.userId, userId),
+    export: {
+      columns: ["name", "createdAt"],
+      rows: (db, userId) =>
+        db
+          .select({ name: tags.name, createdAt: tags.createdAt })
+          .from(tags)
+          .where(eq(tags.userId, userId))
+          .orderBy(tags.createdAt, tags.id),
+    },
+  },
+  {
+    key: "pour_tags",
+    table: pourTags,
+    description: "Which of your tags is on which pour.",
+    onDelete: "deleted",
+    why: "Goes with its pour and its tag.",
+    where: (_db, userId) => eq(pourTags.userId, userId),
+    export: {
+      columns: ["pourId", "tag", "createdAt"],
+      rows: (db, userId) =>
+        db
+          .select({ pourId: pourTags.pourId, tag: tags.name, createdAt: pourTags.createdAt })
+          .from(pourTags)
+          .innerJoin(tags, eq(tags.id, pourTags.tagId))
+          .where(eq(pourTags.userId, userId))
+          .orderBy(pourTags.createdAt, pourTags.pourId),
     },
   },
   {

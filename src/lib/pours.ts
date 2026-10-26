@@ -8,6 +8,7 @@ import { isValidLeaf } from "@/lib/flavor-wheel";
 import { isModerationHidden, moderationLockKey } from "@/lib/moderation";
 import { refreshUserPalate } from "@/lib/palate-store";
 import { getSocialPrefs } from "@/lib/social";
+import { setPourTags, tagsForPours, tagsInputSchema } from "@/lib/tags";
 
 /** Standard pour when the user doesn't specify an amount. */
 export const DEFAULT_POUR_ML = 45;
@@ -66,6 +67,8 @@ export const pourInputSchema = z.object({
     })
     .optional(),
   visibility: z.enum(POUR_VISIBILITIES).optional(),
+  /** The author's own private tags for this pour (cleaned and capped server-side). */
+  tags: tagsInputSchema.optional(),
   /**
    * Idempotency key minted by the client before its first send attempt and
    * reused by every retry of that same pour (REL-4.2). Opaque to the server —
@@ -284,6 +287,7 @@ export async function logPour(db: DB, userId: string, input: PourInput): Promise
       .returning();
       note = inserted;
     }
+    if (parsed.tags && parsed.tags.length > 0) await setPourTags(tx as DB, userId, pour.id, parsed.tags);
     // The materialized palate is part of this write: a failed refresh must
     // roll back the pour, note, and fill-level decrement together.
     await refreshUserPalate(tx as DB, userId);
@@ -296,6 +300,8 @@ export async function logPour(db: DB, userId: string, input: PourInput): Promise
 export interface PourListItem extends Pour {
   bottleName: string;
   note: TastingNote | null;
+  /** The author's own tags on this pour. */
+  tags: string[];
 }
 
 /** A user's pours, newest first, with joined bottle name + tasting note. */
@@ -323,7 +329,8 @@ export async function listPours(
     .orderBy(desc(schema.pours.createdAt), desc(schema.pours.id))
     .limit(limit);
 
-  return rows.map((r) => ({ ...r.pour, bottleName: r.bottleName, note: r.note ?? null }));
+  const tagMap = await tagsForPours(db, userId, rows.map((r) => r.pour.id));
+  return rows.map((r) => ({ ...r.pour, bottleName: r.bottleName, note: r.note ?? null, tags: tagMap.get(r.pour.id) ?? [] }));
 }
 
 /** One pour + note, scoped to the owner. Returns null for missing/others'. */

@@ -21,6 +21,8 @@ export interface TimelinePour {
   amountMl: number | null;
   createdAt: string;
   visibility: PourVisibility;
+  /** The author's private tags. */
+  tags?: string[];
   note: {
     nose: string | null;
     palate: string | null;
@@ -119,6 +121,11 @@ function PourRow({ pour }: { pour: TimelinePour }) {
               .join(" · ")}
           </div>
           {snippet && <p className="mt-1 line-clamp-2 text-xs italic text-foreground/75">{snippet}</p>}
+          {pour.tags && pour.tags.length > 0 && (
+            <p className="mt-0.5 truncate text-xs text-accent/90" aria-label="Tags">
+              {pour.tags.map((t) => `#${t}`).join(" ")}
+            </p>
+          )}
           {shownTags.length > 0 && (
             <ul className="mt-1 flex flex-wrap gap-1" aria-label="Flavor tags">
               {shownTags.map(([leafId, intensity]) => (

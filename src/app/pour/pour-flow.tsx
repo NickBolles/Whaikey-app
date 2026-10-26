@@ -14,6 +14,7 @@ import { NoteCapture, type ExtractedTastingNote } from "@/components/note-captur
 import { VisibilityChips } from "@/components/visibility-chips";
 import { useToast } from "@/components/toast";
 import { PourScanSlot, type PickMeta } from "@/components/pour/scan-slot";
+import { TagsRow } from "@/components/pour/tags-row";
 import { bottleMeta, type ScanBottle } from "@/components/pour/scan-decision";
 import { clearDraft, hasDraftContent, loadDraft, saveDraft } from "@/components/pour/pour-draft";
 import { enqueuePour, newPourClientId } from "@/lib/native/offline-queue";
@@ -68,6 +69,7 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
   const [activeSection, setActiveSection] = useState<NoteSection>("nose");
   const [detailOpen, setDetailOpen] = useState(false);
   const [companions, setCompanions] = useState("");
+  const [tags, setTags] = useState<string[]>([]);
   const [nose, setNose] = useState("");
   const [palate, setPalate] = useState("");
   const [finish, setFinish] = useState("");
@@ -117,6 +119,7 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
     setFinish(draft.finish);
     setFlavorTags(draft.flavorTags ?? {});
     setCompanions(draft.companions);
+    if (Array.isArray(draft.tags)) setTags(draft.tags.filter((t): t is string => typeof t === "string"));
     if (draft.visibility) {
       // An explicit choice outranks the account default arriving later.
       visibilityDirtyRef.current = true;
@@ -128,21 +131,21 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [userId, initialBottle]);
 
-  const draftContent = { bottle, rating, servingStyle, amountMl, freeform, nose, palate, finish, flavorTags, companions };
+  const draftContent = { bottle, rating, servingStyle, amountMl, freeform, nose, palate, finish, flavorTags, companions, tags };
   const hasContent = hasDraftContent({ ...draftContent, bottle: bottle && bottle.id !== initialBottle?.id ? bottle : null });
   const draftVisibility = visibilityChosen ? visibility : null;
   // The latest fields, for the flush on close/unmount: the debounced write
   // below can still be pending when the sheet goes away.
   const latestDraftRef = useRef({ ...draftContent, visibility: draftVisibility });
   useEffect(() => {
-    latestDraftRef.current = { bottle, rating, servingStyle, amountMl, freeform, nose, palate, finish, flavorTags, companions, visibility: draftVisibility };
+    latestDraftRef.current = { bottle, rating, servingStyle, amountMl, freeform, nose, palate, finish, flavorTags, companions, tags, visibility: draftVisibility };
     if (!hydratedRef.current || finishedRef.current) return;
     const t = setTimeout(() => {
       // Saved or discarded while this was pending: never write it back.
       if (!finishedRef.current) saveDraft(userId, latestDraftRef.current);
     }, 300);
     return () => clearTimeout(t);
-  }, [userId, bottle, rating, servingStyle, amountMl, freeform, nose, palate, finish, flavorTags, companions, draftVisibility]);
+  }, [userId, bottle, rating, servingStyle, amountMl, freeform, nose, palate, finish, flavorTags, companions, tags, draftVisibility]);
   useEffect(
     () => () => {
       // Only ever adds: an empty flush would erase a stored draft (and React's
@@ -208,6 +211,7 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
       amountMl,
       context: companions.trim() ? { companions: companions.trim() } : undefined,
       note: hasNote ? noteFields : undefined,
+      tags: tags.length > 0 ? tags : undefined,
       visibility,
       clientId,
       expectedUserId: userId,
@@ -355,6 +359,10 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
             </button>
           ))}
         </section>
+
+        <div className="mt-3">
+          <TagsRow value={tags} onChange={setTags} />
+        </div>
 
         <button
           type="button"

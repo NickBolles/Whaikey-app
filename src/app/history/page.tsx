@@ -62,6 +62,7 @@ export default async function HistoryPage({
     amountMl: pour.amountMl,
     createdAt: pour.createdAt.toISOString(),
     visibility: pour.visibility,
+    tags: pour.tags,
     note: pour.note
       ? {
           nose: pour.note.nose,
