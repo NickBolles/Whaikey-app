@@ -70,6 +70,16 @@ Source and image policy are explicit per manifest entry:
 
 Start with `config/catalog-resource-manifest.example.json`; the respected-source policy registry is in `config/catalog-sources.json`. Exact official producer domains are operator-curated in each manifest rather than guessed by the model.
 
+#### 2.4a Tiered backfill on the Codex subscription (Oct 2026)
+`pnpm flavor` (scripts/flavor-enrich.ts, src/lib/ingest/flavor-tiers.ts) supersedes the capped API-key enrich step for the backlog. Three passes, in order:
+1. **free** — community roll-up (≥2 tagged user notes; always wins over estimates) and a keyword pass: producer/critic/user leaf tags plus `matchLeafIds` over the catalog description, critic notes and user note text, rolled up to wedges. Needs ≥3 leaves across ≥2 wedges. Tier `keyword`, confidence 0.3–0.4. Re-runs only when the inputs hash changes.
+2. **cheap** — `gpt-6-luna` (low reasoning), no tools, 25 bottles/request, for bottles still missing a profile. Tier `model`, 0.5. User notes are never sent to the model.
+3. **heavy** — `gpt-6.1-sol` with web search, 5 bottles/request, for the top-N most popular bottles (pours ×3 + shelf entries ×2) below `model_web`. Tier `model_web`, 0.75.
+
+Every write records `bottle_flavor_provenance` (tier, confidence, method/model, pass, date) and lands only over an equal-or-lower tier (guard in SQL). Profiles with no provenance row predate tracking (seed / old enrich) and are never overwritten. Model output is validated (exact 8 wedge ids, integer 0-10, ids from the exported batch).
+
+**Where it runs.** The DB secret stays in GitHub (`.github/workflows/flavor-enrichment.yml`: `prepare` = free pass + export, `apply` = validate + write, `coverage`); the Codex login stays on the Hermes host (`scripts/flavor-codex-bridge.py`, run by a Hermes cron job). Raw model text crosses via assets on the `flavor-enrichment-data` prerelease. The bridge reads `hermes usage --json` before the run and before every request and stops a pass at 48% used of any window, so at least half the subscription window is always left; the next run resumes from whatever is still missing. Failures open/comment a `flavor-enrichment` issue. The CLI never runs drizzle migrations (it creates its table with idempotent DDL matching migration 0050), so it is safe to dispatch from a branch.
+
 ### 2.5 Open flavor datasets — recommendation bootstrapping
 - **Classic 86-distillery Scotch dataset**: 86 single malts scored 0–4 on 12 flavor dimensions — small but perfect for bootstrapping flavor-similarity before we have user data.
 - WhiskeyProject/whiskey-api (~370 whiskeys, ~70 flavor tags), 2.2k scraped Whisky Advocate reviews (⚠️ copyright risk if surfaced verbatim — use for internal priors only, if at all).
