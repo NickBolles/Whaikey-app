@@ -14,6 +14,10 @@ vi.mock("next/navigation", () => ({
     throw new Error("NEXT_NOT_FOUND");
   },
 }));
+// The host's QR renders asynchronously; a promise that settles after the
+// test environment is torn down would setState into a dead window (an
+// unhandled rejection on CI). The QR itself is not what this file tests.
+vi.mock("qrcode", () => ({ default: { toDataURL: () => new Promise<string>(() => {}) } }));
 let cookie: string | null = null;
 vi.mock("next/headers", () => ({ cookies: async () => ({ get: () => (cookie ? { value: cookie } : undefined) }) }));
 let sessionUser: { id: string; name: string; email: string } | null = null;
