@@ -4,6 +4,7 @@ import type { DB } from "@/db";
 import { FLAVOR_PROFILE_TIERS, type FlavorProfileTier } from "@/db/schema";
 import { parseModelJson } from "@/lib/ai/json";
 import { WEDGE_IDS, isValidLeaf, matchLeafIds, rollUpToWedges, wedgeForLeaf } from "@/lib/flavor-wheel";
+import { MIN_COMMUNITY_RATERS } from "@/lib/search";
 import { buildEnrichPrompt, cleanProfile, profileFromNotes, type EnrichableBottle } from "./enrich";
 
 /**
@@ -205,10 +206,16 @@ export async function runFreePass(db: DB, opts: { dryRun?: boolean; now?: Date }
            p.tier, p.input_hash
     FROM bottles b LEFT JOIN bottle_flavor_provenance p ON p.bottle_id = b.id
     ORDER BY b.id`));
-  const notes = rowsOf<{ bottle_id: string; flavor_tags: Record<string, number> | null; nose: string | null; palate: string | null; finish: string | null; freeform: string | null }>(
+  // Only published notes feed a shared profile (docs/SOCIAL.md §13 rule 6):
+  // pours marked public whose owner still has social enabled, and only once
+  // MIN_COMMUNITY_RATERS distinct people are behind them (see notesBy below).
+  const notes = rowsOf<{ bottle_id: string; user_id: string; flavor_tags: Record<string, number> | null; nose: string | null; palate: string | null; finish: string | null; freeform: string | null }>(
     await db.execute(sql`
-      SELECT po.bottle_id, tn.flavor_tags, tn.nose, tn.palate, tn.finish, tn.freeform
-      FROM tasting_notes tn JOIN pours po ON po.id = tn.pour_id
+      SELECT po.bottle_id, po.user_id, tn.flavor_tags, tn.nose, tn.palate, tn.finish, tn.freeform
+      FROM tasting_notes tn
+      JOIN pours po ON po.id = tn.pour_id
+      JOIN user_profiles up ON up.user_id = po.user_id
+      WHERE po.visibility = 'public' AND up.social_enabled = true
       ORDER BY tn.created_at DESC`),
   );
   const critics = rowsOf<{ bottle_id: string; note: string; flavor_tags: Record<string, number> | null }>(
@@ -216,6 +223,10 @@ export async function runFreePass(db: DB, opts: { dryRun?: boolean; now?: Date }
   );
   const notesBy = new Map<string, typeof notes>();
   for (const n of notes) notesBy.set(n.bottle_id, [...(notesBy.get(n.bottle_id) ?? []), n]);
+  // The floor counts people, not notes: three notes from one person are one opinion.
+  for (const [bottleId, list] of notesBy) {
+    if (new Set(list.map((n) => n.user_id)).size < MIN_COMMUNITY_RATERS) notesBy.delete(bottleId);
+  }
   const criticsBy = new Map<string, typeof critics>();
   for (const c of critics) criticsBy.set(c.bottle_id, [...(criticsBy.get(c.bottle_id) ?? []), c]);
 
@@ -393,6 +404,9 @@ export function parseModelResults(results: ModelResultBatch[]): { writes: Profil
       if (typeof entry !== "object" || entry === null) continue;
       const { id, profile } = entry as { id?: unknown; profile?: unknown };
       if (typeof id !== "string" || !allowed.has(id) || seen.has(id)) continue;
+      // Validate the raw output first: clamping/rounding would turn a 100 into
+      // a 10 and let malformed output through the exact-8-key, integer-0–10 check.
+      if (!isValidWedgeProfile(profile)) continue;
       const clean = cleanProfile(profile);
       if (!clean || !isValidWedgeProfile(clean)) continue;
       seen.add(id);

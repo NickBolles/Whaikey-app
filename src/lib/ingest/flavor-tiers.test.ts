@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import type { DB } from "@/db";
-import { bottleFlavorProvenance, bottles, criticNotes, pours, tastingNotes, userBottles } from "@/db/schema";
+import { bottleFlavorProvenance, bottles, criticNotes, pours, tastingNotes, userBottles, userProfiles } from "@/db/schema";
 import { WEDGE_IDS } from "@/lib/flavor-wheel";
 import { createTestBottle, createTestUser, setupTestDb, uid } from "@/test/helpers";
 import {
@@ -25,10 +25,19 @@ const write = (bottleId: string, over: Partial<ProfileWrite> = {}): ProfileWrite
   pass: "cheap", inputHash: null, ...over,
 });
 
-async function addNote(db: DB, bottleId: string, flavorTags: Record<string, number> | null, nose?: string) {
+async function addNote(
+  db: DB,
+  bottleId: string,
+  flavorTags: Record<string, number> | null,
+  nose?: string,
+  opts: { visibility?: "private" | "public"; socialEnabled?: boolean } = {},
+) {
   const user = await createTestUser(db);
+  await db.insert(userProfiles).values({
+    userId: user.id, handle: `h${user.id.slice(-8)}`, displayName: "Taster", isPublic: true, socialEnabled: opts.socialEnabled ?? true,
+  });
   const pourId = uid("pour");
-  await db.insert(pours).values({ id: pourId, userId: user.id, bottleId, rating: 4 });
+  await db.insert(pours).values({ id: pourId, userId: user.id, bottleId, rating: 4, visibility: opts.visibility ?? "public" });
   await db.insert(tastingNotes).values({ id: uid("note"), pourId, flavorTags, nose: nose ?? null });
 }
 
@@ -110,6 +119,7 @@ describe("runFreePass", () => {
     const community = await createTestBottle(db, { flavorProfile: null });
     await addNote(db, community.id, { vanilla: 3, caramel: 2 });
     await addNote(db, community.id, { vanilla: 2, "black-pepper": 1 });
+    await addNote(db, community.id, { vanilla: 3, caramel: 1 });
     const described = await createTestBottle(db, {
       flavorProfile: null,
       description: "Notes of honey, vanilla and toasted oak with a cinnamon finish.",
@@ -139,9 +149,23 @@ describe("runFreePass", () => {
     await writeTieredProfiles(db, [write(b.id, { profile: profile({ sweet: 1 }) })]);
     await addNote(db, b.id, { vanilla: 3, caramel: 3, honey: 3 });
     await addNote(db, b.id, { vanilla: 3, caramel: 3 });
+    await addNote(db, b.id, { vanilla: 2, honey: 3 });
     await runFreePass(db);
     expect((await prov(db, b.id))!.tier).toBe("community");
     expect((await prof(db, b.id))!.sweet).toBeGreaterThan(1);
+  });
+
+  it("never builds a shared profile from private, stepped-back or too-few people's notes", async () => {
+    const text = "Notes of honey, vanilla, toasted oak and cinnamon with dried cherry.";
+    const priv = await createTestBottle(db, { flavorProfile: null });
+    for (let i = 0; i < 3; i++) await addNote(db, priv.id, { vanilla: 3, caramel: 2 }, text, { visibility: "private" });
+    const stepped = await createTestBottle(db, { flavorProfile: null });
+    for (let i = 0; i < 3; i++) await addNote(db, stepped.id, { vanilla: 3, caramel: 2 }, text, { socialEnabled: false });
+    const two = await createTestBottle(db, { flavorProfile: null });
+    for (let i = 0; i < 2; i++) await addNote(db, two.id, { vanilla: 3, caramel: 2 }, text);
+    const report = await runFreePass(db);
+    expect(report).toMatchObject({ community: 0, keyword: 0, written: 0 });
+    for (const b of [priv, stepped, two]) expect(await prof(db, b.id)).toBeNull();
   });
 
   it("dry run writes nothing", async () => {
@@ -199,6 +223,15 @@ describe("model export/apply", () => {
       { pass: "free" as never, model: "x1", bottleIds: ["c"], raw: JSON.stringify([{ id: "c", profile: profile() }]), completedAt: "" },
       { pass: "cheap", model: "gpt-6-luna", bottleIds: ["d"], raw: "not json at all", completedAt: "" },
     ]);
+    expect(writes).toEqual([]);
+    expect(rejected).toBe(4);
+  });
+
+  it("rejects out-of-range, fractional, string and extra-key scores instead of normalizing them", () => {
+    const bad = [profile({ sweet: 100 }), profile({ sweet: 2.5 }), { ...profile(), sweet: "6" }, { ...profile(), smoky: 2 }];
+    const { writes, rejected } = parseModelResults(
+      bad.map((p, i) => ({ pass: "cheap" as const, model: "gpt-6-luna", bottleIds: [`b${i}`], raw: JSON.stringify([{ id: `b${i}`, profile: p }]), completedAt: "" })),
+    );
     expect(writes).toEqual([]);
     expect(rejected).toBe(4);
   });
