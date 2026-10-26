@@ -40,7 +40,7 @@ describe("EnrichedChart", () => {
         ]}
       />,
     );
-    expect(screen.getByText("1,253 bottles")).toBeTruthy();
+    expect(screen.getByText("1,253 bottles · peak 1,240/day")).toBeTruthy();
     expect(screen.getByRole("img").getAttribute("aria-label")).toContain("52 model + web");
     // 2 + 2 stacked segments, plus 4 legend swatches.
     expect(container.querySelectorAll("svg[role=img] rect")).toHaveLength(4);

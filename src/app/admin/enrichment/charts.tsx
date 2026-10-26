@@ -35,11 +35,11 @@ function XLabels({ days }: { days: string[] }) {
       {[...new Set(picks)].map((i, n) => (
         <text
           key={i}
-          x={n === 0 ? 0 : n === picks.length - 1 ? W : i * step + step / 2}
+          x={n === 0 ? 3 : n === picks.length - 1 ? W - 3 : i * step + step / 2}
           y={H - 2}
           textAnchor={n === 0 ? "start" : n === picks.length - 1 ? "end" : "middle"}
           className="fill-muted"
-          fontSize={8}
+          fontSize={9}
         >
           {short(days[i])}
         </text>
@@ -83,7 +83,7 @@ export function SpendChart({ series, capUsd }: { series: Array<{ day: string; us
           );
         })}
         <line x1={0} x2={W} y1={y(capUsd)} y2={y(capUsd)} className="stroke-danger" strokeWidth={0.75} strokeDasharray="3 2" />
-        <text x={W - 2} y={y(capUsd) - 2} textAnchor="end" fontSize={8} className="fill-danger">
+        <text x={W - 2} y={y(capUsd) - 2} textAnchor="end" fontSize={9} className="fill-danger">
           cap {usd(capUsd)}
         </text>
         <line x1={0} x2={W} y1={PAD_TOP + PLOT_H} y2={PAD_TOP + PLOT_H} className="stroke-border" strokeWidth={0.5} />
@@ -103,7 +103,9 @@ export function EnrichedChart({ series }: { series: DayEnriched[] }) {
     <figure className="flex flex-col gap-1" data-testid="enrich-tier-chart">
       <figcaption className="flex justify-between text-xs text-muted">
         <span>Profiles written per day by tier</span>
-        <span className="tabular-nums">{total.toLocaleString("en-US")} bottles</span>
+        <span className="tabular-nums">
+          {total.toLocaleString("en-US")} bottles · peak {max.toLocaleString("en-US")}/day
+        </span>
       </figcaption>
       <svg
         viewBox={`0 0 ${W} ${H}`}
@@ -126,9 +128,6 @@ export function EnrichedChart({ series }: { series: DayEnriched[] }) {
             </g>
           );
         })}
-        <text x={2} y={PAD_TOP + 6} fontSize={8} className="fill-muted">
-          {max.toLocaleString("en-US")}
-        </text>
         <line x1={0} x2={W} y1={PAD_TOP + PLOT_H} y2={PAD_TOP + PLOT_H} className="stroke-border" strokeWidth={0.5} />
         <XLabels days={series.map((d) => d.day)} />
       </svg>
