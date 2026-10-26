@@ -94,6 +94,14 @@ async function seedFootprint(db: DB, subject: schema.User, counterpart: schema.U
     freeform: `=${tag} formula-looking note`,
     flavorTags: { vanilla: 3 },
   });
+  await db.insert(schema.authProviderEvents).values({
+    id: uid("ape"),
+    jti: `${tag}-apple-jti`,
+    providerId: "apple",
+    providerAccountId: `${tag}-apple-sub`,
+    userId: subject.id,
+    eventType: "consent-revoked",
+  });
   const shareId = uid("share");
   await db.insert(schema.pourShares).values({ id: shareId, pourId, userId: subject.id, code: `${tag}SHARECODE` });
   const tagId = uid("tag");

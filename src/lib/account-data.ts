@@ -39,6 +39,7 @@ import {
   pourShares,
   pours,
   pushDevices,
+  authProviderEvents,
   reactions,
   recExplanations,
   reports,
@@ -218,6 +219,28 @@ export const ACCOUNT_DATA: readonly DataSlice[] = [
     where: (_db, userId) => eq(nativeAuthCodes.userId, userId),
     notExported:
       "Single-use credentials that live for sixty seconds. There is nothing in them you wrote, and a copy would be a key.",
+  },
+  {
+    key: "auth_provider_events",
+    table: authProviderEvents,
+    description: "Notices Apple sent us about your Sign in with Apple (stopped using it, Apple ID deleted, relay email off/on).",
+    onDelete: "deleted",
+    why: "It describes your account to us and nothing else; with the account gone there is nothing for it to describe.",
+    where: (_db, userId) => eq(authProviderEvents.userId, userId),
+    export: {
+      columns: ["providerId", "eventType", "eventTime", "receivedAt"],
+      rows: (db, userId) =>
+        db
+          .select({
+            providerId: authProviderEvents.providerId,
+            eventType: authProviderEvents.eventType,
+            eventTime: authProviderEvents.eventTime,
+            receivedAt: authProviderEvents.receivedAt,
+          })
+          .from(authProviderEvents)
+          .where(eq(authProviderEvents.userId, userId))
+          .orderBy(authProviderEvents.receivedAt, authProviderEvents.id),
+    },
   },
   {
     key: "push_devices",

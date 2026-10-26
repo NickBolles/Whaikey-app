@@ -45,7 +45,9 @@ export default function PrivacyPage() {
             avatar your sign-in provider gives us. There is no password: sign-in is Google or Apple
             only, so we never see one. Signing in also leaves the tokens the provider issues for it,
             encrypted at rest. They exist because sign-in works that way; Whaikey never uses them to
-            read anything from Google or Apple, and they are deleted with the account.
+            read anything from Google or Apple, and they are deleted with the account. If you stop
+            using Sign in with Apple for Whaikey or delete your Apple ID, Apple tells us so directly;
+            we keep that notice from Apple with your account and sign you out everywhere.
           </li>
           <li>
             <strong className="text-foreground">Your sessions</strong> — for each device you are

@@ -372,6 +372,13 @@
       "when": 1793047071465,
       "tag": "0052_pour_tags",
       "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1793047100401,
+      "tag": "0053_auth_provider_events",
+      "breakpoints": true
     }
   ]
 }
