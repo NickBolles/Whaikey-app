@@ -44,6 +44,7 @@ import { POST as CLAIM } from "@/app/api/outings/[code]/claim/route";
 import { GET as EXPORT } from "@/app/api/outings/[code]/export/route";
 import { DELETE as DELETE_OUTING } from "@/app/api/outings/[code]/route";
 import { POST as MINT_CARD } from "@/app/api/cards/route";
+import { GET as CARD } from "@/app/api/cards/[kind]/route";
 
 async function person(db: DB, handle: string) {
   const user = await createTestUser(db, { name: handle });
@@ -317,5 +318,42 @@ describe("outing routes", () => {
     expect((await DELETE_OUTING(jsonRequest("/", "DELETE"), p(joinCode))).status).toBe(404);
     setSessionUser(host);
     expect((await DELETE_OUTING(jsonRequest("/", "DELETE"), p(joinCode))).status).toBe(200);
+  });
+});
+
+describe("the outing recap card", () => {
+  let db: DB;
+  beforeEach(async () => {
+    db = await setupTestDb();
+    vi.stubEnv("BETTER_AUTH_SECRET", "test-secret-for-cards-0123456789");
+  });
+
+  it("renders for someone on the ended outing, and stops for anyone who loses access", async () => {
+    const host = await person(db, "host_k");
+    const friend = await person(db, "friend_k");
+    const outing = await createOuting(db, host.id, input);
+    await joinOutingAsUser(db, outing.id, friend.id);
+    const seat = (await findOutingSeat(db, outing.id, { userId: friend.id }))!;
+    await addTasting(db, outing, seat, { label: "Cask 1142", rating: 4, flavorTags: { vanilla: 2 } });
+
+    setSessionUser(friend);
+    // Not while it's open.
+    expect((await MINT_CARD(jsonRequest("/api/cards", "POST", { kind: "outing", code: outing.joinCode }))).status).toBe(404);
+    await endOuting(db, host.id, outing.id);
+    const minted = await MINT_CARD(jsonRequest("/api/cards", "POST", { kind: "outing", code: outing.joinCode }));
+    expect(minted.status).toBe(200);
+    const { story, link } = (await minted.json()) as { story: string; link: string };
+    expect(link).not.toContain(outing.joinCode);
+    const render = (path: string) => CARD(new Request(`http://localhost${path}`), { params: Promise.resolve({ kind: "outing" }) });
+    const png = await render(link);
+    expect(png.status).toBe(200);
+    expect(png.headers.get("content-type")).toBe("image/png");
+    expect((await render(story)).status).toBe(200);
+
+    // A stranger can't mint one; a block with the host stops the card.
+    setSessionUser(await person(db, "stranger_k"));
+    expect((await MINT_CARD(jsonRequest("/api/cards", "POST", { kind: "outing", code: outing.joinCode }))).status).toBe(404);
+    await blockUser(db, host.id, friend.id);
+    expect((await render(link)).status).toBe(404);
   });
 });
