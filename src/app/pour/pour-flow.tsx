@@ -262,6 +262,7 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
         finish.trim() ||
         freeform.trim() ||
         companions.trim() ||
+        tags.length > 0 ||
         Object.keys(flavorTags).length > 0,
     );
   }

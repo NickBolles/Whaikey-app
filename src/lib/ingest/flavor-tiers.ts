@@ -220,6 +220,8 @@ export interface FreePassReport {
   /** Community profiles withdrawn because their eligible contributors fell below the floor. */
   communityWithdrawn: number;
   keyword: number;
+  /** Keyword profiles withdrawn because their remaining eligible inputs no longer support one. */
+  keywordWithdrawn: number;
   keywordUnchanged: number;
   skippedHigherOrLegacy: number;
   written: number;
@@ -271,7 +273,7 @@ export async function runFreePass(db: DB, opts: { dryRun?: boolean; now?: Date }
   for (const c of critics) criticsBy.set(c.bottle_id, [...(criticsBy.get(c.bottle_id) ?? []), c]);
 
   const report: FreePassReport = {
-    bottles: catalog.length, community: 0, communityWithdrawn: 0, keyword: 0, keywordUnchanged: 0, skippedHigherOrLegacy: 0, written: 0,
+    bottles: catalog.length, community: 0, communityWithdrawn: 0, keyword: 0, keywordWithdrawn: 0, keywordUnchanged: 0, skippedHigherOrLegacy: 0, written: 0,
     dryRun: opts.dryRun ?? false,
   };
   const writes: ProfileWrite[] = [];
@@ -309,7 +311,16 @@ export async function runFreePass(db: DB, opts: { dryRun?: boolean; now?: Date }
     const hash = keywordInputHash(inputs);
     if (row.tier === "keyword" && row.input_hash === hash) { report.keywordUnchanged += 1; continue; }
     const profile = keywordProfile(inputs);
-    if (!profile) continue;
+    if (!profile) {
+      // A keyword profile whose published evidence went away (a contributor
+      // made the pour private, stepped back or deleted the note) is withdrawn
+      // too, not left standing on inputs that no longer support it.
+      if (row.tier === "keyword") {
+        withdrawn.push(row.id);
+        report.keywordWithdrawn += 1;
+      }
+      continue;
+    }
     report.keyword += 1;
     const strong = inputs.producerFlavorTags != null || inputs.criticNotes.length > 0;
     writes.push({ bottleId: row.id, profile, tier: "keyword", confidence: strong ? 0.4 : TIER_CONFIDENCE.keyword, method: "keyword-matcher", model: null, pass: "free", inputHash: hash });
@@ -320,8 +331,8 @@ export async function runFreePass(db: DB, opts: { dryRun?: boolean; now?: Date }
       await db.execute(sql`
         UPDATE bottles SET flavor_profile = NULL
         WHERE id IN (${ids})
-          AND EXISTS (SELECT 1 FROM bottle_flavor_provenance p WHERE p.bottle_id = bottles.id AND p.tier = 'community')`);
-      await db.execute(sql`DELETE FROM bottle_flavor_provenance WHERE tier = 'community' AND bottle_id IN (${ids})`);
+          AND EXISTS (SELECT 1 FROM bottle_flavor_provenance p WHERE p.bottle_id = bottles.id AND p.tier IN ('community', 'keyword'))`);
+      await db.execute(sql`DELETE FROM bottle_flavor_provenance WHERE tier IN ('community', 'keyword') AND bottle_id IN (${ids})`);
     }
     report.written = (await writeTieredProfiles(db, writes)).length;
   }
