@@ -496,7 +496,9 @@ export function buildRecap(rows: Array<{ label: string; bottleId: string | null;
     const key = r.bottleId ? `b:${r.bottleId}` : `l:${normLabel(r.label)}`;
     groups.set(key, [...(groups.get(key) ?? []), r]);
   }
-  const bottles: Array<OutingRecapBottle & { raters: number }> = [];
+  // `mean` is the unrounded average: ranking on the rounded one could crown a
+  // lower-rated bottle when two round to the same tenth.
+  const bottles: Array<OutingRecapBottle & { raters: number; mean: number | null }> = [];
   for (const g of groups.values()) {
     // One voice per person per bottle: a second taste of the same thing is the
     // same opinion, and must not weigh the consensus (or count for anything).
@@ -507,10 +509,12 @@ export function buildRecap(rows: Array<{ label: string; bottleId: string | null;
       for (const t of Object.keys(r.flavorTags ?? {})) tagPeople.set(t, new Set([...(tagPeople.get(t) ?? []), r.participantId]));
     }
     const votes = [...perPerson.values()].map((v) => v.reduce((a, b) => a + b, 0) / v.length);
+    const mean = votes.length ? votes.reduce((a, b) => a + b, 0) / votes.length : null;
     bottles.push({
       label: g[0].label,
       bottleId: g[0].bottleId,
-      average: votes.length ? Math.round((votes.reduce((a, b) => a + b, 0) / votes.length) * 10) / 10 : null,
+      average: mean == null ? null : Math.round(mean * 10) / 10,
+      mean,
       sharedTags: [...tagPeople.entries()]
         .filter(([, p]) => p.size >= 2)
         .sort((a, b) => b[1].size - a[1].size)
@@ -521,7 +525,7 @@ export function buildRecap(rows: Array<{ label: string; bottleId: string | null;
   }
   bottles.sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: "base" }));
   const rank = (a: (typeof bottles)[number], b: (typeof bottles)[number]) =>
-    (b.average ?? 0) - (a.average ?? 0) || b.raters - a.raters || a.label.localeCompare(b.label, undefined, { sensitivity: "base" });
+    (b.mean ?? 0) - (a.mean ?? 0) || b.raters - a.raters || a.label.localeCompare(b.label, undefined, { sensitivity: "base" });
   const agreed = bottles.filter((b) => b.raters >= 2 && b.average != null).sort(rank);
   const anyRated = bottles.filter((b) => b.average != null).sort(rank);
   const fav = agreed[0] ?? anyRated[0] ?? null;

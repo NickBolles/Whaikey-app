@@ -133,6 +133,12 @@ describe("outings (D22)", () => {
     expect(r.bottles).toHaveLength(2);
     expect(r.bottles.find((b) => b.label === "A")?.average).toBe(4);
     expect(r.favorite).toMatchObject({ label: "B", average: 4.5, consensus: true });
+    // Ranked on the unrounded mean: 4.25 and 4.33 both show as 4.3, but B wins.
+    const close = buildRecap([
+      ...[4, 4, 4, 5].map((rating, i) => ({ label: "A", bottleId: "a", rating, flavorTags: null, participantId: `a${i}` })),
+      ...[4, 4, 5].map((rating, i) => ({ label: "B", bottleId: "b", rating, flavorTags: null, participantId: `b${i}` })),
+    ]);
+    expect(close.favorite).toMatchObject({ label: "B", average: 4.3 });
     expect(buildRecap([]).favorite).toBeNull();
     expect(buildRecap([{ label: "Solo", bottleId: null, rating: 4, flavorTags: null, participantId: "p1" }]).favorite).toMatchObject({ consensus: false });
   });
@@ -305,6 +311,11 @@ describe("outing routes", () => {
     expect(poll2.state).toBe("ended");
     expect(poll2.stamp).not.toBe(poll1.stamp);
     expect((await UNTASTE(withCookie(`/api/outings/${joinCode}/tastings/${id}`, "DELETE", cookie), p(joinCode, id))).status).toBe(200);
+
+    // Signing in to an account that hasn't passed the age gate doesn't keep the guest seat working.
+    const ungated = await createTestUser(db, { ageVerified: false });
+    setSessionUser(ungated);
+    expect((await TASTE(withCookie(`/api/outings/${joinCode}/tastings`, "POST", cookie, { label: "x1" }), p(joinCode))).status).toBe(403);
 
     // A guest who signs up keeps their seat.
     const later = await person(db, "later_r");

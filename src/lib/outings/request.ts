@@ -1,5 +1,5 @@
 import { getDb } from "@/db";
-import { getSessionUser } from "@/lib/session";
+import { getSessionUser, requireUser } from "@/lib/session";
 import { findOutingSeat, outingGuestCookieName, visibleOutingByCode } from "@/lib/outings";
 
 export function readOutingGuestToken(cookieHeader: string | null, joinCode: string): string | null {
@@ -25,7 +25,10 @@ export function readOutingGuestToken(cookieHeader: string | null, joinCode: stri
  */
 export async function resolveOuting(req: Request, code: string) {
   const db = getDb();
-  const user = await getSessionUser();
+  // A signed-in caller answers the account's age gate (PLAN §9.1) even when
+  // they also hold a guest cookie: signing in must never be a way around it.
+  // Signed out, the guest cookie's own 21+ check is what seated them.
+  const user = (await getSessionUser()) ? await requireUser() : null;
   const outing = await visibleOutingByCode(db, code, user?.id ?? null);
   const seat = outing
     ? await findOutingSeat(db, outing.id, { userId: user?.id ?? null, guestToken: readOutingGuestToken(req.headers.get("cookie"), code) })
