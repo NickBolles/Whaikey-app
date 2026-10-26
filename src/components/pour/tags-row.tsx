@@ -35,14 +35,23 @@ export function TagsRow({ value, onChange }: { value: string[]; onChange: (next:
   const keys = new Set(value.map(tagKey));
   const full = value.length >= MAX_TAGS_PER_POUR;
 
-  function add(raw: string) {
-    const name = cleanTag(raw);
-    if (!name || keys.has(tagKey(name)) || full) return;
-    onChange([...value, name]);
+  /** Adds every given tag in one change (a pasted "blind, gift" is two). */
+  function addAll(raws: string[]) {
+    const next = [...value];
+    const seen = new Set(next.map(tagKey));
+    for (const raw of raws) {
+      const name = cleanTag(raw);
+      if (!name || seen.has(tagKey(name)) || next.length >= MAX_TAGS_PER_POUR) continue;
+      seen.add(tagKey(name));
+      next.push(name);
+    }
+    if (next.length !== value.length) onChange(next);
   }
 
+  const add = (raw: string) => addAll([raw]);
+
   function commitDraft() {
-    for (const part of draft.split(",")) add(part);
+    addAll(draft.split(","));
     setDraft("");
   }
 

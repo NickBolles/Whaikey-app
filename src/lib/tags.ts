@@ -64,11 +64,13 @@ export async function tagsForPours(db: DB, userId: string, pourIds: readonly str
     .from(schema.pourTags)
     .innerJoin(schema.tags, eq(schema.tags.id, schema.pourTags.tagId))
     .where(and(eq(schema.pourTags.userId, userId), inArray(schema.pourTags.pourId, [...pourIds])))
-    .orderBy(schema.pourTags.createdAt, schema.tags.name);
+    .orderBy(schema.pourTags.createdAt);
   for (const r of rows) {
     const list = out.get(r.pourId) ?? [];
     list.push(r.name);
     out.set(r.pourId, list);
   }
+  // One order everywhere, independent of the database's collation.
+  for (const list of out.values()) list.sort((a, b) => a.localeCompare(b, "en", { sensitivity: "base" }));
   return out;
 }

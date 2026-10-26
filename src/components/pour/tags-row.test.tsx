@@ -42,8 +42,10 @@ describe("TagsRow", () => {
     await act(async () => {});
     fireEvent.click(screen.getByRole("button", { name: /Tag/ }));
     const input = screen.getByLabelText("New tag");
-    fireEvent.change(input, { target: { value: "#tasting night, gift" } });
+    fireEvent.change(input, { target: { value: "#tasting night, gift, blind" } });
     fireEvent.keyDown(input, { key: "Enter" });
-    expect(spy).toHaveBeenLastCalledWith(["Gift", "tasting night"]);
+    // One change carrying every new tag, so none is lost to batching.
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy).toHaveBeenLastCalledWith(["Gift", "tasting night", "blind"]);
   });
 });

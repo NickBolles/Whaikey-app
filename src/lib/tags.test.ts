@@ -38,7 +38,7 @@ describe("tags in the journal", () => {
     expect(await db.query.tags.findMany({ where: (t, { eq }) => eq(t.userId, alice.id) })).toHaveLength(2);
     const listed = await listPours(db, alice.id);
     const byId = new Map(listed.map((p) => [p.id, p.tags]));
-    expect(byId.get(first.pour.id)).toEqual(["Tasting night", "gift"]);
+    expect(byId.get(first.pour.id)).toEqual(["gift", "Tasting night"]);
     // The spelling first used is kept.
     expect(byId.get(second.pour.id)).toEqual(["Tasting night"]);
   });
