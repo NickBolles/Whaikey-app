@@ -23,6 +23,7 @@ import { ShelfActions } from "./shelf-actions";
 import { ShelfDetails } from "./shelf-details";
 import { originLabel } from "@/lib/origin";
 import { YourPours, type YourPourItem } from "./your-pours";
+import { PullQuote, isQuotable } from "@/components/pull-quote";
 import { appNow } from "@/lib/clock";
 import { getEnrichmentView, LIVE_REASONS } from "@/lib/enrich/queue";
 import { LiveEnrichment, SourcedNotes } from "@/components/live-enrichment";
@@ -157,14 +158,23 @@ export default async function BottleDetailPage({
         }
       : null;
 
+  // Most specific origin we can name; a blend has no region and shows its
+  // country rather than nothing (src/lib/origin.ts). It is the hero's serif
+  // kicker above the name (Paper's label line), so the meta line skips it.
+  const origin = originLabel(bottle.region ?? distillery?.region, bottle.country ?? distillery?.country);
   const metaParts = [
-    // Most specific origin we can name; a blend has no region and shows its
-    // country rather than nothing (src/lib/origin.ts).
-    originLabel(bottle.region ?? distillery?.region, bottle.country ?? distillery?.country),
     bottle.ageYears != null ? `${bottle.ageYears} years` : null,
     bottle.abv != null ? `${bottle.abv}% ABV` : null,
     bottle.caskTypes && bottle.caskTypes.length > 0 ? bottle.caskTypes.join(" + ") : null,
   ].filter(Boolean);
+
+  // The bottle page's editorial moment (Ledger × Paper): the viewer's own most
+  // recent written note, set as a centred pull-quote between double rules.
+  // Without one, a short catalog description takes the slot instead; a long
+  // description stays the quiet hanging paragraph it was.
+  const latestNote = yourPours.find((p) => isQuotable(p.snippet)) ?? null;
+  const descriptionAsQuote =
+    !latestNote && bottle.description != null && bottle.description.length <= 160 ? bottle.description : null;
 
   const pairingGroups = (["food", "cigar", "cocktail"] as const)
     .map((type) => ({ type, rows: pairings.filter((p) => p.pairingType === type) }))
@@ -176,6 +186,7 @@ export default async function BottleDetailPage({
       <header>
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
+            {origin && <p className="kicker mb-1">{origin}</p>}
             <h1 className="font-display text-[22px] leading-[1.15] font-semibold tracking-tight">
               {bottle.name}
             </h1>
@@ -245,11 +256,24 @@ export default async function BottleDetailPage({
         </section>
       )}
 
+      {latestNote?.snippet && (
+        <PullQuote
+          variant="center"
+          text={latestNote.snippet}
+          kicker={`Your note · ${new Date(latestNote.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })}`}
+          byline={latestNote.rating != null ? `★ ${latestNote.rating.toFixed(1)}${latestNote.servingStyle ? ` · ${latestNote.servingStyle}` : ""}` : latestNote.servingStyle}
+        />
+      )}
+
       {/* Description */}
-      {bottle.description && (
-        <p className="border-l-2 border-accent/40 pl-4 font-display italic text-[15px] leading-relaxed text-foreground/75">
-          {bottle.description}
-        </p>
+      {descriptionAsQuote ? (
+        <PullQuote variant="center" text={descriptionAsQuote} kicker="In a line" />
+      ) : (
+        bottle.description && (
+          <p className="border-l-2 border-accent/40 pl-4 font-display italic text-[15px] leading-relaxed text-foreground/75">
+            {bottle.description}
+          </p>
+        )
       )}
 
       {/* Tasting notes summarised from published sources by the live

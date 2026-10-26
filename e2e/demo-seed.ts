@@ -836,4 +836,55 @@ export async function seedDemoUser(db: DB): Promise<void> {
     { id: "demo-fe-5", participantId: "demo-seat-jordan", flightId: "demo-flight-1", slot: "C", rating: 4, flavorTags: { vanilla: 2, toffee: 2 }, createdAt: at, updatedAt: at },
     { id: "demo-fe-6", participantId: "demo-seat-sasha", flightId: "demo-flight-1", slot: "C", rating: 3.5, flavorTags: { vanilla: 2, oak: 1 }, createdAt: at, updatedAt: at },
   ]);
+  // ── Outings (D22): an open distillery trip and an ended one with a recap ────
+  // Jordan hosts both; Sasha and a guest ("Pat", seat far in the future so the
+  // real-clock guest filter keeps it) are on the open one. Fixed ids, codes and
+  // timestamps — the /o visual baselines.
+  await db.insert(schema.outings).values([
+    {
+      id: "demo-outing-open",
+      hostId: DEMO_USER_ID,
+      title: "Bourbon Trail Saturday",
+      distilleryName: "Buffalo Trace",
+      location: "Frankfort, KY",
+      visitOn: "2026-07-19",
+      joinCode: "demotrip01",
+      createdAt: D("2026-07-12T18:00:00Z"),
+    },
+    {
+      id: "demo-outing-ended",
+      hostId: DEMO_USER_ID,
+      clubId: "demo-club-1",
+      title: "Islay weekend",
+      distilleryName: "Lagavulin",
+      location: "Islay",
+      visitOn: "2026-06-13",
+      state: "ended",
+      joinCode: "demotrip02",
+      createdAt: D("2026-06-01T18:00:00Z"),
+      endedAt: D("2026-06-13T18:00:00Z"),
+    },
+  ]);
+  await db.insert(schema.outingParticipants).values([
+    { id: "demo-oseat-jordan", outingId: "demo-outing-open", userId: DEMO_USER_ID, joinedAt: D("2026-07-12T18:00:00Z") },
+    { id: "demo-oseat-sasha", outingId: "demo-outing-open", userId: DEMO_FRIEND_ID, joinedAt: D("2026-07-19T15:00:00Z") },
+    { id: "demo-oseat-pat", outingId: "demo-outing-open", guestName: "Pat", guestTokenHash: "demo-guest-hash-pat", joinedAt: D("2026-07-19T15:05:00Z"), expiresAt: D("2099-01-01T00:00:00Z") },
+    { id: "demo-oseat-jordan-2", outingId: "demo-outing-ended", userId: DEMO_USER_ID, joinedAt: D("2026-06-01T18:00:00Z") },
+    { id: "demo-oseat-sasha-2", outingId: "demo-outing-ended", userId: DEMO_FRIEND_ID, joinedAt: D("2026-06-02T18:00:00Z") },
+  ]);
+  const ot = (m: number) => D(`2026-07-19T16:${String(m).padStart(2, "0")}:00Z`);
+  const ot2 = D("2026-06-13T14:00:00Z");
+  await db.insert(schema.outingTastings).values([
+    { id: "demo-ot-1", outingId: "demo-outing-open", participantId: "demo-oseat-jordan", bottleId: "eagle-rare-10", label: "Eagle Rare 10", rating: 4, flavorTags: { vanilla: 2, toffee: 2 }, createdAt: ot(5), updatedAt: ot(5) },
+    { id: "demo-ot-2", outingId: "demo-outing-open", participantId: "demo-oseat-sasha", label: "Cask 1142 barrel-proof sample", rating: 4.5, flavorTags: { "dark-fruit": 2, oak: 2 }, note: "Straight from the barrel thief.", createdAt: ot(12), updatedAt: ot(12) },
+    { id: "demo-ot-3", outingId: "demo-outing-open", participantId: "demo-oseat-pat", label: "Gift-shop single barrel", rating: 4, flavorTags: { caramel: 2 }, createdAt: ot(20), updatedAt: ot(20) },
+    { id: "demo-ot-4", outingId: "demo-outing-ended", participantId: "demo-oseat-jordan-2", bottleId: "lagavulin-16", label: "Lagavulin 16", rating: 4.5, flavorTags: { campfire: 3, brine: 2 }, createdAt: ot2, updatedAt: ot2 },
+    { id: "demo-ot-5", outingId: "demo-outing-ended", participantId: "demo-oseat-sasha-2", bottleId: "lagavulin-16", label: "Lagavulin 16", rating: 4, flavorTags: { campfire: 2, peat: 3 }, createdAt: ot2, updatedAt: ot2 },
+    { id: "demo-ot-6", outingId: "demo-outing-ended", participantId: "demo-oseat-jordan-2", label: "Distillery-only 2009 cask", rating: 5, flavorTags: { brine: 2, "dark-fruit": 2 }, note: "Only sold at the shop.", createdAt: ot2, updatedAt: ot2 },
+    { id: "demo-ot-7", outingId: "demo-outing-ended", participantId: "demo-oseat-sasha-2", label: "Distillery-only 2009 cask", rating: 4.5, flavorTags: { brine: 1, honey: 2 }, createdAt: ot2, updatedAt: ot2 },
+  ]);
+  await db.insert(schema.outingNotes).values([
+    { id: "demo-on-1", outingId: "demo-outing-open", participantId: "demo-oseat-sasha", body: "The warehouse tour was the highlight.", createdAt: ot(15) },
+    { id: "demo-on-2", outingId: "demo-outing-ended", participantId: "demo-oseat-sasha-2", body: "Ferry back at 6.", createdAt: ot2 },
+  ]);
 }

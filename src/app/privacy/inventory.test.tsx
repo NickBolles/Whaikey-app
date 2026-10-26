@@ -61,6 +61,7 @@ const INVENTORY: Record<string, Verdict> = {
   user: { disclosed: "the name, email address and" },
   session: { disclosed: "a session token plus the IP address" },
   account: { disclosed: "the tokens the provider issues for it" },
+  auth_provider_events: { disclosed: "we keep that notice from Apple with your account" },
   verification: { notPersonal: "Better Auth's short-lived sign-in challenges, not user content." },
   native_auth_requests: {
     disclosed: "native sign-in codes are deleted the moment they are used",
@@ -76,6 +77,8 @@ const INVENTORY: Record<string, Verdict> = {
   tasting_notes: { disclosed: "pours, ratings, tasting", sharedWith: ["pours"] },
   user_bottles: { disclosed: "the bottles on your shelf, and what you paid" },
   pour_shares: { disclosed: "any share links you create" },
+  tags: { disclosed: "private tags you add to pours", sharedWith: ["pour_tags"] },
+  pour_tags: { disclosed: "private tags you add to pours", sharedWith: ["tags"] },
   // Was `notPersonal: "Tier definitions … identical for everyone"` — a claim
   // about the schema that the schema contradicts (user_id, family, value,
   // tier, achieved_at: one row per person per badge). See the file docstring:
@@ -145,10 +148,14 @@ const INVENTORY: Record<string, Verdict> = {
   flight_bottles: { disclosed: "Tasting nights", sharedWith: ["flights", "flight_participants", "flight_entries"] },
   flight_participants: { disclosed: "Tasting nights", sharedWith: ["flights", "flight_bottles", "flight_entries"] },
   flight_entries: { disclosed: "Tasting nights", sharedWith: ["flights", "flight_bottles", "flight_participants"] },
-  challenges: { disclosed: "Challenges and the friend board", sharedWith: ["challenge_participants", "breadth_board_opt_ins"] },
-  challenge_participants: { disclosed: "Challenges and the friend board", sharedWith: ["challenges", "breadth_board_opt_ins"] },
+  outings: { disclosed: "Outings", sharedWith: ["outing_participants", "outing_tastings", "outing_notes"] },
+  outing_participants: { disclosed: "Outings", sharedWith: ["outings", "outing_tastings", "outing_notes"] },
+  outing_tastings: { disclosed: "Outings", sharedWith: ["outings", "outing_participants", "outing_notes"] },
+  outing_notes: { disclosed: "Outings", sharedWith: ["outings", "outing_participants", "outing_tastings"] },
+  challenges: { disclosed: "Trails and the friend board", sharedWith: ["challenge_participants", "breadth_board_opt_ins"] },
+  challenge_participants: { disclosed: "Trails and the friend board", sharedWith: ["challenges", "breadth_board_opt_ins"] },
   share_card_keys: { disclosed: "Share cards" },
-  breadth_board_opt_ins: { disclosed: "Challenges and the friend board", sharedWith: ["challenges", "challenge_participants"] },
+  breadth_board_opt_ins: { disclosed: "Trails and the friend board", sharedWith: ["challenges", "challenge_participants"] },
 
   // --- Catalog: about bottles, not about people ---
   distilleries: { notPersonal: "Catalog reference data." },

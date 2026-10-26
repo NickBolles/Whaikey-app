@@ -19,6 +19,8 @@ export interface PourDraft {
   finish: string;
   flavorTags: Record<string, number>;
   companions: string;
+  /** The pour's private tags (absent on drafts saved before tags existed). */
+  tags?: string[];
   /**
    * Only when the user picked it in the sheet. A draft marked "Only me" must
    * come back "Only me", never widened to the account default on reopen.
@@ -40,6 +42,7 @@ export function hasDraftContent(d: Partial<DraftContent>): boolean {
       d.palate?.trim() ||
       d.finish?.trim() ||
       d.companions?.trim() ||
+      (d.tags && d.tags.length > 0) ||
       (d.flavorTags && Object.keys(d.flavorTags).length > 0),
   );
 }

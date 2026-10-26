@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { TRAIL } from "@/lib/challenges/term";
 import { RULE_KINDS, RULE_KIND_IDS, type RuleKindId } from "@/lib/challenges/kinds";
 
 async function call(url: string, method: string, body?: unknown) {
@@ -53,7 +54,7 @@ export function BoardOptIn({ optedIn }: { optedIn: boolean }) {
   );
 }
 
-/** Owner/admin: a club challenge from the distinct-only templates (C6). */
+/** Owner/admin: a club trail (internally a club challenge) from the distinct-only templates (C6). */
 export function ClubChallengeForm({ clubId }: { clubId: string }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -65,7 +66,7 @@ export function ClubChallengeForm({ clubId }: { clubId: string }) {
   if (!open) {
     return (
       <button type="button" onClick={() => setOpen(true)} className="tap-target text-xs font-medium text-accent">
-        Start a club challenge →
+        Start a club {TRAIL.lower} →
       </button>
     );
   }
@@ -75,12 +76,12 @@ export function ClubChallengeForm({ clubId }: { clubId: string }) {
         e.preventDefault();
         setError(false);
         const res = await call(`/api/clubs/${clubId}/challenges`, "POST", { title, rule: { kind, target }, days });
-        if (res?.status === 201) router.push("/challenges");
+        if (res?.status === 201) router.push(TRAIL.path);
         else setError(true);
       }}
       className="flex flex-col gap-2 text-sm"
     >
-      <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Name it" maxLength={60} aria-label="Challenge name" className="rounded-lg border border-border-subtle bg-surface px-3 py-2" />
+      <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Name it" maxLength={60} aria-label={`${TRAIL.one} name`} className="rounded-lg border border-border-subtle bg-surface px-3 py-2" />
       <div className="flex gap-2">
         <label className="flex flex-1 flex-col gap-1">
           <span className="text-xs text-muted">Different…</span>
@@ -101,7 +102,7 @@ export function ClubChallengeForm({ clubId }: { clubId: string }) {
           <input type="number" min={7} max={92} value={days} onChange={(e) => setDays(Number(e.target.value))} className="rounded-lg border border-border-subtle bg-surface px-2 py-2" />
         </label>
       </div>
-      <p className="text-xs text-muted">Challenges count different things met, never how much — a repeat counts for nothing.</p>
+      <p className="text-xs text-muted">{TRAIL.many} count different things met, never how much — a repeat counts for nothing.</p>
       <button type="submit" className="btn-primary py-2 text-sm">
         Start it
       </button>

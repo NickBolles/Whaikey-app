@@ -94,8 +94,19 @@ async function seedFootprint(db: DB, subject: schema.User, counterpart: schema.U
     freeform: `=${tag} formula-looking note`,
     flavorTags: { vanilla: 3 },
   });
+  await db.insert(schema.authProviderEvents).values({
+    id: uid("ape"),
+    jti: `${tag}-apple-jti`,
+    providerId: "apple",
+    providerAccountId: `${tag}-apple-sub`,
+    userId: subject.id,
+    eventType: "consent-revoked",
+  });
   const shareId = uid("share");
   await db.insert(schema.pourShares).values({ id: shareId, pourId, userId: subject.id, code: `${tag}SHARECODE` });
+  const tagId = uid("tag");
+  await db.insert(schema.tags).values({ id: tagId, userId: subject.id, name: `${tag} private tag`, key: `${tag} private tag`.toLowerCase() });
+  await db.insert(schema.pourTags).values({ pourId, tagId, userId: subject.id });
   await db.insert(schema.passportTiers).values({ id: uid("tier"), userId: subject.id, family: "country", value: "USA", tier: 1 });
   await db.insert(schema.recExplanations).values({
     id: uid("rec"),
@@ -236,6 +247,30 @@ async function seedFootprint(db: DB, subject: schema.User, counterpart: schema.U
   await db.insert(schema.flightEntries).values([
     { id: uid("fe"), participantId: mySeat, flightId: theirsFlight, slot: "A", rating: 4, note: `${tag} my flight note` },
     { id: uid("fe"), participantId: theirSeatAtMine, flightId: hosted, slot: "A", rating: 3 },
+  ]);
+
+  // --- Outings (D22)
+  const myOuting = uid("out");
+  const theirOuting = uid("out");
+  await db.insert(schema.outings).values([
+    { id: myOuting, hostId: subject.id, title: `${tag} outing`, distilleryName: "Buffalo Trace", visitOn: "2026-10-31", joinCode: uid("oc").slice(-12) },
+    { id: theirOuting, hostId: counterpart.id, title: `${tag} their outing`, distilleryName: "Ardbeg", visitOn: "2026-11-01", joinCode: uid("oc").slice(-12) },
+  ]);
+  const myOutingSeat = uid("oseat");
+  const myHostSeat = uid("oseat");
+  const theirOutingSeatAtMine = uid("oseat");
+  await db.insert(schema.outingParticipants).values([
+    { id: myOutingSeat, outingId: theirOuting, userId: subject.id },
+    { id: myHostSeat, outingId: myOuting, userId: subject.id },
+    { id: theirOutingSeatAtMine, outingId: myOuting, userId: counterpart.id },
+  ]);
+  await db.insert(schema.outingTastings).values([
+    { id: uid("ot"), outingId: theirOuting, participantId: myOutingSeat, label: "Cask sample #7", rating: 4, note: `${tag} my outing note` },
+    { id: uid("ot"), outingId: myOuting, participantId: theirOutingSeatAtMine, bottleId: catalog.id, label: "Catalog", rating: 3 },
+  ]);
+  await db.insert(schema.outingNotes).values([
+    { id: uid("on"), outingId: theirOuting, participantId: myOutingSeat, body: `${tag} the warehouse tour` },
+    { id: uid("on"), outingId: myOuting, participantId: theirOutingSeatAtMine, body: `${tag} their line` },
   ]);
 
   // --- Challenges (social M2)

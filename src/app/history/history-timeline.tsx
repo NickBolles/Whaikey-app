@@ -3,7 +3,7 @@
 import { useMemo, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { MoreHorizontal, Star, Trash2 } from "lucide-react";
+import { MoreHorizontal, Pencil, Star, Trash2 } from "lucide-react";
 import { useToast } from "@/components/toast";
 import { PourShareButton } from "@/components/pour-share-button";
 import { VisibilityControl } from "@/components/visibility-control";
@@ -21,6 +21,10 @@ export interface TimelinePour {
   amountMl: number | null;
   createdAt: string;
   visibility: PourVisibility;
+  /** ISO time of the owner's last edit of the entry, or null. */
+  editedAt?: string | null;
+  /** The author's private tags. */
+  tags?: string[];
   note: {
     nose: string | null;
     palate: string | null;
@@ -114,11 +118,16 @@ function PourRow({ pour }: { pour: TimelinePour }) {
             )}
           </div>
           <div className="mt-0.5 text-xs text-muted">
-            {[pour.servingStyle, pour.amountMl != null ? `${pour.amountMl} ml` : null, time, VISIBILITY_WORD[visibility]]
+            {[pour.servingStyle, pour.amountMl != null ? `${pour.amountMl} ml` : null, time, VISIBILITY_WORD[visibility], pour.editedAt ? "edited" : null]
               .filter(Boolean)
               .join(" · ")}
           </div>
-          {snippet && <p className="mt-1 line-clamp-2 text-xs italic text-foreground/75">{snippet}</p>}
+          {snippet && <p className="mt-1 line-clamp-2 font-display text-[13px] italic leading-snug text-quote/85">{snippet}</p>}
+          {pour.tags && pour.tags.length > 0 && (
+            <p className="mt-0.5 truncate text-xs text-accent/90" aria-label="Tags">
+              {pour.tags.map((t) => `#${t}`).join(" ")}
+            </p>
+          )}
           {shownTags.length > 0 && (
             <ul className="mt-1 flex flex-wrap gap-1" aria-label="Flavor tags">
               {shownTags.map(([leafId, intensity]) => (
@@ -152,6 +161,10 @@ function PourRow({ pour }: { pour: TimelinePour }) {
       <div id={menuId} hidden={!menuOpen} className="mt-2 flex flex-col gap-2 rounded-lg border border-border bg-surface p-2.5">
         <VisibilityControl pourId={pour.id} visibility={visibility} onChange={setVisibility} />
         <div className="flex flex-wrap items-center gap-2">
+          {/* STORYBOARD §3.8: Edit opens the pour sheet, prefilled. */}
+          <Link href={`/pour?edit=${encodeURIComponent(pour.id)}`} className="btn-secondary flex min-h-11 items-center gap-1.5 px-3 text-sm">
+            <Pencil size={14} strokeWidth={1.8} aria-hidden /> Edit
+          </Link>
           <PourShareButton pourId={pour.id} bottleName={pour.bottleName} />
           <Link href={`/history?bottleId=${encodeURIComponent(pour.bottleId)}`} className="btn-secondary flex min-h-11 items-center px-3 text-sm">
             All pours of this bottle

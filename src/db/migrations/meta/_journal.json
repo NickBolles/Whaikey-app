@@ -355,22 +355,50 @@
     {
       "idx": 50,
       "version": "7",
-      "when": 1792979241814,
-      "tag": "0050_flavor_provenance",
+      "when": 1793022958513,
+      "tag": "0050_social_outings",
       "breakpoints": true
     },
     {
       "idx": 51,
       "version": "7",
-      "when": 1793021783197,
-      "tag": "0051_live_enrichment",
+      "when": 1793047029868,
+      "tag": "0051_pour_edited_at",
       "breakpoints": true
     },
     {
       "idx": 52,
       "version": "7",
-      "when": 1793026912141,
-      "tag": "0052_enrich_popularity",
+      "when": 1793047071465,
+      "tag": "0052_pour_tags",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1793047100401,
+      "tag": "0053_auth_provider_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1793047123452,
+      "tag": "0054_flavor_provenance",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1793047142914,
+      "tag": "0055_live_enrichment",
+      "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1793047469917,
+      "tag": "0056_enrich_popularity",
       "breakpoints": true
     }
   ]

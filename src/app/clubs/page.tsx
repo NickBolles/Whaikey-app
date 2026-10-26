@@ -4,6 +4,7 @@ import { getDb } from "@/db";
 import { getSessionUser } from "@/lib/session";
 import { listMyClubs } from "@/lib/clubs";
 import { listMyFlights } from "@/lib/flights";
+import { formatVisitDay, listMyOutings } from "@/lib/outings";
 import { unreadCount } from "@/lib/notify";
 import { SocialTabs } from "@/components/social/social-tabs";
 import { CreateClubForm } from "@/components/social/club-actions";
@@ -21,7 +22,12 @@ export default async function ClubsPage() {
   const user = await getSessionUser();
   if (!user) redirect("/sign-in?next=/clubs");
   const db = getDb();
-  const [clubs, flights, unread] = await Promise.all([listMyClubs(db, user.id), listMyFlights(db, user.id), unreadCount(db, user.id)]);
+  const [clubs, flights, outings, unread] = await Promise.all([
+    listMyClubs(db, user.id),
+    listMyFlights(db, user.id),
+    listMyOutings(db, user.id),
+    unreadCount(db, user.id),
+  ]);
   return (
     <div className="mx-auto flex max-w-lg flex-col gap-4 px-3 pb-24 pt-5">
       <header className="flex flex-col gap-3">
@@ -55,6 +61,37 @@ export default async function ClubsPage() {
         <div className="card-flat p-3">
           <CreateClubForm />
         </div>
+      </section>
+
+      <section aria-labelledby="outings-heading" className="flex flex-col gap-2">
+        <div className="flex items-baseline justify-between">
+          <h2 id="outings-heading" className="section-label">
+            Outings
+          </h2>
+          <Link href="/outings/new" className="tap-target text-xs font-medium text-accent">
+            Plan one →
+          </Link>
+        </div>
+        {outings.length === 0 ? (
+          <p className="text-sm text-muted">
+            Going to a distillery with friends? Everyone logs what they taste on one shared page — guests join with a QR
+            code, no account needed — and you get a recap of the trip.
+          </p>
+        ) : (
+          <ul className="flex flex-col divide-y divide-border-subtle rounded-xl border border-border-subtle">
+            {outings.map((o) => (
+              <li key={o.joinCode}>
+                <Link href={`/o/${o.joinCode}`} className="flex items-center justify-between gap-3 px-3 py-2.5 hover:bg-surface-raised">
+                  <span className="min-w-0 truncate text-sm">{o.title}</span>
+                  <span className="shrink-0 text-xs text-muted">
+                    {formatVisitDay(o.visitOn)}
+                    {o.state === "ended" ? " · Recap" : ""}
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
 
       <section aria-labelledby="nights-heading" className="flex flex-col gap-2">

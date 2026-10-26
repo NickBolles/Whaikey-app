@@ -22,7 +22,8 @@ export interface PublicPourShare {
   bottleId: string;
   bottleName: string;
   locationLabel: string | null;
-  pour: { rating: number | null; servingStyle: string | null; amountMl: number | null; createdAt: Date };
+  /** `editedAt`: the owner changed the entry after logging it — the page says so. */
+  pour: { rating: number | null; servingStyle: string | null; amountMl: number | null; createdAt: Date; editedAt: Date | null };
   note: {
     nose: string | null;
     palate: string | null;
@@ -222,6 +223,7 @@ export async function getPublicPourShare(db: DB, code: string): Promise<PublicPo
       servingStyle: schema.pours.servingStyle,
       amountMl: schema.pours.amountMl,
       createdAt: schema.pours.createdAt,
+      editedAt: schema.pours.editedAt,
       nose: schema.tastingNotes.nose,
       palate: schema.tastingNotes.palate,
       finish: schema.tastingNotes.finish,
@@ -246,7 +248,7 @@ export async function getPublicPourShare(db: DB, code: string): Promise<PublicPo
     bottleId: row.bottleId,
     bottleName: row.bottleName,
     locationLabel: row.locationLabel,
-    pour: { rating: row.rating, servingStyle: row.servingStyle, amountMl: row.amountMl, createdAt: row.createdAt },
+    pour: { rating: row.rating, servingStyle: row.servingStyle, amountMl: row.amountMl, createdAt: row.createdAt, editedAt: row.editedAt },
     note: { nose: row.nose, palate: row.palate, finish: row.finish, freeform: row.freeform, flavorTags: row.flavorTags },
   };
 }

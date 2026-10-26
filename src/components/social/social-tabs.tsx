@@ -3,16 +3,17 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Bell } from "lucide-react";
+import { TRAIL } from "@/lib/challenges/term";
 
 /**
  * The Friends tab's sub-navigation (design board decision C1: Feed · Clubs ·
- * Challenges, with people controls in the header — STORYBOARD D15). Slices
+ * Trails (D23), with people controls in the header — STORYBOARD D15). Slices
  * that have not shipped yet are simply absent rather than teased.
  */
 export const SOCIAL_TABS = [
   { href: "/friends", label: "Feed" },
   { href: "/clubs", label: "Clubs" },
-  { href: "/challenges", label: "Challenges" },
+  { href: TRAIL.path, label: TRAIL.many },
   { href: "/friends/people", label: "People" },
 ] as const;
 

@@ -30,11 +30,11 @@ describe("decideScan (design board S2/S3)", () => {
   });
 
   it("nothing known is a miss", () => {
-    expect(decideScan({ upc: "1", matches: [], candidates: [], externalName: null })).toEqual({ kind: "miss", upc: "1" });
+    expect(decideScan({ upc: "1", matches: [], candidates: [], externalName: "ACME RYE" })).toEqual({ kind: "miss", upc: "1", externalName: "ACME RYE" });
   });
 
   it("tolerates a malformed response", () => {
-    expect(decideScan({ upc: "1" } as never)).toEqual({ kind: "miss", upc: "1" });
+    expect(decideScan({ upc: "1" } as never)).toEqual({ kind: "miss", upc: "1", externalName: null });
   });
 });
 

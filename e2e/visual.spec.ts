@@ -54,6 +54,14 @@ test.describe("signed out", () => {
    * `/admin/*` has no baseline on purpose: an internal tool for one operator,
    * deliberately outside the design system (docs/STORYBOARD.md §3.17).
    */
+  test("outing: a guest's join screen (21+ check, 24 h seat)", async ({ page }) => {
+    await page.goto("/o/demotrip01");
+    await expect(page.getByRole("heading", { name: "Bourbon Trail Saturday" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Join the outing" })).toBeVisible();
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("outing-guest-join"), { fullPage: true });
+  });
+
   test("terms", async ({ page }) => {
     await page.goto("/terms");
     await settle(page);
@@ -349,6 +357,74 @@ test.describe("signed in (demo collector)", () => {
     await expect(page).toHaveScreenshot(shot("pour-note-capture"), { fullPage: true });
   });
 
+  test("pour flow: editing a journal entry", async ({ page }) => {
+    await page.goto("/pour?edit=demo-pour-1");
+    await expect(page.getByRole("heading", { name: "Edit pour" })).toBeVisible();
+    await expect(page.getByTestId("pour-bottle")).toBeVisible();
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("pour-edit"), { fullPage: true });
+  });
+
+  test("pour flow: unknown barcode card", async ({ page }) => {
+    // A fake camera whose detector reads a barcode the catalog lacks; the
+    // lookup is stubbed to a miss with a product-database name.
+    await page.addInitScript(() => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 640;
+      canvas.height = 360;
+      const draw = () => {
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          ctx.fillStyle = "#241a12";
+          ctx.fillRect(0, 0, 640, 360);
+        }
+      };
+      draw();
+      setInterval(draw, 100);
+      const stream = canvas.captureStream(10);
+      Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia: async () => stream } });
+      (window as unknown as { BarcodeDetector: unknown }).BarcodeDetector = class {
+        async detect() {
+          return [{ rawValue: "012345678905" }];
+        }
+      };
+    });
+    await page.route("**/api/scan/upc", (route) =>
+      route.fulfill({ json: { upc: "012345678905", matches: [], candidates: [], externalName: "OLD FORESTER 1920 750ML" } }),
+    );
+    await page.goto("/pour");
+    await expect(page.getByRole("group", { name: "Unknown barcode" })).toBeVisible({ timeout: 15_000 });
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("pour-unknown-barcode"), { fullPage: true });
+  });
+
+  test("pour flow: keep scanning beside the picked bottle", async ({ page }) => {
+    await page.addInitScript(() => {
+      delete (window as { BarcodeDetector?: unknown }).BarcodeDetector;
+      const canvas = document.createElement("canvas");
+      canvas.width = 640;
+      canvas.height = 360;
+      const draw = () => {
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          ctx.fillStyle = "#241a12";
+          ctx.fillRect(0, 0, 640, 360);
+        }
+      };
+      draw();
+      setInterval(draw, 100);
+      const stream = canvas.captureStream(10);
+      Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia: async () => stream } });
+    });
+    await page.goto("/pour");
+    await page.getByRole("button", { name: /Keep scanning/ }).click();
+    await page.getByRole("list", { name: "Recent bottles" }).getByText(/Eagle Rare 10/i).first().click();
+    await expect(page.getByTestId("pour-bottle")).toBeVisible();
+    await expect(page.getByRole("button", { name: /Stop camera/ })).toBeVisible();
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("pour-keep-scanning"), { fullPage: true });
+  });
+
   test("history journal", async ({ page }) => {
     await page.goto("/history");
     await expect(page.getByText(/Lagavulin/i).first()).toBeVisible();
@@ -480,6 +556,29 @@ test.describe("signed in (demo collector)", () => {
     await expect(page).toHaveScreenshot(shot("club"), { fullPage: true });
   });
 
+  test("outing: plan a distillery visit", async ({ page }) => {
+    await page.goto("/outings/new");
+    await expect(page.getByRole("heading", { name: "Plan an outing" })).toBeVisible();
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("outing-new"), { fullPage: true });
+  });
+
+  test("outing: the host's view mid-visit — QR, ride card, quick add, group feed", async ({ page }) => {
+    await page.goto("/o/demotrip01");
+    await expect(page.getByRole("heading", { name: "Bourbon Trail Saturday" })).toBeVisible();
+    await expect(page.getByText("The warehouse tour was the highlight.")).toBeVisible();
+    await expect(page.getByRole("complementary", { name: "Getting there and back" })).toBeVisible();
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("outing-open"), { fullPage: true, mask: [page.getByRole("img", { name: /QR code/ })] });
+  });
+
+  test("outing: the recap — group favorite and flavor spread, no counts", async ({ page }) => {
+    await page.goto("/o/demotrip02");
+    await expect(page.getByRole("heading", { name: "The recap" })).toBeVisible();
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("outing-recap"), { fullPage: true });
+  });
+
   test("tasting night: revealed blind flight results", async ({ page }) => {
     await page.goto("/f/demonight1");
     await expect(page.getByRole("heading", { name: "Islay night" })).toBeVisible();
@@ -488,11 +587,11 @@ test.describe("signed in (demo collector)", () => {
     await expect(page).toHaveScreenshot(shot("flight-revealed"), { fullPage: true, mask: [page.getByRole("img", { name: /QR code/ })] });
   });
 
-  test("challenges: three curated breadth challenges and the opt-in board", async ({ page }) => {
-    await page.goto("/challenges");
-    await expect(page.getByRole("heading", { name: "This month" })).toBeVisible();
+  test("trails: three curated breadth trails and the opt-in board", async ({ page }) => {
+    await page.goto("/trails");
+    await expect(page.getByRole("heading", { name: "Trails this month" })).toBeVisible();
     await settle(page);
-    await expect(page).toHaveScreenshot(shot("challenges"), { fullPage: true });
+    await expect(page).toHaveScreenshot(shot("trails"), { fullPage: true });
   });
 
   test("wrapped: the year opens December 10", async ({ page }) => {

@@ -11,6 +11,7 @@ import { sweepTelemetry } from "@/lib/observability/metrics";
 import { drainPendingPushes, friendTastedDigest, sweepNotifications } from "@/lib/notify";
 import { sweepClubs } from "@/lib/clubs";
 import { sweepGuests } from "@/lib/flights";
+import { sweepOutingGuests } from "@/lib/outings";
 import { ensureCurated, evaluateAll } from "@/lib/challenges";
 import { sweepEnrichment } from "@/lib/enrich/queue";
 
@@ -108,6 +109,7 @@ export async function GET(request: Request): Promise<NextResponse> {
       ["friend-tasted-digest", () => friendTastedDigest(db, now)],
       // Guest seats past their 24 hours, ratings with them (D20).
       ["flight-guests", () => sweepGuests(db, now)],
+      ["outing-guests", () => sweepOutingGuests(db, now)],
       // Clubs whose owner left or deleted their account get a new one; empty clubs go.
       ["clubs", () => sweepClubs(db)],
       // Enrichment progress lines past 30 days, call/run telemetry past 90.

@@ -69,6 +69,12 @@ export default async function NotePage({ params }: Props) {
   if (!note) notFound();
 
   const isOwner = note.author.userId === viewer.id;
+  // Readers see that an entry was changed after it was logged.
+  const [{ editedAt } = { editedAt: null }] = await db
+    .select({ editedAt: schema.pours.editedAt })
+    .from(schema.pours)
+    .where(eq(schema.pours.id, note.pourId))
+    .limit(1);
 
   // Same query pattern as src/app/s/[code]/page.tsx: union the viewer's own
   // flavor tags across every pour they've logged on this bottle.
@@ -187,6 +193,7 @@ export default async function NotePage({ params }: Props) {
           </div>
           <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-muted">
             <span>{formatDate(note.createdAt)}</span>
+            {editedAt && <span>· edited</span>}
             <span className="chip px-2 py-0.5 text-[10px] uppercase tracking-[0.08em]">
               {VISIBILITY_LABEL[note.visibility] ?? note.visibility}
             </span>

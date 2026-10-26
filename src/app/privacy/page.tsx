@@ -45,7 +45,9 @@ export default function PrivacyPage() {
             avatar your sign-in provider gives us. There is no password: sign-in is Google or Apple
             only, so we never see one. Signing in also leaves the tokens the provider issues for it,
             encrypted at rest. They exist because sign-in works that way; Whaikey never uses them to
-            read anything from Google or Apple, and they are deleted with the account.
+            read anything from Google or Apple, and they are deleted with the account. If you stop
+            using Sign in with Apple for Whaikey or delete your Apple ID, Apple tells us so directly;
+            we keep that notice from Apple with your account and sign you out everywhere.
           </li>
           <li>
             <strong className="text-foreground">Your sessions</strong> — for each device you are
@@ -56,7 +58,8 @@ export default function PrivacyPage() {
           </li>
           <li>
             <strong className="text-foreground">Your journal</strong> — pours, ratings, tasting
-            notes, flavour tags, the bottles on your shelf, and what you paid.
+            notes, flavour tags, the bottles on your shelf, and what you paid. Also the private
+            tags you add to pours, which only you ever see.
           </li>
           <li>
             <strong className="text-foreground">Your concierge conversations</strong> — every
@@ -144,7 +147,7 @@ export default function PrivacyPage() {
           </li>
           <li>
             <strong className="text-foreground">Your notification inbox</strong> — who followed you,
-            cheered or commented on your notes, or sent club, tasting-night or challenge news, and
+            cheered or commented on your notes, or sent club, tasting-night, outing or trail news, and
             when; whether you have read each one and whether it was pushed to a device. The wording
             is not stored, only what happened. Kept for 90 days, then deleted.
           </li>
@@ -164,8 +167,16 @@ export default function PrivacyPage() {
             and keep only the name and their ratings, for 24 hours, unless they create an account.
           </li>
           <li>
-            <strong className="text-foreground">Challenges and the friend board</strong> — which
-            challenges you joined and when you earned each crest, club challenges you started, and
+            <strong className="text-foreground">Outings</strong> — the distillery trips you plan (name, the
+            distillery and where it is, the day) and, for everyone on one, what they logged: the bottle or the
+            name they typed, a rating, descriptors, a note, and short posts on the outing&rsquo;s feed. No
+            device location is read and no amounts are recorded. A guest without an account gives a first name
+            and a birth date; we check the date and keep only the name and what they logged, for 24 hours,
+            unless they create an account.
+          </li>
+          <li>
+            <strong className="text-foreground">Trails and the friend board</strong> — which
+            trails you joined and when you earned each crest, club trails you started, and
             whether you opted in to the friends-only board. Progress is not stored; it is counted
             from your notes when shown.
           </li>
@@ -303,7 +314,7 @@ export default function PrivacyPage() {
           yours — account, sign-in methods and sessions, age answer, shelf, pours and tasting
           notes, share links, passport, concierge conversations, bottles you proposed, profile,
           who you follow and who follows you, who you blocked, cheers and comments you gave,
-          your notification inbox and settings, your clubs and tasting nights, your challenges and crests,
+          your notification inbox and settings, your clubs, tasting nights and outings, your trails and crests,
           reports you filed, support messages, and the AI and share-link records about you — as
           one JSON file or a zip of spreadsheets. What it leaves out, it names inside the file,
           with the reason. Three kinds of thing are always left out: credentials (session tokens,
@@ -332,6 +343,7 @@ export default function PrivacyPage() {
             directions, device push registrations, your notification inbox and settings (and the
             notifications your actions put in other people&rsquo;s inboxes), club memberships and invite
             links, tasting nights you hosted (with every rating at them) and your ratings at other people&rsquo;s,
+            outings you planned (with everything logged on them) and what you logged on other people&rsquo;s,
             rate-limit counters, support messages you sent
             signed in, and bottles you proposed that were never added to the shared catalog, with
             the proposals themselves.
@@ -349,7 +361,7 @@ export default function PrivacyPage() {
             reports you filed about other people&rsquo;s content, so a complaint still gets judged
             after you leave; a bottle you added that is now in the shared catalog, because other
             people&rsquo;s shelves point at it; a club you started, which stays with its other
-            members and no longer names you as founder, and a club challenge you started, which stays
+            members and no longer names you as founder, and a club trail you started, which stays
             for the members taking part; and, if you were ever a moderator, the
             decisions you made.
           </li>

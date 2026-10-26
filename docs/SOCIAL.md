@@ -14,6 +14,14 @@ Companion to [PLAN.md](../PLAN.md), [FEATURES.md](./FEATURES.md) and [COMPETITOR
 >
 > **The test for every new mechanic is still the one in §3.2:** *can someone win this by drinking less of more?* Challenges and boards enforce it in code (a rule-kind lint test; distinct-count and saturating keys only), and notification templates are checked against a banned-copy list.
 
+> **Amendment 2026-10-26 — distillery visits unfrozen; "Challenges" renamed (owner direction).** The owner is taking friends to a distillery and wants the app on the trip; he also pointed out that "Challenges" reads as *we're challenging you to drink more*. Both are owner decisions that override the earlier text:
+>
+> **Unfrozen, buildable now:** **distillery visits** (D14 moves from "future" to "now", and the PLAN §5.4 freeze on visits is lifted), shipped first as **Outings** — a group trip to a distillery with a shared feed and a recap (§7.15, D22). The original freeze reason (geolocation in the native shell) no longer gates anything, because outings and visits **do not read device location at all**: the host types the distillery and the day. A later location-assisted check-in still follows §8.3 to the letter.
+>
+> **Renamed:** breadth challenges are called **Trails** in every user-facing surface (D23). The mechanic and its lint test are unchanged; tables, API routes and rule kinds keep the internal `challenge` name.
+>
+> **Guardrails on outings and visits, binding:** destinations only, never venues — a bar, restaurant, festival or shop can't be an outing, and nothing counts visit frequency; no proximity mechanics, geofences or "you're near a distillery" copy; an outing records *what you met* (bottle, rating, descriptors, note) and has **no amount, volume or per-person count anywhere** — not in the feed, the recap, the share card or the export; no "who's tasting now" — the feed is visible only to people on the trip, carries no live-presence signal, and no notification fires per tasting (only the invite and the recap); the ride card is a single dismissible line of planning help, never a notification, never repeated, never about how much anyone has had; guests pass the same 21+ birth-date check as tasting nights (D20) and their rows are swept at 24 h; every §3.1 ban, the read-path invariant (§13), blocks, suspension and the host's hide apply as they do to tasting nights.
+
 **How to read this doc:** §1–§4 are the argument. §5 (user stories) and §6 (pages & flow) are what we're building and where it lives. §7 details each feature. §8–§12 are the operating rules. §13 is the phase plan, §14 the decisions, §15 the risks — and **§16 is the agent-ready build spec for S1**, which is implementable today with zero open decisions.
 
 ---
@@ -136,7 +144,7 @@ The stories are the contract: each phase in §13 ships a coherent subset, and §
 - **US-5 — Follow.** *As a user, I want to follow a friend (with approval if their account is private), so their notes can reach me.*
   ✓ Follow, unfollow, approve/deny requests; mutual follow derives "friends."
 - **US-6 — Visibility without friction.** *As a logger, I want to choose who can see a pour at log time without extra taps in the core loop.*
-  ✓ Visibility selector lives behind "add detail" on the pour sheet; default is my saved preference (ships as Only me); logging speed is unchanged.
+  ✓ Visibility selector lives behind "add detail" on the pour sheet; default is my saved preference (Friends for new accounts, D2 amended); logging speed is unchanged.
 - **US-7 — Friends on Home.** *As a user, I want to see my friends' recent notes on Home, each framed as a comparison or a discovery, so opening the app is interesting on days I don't pour.*
   ✓ Home shows a "From your friends" module; each card carries "you tasted this too" or "add to wishlist"; empty state invites, doesn't nag.
 - **US-8 — Same Dram.** *As a taster, on a bottle page I want to see me vs. the producer vs. my friends in one flavor space — "where Sarah writes clove, you write cinnamon."*
@@ -331,7 +339,7 @@ The existing backlog item (2 oz samples, who owes whom) is a *social* feature an
 
 ---
 
-### 7.12 Challenges — breadth only (added 2026-10, D16)
+### 7.12 Challenges — breadth only (added 2026-10, D16; shown to users as **Trails**, D23)
 
 Strava's monthly challenges are joinable goals with a badge at the end; ours count **distinct things met in a window**, never amounts.
 
@@ -350,13 +358,19 @@ Rivalry with friends is encouraged (§3.2); ranking by consumption is banned (§
 
 `/wrapped/[year]`: countries, regions, distilleries and descriptors discovered; best new find; how your palate moved; your taste twin; flights attended. **No counts of pours, ml, nights, or spend**, and nothing about time of day. Private by default; shareable as a card (§7.10).
 
+### 7.15 Outings — a group distillery visit (added 2026-10-26, D22)
+
+A host plans an outing (distillery name, optional place, the day; optionally a club, whose members get an invite) and shares a link/QR. Friends join with an account or as a **24 h guest** after the 21+ birth-date check — the tasting-night guest model (D20), reused. During the visit everyone logs what they tasted **against the outing**: a catalog bottle, their own pending submission (linked only for them), or just a name — "Cask 1142, barrel-proof sample" — so distillery-only bottlings need no catalog row; a signed-in taster can also add the bottle to the catalog through the normal add-a-bottle flow, which returns to the outing with it picked. Logging on an outing is not a pour: a signed-in taster can choose *Add to my journal*, which opens the ordinary pour sheet.
+
+The outing page has a shared feed of tastings and short notes (people on the trip only; refreshed by an opaque poll, no presence). When the host ends it, everyone gets the **recap**: the bottles the group explored together, the **favourite by consensus** (highest average where two or more people rated it, one voice per person per bottle), and the **flavour spread** across families as percentages. The recap never shows counts of pours per person, amounts or volumes; it is exportable as CSV and shareable as a card (§7.10) by anyone on it with an account. The host can hide any item and delete the outing; anyone can remove their own. A visit badge on the passport (US-20, FEATURES §11.8 — distinct destinations only) is the natural follow-up and is not part of the first slice.
+
 ## 8. Privacy model
 
 Alcohol consumption is sensitive personal data — in some jobs, families, jurisdictions and recovery contexts, seriously so. Strava's cautionary tale is that permissive defaults leaked home addresses and, in aggregate, military bases. Our defaults are the opposite.
 
 **Principles:**
 
-1. **Private by default, at every level.** Visibility is opt-in per pour, with a "default visibility for new pours" preference that ships as **Only me**. **No system action — migration, default change, or feature launch — ever raises the visibility of existing data.** The *owner* may: an explicit, confirmed "make my past pours friends-visible" bulk action is their right, and refusing to build it would be its own kind of paternalism. The ban is on defaults and dark patterns, not on the user's own choices.
+1. **Private by default, at every level.** Visibility is opt-in per pour, with a "default visibility for new pours" preference that ships as **Friends for accounts created after 2026-10-25** (Only me for earlier accounts; D2 amended). **No system action — migration, default change, or feature launch — ever raises the visibility of existing data.** The *owner* may: an explicit, confirmed "make my past pours friends-visible" bulk action is their right, and refusing to build it would be its own kind of paternalism. The ban is on defaults and dark patterns, not on the user's own choices.
 2. **Money never travels.** Purchase price, collection value, spend, and cost-per-pour are excluded from every social projection — no exceptions, no toggle in v1. This is both a privacy and a safety property (a public high-value collection is a burglary target). Enforced structurally: social read paths use a projection type that doesn't carry these columns, mirroring how `getPublicPourShare()` is written today.
 3. **Location is coarse, opt-in, and momentary.** Venue tagging (if built) is a named place chosen by the user. Device location may be used for exactly one thing — confirming you are at a distillery you're checking into (§11.8) — under these rules, which are the price of using it at all:
    - **Foreground and on-tap only.** The fix is requested when the user taps to check in, never in the background, never on app open, never while the app is closed. No always-on permission is ever requested.
@@ -480,7 +494,7 @@ The first draft left 14 questions open "for a human call before S1 code." Under 
 | # | Decision | Call |
 |---|---|---|
 | D1 | Graph shape | **Asymmetric follow** as the graph; mutual follow derived as "friends" gates intimate surfaces. Private accounts turn follows into requests. |
-| D2 | Default visibility for new pours | **Only me**, with a user-settable default. The system never raises visibility of existing data; the owner explicitly can, including in bulk (§8, principle 1). |
+| D2 | Default visibility for new pours | **Amended 2026-10-25 (owner): Friends for accounts created from now on** (a `user_social_prefs` row seeded at sign-up); accounts that existed before keep **Only me**, and no existing pour changes. User-settable in Settings either way; a pour is still held private until its author has a social profile. The system never raises visibility of existing data; the owner explicitly can, including in bulk (§8, principle 1). |
 | D3 | Public per-user counts | Never a sortable rank; coarse buckets/rates/sets fine (§3.3). |
 | D4 | Reaction name | **"Cheers."** |
 | D5 | Feed ordering | Chronological with a light own-bottles boost; no engagement ranking. Revisit only if sparsity, not attention, is the problem. |
@@ -499,6 +513,8 @@ The first draft left 14 questions open "for a human call before S1 code." Under 
 | D18 | Notifications | **Sender + inbox + per-category prefs + quiet hours** (§7.5 note); banned-copy test on templates; never a pour nudge or a cadence reminder. |
 | D19 | Wrapped | **Breadth-framed, private by default, shareable as a card** (§7.14); no pour, volume, nights or spend counts. |
 | D20 | Flight guests | A guest joins by link/QR and may **view and rate for 24 hours without an account**; notes are kept only if they create one. Guest entries are deleted at 24 h otherwise. |
+| D22 | Distillery visits / Outings (owner direction, 2026-10-26) | **Unfrozen.** Outings (§7.15) ship first: host-typed destination and day, no device location, accounts or 24 h 21+ guests, a shared feed for people on the trip, a consensus/breadth recap with **no per-person counts or amounts**, an optional one-line ride card. Destinations only, never venues, never frequency, never proximity (amendment above). |
+| D23 | "Challenges" renamed (owner direction, 2026-10-26) | User-facing name is **Trails** — exploration, not a dare to drink. One copy constant (`src/lib/challenges/term.ts`); `/challenges` redirects to `/trails`. Alternates shortlisted: Expeditions, Field Guides, Explorations, Passport Stamps, Quests. Internals keep `challenge`. |
 | D21 | Shelf and wishlist sharing (resolves Q1) | **Opt-in, friends-only by default, revocable**, projection strips price, value, fill level and purchase data. A public shelf link is a separate opt-in, like pour shares. |
 
 ### Still open (genuinely)
@@ -506,7 +522,7 @@ The first draft left 14 questions open "for a human call before S1 code." Under 
 | # | Question | Current lean |
 |---|---|---|
 | ~~Q1~~ | ~~Whole-shelf sharing — when, and to whom?~~ | **Resolved 2026-10 as D21** (owner direction): opt-in, friends-only by default, prices/value/fill stripped. |
-| Q3 | Default visibility for **new** pours: D2 here says *Only me*; STORYBOARD D19 (2026-09 owner review) says *Friends* for new accounts; the code still ships `private`. | **Owner call before WP-7 ships.** Lean: Friends for new accounts (a feed needs content), with the first-run screen stating it and one tap to change; never applied retroactively. |
+| Q3 | Default visibility for **new** pours | **Resolved 2026-10-25 (owner): Friends for new accounts only**, never applied retroactively (D2 amended). |
 | Q2 | Jurisdiction rules for user-generated alcohol content in launch markets | Checklist review before S4 public discovery (§11). |
 
 **Research still open:** whether Whiskey Social / DramIt's feeds actually retain users or are ghost towns (the honest failure mode for whiskey social — the category may simply be less social than beer); and whether club-level blind flights work over distance or need co-location. The third research question from the first draft — how much bottle overlap two users need before comparison is interesting — is no longer a desk question: **S1 measures it directly** (§12), which is the main reason S1 is scoped the way it is.

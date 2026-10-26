@@ -28,6 +28,17 @@ interface Duplicate {
   category: string;
 }
 
+/**
+ * An outing's quick add (`/o/…`) gets the new bottle's id back as `?added=`,
+ * so it opens with the bottle picked. Every other caller returns unchanged.
+ */
+export function withAddedBottle(returnTo: string, bottleId: string): string {
+  if (!returnTo.startsWith("/o/")) return returnTo;
+  const [path, hash = ""] = returnTo.split("#", 2);
+  const sep = path.includes("?") ? "&" : "?";
+  return `${path}${sep}added=${encodeURIComponent(bottleId)}${hash ? `#${hash}` : ""}`;
+}
+
 export function NewBottleForm({
   categories,
   initialName,
@@ -95,7 +106,7 @@ export function NewBottleForm({
       if (!res.ok) throw new Error(`add failed (${res.status})`);
 
       const data = (await res.json()) as { bottle: { id: string } };
-      router.push(returnTo ?? `/bottles/${data.bottle.id}`);
+      router.push(returnTo ? withAddedBottle(returnTo, data.bottle.id) : `/bottles/${data.bottle.id}`);
       router.refresh();
     } catch {
       setError("Couldn't add that bottle. Check your connection and try again.");

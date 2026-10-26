@@ -424,7 +424,7 @@ Not yet built here: the "tonight" rail (its candidates are the user's own shelf,
 - 🔵 **Whiskey Wrapped** (yearly recap, shareable, opt-in on the spend slide 😅) — built on the passport's breadth story rather than a volume total.
 - ⚪ Sample-share tracker (2oz samples, who owes whom); home-screen widgets (tonight's pick, collection value). The distillery map now lives with visits — §11.8.
 
-### 11.8 Distillery visits — the pilgrimage page (⚪ future)
+### 11.8 Distillery visits — the pilgrimage page (🟡 unfrozen 2026-10-26, SOCIAL.md D22: group **Outings** ship first; the passport page and visit badge follow)
 
 Whiskey is one of the few hobbies with *destinations*. People plan Islay trips, do the Speyside run, detour an hour off a motorway for a tour. That belongs on the passport, and it is the dimension a drinker is proudest of — so it gets its own page: distilleries visited, on a map, with the date and whatever they want to remember about it.
 

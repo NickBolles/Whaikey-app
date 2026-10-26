@@ -19,7 +19,7 @@ export const TABS = [
   // Explore (STORYBOARD D10): catalog search is its front door until the
   // Explore hub lands; Learn, Passport and the Concierge hang off it.
   { href: "/search", label: "Explore" },
-  // The Social tab (design board C1): Feed · Clubs · Challenges live under
+  // The Social tab (design board C1): Feed · Clubs · Trails live under
   // /friends, owned by the social track. Chat left the nav (D1): it is an
   // affordance on Home and the bottle page.
   { href: "/friends", label: "Social" },
@@ -113,6 +113,9 @@ export function routeLabel(pathname: string): string | null {
       return "Support";
     case "responsible":
       return "Drinking responsibly";
+    case "o":
+    case "outings":
+      return "Outing";
     default:
       return null;
   }
