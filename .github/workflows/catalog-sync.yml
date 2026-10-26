@@ -121,9 +121,10 @@ jobs:
 
       - id: whiskyedition
         name: Sync WHISKY:EDITION review catalog
-        # thewhiskyedition.com has served a STRATO "Domain not available"
-        # page since Sept 2026; the adapter reports that as `degraded` (exit 0)
-        # rather than failing the run, and the alert issue tracks it.
+        # thewhiskyedition.com served a STRATO "Domain not available" page
+        # from Sept 2026 and has refused the TLS handshake since Oct 2026; the
+        # adapter reports both as `degraded` (exit 0) rather than failing the
+        # run, and the alert issue tracks it.
         continue-on-error: true
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
