@@ -102,7 +102,7 @@ export default async function AdminEnrichmentPage() {
           <Stat label="Done" value={num(stats.done)} />
           <Stat label="Failed" value={num(stats.failed)} />
         </div>
-        <table className="w-full text-xs">
+        <div className="overflow-x-auto"><table className="w-full min-w-[30rem] text-xs">
           <thead className="text-muted">
             <tr>
               <th className="py-1 pr-3 text-left font-normal">Day</th>
@@ -128,14 +128,14 @@ export default async function AdminEnrichmentPage() {
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
       </section>
 
       <EnrichmentControls paused={settings.paused} dailyBudgetUsd={settings.dailyBudgetUsd} live={enabled && provider != null} failed={stats.failed} />
 
       <section aria-labelledby="runs" className="flex flex-col gap-2">
         <H2 id="runs">Recent runs</H2>
-        <table className="w-full text-xs">
+        <div className="overflow-x-auto"><table className="w-full min-w-[30rem] text-xs">
           <thead className="text-muted">
             <tr>
               <th className="py-1 pr-3 text-left font-normal">Started</th>
@@ -161,12 +161,12 @@ export default async function AdminEnrichmentPage() {
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
       </section>
 
       <section aria-labelledby="jobs" className="flex flex-col gap-2">
         <H2 id="jobs">Jobs</H2>
-        <table className="w-full text-xs">
+        <div className="overflow-x-auto"><table className="w-full min-w-[30rem] text-xs">
           <thead className="text-muted">
             <tr>
               <th className="py-1 pr-3 text-left font-normal">Bottle</th>
@@ -190,7 +190,7 @@ export default async function AdminEnrichmentPage() {
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
       </section>
     </div>
   );
