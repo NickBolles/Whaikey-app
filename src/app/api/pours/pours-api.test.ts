@@ -15,6 +15,7 @@ import {
 vi.mock("@/lib/session", async () => mockSessionModule());
 
 import { GET, POST } from "@/app/api/pours/route";
+import { logPour } from "@/lib/pours";
 import { DELETE, GET as GET_ONE, PATCH } from "@/app/api/pours/[id]/route";
 
 const ctx = (id: string) => ({ params: Promise.resolve({ id }) });
@@ -346,9 +347,71 @@ describe("/api/pours", () => {
 
     const res = await PATCH(jsonRequest(`/api/pours/${pour.id}`, "PATCH", { visibility: "public" }), ctx(pour.id));
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ visibility: "public" });
+    expect(await res.json()).toMatchObject({ visibility: "public", previous: { visibility: "private" } });
 
     const reread = await GET_ONE(jsonRequest(`/api/pours/${pour.id}`, "GET"), ctx(pour.id));
     expect((await reread.json()).pour.visibility).toBe("public");
+  });
+
+  it("PATCH edits rating, serving and note, stamps editedAt, and Undo restores the previous values", async () => {
+        const { pour } = await logPour(db, user.id, {
+      bottleId: bottle.id,
+      rating: 3,
+      servingStyle: "neat",
+      note: { nose: "caramel", freeform: "first try" },
+    });
+    const res = await PATCH(
+      jsonRequest(`/api/pours/${pour.id}`, "PATCH", {
+        rating: 4.5,
+        servingStyle: "rocks",
+        note: { freeform: "better on ice", nose: null },
+      }),
+      ctx(pour.id),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.pour).toMatchObject({ rating: 4.5, servingStyle: "rocks" });
+    expect(body.pour.editedAt).toEqual(expect.any(String));
+    expect(body.note).toMatchObject({ freeform: "better on ice", nose: null });
+    expect(body.previous).toEqual({ rating: 3, servingStyle: "neat", note: { freeform: "first try", nose: "caramel" } });
+
+    // Snapshot columns describe the moment of the pour; an edit never moves them.
+    const row = await db.query.pours.findFirst({ where: (p, { eq }) => eq(p.id, pour.id) });
+    expect(row?.createdAt.getTime()).toBe(pour.createdAt.getTime());
+    expect(row?.visibilityAtCreation).toBe(pour.visibilityAtCreation);
+    expect(row?.amountMl).toBe(pour.amountMl);
+
+    // A public share link already sent carries the edited marker.
+    const { createPourShare, getPublicPourShare } = await import("@/lib/pour-sharing");
+    await db.insert(schema.userProfiles).values({ userId: user.id, handle: "editor", displayName: "Editor", socialEnabled: true });
+    const share = await createPourShare(db, user.id, pour.id);
+    expect((await getPublicPourShare(db, share!.code))?.pour.editedAt).toBeInstanceOf(Date);
+
+    const undo = await PATCH(jsonRequest(`/api/pours/${pour.id}`, "PATCH", body.previous), ctx(pour.id));
+    expect(undo.status).toBe(200);
+    const undone = await undo.json();
+    expect(undone.pour).toMatchObject({ rating: 3, servingStyle: "neat" });
+    expect(undone.note).toMatchObject({ nose: "caramel", freeform: "first try" });
+  });
+
+  it("PATCH clearing every note field removes the note; an empty or unknown body is a 400", async () => {
+        const { pour } = await logPour(db, user.id, { bottleId: bottle.id, note: { freeform: "x" } });
+    const res = await PATCH(jsonRequest(`/api/pours/${pour.id}`, "PATCH", { note: { freeform: "  " } }), ctx(pour.id));
+    expect((await res.json()).note).toBeNull();
+    expect(await db.query.tastingNotes.findFirst({ where: (n, { eq }) => eq(n.pourId, pour.id) })).toBeUndefined();
+
+    expect((await PATCH(jsonRequest(`/api/pours/${pour.id}`, "PATCH", {}), ctx(pour.id))).status).toBe(400);
+    expect((await PATCH(jsonRequest(`/api/pours/${pour.id}`, "PATCH", { amountMl: 5 }), ctx(pour.id))).status).toBe(400);
+    expect((await PATCH(jsonRequest(`/api/pours/${pour.id}`, "PATCH", { rating: 4.2 }), ctx(pour.id))).status).toBe(400);
+  });
+
+  it("PATCH rolls the whole edit back when the visibility part is refused", async () => {
+        const { pour } = await logPour(db, user.id, { bottleId: bottle.id, rating: 2 });
+    // No social profile ⇒ social is off ⇒ publishing is refused.
+    const res = await PATCH(jsonRequest(`/api/pours/${pour.id}`, "PATCH", { rating: 5, visibility: "public" }), ctx(pour.id));
+    expect(res.status).toBe(409);
+    const row = await db.query.pours.findFirst({ where: (p, { eq }) => eq(p.id, pour.id) });
+    expect(row?.rating).toBe(2);
+    expect(row?.editedAt).toBeNull();
   });
 });

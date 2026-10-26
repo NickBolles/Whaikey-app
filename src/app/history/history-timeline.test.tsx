@@ -36,6 +36,7 @@ function pour(over: Partial<TimelinePour> = {}): TimelinePour {
     amountMl: over.amountMl ?? 30,
     createdAt: over.createdAt ?? "2026-03-14T18:30:00.000Z",
     visibility: over.visibility ?? "private",
+    editedAt: over.editedAt ?? null,
     note: over.note ?? null,
   };
 }
@@ -116,5 +117,12 @@ describe("HistoryTimeline", () => {
       minute: "2-digit",
     });
     expect(screen.getByText(new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")))).toBeInTheDocument();
+  });
+
+  it("Edit opens the pour sheet prefilled (STORYBOARD §3.8), and an edited entry says so", () => {
+    render(<HistoryTimeline pours={[pour({ id: "p 1", editedAt: "2026-03-15T00:00:00.000Z" })]} />);
+    fireEvent.click(screen.getByRole("button", { name: "More for Test Bourbon" }));
+    expect(screen.getByRole("link", { name: /Edit/ })).toHaveAttribute("href", "/pour?edit=p%201");
+    expect(screen.getByText(/· edited/)).toBeInTheDocument();
   });
 });

@@ -240,3 +240,75 @@ describe("PourFlow — draft (notes before the bottle)", () => {
     expect(screen.getByText(/Only me can see/)).toBeInTheDocument();
   });
 });
+
+describe("PourFlow — editing a logged pour", () => {
+  const entry = {
+    id: "p9",
+    bottle: { id: "b1", name: "Test Bourbon" },
+    rating: 3,
+    servingStyle: "neat",
+    amountMl: 30,
+    visibility: "private" as const,
+    note: { nose: "caramel", palate: null, finish: null, freeform: "first try", flavorTags: null },
+  };
+
+  it("opens prefilled, PATCHes only what changed, and Undo sends the server's previous values", async () => {
+    prev = "/history";
+    const fetchMock = stubFetch(async (url, init) => {
+      if (String(url) === "/api/pours/p9" && init?.method === "PATCH") {
+        const body = JSON.parse(String(init.body));
+        return ok({ pour: {}, note: null, previous: body.rating === 3 ? {} : { rating: 3, note: { freeform: "first try" } } });
+      }
+      return ok({});
+    });
+    renderFlow({ editEntry: entry });
+    await act(async () => {});
+    expect(screen.getByRole("heading", { name: "Edit pour" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Change" })).not.toBeInTheDocument();
+    expect(screen.getByDisplayValue("first try")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Rate 4.5 stars" }));
+    fireEvent.change(screen.getByDisplayValue("first try"), { target: { value: "better second time" } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    });
+    const patches = fetchMock.mock.calls.filter(([, i]) => i?.method === "PATCH").map(([, i]) => JSON.parse(String(i?.body)));
+    expect(patches[0]).toEqual({ rating: 4.5, note: { freeform: "better second time" } });
+    expect(back).toHaveBeenCalled();
+    // Never touches the new-pour draft.
+    expect(window.localStorage.length).toBe(0);
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: "Undo" }));
+    });
+    const after = fetchMock.mock.calls.filter(([, i]) => i?.method === "PATCH").map(([, i]) => JSON.parse(String(i?.body)));
+    expect(after[1]).toEqual({ rating: 3, note: { freeform: "first try" } });
+  });
+
+  it("an edit with nothing changed just closes", async () => {
+    prev = "/history";
+    const fetchMock = stubFetch(async () => ok({}));
+    renderFlow({ editEntry: entry });
+    await act(async () => {});
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    });
+    expect(fetchMock.mock.calls.some(([, i]) => i?.method === "PATCH")).toBe(false);
+    expect(back).toHaveBeenCalled();
+  });
+
+  it("a refused edit shows the server's reason and stays open", async () => {
+    prev = "/history";
+    stubFetch(async (url, init) =>
+      init?.method === "PATCH"
+        ? ({ ok: false, status: 409, json: async () => ({ error: "moderated", message: "A moderator hid this note." }) } as Response)
+        : ok({}),
+    );
+    renderFlow({ editEntry: entry });
+    await act(async () => {});
+    fireEvent.click(screen.getByRole("button", { name: "Rate 5 stars" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    });
+    expect(screen.getByRole("alert")).toHaveTextContent("A moderator hid this note.");
+    expect(back).not.toHaveBeenCalled();
+  });
+});

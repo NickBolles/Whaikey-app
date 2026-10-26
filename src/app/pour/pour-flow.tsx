@@ -56,27 +56,61 @@ const VISIBILITY_SUMMARY: Record<PourVisibility, string> = {
  * After Save a toast carries Undo and the sheet returns where you came from —
  * there is no "Poured." page any more.
  */
-export function PourFlow({ userId, initialBottle = null, initialBottleMissing = false }: { userId?: string; initialBottle?: BottlePick | null; initialBottleMissing?: boolean }) {
+/** A logged pour opened for editing (journal ⋯ → Edit). */
+export interface EditEntry {
+  id: string;
+  bottle: BottlePick;
+  rating: number | null;
+  servingStyle: string | null;
+  amountMl: number | null;
+  visibility: PourVisibility;
+  note: { nose: string | null; palate: string | null; finish: string | null; freeform: string | null; flavorTags: Record<string, number> | null };
+}
+
+type EntryEdit = {
+  rating?: number | null;
+  servingStyle?: string | null;
+  visibility?: PourVisibility;
+  note?: Partial<Record<"nose" | "palate" | "finish" | "freeform", string | null>> & { flavorTags?: Record<string, number> | null };
+};
+
+async function patchEntry(pourId: string, edit: EntryEdit): Promise<{ previous: EntryEdit }> {
+  const res = await fetch(`/api/pours/${encodeURIComponent(pourId)}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(edit),
+  });
+  const body = (await res.json().catch(() => null)) as { previous?: EntryEdit; message?: string; error?: string } | null;
+  if (!res.ok || !body?.previous) throw new Error(body?.message ?? "Couldn't save that edit. Try again.");
+  return { previous: body.previous };
+}
+
+export function PourFlow({ userId, initialBottle = null, initialBottleMissing = false, editEntry = null }: { userId?: string; initialBottle?: BottlePick | null; initialBottleMissing?: boolean; editEntry?: EditEntry | null }) {
   const router = useRouter();
   const toast = useToast();
-  const [bottle, setBottle] = useState<ScanBottle | null>(initialBottle);
+  // Edit mode: the same sheet, prefilled; no draft, no bottle change, and
+  // nothing about the moment of the pour (size, who was there) moves.
+  const editing = editEntry != null;
+  const [bottle, setBottle] = useState<ScanBottle | null>(editEntry?.bottle ?? initialBottle);
   const [pickedVia, setPickedVia] = useState<PickMeta | null>(null);
   const [notItOpen, setNotItOpen] = useState(false);
-  const [rating, setRating] = useState<number | null>(null);
-  const [servingStyle, setServingStyle] = useState<ServingStyle | null>(null);
-  const [amountMl, setAmountMl] = useState<number>(45);
+  const [rating, setRating] = useState<number | null>(editEntry?.rating ?? null);
+  const [servingStyle, setServingStyle] = useState<ServingStyle | null>((editEntry?.servingStyle as ServingStyle | null) ?? null);
+  const [amountMl, setAmountMl] = useState<number>(editEntry?.amountMl ?? 45);
   const [activeSection, setActiveSection] = useState<NoteSection>("nose");
-  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailOpen, setDetailOpen] = useState(
+    Boolean(editEntry && (editEntry.note.nose || editEntry.note.palate || editEntry.note.finish || editEntry.note.freeform || Object.keys(editEntry.note.flavorTags ?? {}).length > 0)),
+  );
   const [companions, setCompanions] = useState("");
-  const [nose, setNose] = useState("");
-  const [palate, setPalate] = useState("");
-  const [finish, setFinish] = useState("");
-  const [freeform, setFreeform] = useState("");
-  const [flavorTags, setFlavorTags] = useState<Record<string, number>>({});
+  const [nose, setNose] = useState(editEntry?.note.nose ?? "");
+  const [palate, setPalate] = useState(editEntry?.note.palate ?? "");
+  const [finish, setFinish] = useState(editEntry?.note.finish ?? "");
+  const [freeform, setFreeform] = useState(editEntry?.note.freeform ?? "");
+  const [flavorTags, setFlavorTags] = useState<Record<string, number>>(editEntry?.note.flavorTags ?? {});
   // Default visibility is the account's saved preference, "Only me" until it
   // loads (owner decision on D19 is pending: do not widen the default here).
-  const [visibility, setVisibility] = useState<PourVisibility>("private");
-  const visibilityDirtyRef = useRef(false);
+  const [visibility, setVisibility] = useState<PourVisibility>(editEntry?.visibility ?? "private");
+  const visibilityDirtyRef = useRef(editing);
   const [visibilityChosen, setVisibilityChosen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -103,6 +137,9 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
   // Resume a draft from the last 24 h. A Pour button that names a bottle wins
   // over a draft's bottle, but the draft's words still come back.
   useEffect(() => {
+    // Editing a logged pour never reads or writes the new-pour draft; leaving
+    // hydratedRef false keeps both draft effects below inert.
+    if (editing) return;
     const draft = loadDraft(userId);
     hydratedRef.current = true;
     if (!draft) return;
@@ -126,10 +163,10 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
     if (draft.freeform || draft.nose || draft.palate || draft.finish || Object.keys(draft.flavorTags ?? {}).length > 0) setDetailOpen(true);
     setDraftRestored(true);
     /* eslint-enable react-hooks/set-state-in-effect */
-  }, [userId, initialBottle]);
+  }, [userId, initialBottle, editing]);
 
   const draftContent = { bottle, rating, servingStyle, amountMl, freeform, nose, palate, finish, flavorTags, companions };
-  const hasContent = hasDraftContent({ ...draftContent, bottle: bottle && bottle.id !== initialBottle?.id ? bottle : null });
+  const hasContent = !editing && hasDraftContent({ ...draftContent, bottle: bottle && bottle.id !== initialBottle?.id ? bottle : null });
   const draftVisibility = visibilityChosen ? visibility : null;
   // The latest fields, for the flush on close/unmount: the debounced write
   // below can still be pending when the sheet goes away.
@@ -185,7 +222,49 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
     }
   };
 
+  /** Edit mode: PATCH only what changed; the toast's Undo sends the server's `previous` back. */
+  const submitEdit = async (entry: EditEntry) => {
+    const edit: EntryEdit = {};
+    if (rating !== entry.rating) edit.rating = rating;
+    if (servingStyle !== entry.servingStyle) edit.servingStyle = servingStyle;
+    if (visibility !== entry.visibility) edit.visibility = visibility;
+    const note: NonNullable<EntryEdit["note"]> = {};
+    const current = { nose, palate, finish, freeform };
+    for (const key of ["nose", "palate", "finish", "freeform"] as const) {
+      const next = current[key].trim() || null;
+      if (next !== (entry.note[key] ?? null)) note[key] = next;
+    }
+    const tagsNow = Object.keys(flavorTags).length > 0 ? flavorTags : null;
+    if (JSON.stringify(tagsNow) !== JSON.stringify(entry.note.flavorTags ?? null)) note.flavorTags = tagsNow;
+    if (Object.keys(note).length > 0) edit.note = note;
+    if (Object.keys(edit).length === 0) {
+      leave();
+      return;
+    }
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      const { previous } = await patchEntry(entry.id, edit);
+      finishedRef.current = true;
+      toast.show({
+        message: `Updated your pour of ${entry.bottle.name}`,
+        tone: "success",
+        undo: async () => {
+          await patchEntry(entry.id, previous);
+          router.refresh();
+        },
+      });
+      leave();
+      router.refresh();
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : "Couldn't save that edit. Try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const submit = async () => {
+    if (editEntry) return submitEdit(editEntry);
     if (!bottle || submitting) return;
     setSubmitting(true);
     setSubmitError(null);
@@ -273,7 +352,7 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
       <div data-pour-sheet className="flex-1 bg-background px-3 pt-2 pb-4">
         <div aria-hidden className="mx-auto mb-2 h-1 w-9 rounded-full bg-border" />
         <header className="flex min-h-11 items-center justify-between gap-2">
-          <h1 className="font-display text-[20px] font-semibold leading-tight">Log a pour</h1>
+          <h1 className="font-display text-[20px] font-semibold leading-tight">{editing ? "Edit pour" : "Log a pour"}</h1>
           <div className="flex items-center gap-1">
             {(hasContent || draftRestored) && <span className="text-xs text-muted">{draftRestored ? "Draft restored" : "Draft kept 24h"}</span>}
             <button type="button" onClick={leave} aria-label="Close" className="flex h-11 w-11 items-center justify-center rounded-lg text-muted hover:bg-surface-raised hover:text-foreground">
@@ -301,6 +380,7 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
                 <span className="block truncate font-display text-[17px] font-semibold leading-tight">{bottle.name}</span>
                 <span className="block truncate text-xs text-muted">{bottleMeta(bottle) || bottle.category}</span>
               </span>
+              {!editing && (
               <button
                 type="button"
                 onClick={() => {
@@ -312,6 +392,7 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
               >
                 Change
               </button>
+              )}
             </div>
             {pickedVia && pickedVia.via !== "recent" && <ShelfQuickActions key={bottle.id} bottle={bottle} />}
             {notItOpen && (
@@ -416,10 +497,13 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
               })}
               <FlavorWheelInput value={flavorTags} onChange={setFlavorTags} />
             </section>
+            {!editing && (
             <section aria-label="Pour size" className="border-t border-border pt-3">
               <PourSizePicker value={amountMl} onChange={setAmountMl} />
             </section>
+            )}
             <section aria-label="More" className="flex flex-col gap-2 border-t border-border pt-3">
+              {!editing && (
               <label className="flex flex-col gap-1">
                 <span className="section-label">With…</span>
                 <input
@@ -429,6 +513,7 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
                   className="h-11 rounded-lg border border-border bg-surface px-3 text-sm placeholder:text-muted focus:border-accent focus:outline-none"
                 />
               </label>
+              )}
               <span className="section-label">Who can see this</span>
               <VisibilityChips
                 value={visibility}
@@ -459,10 +544,10 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
 
       <div data-sticky className="sticky bottom-0 z-30 border-t border-border bg-background/95 px-3 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] backdrop-blur">
         <button type="button" onClick={() => void submit()} disabled={!bottle || submitting} className="btn-primary min-h-12 w-full text-base disabled:opacity-50">
-          {submitting ? "Saving…" : "Save pour"}
+          {submitting ? "Saving…" : editing ? "Save changes" : "Save pour"}
         </button>
         <p className="mt-1 flex min-h-6 items-center justify-center gap-3 text-xs text-muted">
-          {!bottle ? <span>Pick a bottle to save</span> : <span>Undo for 4s after saving</span>}
+          {!bottle ? <span>Pick a bottle to save</span> : <span>{editing ? "Undo for 4s after saving · size and time stay as logged" : "Undo for 4s after saving"}</span>}
           {hasContent && (
             <button type="button" onClick={discard} className="tap-target px-1 underline-offset-2 hover:text-foreground hover:underline">
               Discard
