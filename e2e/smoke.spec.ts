@@ -84,7 +84,7 @@ test.describe("security headers", () => {
 test.describe("signed-out smoke", () => {
   test("home shows the hero with a sign-in CTA", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("heading", { name: "Whaikey" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Caskfolk" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Get started" })).toBeVisible();
   });
 
@@ -164,12 +164,12 @@ test.describe("app shell", () => {
     await page.goto("/bottles/eagle-rare-10");
     const back = page.getByTestId("header-back");
     await expect(back).toHaveAccessibleName("Back to Explore");
-    await expect(page.getByRole("link", { name: "Whaikey" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Caskfolk" })).toHaveCount(0);
     await back.click();
     await expect(page).toHaveURL(/\/search$/);
     // A tab route gets the wordmark back instead.
     await page.goto("/");
-    await expect(page.getByRole("link", { name: "Whaikey" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Caskfolk" })).toBeVisible();
     await expect(page.getByTestId("header-back")).toHaveCount(0);
   });
 

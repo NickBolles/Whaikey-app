@@ -8,13 +8,13 @@
 import { isAndroid, isIos, nativeOnly } from "./platform";
 
 /** Whaikey's page background — the status bar has to match it exactly. */
-const BACKGROUND = "#14100b";
+const BACKGROUND = "#0d1410";
 
 /**
  * Tint the status bar to match the app background.
  *
  * `Style.Dark` is Capacitor's name for *light content on a dark background*,
- * which is what a #14100b app wants. The Android background colour is a no-op on
+ * which is what a #0d1410 app wants. The Android background colour is a no-op on
  * iOS, where the status bar is always drawn over the app.
  */
 export async function applyStatusBarStyle(): Promise<void> {

@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Star } from "lucide-react";
 import { leafLabel } from "@/lib/flavor-wheel";
 import { share } from "@/lib/native/share";
+import { BRAND_NAME } from "@/lib/brand";
 
 /** A short, broad palette for rating at the table — the full wheel lives on the pour sheet. */
 export const TABLE_TAGS = [
@@ -47,7 +48,7 @@ export function GuestJoinForm({
     const res = await post(endpoint, "POST", { code, guest: { guestName, birthDate, market } }).catch(() => null);
     setBusy(false);
     if (res?.ok) router.refresh();
-    else if (res?.status === 403) setError("Whaikey is only for people of legal drinking age where you live.");
+    else if (res?.status === 403) setError(`${BRAND_NAME} is only for people of legal drinking age where you live.`);
     else if (res?.status === 400) setError("Check your name and birth date.");
     else setError(closedCopy);
   }
@@ -223,7 +224,7 @@ export function HostControls({ code, title, state }: { code: string; title: stri
     <div className="flex flex-wrap gap-2">
       <button
         type="button"
-        onClick={() => void share({ title, text: `Join "${title}" on Whaikey`, url: `${window.location.origin}/f/${code}` })}
+        onClick={() => void share({ title, text: `Join "${title}" on ${BRAND_NAME}`, url: `${window.location.origin}/f/${code}` })}
         className="btn-secondary px-4 py-2 text-sm"
       >
         Share invite

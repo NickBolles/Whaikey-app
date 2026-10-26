@@ -4,10 +4,11 @@ import { legalIdentity } from "@/lib/legal";
 import { getSessionUser } from "@/lib/session";
 import { DeleteAccount } from "@/app/settings/your-data";
 import { DeletionRequestForm } from "./deletion-request-form";
+import { BRAND_NAME } from "@/lib/brand";
 
 export const metadata: Metadata = {
   title: "Delete your account",
-  description: "How to delete your Whaikey account and its data, in the app or on the web.",
+  description: `How to delete your ${BRAND_NAME} account and its data, in the app or on the web.`,
 };
 
 export const dynamic = "force-dynamic";
@@ -34,16 +35,16 @@ export const dynamic = "force-dynamic";
 export default async function DeleteAccountPage() {
   const user = await getSessionUser();
   const { entity, contactEmail } = legalIdentity();
-  const developer = entity ?? "the Whaikey developer";
+  const developer = entity ?? `the ${BRAND_NAME} developer`;
 
   return (
     <div className="px-3 py-4 max-w-2xl mx-auto w-full flex flex-col gap-3">
       <header className="flex flex-col gap-1">
         <h1 className="font-display text-[22px] leading-tight font-semibold tracking-tight">
-          Delete your Whaikey account
+          Delete your {BRAND_NAME} account
         </h1>
         <p className="text-muted leading-relaxed">
-          Whaikey is published by {developer}. You can delete your account and everything in it
+          {BRAND_NAME} is published by {developer}. You can delete your account and everything in it
           at any time — in the app, or here on the web without installing anything.
         </p>
       </header>
@@ -53,7 +54,7 @@ export default async function DeleteAccountPage() {
           In the app
         </h2>
         <ol className="list-decimal pl-5 text-sm text-muted leading-relaxed flex flex-col gap-1">
-          <li>Open Whaikey and go to <strong className="text-foreground">Settings</strong>.</li>
+          <li>Open {BRAND_NAME} and go to <strong className="text-foreground">Settings</strong>.</li>
           <li>
             Under <strong className="text-foreground">Your data</strong>, choose{" "}
             <strong className="text-foreground">Delete account…</strong>
@@ -80,7 +81,7 @@ export default async function DeleteAccountPage() {
         ) : (
           <>
             <p className="text-sm text-muted leading-relaxed">
-              Sign in with the Google or Apple account you use for Whaikey, and you will come
+              Sign in with the Google or Apple account you use for {BRAND_NAME}, and you will come
               straight back here to delete it.
             </p>
             <Link

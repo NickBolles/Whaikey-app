@@ -1,4 +1,23 @@
-# Whaikey Design System
+# Caskfolk Design System
+
+> **Amended 2026-10-26 (owner: rename to Caskfolk "for now", tone down button gradients).**
+> Colour, type and wordmark follow the Caskfolk brand (rebrand v2 board); Ledger × Paper's
+> layout, radii, density, pull-quotes, badge art and flavor wheel are unchanged.
+> - **Name:** one constant, `src/lib/brand.ts` (`BRAND_NAME`, `BRAND_SLUG`, `BRAND_TAGLINE` "Pull up a chair.").
+>   Internal identifiers keep `whaikey` until the final name decision (bundle id, scheme, domain, env vars, keys).
+> - **Wordmark:** `src/components/brand-mark.tsx` — the cask-head/round-table mark (ring + staves in
+>   `currentColor`, six copper seats) beside "Caskfolk" in Zilla Slab 600, upright.
+> - **Type:** Display **Zilla Slab** (500/600/700, italic 500 for pull-quotes) via `--font-brand-display`;
+>   UI **Work Sans** (variable) via `--font-brand-sans`. Where this file says Fraunces/Geist Sans below, read these.
+> - **Colour (dark, default):** background `#0d1410` rickhouse, surface `#142019`, raised `#1b2a21` fir,
+>   border `#26392d`, rule `#41604b`, text `#eee7d6` linen, muted `#93a092`, editorial `#c9a46a` brass,
+>   quote `#f0e6cf`, accent `#d27b3e` copper (deep `#a9581f`), success `#a7c47a` moss.
+>   Light ("linen") tokens exist behind `<html data-theme="light">`; dark stays the default.
+> - **Buttons are flat.** `.btn-primary` = solid copper, 1px `--accent-deep` edge, dark-ground text
+>   (`--accent-foreground`, 5.9:1); hover lifts to `--accent-hover`, press drops to `--accent-deep`.
+>   No gradients or glows on any button. `.text-gradient-amber` is now a flat colour (name kept).
+> - Contrast: every text token pair is ≥4.5:1 on its surfaces (muted 6.8/5.5, accent 5.9/4.75, editorial 8.0/6.4).
+> - Hex values in the token table below are the pre-Caskfolk ones; `globals.css` is the source of truth.
 
 The feel: **compact, dense, premium — a collector's ledger in a well-lit whiskey lounge.** Clean and sleek, warm and a little fancy — never sterile, and never roomy for its own sake. Think aged oak, amber glass, brass hardware, cream paper labels, and a tasting book where every line earns its place. More of the shelf, the journal and the bottle fits on one screen than in a typical consumer app; premium comes from type, colour and alignment, not from whitespace.
 

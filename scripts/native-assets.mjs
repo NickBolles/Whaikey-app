@@ -18,7 +18,7 @@ const androidRes = path.join(repoRoot, "android", "app", "src", "main", "res");
 const publicIcons = path.join(repoRoot, "public", "icons");
 
 /** App background — every opaque raster is flattened onto this. */
-const BACKGROUND = "#14100b";
+const BACKGROUND = "#0d1410";
 
 /** Android density buckets: [dir suffix, launcher px, adaptive foreground px]. */
 const DENSITIES = [

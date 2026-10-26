@@ -144,7 +144,7 @@ describe("PolicyPage legal identity", () => {
     render(<PolicyPage title="Terms">{body}</PolicyPage>);
 
     const who = screen.getByRole("heading", { name: "Who this is" }).parentElement!;
-    expect(who).toHaveTextContent("Whaikey is operated by Whaikey, LLC.");
+    expect(who).toHaveTextContent("Caskfolk is operated by Whaikey, LLC.");
     expect(who).toHaveTextContent("The governing law is not yet published here.");
   });
 

@@ -16,6 +16,7 @@ import { getPublicPourShare } from "@/lib/pour-sharing";
 import { isAutomatedFetch, recordEvents, shareIdForCode } from "@/lib/observability/analytics";
 import { getSocialNote, getSocialPrefs, listComments } from "@/lib/social";
 import { WishlistCta } from "./wishlist-cta";
+import { BRAND_NAME } from "@/lib/brand";
 
 export const dynamic = "force-dynamic";
 
@@ -264,7 +265,7 @@ export default async function SharedPourPage({ params }: Props) {
   return (
     <div className="mx-auto flex max-w-lg flex-col gap-6 px-4 py-12">
       <header className="space-y-2">
-        <p className="section-label">Shared from Whaikey</p>
+        <p className="section-label">Shared from {BRAND_NAME}</p>
         <h1 className="font-display text-4xl font-semibold leading-tight">{share.bottleName}</h1>
         <p className="text-muted">{share.ownerName}&apos;s tasting note</p>
       </header>
@@ -288,7 +289,7 @@ export default async function SharedPourPage({ params }: Props) {
         {share.note.freeform && <blockquote className="border-l-2 border-accent/70 pl-4 font-display text-lg italic text-foreground/90">{share.note.freeform}</blockquote>}
         {noteParts.length === 0 && !share.note.freeform && <p className="text-muted">A moment from {share.ownerName}&apos;s tasting journal.</p>}
       </article>
-      <p className="text-center text-xs text-muted">Shared intentionally by its author · Whaikey</p>
+      <p className="text-center text-xs text-muted">Shared intentionally by its author · {BRAND_NAME}</p>
       {viewerBlock}
       {discussionBlock}
     </div>

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { withErrorHandling } from "@/lib/session";
 import { getOutingView, outingCsv } from "@/lib/outings";
 import { resolveOuting } from "@/lib/outings/request";
+import { BRAND_SLUG } from "@/lib/brand";
 
 /** GET — the outing's feed as CSV, for anyone on it (owner: export everywhere). */
 export async function GET(req: Request, ctx: { params: Promise<{ code: string }> }) {
@@ -13,7 +14,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ code: string }>
     return new NextResponse(outingCsv(view), {
       headers: {
         "content-type": "text/csv; charset=utf-8",
-        "content-disposition": `attachment; filename="whaikey-outing-${code}.csv"`,
+        "content-disposition": `attachment; filename="${BRAND_SLUG}-outing-${code}.csv"`,
         "cache-control": "no-store",
       },
     });

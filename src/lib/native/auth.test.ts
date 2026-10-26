@@ -92,7 +92,7 @@ describe("exchangeUrl", () => {
 describe("callback state", () => {
   /**
    * The state nonce is the whole reason an inbound `whaikey://` link can be
-   * trusted: without it, any app on the device can push a code at Whaikey and
+   * trusted: without it, any app on the device can push a code at Caskfolk and
    * silently swap the user into the sender's account (SEC-H1).
    */
   it("extracts the state alongside the code", () => {

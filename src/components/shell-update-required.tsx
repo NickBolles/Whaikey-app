@@ -1,3 +1,4 @@
+import { BRAND_NAME } from "@/lib/brand";
 /**
  * The update gate (docs/NATIVE_APP.md §2.2, docs/STORYBOARD.md §3.15).
  *
@@ -35,16 +36,16 @@ export function ShellUpdateRequired({
     <div
       role="alertdialog"
       aria-modal="true"
-      aria-label="Update Whaikey"
+      aria-label={`Update ${BRAND_NAME}`}
       // Above everything, including the nav's quick-actions sheet at z-[60] —
       // which is the later DOM sibling and would otherwise paint over this and
       // offer routes into a UI the binary cannot run.
       className="fixed inset-0 z-[100] flex flex-col items-center justify-center gap-5 bg-background px-8 text-center"
     >
-      <div aria-hidden className="text-5xl drop-shadow-[0_0_24px_rgba(232,161,60,0.25)]">
+      <div aria-hidden className="text-5xl drop-shadow-[0_0_24px_rgba(210,123,62,0.25)]">
         🥃
       </div>
-      <h1 className="font-display text-2xl font-semibold">Update Whaikey</h1>
+      <h1 className="font-display text-2xl font-semibold">Update {BRAND_NAME}</h1>
       <p className="text-muted max-w-sm leading-relaxed">
         {notice ??
           "This version of the app is too old for what's on the shelf. Updating takes a moment, and nothing you've logged is lost."}

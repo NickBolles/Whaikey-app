@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import QRCode from "qrcode";
 import { QrCode, X } from "lucide-react";
+import { BRAND_NAME } from "@/lib/brand";
 
 /**
  * Shows the current user's add-me code: a QR pointing at
@@ -48,7 +49,7 @@ export function FriendQr({ handle }: { handle: string }) {
         // eslint-disable-next-line @next/next/no-img-element -- local data URL, no next/image benefit
         <img
           src={dataUrl}
-          alt={`QR code to add @${handle} on Whaikey`}
+          alt={`QR code to add @${handle} on ${BRAND_NAME}`}
           width={180}
           height={180}
           className="rounded-xl border border-border-subtle bg-white p-2"

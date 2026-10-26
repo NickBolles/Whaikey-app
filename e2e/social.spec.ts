@@ -152,7 +152,7 @@ test.describe("social: signed in as Jordan (the demo user)", () => {
 
     // Default face ("Find people"): the add form and the QR pair.
     await page.getByRole("button", { name: "Show my code" }).click();
-    const qr = page.getByRole("img", { name: "QR code to add @jordan on Whaikey" });
+    const qr = page.getByRole("img", { name: "QR code to add @jordan on Caskfolk" });
     await expect(qr).toBeVisible();
     await expect(qr).toHaveAttribute("src", /^data:image\/png;base64,/);
 
@@ -173,7 +173,7 @@ test.describe("social: signed in as Jordan (the demo user)", () => {
     await expect(page).toHaveURL(/\/add\/sasha$/);
     await expect(page.getByRole("heading", { name: "Sasha Glen" })).toBeVisible();
     // Exact match: a substring match also hits Next's route announcer div,
-    // which echoes the page title ("Add @sasha · Whaikey").
+    // which echoes the page title ("Add @sasha · Caskfolk").
     await expect(page.getByText("@sasha", { exact: true })).toBeVisible();
     // Jordan already follows Sasha and she follows him back (seeded mutual).
     // Not anchored/exact: the chip ("Friends") and the state pill ("Following")

@@ -3,7 +3,7 @@
 ## Apple — Notes for Review
 
 ```
-Whaikey is a whiskey collection and tasting journal for adults (18+).
+Caskfolk is a whiskey collection and tasting journal for adults (18+).
 
 Sign-in: Sign in with Apple (native) or Google. Reviewer access: {{REVIEWER_ACCESS}}
 The reviewer account has a stocked bar, tasting notes, friends and a shared note.

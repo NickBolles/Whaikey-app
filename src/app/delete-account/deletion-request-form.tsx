@@ -1,6 +1,7 @@
 "use client";
 
 import { useId, useState } from "react";
+import { BRAND_NAME } from "@/lib/brand";
 
 /**
  * The signed-out deletion request (see ./page.tsx).
@@ -26,7 +27,7 @@ export function DeletionRequestForm() {
     event.preventDefault();
     const address = email.trim();
     if (!EMAIL.test(address)) {
-      setError("Enter the email address your Whaikey account uses.");
+      setError(`Enter the email address your ${BRAND_NAME} account uses.`);
       return;
     }
     setPhase("sending");

@@ -4,12 +4,13 @@ import { useState } from "react";
 import Link from "next/link";
 import { ToggleSwitch } from "@/components/toggle-switch";
 import type { PourVisibility } from "@/db/schema";
+import { BRAND_NAME } from "@/lib/brand";
 
 const VISIBILITY_OPTIONS: Array<{ value: PourVisibility; label: string; description: string }> = [
   { value: "private", label: "Only me", description: "Nothing is shared automatically." },
   { value: "friends", label: "Friends", description: "Visible to people who follow you back." },
   { value: "followers", label: "Followers", description: "Visible to everyone who follows you." },
-  { value: "public", label: "Public", description: "Visible to any signed-in Whaikey user." },
+  { value: "public", label: "Public", description: `Visible to any signed-in ${BRAND_NAME} user.` },
 ];
 
 export interface PrivacyControlsProps {

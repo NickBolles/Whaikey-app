@@ -13,7 +13,7 @@ export default async function ComparePage({ params }: { params: Promise<{ id: st
   if (!user) {
     return (
       <div className="flex min-h-[60dvh] flex-col items-center justify-center gap-6 px-6 text-center">
-        <div aria-hidden className="text-5xl drop-shadow-[0_0_24px_rgba(232,161,60,0.25)]">🥃</div>
+        <div aria-hidden className="text-5xl drop-shadow-[0_0_24px_rgba(210,123,62,0.25)]">🥃</div>
         <div>
           <h1 className="font-display text-3xl font-semibold tracking-tight">Your note, compared</h1>
           <p className="mt-2 max-w-sm leading-relaxed text-muted">

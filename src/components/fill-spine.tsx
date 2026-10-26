@@ -31,7 +31,7 @@ export function FillSpine({ level, tone, className }: FillSpineProps) {
       aria-label={`${Math.round(clamped)}% full`}
       data-testid="fill-spine"
       className={`relative w-[13px] shrink-0 overflow-hidden rounded-[4px] ${className ?? ""}`}
-      style={{ backgroundColor: "#241d14" }}
+      style={{ backgroundColor: "#1b2a21" }}
     >
       <div
         data-testid="fill-spine-fill"

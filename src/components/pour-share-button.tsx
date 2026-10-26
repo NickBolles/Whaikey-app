@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { MapPin, Share2 } from "lucide-react";
 import { share } from "@/lib/native/share";
+import { BRAND_NAME } from "@/lib/brand";
 
 export function PourShareButton({ pourId, bottleName }: { pourId: string; bottleName: string }) {
   const [expanded, setExpanded] = useState(false);
@@ -28,7 +29,7 @@ export function PourShareButton({ pourId, bottleName }: { pourId: string; bottle
       const url = new URL(body.path, window.location.origin).toString();
       const outcome = await share({
         title: `My ${bottleName} pour`,
-        text: "A tasting note from Whaikey.",
+        text: `A tasting note from ${BRAND_NAME}.`,
         url,
         dialogTitle: "Share tasting note",
       });
@@ -63,7 +64,7 @@ export function PourShareButton({ pourId, bottleName }: { pourId: string; bottle
               className="min-h-11 rounded-xl border border-border-subtle bg-surface px-3 text-sm placeholder:text-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
             />
           </label>
-          <p className="text-xs leading-relaxed text-muted">Only this label is shared—Whaikey never uses your device location.</p>
+          <p className="text-xs leading-relaxed text-muted">Only this label is shared—{BRAND_NAME} never uses your device location.</p>
           <button type="button" onClick={handleShare} disabled={busy} className="btn-primary min-h-11 px-4 text-sm disabled:opacity-60">
             {busy ? "Creating…" : "Share tasting note"}
           </button>

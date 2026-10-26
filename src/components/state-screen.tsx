@@ -20,7 +20,7 @@ export function StateScreen({
   const Heading = headingLevel === 1 ? "h1" : "h2";
   return (
     <div className="flex min-h-[60dvh] flex-col items-center justify-center gap-5 px-6 text-center">
-      <div aria-hidden className="text-5xl drop-shadow-[0_0_24px_rgba(232,161,60,0.25)]">
+      <div aria-hidden className="text-5xl drop-shadow-[0_0_24px_rgba(210,123,62,0.25)]">
         {emoji}
       </div>
       <div>

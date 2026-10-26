@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-        <string>Whaikey</string>
+        <string>Caskfolk</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -27,9 +27,9 @@
 	<!-- Permission prompts. Apple rejects builds whose strings describe the
 	     permission rather than the reason it is being asked for. -->
 	<key>NSCameraUsageDescription</key>
-	<string>Whaikey uses the camera to scan bottle barcodes and read labels so you can shelve bottles in seconds.</string>
+	<string>Caskfolk uses the camera to scan bottle barcodes and read labels so you can shelve bottles in seconds.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Choose a photo of a bottle label for Whaikey to identify.</string>
+	<string>Choose a photo of a bottle label for Caskfolk to identify.</string>
 	<!-- HTTPS only, no proprietary cryptography: answering here means the export
 	     compliance question is not asked on every TestFlight upload. -->
 	<key>ITSAppUsesNonExemptEncryption</key>

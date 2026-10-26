@@ -89,7 +89,7 @@ export function FlavorChip({
   let style: React.CSSProperties | undefined;
   let prefix: ReactNode = null;
   if (variant === "solid") {
-    className = `${base} text-[#14100b]`;
+    className = `${base} text-[#0d1410]`;
     style = { backgroundColor: leafColor(leafId) };
   } else if (variant === "confirmed") {
     className = `${base} border border-accent/55 bg-accent/10 text-accent`;

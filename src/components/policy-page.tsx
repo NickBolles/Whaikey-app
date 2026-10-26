@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { legalIdentity, missingLegalFacts, type LegalIdentity } from "@/lib/legal";
+import { BRAND_NAME } from "@/lib/brand";
 
 /**
  * The shared frame for `/terms` and `/privacy` (PLAN.md §9.3).
@@ -111,12 +112,12 @@ function Identity({ identity }: { identity: LegalIdentity }) {
             afford. */}
         {identity.entity && identity.jurisdiction ? (
           <>
-            Whaikey is operated by <strong className="text-foreground">{identity.entity}</strong>{" "}
+            {BRAND_NAME} is operated by <strong className="text-foreground">{identity.entity}</strong>{" "}
             under the laws of {identity.jurisdiction}.
           </>
         ) : identity.entity ? (
           <>
-            Whaikey is operated by <strong className="text-foreground">{identity.entity}</strong>.
+            {BRAND_NAME} is operated by <strong className="text-foreground">{identity.entity}</strong>.
             The governing law is not yet published here.
           </>
         ) : identity.jurisdiction ? (

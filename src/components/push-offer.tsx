@@ -5,6 +5,7 @@ import { BellRing, X } from "lucide-react";
 import { isNativeApp } from "@/lib/native/platform";
 import { enablePush, pushPermissionState } from "@/lib/native/push";
 import { SOCIAL_INTERACTION_EVENT, loadOfferState, mayOffer, saveOfferState } from "@/lib/native/push-offer";
+import { BRAND_NAME } from "@/lib/brand";
 
 /**
  * The app's own pre-permission card, shown after a first social interaction
@@ -57,7 +58,7 @@ export function PushOffer() {
     }
     saveOfferState({ ...loadOfferState(), done: true });
     if (state === "denied") {
-      setNote("Notifications are off for Whaikey in your phone's settings.");
+      setNote(`Notifications are off for ${BRAND_NAME} in your phone's settings.`);
       return;
     }
     setOpen(false);

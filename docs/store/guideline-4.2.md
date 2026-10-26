@@ -38,6 +38,6 @@ this branch:
 
 ## Review-notes sentence (keep in sync with `review-notes.md`)
 
-> Whaikey uses native barcode scanning, on-device label text recognition, native Sign in
+> Caskfolk uses native barcode scanning, on-device label text recognition, native Sign in
 > with Apple, haptic feedback, the native share sheet, and an offline pour queue that
 > syncs when the device reconnects.

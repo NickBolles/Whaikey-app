@@ -21,6 +21,7 @@ import {
   QuickAddTasting,
   RideReminder,
 } from "@/components/social/outing-client";
+import { BRAND_NAME } from "@/lib/brand";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Outing", robots: { index: false, follow: false } };
@@ -75,7 +76,7 @@ export default async function OutingPage({
           {view.location ? ` · ${view.location}` : ""} · {formatVisitDay(view.visitOn)}
         </p>
         <p className="text-xs text-muted">
-          Hosted by {view.host ? `@${view.host.handle}` : "a Whaikey member"}
+          Hosted by {view.host ? `@${view.host.handle}` : `a ${BRAND_NAME} member`}
           {onTrip && view.people.length > 0 && <> · {view.people.map((p) => p.name).join(", ")}</>}
         </p>
       </header>

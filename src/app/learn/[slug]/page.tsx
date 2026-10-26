@@ -37,7 +37,7 @@ export default async function LessonPage({ params }: { params: Promise<{ slug: s
       {/* Back to Whiskey School is the header's back slot (app-routes.ts). */}
       <header>
         <div className="flex items-start gap-3">
-          <span aria-hidden className="text-4xl leading-none drop-shadow-[0_0_16px_rgba(232,161,60,0.2)]">
+          <span aria-hidden className="text-4xl leading-none drop-shadow-[0_0_16px_rgba(210,123,62,0.2)]">
             {lesson.emoji}
           </span>
           <div>

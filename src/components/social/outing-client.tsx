@@ -7,6 +7,7 @@ import { Car, Star, X } from "lucide-react";
 import { leafLabel } from "@/lib/flavor-wheel";
 import { share } from "@/lib/native/share";
 import { TABLE_TAGS } from "@/components/social/flight-client";
+import { BRAND_NAME } from "@/lib/brand";
 
 async function send(url: string, method: string, body?: unknown) {
   return fetch(url, {
@@ -405,7 +406,7 @@ export function OutingHostControls({ code, title, state }: { code: string; title
           <>
             <button
               type="button"
-              onClick={() => void share({ title, text: `Join "${title}" on Whaikey`, url: `${window.location.origin}/o/${code}` })}
+              onClick={() => void share({ title, text: `Join "${title}" on ${BRAND_NAME}`, url: `${window.location.origin}/o/${code}` })}
               className="btn-secondary px-4 py-2 text-sm"
             >
               Share invite

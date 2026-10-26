@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { UserAvatar } from "@/components/user-avatar";
+import { BRAND_NAME } from "@/lib/brand";
 
 export interface InboxItemJson {
   id: string;
@@ -65,7 +66,7 @@ export function InboxList({ items: initial, hasUnread, pageSize }: { items: Inbo
           <li key={item.id}>
             <Link href={item.deepLink} className="flex items-center gap-3 px-3 py-2.5 hover:bg-surface-raised">
               <UserAvatar
-                name={item.actor?.displayName || item.actor?.handle || "Whaikey"}
+                name={item.actor?.displayName || item.actor?.handle || BRAND_NAME}
                 image={item.actor?.avatarUrl ?? null}
                 size={32}
               />

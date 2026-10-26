@@ -22,6 +22,8 @@ import { categoryLabel } from "@/components/category-chip";
 import { FriendQr } from "@/components/friend-qr";
 import { ToggleSwitch } from "@/components/toggle-switch";
 import { UserAvatar } from "@/components/user-avatar";
+import { BRAND_NAME } from "@/lib/brand";
+import { BrandMark } from "@/components/brand-mark";
 
 // Kept in sync by hand with src/lib/onboarding.ts (ONBOARDING_COOKIE) and
 // src/lib/social.ts (HANDLE_RE) — neither is imported at runtime here because
@@ -107,9 +109,9 @@ export function WelcomeClient({
   if (done) {
     return (
       <div className="mx-auto flex min-h-[85dvh] max-w-lg flex-col items-center justify-center gap-6 px-4 text-center">
-        <div aria-hidden className="text-5xl drop-shadow-[0_0_24px_rgba(232,161,60,0.25)]">
-          🥃
-        </div>
+        <div aria-hidden className="text-foreground">
+        <BrandMark size={56} />
+      </div>
         <div>
           <h1 className="font-display text-3xl font-semibold">You&apos;re set.</h1>
           <p className="mt-2 max-w-xs text-muted">
@@ -117,7 +119,7 @@ export function WelcomeClient({
           </p>
         </div>
         <button type="button" onClick={goHome} className="btn-primary px-8 py-3">
-          Open Whaikey
+          Open {BRAND_NAME}
         </button>
       </div>
     );
@@ -214,7 +216,7 @@ function StepWelcome({ onFirstBottle, onStart, onSkipTour }: { onFirstBottle: ()
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-7 text-center">
       <div>
-        <h1 className="font-display text-4xl font-semibold tracking-tight text-gradient-amber">Whaikey</h1>
+        <h1 className="font-display text-4xl font-semibold tracking-tight text-gradient-amber">{BRAND_NAME}</h1>
         <p className="mt-1 text-sm text-muted">Your bar, your palate, your pours.</p>
       </div>
 

@@ -1,3 +1,4 @@
+import { BRAND_NAME } from "@/lib/brand";
 /**
  * Whiskey School curriculum: hand-curated micro-lessons (2–3 minute reads),
  * end-of-lesson quizzes, and per-wedge flavor education keyed to the shared
@@ -88,7 +89,7 @@ export const TRACKS: Track[] = [
           {
             heading: "Whiskey vs. whisky",
             paragraphs: [
-              "Both spellings are correct — it's geography, not quality. The United States and Ireland usually write \"whiskey\"; Scotland, Japan, and Canada write \"whisky\". Whaikey uses \"whiskey\" as the umbrella and respects each bottle's own label.",
+              `Both spellings are correct — it's geography, not quality. The United States and Ireland usually write "whiskey"; Scotland, Japan, and Canada write "whisky". ${BRAND_NAME} uses "whiskey" as the umbrella and respects each bottle's own label.`,
             ],
           },
         ],
@@ -360,7 +361,7 @@ export const TRACKS: Track[] = [
           },
           {
             heading: "The eight families",
-            paragraphs: ["Whaikey's wheel uses eight core families, each with its own origin story:"],
+            paragraphs: [`${BRAND_NAME}'s wheel uses eight core families, each with its own origin story:`],
             bullets: [
               "Fruity — orchard, citrus, and dark fruits, mostly esters born in fermentation.",
               "Floral — heather, rose, fresh grass; the delicate end of the spectrum.",

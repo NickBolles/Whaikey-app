@@ -312,7 +312,7 @@ describe("PourScanSlot — keep scanning", () => {
 
 describe("teachMessage", () => {
   it("names what the confirmation did", () => {
-    expect(teachMessage("X", { teach: { state: "promoted", confirmations: 2, required: 2, taught: true } })).toMatch(/You taught Whaikey/);
+    expect(teachMessage("X", { teach: { state: "promoted", confirmations: 2, required: 2, taught: true } })).toMatch(/You taught Caskfolk/);
     expect(teachMessage("X", { teach: { state: "pending", confirmations: 1, required: 2, taught: false } })).toMatch(/1 more confirmation /);
     expect(teachMessage("X", { teach: { state: "pending", confirmations: 2, required: 2, taught: false } })).toMatch(/waiting for review/);
     expect(teachMessage("X", null)).toMatch(/barcode noted/);

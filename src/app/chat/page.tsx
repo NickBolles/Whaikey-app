@@ -2,10 +2,11 @@ import Link from "next/link";
 import { getSessionUser } from "@/lib/session";
 import { isAiConfigured } from "@/lib/ai/client";
 import { ChatClient } from "./chat-client";
+import { BRAND_NAME } from "@/lib/brand";
 
 export const dynamic = "force-dynamic";
 
-export const metadata = { title: "Concierge — Whaikey" };
+export const metadata = { title: `Concierge — ${BRAND_NAME}` };
 
 export default async function ChatPage({ searchParams }: { searchParams: Promise<{ q?: string | string[] }> }) {
   const [user, query] = await Promise.all([getSessionUser(), searchParams]);
@@ -13,7 +14,7 @@ export default async function ChatPage({ searchParams }: { searchParams: Promise
   if (!user) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[70dvh] px-6 text-center gap-6">
-        <div aria-hidden className="text-5xl drop-shadow-[0_0_24px_rgba(232,161,60,0.25)]">
+        <div aria-hidden className="text-5xl drop-shadow-[0_0_24px_rgba(210,123,62,0.25)]">
           🥃
         </div>
         <div>

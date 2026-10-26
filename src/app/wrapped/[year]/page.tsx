@@ -6,6 +6,7 @@ import { getSessionUser } from "@/lib/session";
 import { getWrapped, wrappedAvailable } from "@/lib/wrapped";
 import { appNow } from "@/lib/clock";
 import { ShareCardButton } from "@/components/social/share-card-button";
+import { BRAND_NAME } from "@/lib/brand";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Wrapped", robots: { index: false, follow: false } };
@@ -42,7 +43,7 @@ export default async function WrappedPage({ params }: { params: Promise<{ year: 
   return (
     <div className="mx-auto flex max-w-lg flex-col gap-4 px-3 pb-24 pt-5">
       <header>
-        <p className="section-label">Whaikey Wrapped · only you can see this</p>
+        <p className="section-label">{BRAND_NAME} Wrapped · only you can see this</p>
         <h1 className="font-display text-[1.75rem] font-semibold leading-tight">{year}, explored</h1>
       </header>
       {w.empty ? (

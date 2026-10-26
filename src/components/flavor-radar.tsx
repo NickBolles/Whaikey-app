@@ -83,7 +83,7 @@ export function FlavorRadar({ profile, size = 300 }: FlavorRadarProps) {
           key={f}
           points={ringPoints(radius * f)}
           fill="none"
-          stroke="var(--border, #392e20)"
+          stroke="var(--border, #26392d)"
           strokeWidth={1}
           opacity={idx === 3 ? 0.9 : 0.45}
         />
@@ -98,7 +98,7 @@ export function FlavorRadar({ profile, size = 300 }: FlavorRadarProps) {
             y1={cy}
             x2={x}
             y2={y}
-            stroke="var(--border, #392e20)"
+            stroke="var(--border, #26392d)"
             strokeWidth={1}
             opacity={0.4}
           />
@@ -108,9 +108,9 @@ export function FlavorRadar({ profile, size = 300 }: FlavorRadarProps) {
       <polygon
         data-testid="flavor-radar-polygon"
         points={dataPoints}
-        fill="var(--accent, #e8a13c)"
+        fill="var(--accent, #d27b3e)"
         fillOpacity={0.35}
-        stroke="var(--accent, #e8a13c)"
+        stroke="var(--accent, #d27b3e)"
         strokeWidth={2}
         strokeLinejoin="round"
       />
@@ -123,8 +123,8 @@ export function FlavorRadar({ profile, size = 300 }: FlavorRadarProps) {
             cx={x}
             cy={y}
             r={2.5}
-            fill="var(--accent, #e8a13c)"
-            stroke="var(--background, #14100b)"
+            fill="var(--accent, #d27b3e)"
+            stroke="var(--background, #0d1410)"
             strokeWidth={1}
           />
         );
@@ -144,7 +144,7 @@ export function FlavorRadar({ profile, size = 300 }: FlavorRadarProps) {
             fontSize={10.5}
             letterSpacing="0.1em"
             style={{ textTransform: "uppercase" }}
-            fill="var(--muted, #a3927a)"
+            fill="var(--muted, #93a092)"
           >
             {radarLabel(w.id, w.label)}
           </text>

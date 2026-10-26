@@ -19,6 +19,7 @@ import { RevokeCardsButton } from "@/components/social/revoke-cards-button";
 import { getNotificationSettings } from "@/lib/notify";
 import { isPushConfigured } from "@/lib/push/send";
 import { YourData } from "./your-data";
+import { BRAND_NAME } from "@/lib/brand";
 
 export const dynamic = "force-dynamic";
 
@@ -40,7 +41,7 @@ export default async function SettingsPage() {
   if (!user) {
     return (
       <div className="flex min-h-[60dvh] flex-col items-center justify-center gap-5 px-6 text-center">
-        <div aria-hidden className="text-5xl drop-shadow-[0_0_24px_rgba(232,161,60,0.25)]">
+        <div aria-hidden className="text-5xl drop-shadow-[0_0_24px_rgba(210,123,62,0.25)]">
           ⚙️
         </div>
         <div>
@@ -254,7 +255,7 @@ export default async function SettingsPage() {
             <dd className="text-right text-muted">Millilitres (ml)</dd>
           </div>
         </dl>
-        <p className="text-xs text-muted">These are the only scale and unit Whaikey has today.</p>
+        <p className="text-xs text-muted">These are the only scale and unit {BRAND_NAME} has today.</p>
       </section>
 
       <NotificationsCard initial={notificationSettings} pushAvailable={isPushConfigured()} />

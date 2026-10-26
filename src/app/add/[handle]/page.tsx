@@ -5,6 +5,7 @@ import { getSessionUser } from "@/lib/session";
 import { getAddTarget } from "@/lib/social";
 import { UserAvatar } from "@/components/user-avatar";
 import { AddConfirmClient } from "./add-confirm-client";
+import { BRAND_NAME } from "@/lib/brand";
 
 export const dynamic = "force-dynamic";
 
@@ -29,13 +30,13 @@ export default async function AddPage({ params }: Props) {
   if (!user) {
     return (
       <div className="flex min-h-[60dvh] flex-col items-center justify-center gap-5 px-6 text-center">
-        <div aria-hidden className="text-5xl drop-shadow-[0_0_24px_rgba(232,161,60,0.25)]">
+        <div aria-hidden className="text-5xl drop-shadow-[0_0_24px_rgba(210,123,62,0.25)]">
           🥃
         </div>
         <div>
           <h1 className="font-display text-2xl font-semibold">Add @{handle}</h1>
           <p className="mt-2 max-w-sm text-muted">
-            Sign in to Whaikey, then come back to this link to add them.
+            Sign in to {BRAND_NAME}, then come back to this link to add them.
           </p>
         </div>
         <Link

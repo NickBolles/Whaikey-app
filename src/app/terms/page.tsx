@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { PolicyPage } from "@/components/policy-page";
+import { BRAND_NAME } from "@/lib/brand";
 
 export const metadata: Metadata = {
   title: "Terms",
-  description: "The terms you agree to by using Whaikey.",
+  description: `The terms you agree to by using ${BRAND_NAME}.`,
 };
 
 /**
@@ -19,7 +20,7 @@ export const metadata: Metadata = {
 export default function TermsPage() {
   return (
     <PolicyPage title="Terms">
-      <Section title="What Whaikey is">
+      <Section title={`What ${BRAND_NAME} is`}>
         <p>
           A private tasting journal with optional social surfaces. You record what you drink, what
           you thought of it, and what you paid; you choose, per note, whether anyone else sees any
@@ -29,7 +30,7 @@ export default function TermsPage() {
 
       <Section title="You have to be old enough">
         <p>
-          There is a legal minimum drinking age where you are, and Whaikey asks for your date of
+          There is a legal minimum drinking age where you are, and {BRAND_NAME} asks for your date of
           birth and your market once, at first use. Answering untruthfully to get in is a breach of
           these terms. If you are under that age, the account is held until you reach it — nothing
           is deleted, and you can come back.
@@ -115,7 +116,7 @@ export default function TermsPage() {
 
       <Section title="Ending it">
         <p>
-          You can stop using Whaikey at any time, and delete your account from Settings whenever
+          You can stop using {BRAND_NAME} at any time, and delete your account from Settings whenever
           you choose — at once, with no undo. What that removes and what it keeps is set out in the
           privacy policy. We may end an account that is being used to harm other people, and will
           say why.

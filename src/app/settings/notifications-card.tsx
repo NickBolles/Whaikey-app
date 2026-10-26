@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { isNativeApp } from "@/lib/native/platform";
 import { disablePush, enablePush, pushPermissionState } from "@/lib/native/push";
 import { NOTIFICATION_GROUPS } from "@/lib/notify/copy";
+import { BRAND_NAME } from "@/lib/brand";
 
 /**
  * Settings → Notifications (docs/SOCIAL.md D18).
@@ -93,7 +94,7 @@ export function NotificationsCard({
     const state = await enablePush().catch(() => "unavailable" as const);
     setBusy(false);
     setRegistered(state === "granted");
-    if (state === "denied") setMessage("Notifications are off for Whaikey in your phone's settings.");
+    if (state === "denied") setMessage(`Notifications are off for ${BRAND_NAME} in your phone's settings.`);
   }
 
   async function handleRelease() {

@@ -107,7 +107,7 @@ export function Dashboard({
                   </span>
                   <span
                     className="relative h-2 min-w-0 flex-1 overflow-hidden rounded-full"
-                    style={{ backgroundColor: "#241d14" }}
+                    style={{ backgroundColor: "#1b2a21" }}
                   >
                     <span
                       className="absolute inset-y-0 left-0 rounded-full"
@@ -129,7 +129,7 @@ export function Dashboard({
             {[0, 1, 2].map((i) => (
               <li key={i} className="flex items-center gap-3">
                 <span className="w-[104px] shrink-0 text-xs text-muted/50">—</span>
-                <span className="h-2 min-w-0 flex-1 rounded-full" style={{ backgroundColor: "#241d14" }} />
+                <span className="h-2 min-w-0 flex-1 rounded-full" style={{ backgroundColor: "#1b2a21" }} />
                 <span className="w-10 shrink-0" />
               </li>
             ))}
@@ -149,7 +149,7 @@ export function Dashboard({
               <li
                 key={row.userBottleId}
                 className="flex items-stretch gap-[13px] rounded-2xl border px-3.5 py-3"
-                style={{ borderColor: "#2e2519", background: "rgba(244,236,221,.03)" }}
+                style={{ borderColor: "#26392d", background: "rgba(238,231,214,.03)" }}
               >
                 <FillSpine level={row.fillLevel} tone={spineTone(row.bottleId)} className="self-stretch" />
                 <Link href={`/bottles/${row.bottleId}`} className="min-w-0 flex-1 self-center">

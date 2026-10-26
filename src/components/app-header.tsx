@@ -6,6 +6,7 @@ import { BookOpen, Search } from "lucide-react";
 import { UserAvatar } from "@/components/user-avatar";
 import { BackButton } from "@/components/back-button";
 import { isChromeless, isTabRoute, parentRoute } from "@/lib/app-routes";
+import { BrandLockup } from "@/components/brand-mark";
 
 /**
  * Global slim header, rendered once from the root layout above every page.
@@ -44,12 +45,9 @@ export function AppHeader({
         {isTabRoute(pathname) ? (
           <Link
             href="/"
-            className="font-display text-xl font-semibold italic tracking-tight text-foreground rounded-xl focus-visible:ring-2 focus-visible:ring-accent/60"
+            className="font-display text-xl font-semibold tracking-tight text-foreground rounded-xl focus-visible:ring-2 focus-visible:ring-accent/60"
           >
-            <span aria-hidden className="mr-1.5">
-              🥃
-            </span>
-            Whaikey
+            <BrandLockup size={20} />
           </Link>
         ) : (
           <BackButton fallback={parentRoute(pathname, { signedIn: Boolean(user), profileHandle })} />

@@ -1,3 +1,4 @@
+import { BRAND_NAME } from "@/lib/brand";
 /**
  * On-device scan guidance: everything here runs locally against camera
  * frames — no network, no model. The detect loop samples a downscaled frame,
@@ -162,7 +163,7 @@ export function guidanceFor(
     return { kind: "warn", message: "Hold steady…" };
   }
   if (!barcodeCapable) {
-    return { kind: "hint", message: "Point at the label — Whaikey reads it automatically" };
+    return { kind: "hint", message: `Point at the label — ${BRAND_NAME} reads it automatically` };
   }
   if (msSinceDetection >= MOVE_CLOSER_AFTER_MS) {
     return { kind: "hint", message: "Move closer — fill the frame with the barcode" };

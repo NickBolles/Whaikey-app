@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { share } from "@/lib/native/share";
+import { BRAND_SLUG } from "@/lib/brand";
 
 /** "shared" | "cancelled" (the person closed the sheet — stop there) | "unsupported" (fall back to the link). */
 async function shareImageFile(url: string, title: string): Promise<"shared" | "cancelled" | "unsupported"> {
@@ -9,7 +10,7 @@ async function shareImageFile(url: string, title: string): Promise<"shared" | "c
     const nav = navigator as Navigator & { canShare?: (data: ShareData) => boolean };
     if (typeof nav.share !== "function" || typeof nav.canShare !== "function") return "unsupported";
     const blob = await (await fetch(url)).blob();
-    const file = new File([blob], "whaikey-card.png", { type: "image/png" });
+    const file = new File([blob], `${BRAND_SLUG}-card.png`, { type: "image/png" });
     if (!nav.canShare({ files: [file] })) return "unsupported";
     await nav.share({ files: [file], title });
     return "shared";

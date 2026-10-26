@@ -14,10 +14,11 @@ import { leafLabel } from "@/lib/flavor-wheel";
 import { share } from "@/lib/native/share";
 import { FlavorChip } from "@/components/flavor-chip";
 import { UserAvatar } from "@/components/user-avatar";
+import { BRAND_NAME } from "@/lib/brand";
 
 /** Bars scale against a full-intensity (3) descriptor. */
 const MAX_INTENSITY = 3;
-const YOU_COLOR = "#e8a13c";
+const YOU_COLOR = "#d27b3e";
 const THEM_COLOR = "#6b7f8a";
 
 const SOURCE_META: Record<CompareSource, { name: string; short: string; empty: string }> = {
@@ -93,7 +94,7 @@ export function CompareClient({ comparison }: { comparison: BottleComparison }) 
       const url = new URL(body.path, window.location.origin).toString();
       const outcome = await share({
         title: `My ${comparison.bottleName} note`,
-        text: "How my tasting note reads — from Whaikey.",
+        text: `How my tasting note reads — from ${BRAND_NAME}.`,
         url,
         dialogTitle: "Share comparison",
       });
@@ -164,7 +165,7 @@ export function CompareClient({ comparison }: { comparison: BottleComparison }) 
                   </span>
                   <span
                     className="relative h-5 min-w-0 flex-1 overflow-hidden rounded-[6px]"
-                    style={{ backgroundColor: "#221a12" }}
+                    style={{ backgroundColor: "#1b2a21" }}
                     aria-label={`${leafLabel(row.leafId)}: you ${row.mine}, them ${row.theirs}`}
                   >
                     <span
