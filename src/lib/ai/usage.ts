@@ -92,6 +92,12 @@ let RATES: Record<string, DatedRate[]> = {
   // `anthropic/claude-sonnet-4` on the OpenRouter path, which normalises here.
   "claude-sonnet-4-6": [{ from: SINCE_FIRST_ROW, input: 3, output: 15 }],
   "claude-sonnet-4": [{ from: SINCE_FIRST_ROW, input: 3, output: 15 }],
+  // OpenAI, for in-app enrichment (src/lib/enrich/providers.ts): standard-tier
+  // rates from developers.openai.com/api/docs/pricing as of 2026-10-26. Keys
+  // are normalised ids ("gpt-6.1-sol" → "gpt-6-1-sol"). Cached input bills at
+  // 0.1x, which CACHE_READ_MULTIPLIER already applies.
+  "gpt-6-luna": [{ from: "2026-10-26", input: 0.1, output: 0.5 }],
+  "gpt-6-1-sol": [{ from: "2026-10-26", input: 2, output: 10 }],
 };
 
 const DEFAULT_RATES = RATES;

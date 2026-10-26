@@ -133,4 +133,35 @@ describe("fetchWhiskyEditionCandidates when the source is gone", () => {
       new Response(parked, { status: 200, headers: { "content-type": "application/json" } })) as unknown as typeof fetch;
     await expect(fetchWhiskyEditionCandidates(fetchImpl)).rejects.toBeInstanceOf(SourceUnavailableError);
   });
+
+  // Since Oct 2026 the lapsed host refuses the TLS handshake: undici rejects
+  // with TypeError("fetch failed") and the reason in `cause`.
+  it("treats a refused TLS handshake (fetch failed) as unavailable, naming the cause", async () => {
+    const fetchImpl = (async () => {
+      throw new TypeError("fetch failed", {
+        cause: Object.assign(new Error("ssl/tls alert handshake failure"), {
+          code: "ERR_SSL_SSL/TLS_ALERT_HANDSHAKE_FAILURE",
+        }),
+      });
+    }) as unknown as typeof fetch;
+    const err = await fetchWhiskyEditionCandidates(fetchImpl).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(SourceUnavailableError);
+    expect((err as Error).message).toMatch(/unreachable.*ERR_SSL_SSL\/TLS_ALERT_HANDSHAKE_FAILURE/);
+  });
+
+  it("treats a domain that no longer resolves as unavailable", async () => {
+    const fetchImpl = (async () => {
+      throw new TypeError("fetch failed", { cause: Object.assign(new Error("getaddrinfo ENOTFOUND"), { code: "ENOTFOUND" }) });
+    }) as unknown as typeof fetch;
+    await expect(fetchWhiskyEditionCandidates(fetchImpl)).rejects.toBeInstanceOf(SourceUnavailableError);
+  });
+
+  it("still fails loudly on errors that are not the network", async () => {
+    const fetchImpl = (async () => {
+      throw new RangeError("bug in our code");
+    }) as unknown as typeof fetch;
+    const err = await fetchWhiskyEditionCandidates(fetchImpl).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(RangeError);
+    expect(err).not.toBeInstanceOf(SourceUnavailableError);
+  });
 });

@@ -61,6 +61,7 @@ const INVENTORY: Record<string, Verdict> = {
   user: { disclosed: "the name, email address and" },
   session: { disclosed: "a session token plus the IP address" },
   account: { disclosed: "the tokens the provider issues for it" },
+  auth_provider_events: { disclosed: "we keep that notice from Apple with your account" },
   verification: { notPersonal: "Better Auth's short-lived sign-in challenges, not user content." },
   native_auth_requests: {
     disclosed: "native sign-in codes are deleted the moment they are used",
@@ -76,6 +77,8 @@ const INVENTORY: Record<string, Verdict> = {
   tasting_notes: { disclosed: "pours, ratings, tasting", sharedWith: ["pours"] },
   user_bottles: { disclosed: "the bottles on your shelf, and what you paid" },
   pour_shares: { disclosed: "any share links you create" },
+  tags: { disclosed: "private tags you add to pours", sharedWith: ["pour_tags"] },
+  pour_tags: { disclosed: "private tags you add to pours", sharedWith: ["tags"] },
   // Was `notPersonal: "Tier definitions … identical for everyone"` — a claim
   // about the schema that the schema contradicts (user_id, family, value,
   // tier, achieved_at: one row per person per badge). See the file docstring:
@@ -172,6 +175,13 @@ const INVENTORY: Record<string, Verdict> = {
       "family, value, total, refreshed_at: counts of verified catalog bottles per country, region and style; no user column, and nothing a person logs is counted.",
   },
   bottle_verifications: { notPersonal: "Catalog QA state." },
+  bottle_flavor_provenance: { notPersonal: "Catalog flavor-profile provenance." },
+  bottle_enrichment_jobs: { notPersonal: "Catalog enrichment queue state for a bottle." },
+  bottle_enrichment_events: { notPersonal: "Progress lines for a bottle's catalog enrichment." },
+  enrichment_calls: { notPersonal: "Token counts per catalog enrichment call." },
+  enrichment_reservations: { notPersonal: "In-flight catalog enrichment spend holds." },
+  enrichment_runs: { notPersonal: "Catalog enrichment batch runs." },
+  enrichment_settings: { notPersonal: "Operator enrichment settings." },
   catalog_sources: { notPersonal: "Where catalog data came from." },
   bottle_resources: { notPersonal: "Links attached to catalog rows." },
   bottle_claims: { notPersonal: "Sourced factual claims about a bottle." },

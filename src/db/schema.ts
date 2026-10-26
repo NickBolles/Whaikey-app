@@ -472,6 +472,13 @@ export const pours = pgTable(
      * unique index below only ever constrains real keys.
      */
     clientId: text("client_id"),
+    /**
+     * Last time the owner edited the entry itself (rating, serving, note).
+     * Null for a pour never edited. The snapshot columns above are never
+     * touched by an edit — they describe the moment of the pour, and an
+     * edit is not that moment.
+     */
+    editedAt: timestamp("edited_at", { withTimezone: true, mode: "date" }),
     createdAt: createdAt(),
   },
   (t) => [
@@ -481,6 +488,45 @@ export const pours = pgTable(
     index("pours_bottle_idx").on(t.bottleId),
     uniqueIndex("pours_user_client_idx").on(t.userId, t.clientId),
   ],
+);
+
+/**
+ * A person's own words for grouping pours ("tasting night", "gift", "blind").
+ * Private to their author: never projected to another user, never feeds a
+ * community number. `key` is the normalized form (trimmed, lower-cased) that
+ * makes "Gift" and "gift " one tag; `name` keeps the spelling first used.
+ */
+export const tags = pgTable(
+  "tags",
+  {
+    id: id(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    key: text("key").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("tags_user_key_idx").on(t.userId, t.key)],
+);
+
+/** Which of the author's tags are on which of their pours. */
+export const pourTags = pgTable(
+  "pour_tags",
+  {
+    pourId: text("pour_id")
+      .notNull()
+      .references(() => pours.id, { onDelete: "cascade" }),
+    tagId: text("tag_id")
+      .notNull()
+      .references(() => tags.id, { onDelete: "cascade" }),
+    /** Denormalized owner, so deletion and export slice without a join. */
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.pourId, t.tagId] }), index("pour_tags_tag_idx").on(t.tagId), index("pour_tags_user_idx").on(t.userId)],
 );
 
 /**
@@ -1437,6 +1483,182 @@ export const bottleClaims = pgTable(
   ],
 );
 
+/**
+ * Provenance + confidence tier for `bottles.flavorProfile`
+ * (src/lib/ingest/flavor-tiers.ts, docs/DATA_SOURCES.md §2.4). One row per
+ * bottle whose profile was written by the tiered backfill. Tiers rank
+ * keyword < model < model_web < community, and a write only lands over an
+ * equal-or-lower tier — never over a higher one. A profile with NO row here
+ * predates tracking (seed data or the old enrich step) and is never
+ * overwritten by the backfill.
+ */
+export const FLAVOR_PROFILE_TIERS = ["keyword", "model", "model_web", "community"] as const;
+export type FlavorProfileTier = (typeof FLAVOR_PROFILE_TIERS)[number];
+
+export const bottleFlavorProvenance = pgTable(
+  "bottle_flavor_provenance",
+  {
+    bottleId: text("bottle_id").primaryKey().references(() => bottles.id, { onDelete: "cascade" }),
+    tier: text("tier").$type<FlavorProfileTier>().notNull(),
+    /** 0-1; recorded for consumers that want to down-weight estimates. */
+    confidence: doublePrecision("confidence").notNull(),
+    /** "keyword-matcher", "community-notes", or "codex:<model>". */
+    method: text("method").notNull(),
+    model: text("model"),
+    /** "free" | "cheap" | "heavy" — the backfill pass that wrote the profile. */
+    pass: text("pass").notNull(),
+    /** Hash of the inputs the profile was derived from (free pass re-runs only on change). */
+    inputHash: text("input_hash"),
+    enrichedAt: timestamp("enriched_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+  },
+  (t) => [index("bottle_flavor_provenance_tier_idx").on(t.tier)],
+);
+
+/**
+ * In-app enrichment queue (src/lib/enrich/, docs/DATA_SOURCES.md §2.4c).
+ *
+ * A bottle a user adds gets one job; a Vercel function runs it one step per
+ * invocation (keyword → quick model → web model, API-key provider) and the
+ * bottle page polls the events to fill the card in live. Scheduled refreshes
+ * reuse the same rows (reason "refresh"). No user column: the requester is the
+ * bottle's own `submittedBy`, so the queue is catalog state and goes when the
+ * bottle does.
+ */
+export const ENRICHMENT_JOB_STATES = ["queued", "running", "done", "failed"] as const;
+export type EnrichmentJobState = (typeof ENRICHMENT_JOB_STATES)[number];
+export const ENRICHMENT_STEPS = ["keyword", "quick", "web"] as const;
+export type EnrichmentStep = (typeof ENRICHMENT_STEPS)[number];
+
+/** What the web step found, kept for the card (never written over user data). */
+export interface EnrichmentResult {
+  notes?: { nose: string | null; palate: string | null; finish: string | null; leaves: string[] };
+  sources?: Array<{ url: string; label: string }>;
+  /** Columns the job filled because they were empty. */
+  filled?: string[];
+  profileTier?: FlavorProfileTier | null;
+}
+
+export const bottleEnrichmentJobs = pgTable(
+  "bottle_enrichment_jobs",
+  {
+    id: id(),
+    bottleId: text("bottle_id").notNull().references(() => bottles.id, { onDelete: "cascade" }),
+    /** "new_bottle" | "scan" | "import" | "refresh" | "admin" — why the job exists. */
+    reason: text("reason").notNull(),
+    state: text("state").$type<EnrichmentJobState>().notNull().default("queued"),
+    /** Steps finished so far, in order. */
+    stepsDone: jsonb("steps_done").$type<EnrichmentStep[]>().notNull().default([]),
+    /** Why a queued job is parked ("budget" | "paused" | "disabled" | "error"), so the card can say so. */
+    waitingReason: text("waiting_reason"),
+    attempts: integer("attempts").notNull().default(0),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true, mode: "date" }),
+    /** Not claimable before this (a paused or failed attempt backs off). */
+    notBefore: timestamp("not_before", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+    result: jsonb("result").$type<EnrichmentResult>(),
+    error: text("error"),
+    lastSeq: integer("last_seq").notNull().default(0),
+    createdAt: createdAt(),
+    claimedAt: timestamp("claimed_at", { withTimezone: true, mode: "date" }),
+    finishedAt: timestamp("finished_at", { withTimezone: true, mode: "date" }),
+  },
+  (t) => [
+    uniqueIndex("bottle_enrichment_jobs_bottle_uq").on(t.bottleId),
+    index("bottle_enrichment_jobs_state_idx").on(t.state, t.notBefore),
+  ],
+);
+
+export const bottleEnrichmentEvents = pgTable(
+  "bottle_enrichment_events",
+  {
+    id: id(),
+    jobId: text("job_id").notNull().references(() => bottleEnrichmentJobs.id, { onDelete: "cascade" }),
+    /** 1, 2, 3… per job; the client polls with `after=<seq>`. */
+    seq: integer("seq").notNull(),
+    /** queued | claimed | step_started | step_done | found | waiting | done | failed */
+    kind: text("kind").notNull(),
+    step: text("step"),
+    message: text("message").notNull(),
+    data: jsonb("data").$type<Record<string, unknown>>(),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("bottle_enrichment_events_job_seq_uq").on(t.jobId, t.seq)],
+);
+
+/**
+ * One row per model call the enrichment made: tokens and hosted searches, so
+ * the admin page can show spend per day/run and the daily cap can hard-stop.
+ * Dollars are derived at read time from `src/lib/ai/usage.ts`'s dated rates.
+ */
+export const enrichmentCalls = pgTable(
+  "enrichment_calls",
+  {
+    id: id(),
+    jobId: text("job_id").references(() => bottleEnrichmentJobs.id, { onDelete: "set null" }),
+    runId: text("run_id").references(() => enrichmentRuns.id, { onDelete: "set null" }),
+    /** "quick" | "web" | "batch-quick" | "batch-web" */
+    step: text("step").notNull(),
+    provider: text("provider").notNull(),
+    model: text("model").notNull(),
+    bottles: integer("bottles").notNull().default(1),
+    inputTokens: integer("input_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull().default(0),
+    cachedInputTokens: integer("cached_input_tokens").notNull().default(0),
+    webSearches: integer("web_searches").notNull().default(0),
+    ok: boolean("ok").notNull(),
+    error: text("error"),
+    latencyMs: integer("latency_ms"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("enrichment_calls_created_idx").on(t.createdAt), index("enrichment_calls_run_idx").on(t.runId)],
+);
+
+/** A scheduled or operator-started batch chunk (src/lib/enrich/batch.ts). */
+export const enrichmentRuns = pgTable(
+  "enrichment_runs",
+  {
+    id: id(),
+    /** "cron" | "admin" */
+    trigger: text("trigger").notNull(),
+    tiers: jsonb("tiers").$type<string[]>().notNull(),
+    /** "running" | "done" | "stopped" | "failed" */
+    state: text("state").notNull(),
+    counts: jsonb("counts").$type<Record<string, number>>().notNull().default({}),
+    stopReason: text("stop_reason"),
+    error: text("error"),
+    startedAt: timestamp("started_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+    finishedAt: timestamp("finished_at", { withTimezone: true, mode: "date" }),
+  },
+  (t) => [index("enrichment_runs_started_idx").on(t.startedAt)],
+);
+
+/** Operator settings for enrichment: one row, id "global". */
+export const enrichmentSettings = pgTable("enrichment_settings", {
+  id: text("id").primaryKey(),
+  paused: boolean("paused").notNull().default(false),
+  /** Hard daily stop for model spend, in estimated USD (UTC day). */
+  dailyBudgetUsd: doublePrecision("daily_budget_usd").notNull().default(2),
+  /** Resume point (bottle id) for the batched missing-profile tier. */
+  missingCursor: text("missing_cursor"),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+});
+
+/**
+ * In-flight spend holds: a model call reserves its worst-case estimate here
+ * (under an advisory lock) before it starts, and the hold is dropped once the
+ * call's usage is recorded. Concurrent calls therefore can't all pass the
+ * daily cap on the same remaining allowance. Holds expire, so a crashed call
+ * frees its slice. No user column.
+ */
+export const enrichmentReservations = pgTable("enrichment_reservations", {
+  id: text("id").primaryKey(),
+  usd: doublePrecision("usd").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+});
+
+export type BottleEnrichmentJob = typeof bottleEnrichmentJobs.$inferSelect;
+export type BottleEnrichmentEvent = typeof bottleEnrichmentEvents.$inferSelect;
+
 export const BOTTLE_MEDIA_KINDS = ["bottle", "distillery", "label"] as const;
 export type BottleMediaKind = (typeof BOTTLE_MEDIA_KINDS)[number];
 
@@ -1691,6 +1913,32 @@ export const nativeAuthCodes = pgTable(
     createdAt: createdAt(),
   },
   (t) => [index("native_auth_codes_expires_idx").on(t.expiresAt)],
+);
+
+/**
+ * What an identity provider told us about one of our accounts, server to
+ * server — today Sign in with Apple's notifications (consent revoked, Apple ID
+ * deleted, private-relay email turned off/on). `jti` is the provider's id for
+ * the notification and makes a redelivery a no-op. `consent-revoked` and
+ * `account-deleted` (alias `account-delete`) also sign the account out (its sessions are deleted) and
+ * stand as a flag on the account: the person told Apple to stop, and the app
+ * should know that when they come back.
+ */
+export const authProviderEvents = pgTable(
+  "auth_provider_events",
+  {
+    id: id(),
+    jti: text("jti").notNull().unique(),
+    providerId: text("provider_id").notNull(),
+    /** The provider's subject for the account (Apple's `sub`). */
+    providerAccountId: text("provider_account_id").notNull(),
+    /** Null when no account of ours is linked to that subject. */
+    userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
+    eventType: text("event_type").notNull(),
+    eventTime: timestamp("event_time", { withTimezone: true, mode: "date" }),
+    receivedAt: createdAt(),
+  },
+  (t) => [index("auth_provider_events_user_idx").on(t.userId)],
 );
 
 /**

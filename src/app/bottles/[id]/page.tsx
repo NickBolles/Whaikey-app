@@ -24,6 +24,12 @@ import { ShelfDetails } from "./shelf-details";
 import { originLabel } from "@/lib/origin";
 import { YourPours, type YourPourItem } from "./your-pours";
 import { PullQuote, isQuotable } from "@/components/pull-quote";
+import { appNow } from "@/lib/clock";
+import { getEnrichmentView, LIVE_REASONS } from "@/lib/enrich/queue";
+import { LiveEnrichment, SourcedNotes } from "@/components/live-enrichment";
+
+/** A finished job keeps its panel this long, so a refresh right after completion still shows it. */
+const LIVE_PANEL_LINGER_MS = 3 * 60_000;
 
 export const dynamic = "force-dynamic";
 
@@ -67,7 +73,7 @@ export default async function BottleDetailPage({
 
   const { bottle, distillery, communityStats, userBottle, pairings, resources, media } = detail;
 
-  const [submission, personal] = await Promise.all([
+  const [submission, personal, enrichment] = await Promise.all([
     // Only the submitter of a bottle still outside the shared catalog sees
     // where its review got to; `catalogVisibleTo` already guarantees nobody
     // else can reach this page for it.
@@ -86,7 +92,15 @@ export default async function BottleDetailPage({
           listPours(db, user.id, { bottleId: bottle.id, limit: 200 }),
         ])
       : null,
+    getEnrichmentView(db, bottle.id, user?.id),
   ]);
+  const enrichJob = enrichment?.job ?? null;
+  const showLive =
+    enrichJob != null &&
+    LIVE_REASONS.has(enrichJob.reason) &&
+    ((enrichJob.state !== "done" && enrichJob.state !== "failed") ||
+      (enrichJob.finishedAt != null && appNow().getTime() - Date.parse(enrichJob.finishedAt) < LIVE_PANEL_LINGER_MS));
+  const sourcedNotes = !showLive ? (enrichment?.fields.notes ?? null) : null;
 
   // Personal taste-match: cosine similarity of the signed palate vs this
   // bottle's flavor profile. Null (hidden) for signed-out users, users with no
@@ -214,6 +228,8 @@ export default async function BottleDetailPage({
         />
       )}
 
+      {showLive && enrichment && <LiveEnrichment bottleId={bottle.id} initial={enrichment} />}
+
       <SourceBackedResources bottleName={bottle.name} resources={resources} media={media} />
 
       {/* Price row */}
@@ -254,6 +270,17 @@ export default async function BottleDetailPage({
             {bottle.description}
           </p>
         )
+      )}
+
+      {/* Tasting notes summarised from published sources by the live
+          enrichment's web step — labelled as such, with the sources linked. */}
+      {sourcedNotes && (
+        <section aria-label="Published tasting notes">
+          <h2 className="section-label mb-2">Tasting notes</h2>
+          <div className="card p-3">
+            <SourcedNotes notes={sourcedNotes} sources={enrichment?.fields.sources ?? null} />
+          </div>
+        </section>
       )}
 
       {/* Flavor profile */}

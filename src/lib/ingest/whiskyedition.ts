@@ -1,6 +1,6 @@
 import type { WhiskeyCategory } from "@/db/schema";
 import { cleanProductName, looksFlavored, slugify } from "./normalize";
-import { readJsonResponse, type CatalogCandidate } from "./types";
+import { fetchSource, readJsonResponse, type CatalogCandidate } from "./types";
 
 /**
  * WHISKY:EDITION review-catalog ingest (docs/SOURCING_AT_SCALE.md §3.2).
@@ -124,7 +124,9 @@ export async function fetchWhiskyEditionCandidates(
   const reviews: WhiskyEditionReview[] = [];
   for (let page = 1; page <= MAX_PAGES; page++) {
     const url = `${WHISKY_EDITION_API_URL}?page=${page}`;
-    const res = await fetchImpl(url);
+    // Since Oct 2026 the lapsed host refuses the TLS handshake outright;
+    // fetchSource reports that as unavailable (degraded) too.
+    const res = await fetchSource(fetchImpl, url, "whiskyedition");
     if (!res.ok) {
       throw new Error(`WHISKY:EDITION download failed: HTTP ${res.status} from ${url}`);
     }

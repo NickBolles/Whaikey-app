@@ -52,7 +52,7 @@ export interface UpcLookup {
 export type ScanDecision =
   | { kind: "exact"; upc: string; bottle: ScanBottle; alternatives: ScanBottle[] }
   | { kind: "choose"; upc: string; options: ScanBottle[]; externalName: string | null }
-  | { kind: "miss"; upc: string };
+  | { kind: "miss"; upc: string; externalName: string | null };
 
 export function decideScan(lookup: UpcLookup): ScanDecision {
   const matches = Array.isArray(lookup.matches) ? lookup.matches : [];
@@ -66,7 +66,7 @@ export function decideScan(lookup: UpcLookup): ScanDecision {
   if (candidates.length > 0) {
     return { kind: "choose", upc: lookup.upc, options: candidates.slice(0, 3), externalName: lookup.externalName ?? null };
   }
-  return { kind: "miss", upc: lookup.upc };
+  return { kind: "miss", upc: lookup.upc, externalName: lookup.externalName ?? null };
 }
 
 /** "Buffalo Trace · Kentucky · 46.5%" — the one-line identity under a bottle name. */

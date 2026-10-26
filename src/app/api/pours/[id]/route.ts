@@ -1,7 +1,5 @@
 import { NextResponse } from "next/server";
-import { z } from "zod";
 import { getDb } from "@/db";
-import { POUR_VISIBILITIES } from "@/db/schema";
 import { requireUser, withErrorHandling } from "@/lib/session";
 import {
   PendingBottleError,
@@ -9,12 +7,11 @@ import {
   deletePour,
   getPour,
   ModeratedError,
-  updatePourVisibility,
+  pourEditSchema,
+  updatePourEntry,
 } from "@/lib/pours";
 
 type Ctx = { params: Promise<{ id: string }> };
-
-const pourPatchSchema = z.object({ visibility: z.enum(POUR_VISIBILITIES) });
 
 export async function GET(_req: Request, ctx: Ctx) {
   return withErrorHandling(async () => {
@@ -28,14 +25,18 @@ export async function GET(_req: Request, ctx: Ctx) {
   });
 }
 
-/** PATCH /api/pours/[id] { visibility } — owner-only social visibility change. */
+/**
+ * PATCH /api/pours/[id] — owner-only edit of the journal entry: any of
+ * { rating, servingStyle, note, visibility }. Responds with the entry and
+ * `previous` (the pre-edit values of the fields sent) for the client's Undo.
+ */
 export async function PATCH(req: Request, ctx: Ctx) {
   return withErrorHandling(async () => {
     const user = await requireUser();
     const { id } = await ctx.params;
 
     const body = await req.json().catch(() => null);
-    const parsed = pourPatchSchema.safeParse(body);
+    const parsed = pourEditSchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json(
         {
@@ -50,7 +51,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
 
     let updated;
     try {
-      updated = await updatePourVisibility(getDb(), user.id, id, parsed.data.visibility);
+      updated = await updatePourEntry(getDb(), user.id, id, parsed.data);
     } catch (err) {
       if (err instanceof SocialDisabledError) {
         return NextResponse.json({ error: "social_disabled" }, { status: 409 });
@@ -79,7 +80,26 @@ export async function PATCH(req: Request, ctx: Ctx) {
     if (!updated) {
       return NextResponse.json({ error: "Pour not found" }, { status: 404 });
     }
-    return NextResponse.json({ visibility: updated.visibility });
+    return NextResponse.json({
+      visibility: updated.pour.visibility,
+      pour: {
+        id: updated.pour.id,
+        rating: updated.pour.rating,
+        servingStyle: updated.pour.servingStyle,
+        visibility: updated.pour.visibility,
+        editedAt: updated.pour.editedAt?.toISOString() ?? null,
+      },
+      note: updated.note
+        ? {
+            nose: updated.note.nose,
+            palate: updated.note.palate,
+            finish: updated.note.finish,
+            freeform: updated.note.freeform,
+            flavorTags: updated.note.flavorTags,
+          }
+        : null,
+      previous: updated.previous,
+    });
   });
 }
 

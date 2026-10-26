@@ -39,12 +39,15 @@ import {
   pourShares,
   pours,
   pushDevices,
+  authProviderEvents,
   reactions,
   recExplanations,
   reports,
   session,
   shareCardKeys,
   tastingNotes,
+  tags,
+  pourTags,
   upcConfirmations,
   user,
   userBottles,
@@ -218,6 +221,28 @@ export const ACCOUNT_DATA: readonly DataSlice[] = [
       "Single-use credentials that live for sixty seconds. There is nothing in them you wrote, and a copy would be a key.",
   },
   {
+    key: "auth_provider_events",
+    table: authProviderEvents,
+    description: "Notices Apple sent us about your Sign in with Apple (stopped using it, Apple ID deleted, relay email off/on).",
+    onDelete: "deleted",
+    why: "It describes your account to us and nothing else; with the account gone there is nothing for it to describe.",
+    where: (_db, userId) => eq(authProviderEvents.userId, userId),
+    export: {
+      columns: ["providerId", "eventType", "eventTime", "receivedAt"],
+      rows: (db, userId) =>
+        db
+          .select({
+            providerId: authProviderEvents.providerId,
+            eventType: authProviderEvents.eventType,
+            eventTime: authProviderEvents.eventTime,
+            receivedAt: authProviderEvents.receivedAt,
+          })
+          .from(authProviderEvents)
+          .where(eq(authProviderEvents.userId, userId))
+          .orderBy(authProviderEvents.receivedAt, authProviderEvents.id),
+    },
+  },
+  {
     key: "push_devices",
     table: pushDevices,
     description: "Devices registered for notifications.",
@@ -365,6 +390,41 @@ export const ACCOUNT_DATA: readonly DataSlice[] = [
           .innerJoin(pours, eq(pours.id, tastingNotes.pourId))
           .where(eq(pours.userId, userId))
           .orderBy(tastingNotes.createdAt, tastingNotes.id),
+    },
+  },
+  {
+    key: "tags",
+    table: tags,
+    description: "The private tags you made for your pours.",
+    onDelete: "deleted",
+    why: "Yours alone: never shown to anyone else and never counted in anything shared.",
+    where: (_db, userId) => eq(tags.userId, userId),
+    export: {
+      columns: ["name", "createdAt"],
+      rows: (db, userId) =>
+        db
+          .select({ name: tags.name, createdAt: tags.createdAt })
+          .from(tags)
+          .where(eq(tags.userId, userId))
+          .orderBy(tags.createdAt, tags.id),
+    },
+  },
+  {
+    key: "pour_tags",
+    table: pourTags,
+    description: "Which of your tags is on which pour.",
+    onDelete: "deleted",
+    why: "Goes with its pour and its tag.",
+    where: (_db, userId) => eq(pourTags.userId, userId),
+    export: {
+      columns: ["pourId", "tag", "createdAt"],
+      rows: (db, userId) =>
+        db
+          .select({ pourId: pourTags.pourId, tag: tags.name, createdAt: pourTags.createdAt })
+          .from(pourTags)
+          .innerJoin(tags, eq(tags.id, pourTags.tagId))
+          .where(eq(pourTags.userId, userId))
+          .orderBy(pourTags.createdAt, pourTags.pourId),
     },
   },
   {
@@ -1395,6 +1455,13 @@ export const NOT_LINKED: Readonly<Record<string, string>> = {
   price_history: "Observed market prices; no user column.",
   catalog_totals: "Counts of verified catalog bottles per country, region and style; no user column, and nothing a person logs is counted.",
   bottle_verifications: "Catalog QA evidence; no user column.",
+  bottle_flavor_provenance: "Catalog flavor-profile provenance (tier, model, date); no user column.",
+  bottle_enrichment_jobs: "Catalog enrichment queue for a bottle (state, steps, sourced notes); no user column — the requester is the bottle's own submitter, and the job is deleted with the bottle.",
+  bottle_enrichment_events: "Progress lines for a bottle's enrichment job; no user column.",
+  enrichment_calls: "Token and search counts per enrichment model call; no user column.",
+  enrichment_reservations: "In-flight enrichment spend holds (estimated USD, expiry); no user column.",
+  enrichment_runs: "Scheduled/operator enrichment batch runs; no user column.",
+  enrichment_settings: "Operator enrichment settings (pause, daily budget); no user column.",
   catalog_sources: "Where catalog data came from; no user column.",
   bottle_resources: "Links attached to catalog rows; no user column.",
   bottle_claims: "Sourced facts about a bottle; no user column.",

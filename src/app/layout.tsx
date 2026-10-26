@@ -11,6 +11,8 @@ import { PATH_HEADER } from "@/proxy";
 import { AppHeader } from "@/components/app-header";
 import { AppNav } from "@/components/app-nav";
 import { NativeShell } from "@/components/native-shell";
+import { PushOffer } from "@/components/push-offer";
+import { isPushConfigured } from "@/lib/push/send";
 import { NavHistoryTracker } from "@/components/nav-history-tracker";
 import { ToastProvider } from "@/components/toast";
 
@@ -127,6 +129,8 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
           {/* The queue lives in per-origin storage, so the flush has to know
               whose pours it is allowed to send. */}
           <NativeShell userId={user?.id ?? null} />
+          {/* Only where a buzz can actually be delivered: never spend the one OS prompt on an inbox-only deploy. */}
+          {user && isPushConfigured() && <PushOffer />}
           {/* Above the header, which unmounts on chromeless routes and would
               otherwise miss the pages visited there. */}
           <NavHistoryTracker />

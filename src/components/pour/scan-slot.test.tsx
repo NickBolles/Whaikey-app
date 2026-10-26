@@ -8,7 +8,7 @@ vi.mock("@/lib/native/haptics", () => ({ haptic: vi.fn() }));
 const identifyLabel = vi.fn();
 vi.mock("@/lib/label-scan", () => ({ identifyLabel: (...args: unknown[]) => identifyLabel(...args) }));
 
-import { PourScanSlot } from "./scan-slot";
+import { CAMERA_AUTO_PAUSE_MS, CAMERA_MAX_SESSION_MS, PourScanSlot, teachMessage } from "./scan-slot";
 
 const blantons = { id: "blantons", name: "Blanton's Original", distillery: "Buffalo Trace", category: "bourbon", region: "Kentucky", abv: 46.5, ageYears: null };
 
@@ -136,12 +136,72 @@ describe("PourScanSlot — live barcode", () => {
     expect(JSON.parse(String(confirm?.[1]?.body))).toEqual({ upc: "080244003302", bottleId: "blantons" });
   });
 
-  it("an unknown barcode points at teaching the scanner", async () => {
+  it("an unknown barcode gets a breakdown card: what was read, Pick bottle, and Teach this barcode", async () => {
     fakeCamera(["080244003302"]);
-    stubFetch((url) => (url === "/api/scan/upc" ? { upc: "080244003302", matches: [], candidates: [], externalName: null } : undefined));
-    render(<PourScanSlot onPick={vi.fn()} />);
-    expect(await screen.findByText(/We don’t know barcode 080244003302 yet/, {}, { timeout: 3000 })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "teach the scanner" })).toHaveAttribute("href", "/scan");
+    const fetchMock = stubFetch((url) => {
+      if (url === "/api/scan/upc") return { upc: "080244003302", matches: [], candidates: [], externalName: "BLANTONS SB 750" };
+      if (url.includes("q=BLANTONS")) return { results: [blantons] };
+      if (url === "/api/scan/confirm") return { teach: { state: "pending", confirmations: 1, required: 2, taught: false } };
+      return undefined;
+    });
+    const onPick = vi.fn();
+    const onNotice = vi.fn();
+    render(<PourScanSlot onPick={onPick} onNotice={onNotice} />);
+    const card = await screen.findByRole("group", { name: "Unknown barcode" }, { timeout: 3000 });
+    expect(card).toHaveTextContent("080244003302");
+    expect(card).toHaveTextContent("BLANTONS SB 750");
+    expect(card).toHaveTextContent(/not read yet/);
+    expect(screen.getByRole("switch", { name: /Teach this barcode/ })).toHaveAttribute("aria-checked", "true");
+
+    // Pick bottle searches with what the barcode lookup said and focuses the box.
+    fireEvent.click(screen.getByRole("button", { name: /Pick bottle/ }));
+    expect(screen.getByPlaceholderText(/or type a name/)).toHaveFocus();
+    fireEvent.click(await screen.findByRole("button", { name: /Blanton's Original/ }, { timeout: 2000 }));
+    expect(onPick).toHaveBeenCalledWith(blantons, { via: "search" });
+    const confirm = fetchMock.mock.calls.find(([u]) => String(u) === "/api/scan/confirm");
+    expect(JSON.parse(String(confirm?.[1]?.body))).toEqual({ upc: "080244003302", bottleId: "blantons" });
+    await waitFor(() => expect(onNotice).toHaveBeenCalledWith(expect.stringMatching(/1 more confirmation adds it for everyone/)));
+    expect(screen.queryByRole("group", { name: "Unknown barcode" })).not.toBeInTheDocument();
+  });
+
+  it("with Teach switched off, picking for an unknown barcode teaches nothing", async () => {
+    fakeCamera(["080244003302"]);
+    const fetchMock = stubFetch((url) => {
+      if (url === "/api/scan/upc") return { upc: "080244003302", matches: [], candidates: [], externalName: null };
+      if (url.startsWith("/api/pours")) return { pours: [{ bottleId: "b2", bottleName: "Lagavulin 16" }] };
+      return undefined;
+    });
+    const onPick = vi.fn();
+    render(<PourScanSlot onPick={onPick} />);
+    await screen.findByRole("group", { name: "Unknown barcode" }, { timeout: 3000 });
+    fireEvent.click(screen.getByRole("switch", { name: /Teach this barcode/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Lagavulin 16" }));
+    expect(onPick).toHaveBeenCalledWith({ id: "b2", name: "Lagavulin 16" }, { via: "recent" });
+    expect(fetchMock.mock.calls.some(([u]) => String(u) === "/api/scan/confirm")).toBe(false);
+  });
+
+  it("Read the label on the card shows the OCR text and its matches teach the barcode", async () => {
+    fakeCamera(["080244003302"]);
+    const fetchMock = stubFetch((url) =>
+      url === "/api/scan/upc" ? { upc: "080244003302", matches: [], candidates: [], externalName: null } : undefined,
+    );
+    identifyLabel.mockResolvedValue({ via: "ocr", candidates: [blantons], guess: "Blanton's Single Barrel", aiUnavailable: null });
+    const onPick = vi.fn();
+    render(<PourScanSlot onPick={onPick} />);
+    await screen.findByRole("group", { name: "Unknown barcode" }, { timeout: 3000 });
+    const video = document.querySelector("video")!;
+    Object.defineProperty(video, "videoWidth", { configurable: true, value: 640 });
+    Object.defineProperty(video, "videoHeight", { configurable: true, value: 480 });
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
+    vi.spyOn(HTMLCanvasElement.prototype, "toDataURL").mockReturnValue("data:image/jpeg;base64,AAAA");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Read the label/ }));
+    });
+    expect(screen.getByRole("group", { name: "Unknown barcode" })).toHaveTextContent("“Blanton's Single Barrel”");
+    fireEvent.click(await screen.findByRole("button", { name: /Blanton's Original/ }));
+    expect(onPick).toHaveBeenCalledWith(expect.objectContaining({ id: "blantons" }), { via: "label" });
+    const bodies = fetchMock.mock.calls.filter(([u]) => String(u) === "/api/scan/confirm").map(([, i]) => JSON.parse(String(i?.body)));
+    expect(bodies).toEqual([{ upc: "080244003302", bottleId: "blantons" }]);
   });
 
   it("a lookup failure falls back to typing", async () => {
@@ -197,5 +257,85 @@ describe("PourScanSlot — live barcode", () => {
     await screen.findByText("Snap the label to identify it.");
     view.unmount();
     expect(stop).toHaveBeenCalled();
+  });
+});
+
+describe("PourScanSlot — keep scanning", () => {
+  it("offers Keep scanning while the camera runs; Stop camera turns it off and stops the stream", async () => {
+    const { stop } = fakeCamera(null);
+    stubFetch(() => undefined);
+    const onKeep = vi.fn();
+    const view = render(<PourScanSlot onPick={vi.fn()} keepScanning={false} onKeepScanningChange={onKeep} />);
+    const toggle = await screen.findByRole("button", { name: /Keep scanning/ });
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(toggle);
+    expect(onKeep).toHaveBeenLastCalledWith(true);
+    view.rerender(<PourScanSlot onPick={vi.fn()} keepScanning onKeepScanningChange={onKeep} />);
+    fireEvent.click(screen.getByRole("button", { name: /Stop camera/ }));
+    expect(stop).toHaveBeenCalled();
+    expect(onKeep).toHaveBeenLastCalledWith(false);
+    expect(await screen.findByText(/Camera paused to save battery/)).toBeInTheDocument();
+  });
+
+  it("compact mode is just the viewfinder, and a new round lets the same bottle be read again", async () => {
+    fakeCamera(["080244003302"]);
+    stubFetch((url) => (url === "/api/scan/upc" ? { upc: "080244003302", matches: [blantons], candidates: [], externalName: null } : undefined));
+    const onPick = vi.fn();
+    const view = render(<PourScanSlot onPick={onPick} compact keepScanning onKeepScanningChange={vi.fn()} />);
+    expect(screen.queryByPlaceholderText(/or type a name/)).not.toBeInTheDocument();
+    await waitFor(() => expect(onPick).toHaveBeenCalledTimes(1), { timeout: 3000 });
+    // Same code in frame: not read twice in one round.
+    await new Promise((r) => setTimeout(r, 700));
+    expect(onPick).toHaveBeenCalledTimes(1);
+    view.rerender(<PourScanSlot onPick={onPick} compact keepScanning onKeepScanningChange={vi.fn()} round={1} />);
+    await waitFor(() => expect(onPick).toHaveBeenCalledTimes(2), { timeout: 3000 });
+  });
+
+  it("pauses after the idle timeout and caps a session even while reads keep coming", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const { stop } = fakeCamera(null);
+      stubFetch(() => undefined);
+      render(<PourScanSlot onPick={vi.fn()} keepScanning onKeepScanningChange={vi.fn()} />);
+      await screen.findByRole("button", { name: /Stop camera/ });
+      await act(async () => {
+        vi.advanceTimersByTime(CAMERA_AUTO_PAUSE_MS + 10);
+      });
+      expect(stop).toHaveBeenCalled();
+      expect(screen.getByText(/tap Resume for the next bottle/)).toBeInTheDocument();
+      expect(CAMERA_MAX_SESSION_MS).toBeGreaterThan(CAMERA_AUTO_PAUSE_MS);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("teachMessage", () => {
+  it("names what the confirmation did", () => {
+    expect(teachMessage("X", { teach: { state: "promoted", confirmations: 2, required: 2, taught: true } })).toMatch(/You taught Whaikey/);
+    expect(teachMessage("X", { teach: { state: "pending", confirmations: 1, required: 2, taught: false } })).toMatch(/1 more confirmation /);
+    expect(teachMessage("X", { teach: { state: "pending", confirmations: 2, required: 2, taught: false } })).toMatch(/waiting for review/);
+    expect(teachMessage("X", null)).toMatch(/barcode noted/);
+  });
+});
+
+describe("PourScanSlot — stale suggestions", () => {
+  it("an exact match clears the previous barcode's suggestions", async () => {
+    let call = 0;
+    const codes = ["080244003302"];
+    fakeCamera(codes);
+    stubFetch((url) => {
+      if (url !== "/api/scan/upc") return undefined;
+      call += 1;
+      return call === 1
+        ? { upc: "080244003302", matches: [], candidates: [blantons], externalName: null }
+        : { upc: "088004021344", matches: [{ ...blantons, id: "eagle", name: "Eagle Rare 10" }], candidates: [], externalName: null };
+    });
+    const onPick = vi.fn();
+    render(<PourScanSlot onPick={onPick} compact keepScanning onKeepScanningChange={vi.fn()} />);
+    await screen.findByRole("group", { name: "Is it one of these?" }, { timeout: 3000 });
+    codes[0] = "088004021344";
+    await waitFor(() => expect(onPick).toHaveBeenCalledWith(expect.objectContaining({ id: "eagle" }), expect.anything()), { timeout: 3000 });
+    expect(screen.queryByRole("group", { name: "Is it one of these?" })).not.toBeInTheDocument();
   });
 });
