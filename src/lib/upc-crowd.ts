@@ -37,9 +37,12 @@ export const PENDING_CLAIMS_PER_DAY = 25;
 export const TRUSTED_ACCOUNT_AGE_DAYS = 30;
 export const TRUSTED_MIN_PROMOTED = 5;
 
+/** Owner decision (2026-10-25): three agreeing people publish a crowd barcode. */
+export const DEFAULT_UPC_CONFIRMATIONS_REQUIRED = 3;
+
 export function upcConfirmationsRequired(env: Env = process.env): number {
   const n = Number(env.WHAIKEY_UPC_CONFIRMATIONS_REQUIRED);
-  return Number.isInteger(n) && n >= 1 && n <= 10 ? n : 2;
+  return Number.isInteger(n) && n >= 1 && n <= 10 ? n : DEFAULT_UPC_CONFIRMATIONS_REQUIRED;
 }
 
 export type TeachState =

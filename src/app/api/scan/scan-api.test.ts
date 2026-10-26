@@ -203,7 +203,7 @@ describe("POST /api/scan/confirm", () => {
     const body = await res.json();
     // An unknown barcode is a pending claim, not a live mapping (M1 teach-the-scanner).
     expect(body.mapping).toBeNull();
-    expect(body.teach).toEqual({ state: "pending", confirmations: 0, required: 2, taught: false });
+    expect(body.teach).toEqual({ state: "pending", confirmations: 0, required: 3, taught: false });
     expect(await resolveUpcRows()).toEqual([]);
     expect(body.userBottle.relationship).toBe("own");
     expect(body.userBottle.status).toBe("sealed");
@@ -234,14 +234,18 @@ describe("POST /api/scan/confirm", () => {
     expect(body.userBottle).toBeNull();
   });
 
-  it("publishes a barcode once two established accounts agree", async () => {
+  it("publishes a barcode once three established accounts agree", async () => {
     const old = new Date(Date.now() - 30 * 86_400_000);
     const a = await createTestUser(db, { createdAt: old });
+    const c = await createTestUser(db, { createdAt: old });
     const b = await createTestUser(db, { createdAt: old });
     const bottle = await createTestBottle(db);
     setSessionUser(a);
     const first = await (await confirmPost(jsonRequest("/api/scan/confirm", "POST", { upc: UPC, bottleId: bottle.id }))).json();
     expect(first.teach).toMatchObject({ state: "pending", confirmations: 1 });
+    setSessionUser(c);
+    const middle = await (await confirmPost(jsonRequest("/api/scan/confirm", "POST", { upc: UPC, bottleId: bottle.id }))).json();
+    expect(middle.teach).toMatchObject({ state: "pending", confirmations: 2 });
     setSessionUser(b);
     const second = await (await confirmPost(jsonRequest("/api/scan/confirm", "POST", { upc: UPC, bottleId: bottle.id }))).json();
     expect(second.teach).toMatchObject({ state: "verified", taught: true });

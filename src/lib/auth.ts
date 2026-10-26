@@ -1,4 +1,5 @@
 import { isNotNull, lt, or } from "drizzle-orm";
+import { seedNewAccountPrefs } from "@/lib/social";
 import { betterAuth, type BetterAuthOptions } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { getDb, schema } from "@/db";
@@ -89,6 +90,17 @@ export const auth = betterAuth({
    * which was a data inventory missing its most sensitive row.
    */
   account: { encryptOAuthTokens: true },
+
+  /** New accounts start with pours defaulting to Friends (see `seedNewAccountPrefs`). */
+  databaseHooks: {
+    user: {
+      create: {
+        after: async (created) => {
+          await seedNewAccountPrefs(getDb(), created.id);
+        },
+      },
+    },
+  },
 
   /**
    * WP-19: report sign-in failures, at Better Auth's own error boundary.

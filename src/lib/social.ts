@@ -947,6 +947,23 @@ export interface SocialPrefs {
 
 const DEFAULT_SOCIAL_PREFS: SocialPrefs = { defaultPourVisibility: "private", allowComments: true };
 
+/**
+ * Owner decision 2026-10-25 (SOCIAL.md D2 amended, STORYBOARD D19): an account
+ * created from now on starts with new pours defaulting to Friends. Written as
+ * a prefs row at sign-up, so it applies to NEW accounts only — an existing
+ * account without a row keeps the Only-me fallback above, and no existing
+ * pour is touched. The setting stays changeable in Settings, and `logPour`
+ * still holds a pour private while the author has no social profile.
+ */
+export const NEW_ACCOUNT_POUR_VISIBILITY: PourVisibility = "friends";
+
+export async function seedNewAccountPrefs(db: DB, userId: string): Promise<void> {
+  await db
+    .insert(schema.userSocialPrefs)
+    .values({ userId, defaultPourVisibility: NEW_ACCOUNT_POUR_VISIBILITY })
+    .onConflictDoNothing({ target: schema.userSocialPrefs.userId });
+}
+
 export async function getSocialPrefs(db: DB, userId: string): Promise<SocialPrefs> {
   const row = await db.query.userSocialPrefs.findFirst({ where: eq(schema.userSocialPrefs.userId, userId) });
   if (!row) return { ...DEFAULT_SOCIAL_PREFS };
