@@ -11,8 +11,13 @@ import {
   submitBottle,
   SubmissionRateLimitedError,
 } from "@/lib/catalog";
+import { enqueueEnrichment, runNextStep } from "@/lib/enrich/queue";
+import { kick } from "@/lib/enrich/kick";
+import { reportInBackground } from "@/lib/observability/errors";
 
 export const runtime = "nodejs";
+/** The first enrichment step (keyword + quick profile) runs in this invocation's `after()`. */
+export const maxDuration = 60;
 
 /** A bottle record is a handful of short fields; nothing here is prose. */
 const MAX_BODY_BYTES = 8 * 1024;
@@ -104,9 +109,31 @@ export async function POST(request: Request): Promise<NextResponse> {
       throw err;
     }
 
+    // Start building the bottle's card now rather than at the next daily
+    // pass (src/lib/enrich/queue.ts): queue it, then run the first step after
+    // the response. Best-effort: a queue failure must never turn a saved
+    // bottle into an error, and the daily batch still covers it. Inert (no
+    // job) until ENRICH_ENABLED and a provider key are set.
+    let enrichmentQueued = false;
+    try {
+      const jobId = await enqueueEnrichment(db, {
+        bottleId: created.bottle.id,
+        submittedBy: user.id,
+        reason: input.source === "scan" ? "scan" : input.source === "import" ? "import" : "new_bottle",
+      });
+      if (jobId) {
+        enrichmentQueued = true;
+        kick(() => runNextStep(db, jobId));
+      }
+    } catch (err) {
+      reportInBackground(err, { where: "bottles/enqueue-enrichment" });
+    }
+
     return NextResponse.json(
       {
         bottle: created.bottle,
+        /** True when a live enrichment job was queued (the bottle page shows its progress). */
+        enrichmentQueued,
         submissionId: created.submissionId,
         userBottle: created.userBottle,
         /** Near-matches we found anyway, so the client can offer a merge later. */

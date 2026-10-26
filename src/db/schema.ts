@@ -1514,6 +1514,137 @@ export const bottleFlavorProvenance = pgTable(
   (t) => [index("bottle_flavor_provenance_tier_idx").on(t.tier)],
 );
 
+/**
+ * In-app enrichment queue (src/lib/enrich/, docs/DATA_SOURCES.md §2.4c).
+ *
+ * A bottle a user adds gets one job; a Vercel function runs it one step per
+ * invocation (keyword → quick model → web model, API-key provider) and the
+ * bottle page polls the events to fill the card in live. Scheduled refreshes
+ * reuse the same rows (reason "refresh"). No user column: the requester is the
+ * bottle's own `submittedBy`, so the queue is catalog state and goes when the
+ * bottle does.
+ */
+export const ENRICHMENT_JOB_STATES = ["queued", "running", "done", "failed"] as const;
+export type EnrichmentJobState = (typeof ENRICHMENT_JOB_STATES)[number];
+export const ENRICHMENT_STEPS = ["keyword", "quick", "web"] as const;
+export type EnrichmentStep = (typeof ENRICHMENT_STEPS)[number];
+
+/** What the web step found, kept for the card (never written over user data). */
+export interface EnrichmentResult {
+  notes?: { nose: string | null; palate: string | null; finish: string | null; leaves: string[] };
+  sources?: Array<{ url: string; label: string }>;
+  /** Columns the job filled because they were empty. */
+  filled?: string[];
+  profileTier?: FlavorProfileTier | null;
+}
+
+export const bottleEnrichmentJobs = pgTable(
+  "bottle_enrichment_jobs",
+  {
+    id: id(),
+    bottleId: text("bottle_id").notNull().references(() => bottles.id, { onDelete: "cascade" }),
+    /** "new_bottle" | "scan" | "import" | "refresh" | "admin" — why the job exists. */
+    reason: text("reason").notNull(),
+    state: text("state").$type<EnrichmentJobState>().notNull().default("queued"),
+    /** Steps finished so far, in order. */
+    stepsDone: jsonb("steps_done").$type<EnrichmentStep[]>().notNull().default([]),
+    /** Why a queued job is parked ("budget" | "paused" | "disabled" | "error"), so the card can say so. */
+    waitingReason: text("waiting_reason"),
+    attempts: integer("attempts").notNull().default(0),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true, mode: "date" }),
+    /** Not claimable before this (a paused or failed attempt backs off). */
+    notBefore: timestamp("not_before", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+    result: jsonb("result").$type<EnrichmentResult>(),
+    error: text("error"),
+    lastSeq: integer("last_seq").notNull().default(0),
+    createdAt: createdAt(),
+    claimedAt: timestamp("claimed_at", { withTimezone: true, mode: "date" }),
+    finishedAt: timestamp("finished_at", { withTimezone: true, mode: "date" }),
+  },
+  (t) => [
+    uniqueIndex("bottle_enrichment_jobs_bottle_uq").on(t.bottleId),
+    index("bottle_enrichment_jobs_state_idx").on(t.state, t.notBefore),
+  ],
+);
+
+export const bottleEnrichmentEvents = pgTable(
+  "bottle_enrichment_events",
+  {
+    id: id(),
+    jobId: text("job_id").notNull().references(() => bottleEnrichmentJobs.id, { onDelete: "cascade" }),
+    /** 1, 2, 3… per job; the client polls with `after=<seq>`. */
+    seq: integer("seq").notNull(),
+    /** queued | claimed | step_started | step_done | found | waiting | done | failed */
+    kind: text("kind").notNull(),
+    step: text("step"),
+    message: text("message").notNull(),
+    data: jsonb("data").$type<Record<string, unknown>>(),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("bottle_enrichment_events_job_seq_uq").on(t.jobId, t.seq)],
+);
+
+/**
+ * One row per model call the enrichment made: tokens and hosted searches, so
+ * the admin page can show spend per day/run and the daily cap can hard-stop.
+ * Dollars are derived at read time from `src/lib/ai/usage.ts`'s dated rates.
+ */
+export const enrichmentCalls = pgTable(
+  "enrichment_calls",
+  {
+    id: id(),
+    jobId: text("job_id").references(() => bottleEnrichmentJobs.id, { onDelete: "set null" }),
+    runId: text("run_id").references(() => enrichmentRuns.id, { onDelete: "set null" }),
+    /** "quick" | "web" | "batch-quick" | "batch-web" */
+    step: text("step").notNull(),
+    provider: text("provider").notNull(),
+    model: text("model").notNull(),
+    bottles: integer("bottles").notNull().default(1),
+    inputTokens: integer("input_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull().default(0),
+    cachedInputTokens: integer("cached_input_tokens").notNull().default(0),
+    webSearches: integer("web_searches").notNull().default(0),
+    ok: boolean("ok").notNull(),
+    error: text("error"),
+    latencyMs: integer("latency_ms"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("enrichment_calls_created_idx").on(t.createdAt), index("enrichment_calls_run_idx").on(t.runId)],
+);
+
+/** A scheduled or operator-started batch chunk (src/lib/enrich/batch.ts). */
+export const enrichmentRuns = pgTable(
+  "enrichment_runs",
+  {
+    id: id(),
+    /** "cron" | "admin" */
+    trigger: text("trigger").notNull(),
+    tiers: jsonb("tiers").$type<string[]>().notNull(),
+    /** "running" | "done" | "stopped" | "failed" */
+    state: text("state").notNull(),
+    counts: jsonb("counts").$type<Record<string, number>>().notNull().default({}),
+    stopReason: text("stop_reason"),
+    error: text("error"),
+    startedAt: timestamp("started_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+    finishedAt: timestamp("finished_at", { withTimezone: true, mode: "date" }),
+  },
+  (t) => [index("enrichment_runs_started_idx").on(t.startedAt)],
+);
+
+/** Operator settings for enrichment: one row, id "global". */
+export const enrichmentSettings = pgTable("enrichment_settings", {
+  id: text("id").primaryKey(),
+  paused: boolean("paused").notNull().default(false),
+  /** Hard daily stop for model spend, in estimated USD (UTC day). */
+  dailyBudgetUsd: doublePrecision("daily_budget_usd").notNull().default(2),
+  /** Resume point (bottle id) for the batched missing-profile tier. */
+  missingCursor: text("missing_cursor"),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+});
+
+export type BottleEnrichmentJob = typeof bottleEnrichmentJobs.$inferSelect;
+export type BottleEnrichmentEvent = typeof bottleEnrichmentEvents.$inferSelect;
+
 export const BOTTLE_MEDIA_KINDS = ["bottle", "distillery", "label"] as const;
 export type BottleMediaKind = (typeof BOTTLE_MEDIA_KINDS)[number];
 
