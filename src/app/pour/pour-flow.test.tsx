@@ -315,4 +315,22 @@ describe("PourFlow — keep scanning", () => {
     fireEvent.click(screen.getByRole("button", { name: "fake second pick" }));
     expect(screen.getByTestId("pour-bottle")).toHaveTextContent("Lagavulin 16");
   });
+
+  it("a Switch left over from a saved pour does nothing to the next one", async () => {
+    window.sessionStorage.setItem("whaikey:pour-keep-scanning", "1");
+    stubFetch(async (url, init) => (String(url) === "/api/pours" && init?.method === "POST" ? ok({ pour: { id: "p1" } }) : ok({})));
+    renderFlow();
+    await act(async () => {});
+    fireEvent.click(screen.getByRole("button", { name: "fake search pick" }));
+    fireEvent.click(screen.getByRole("button", { name: "Rate 4 stars" }));
+    fireEvent.click(screen.getByRole("button", { name: "fake second pick" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Save pour" }));
+    });
+    fireEvent.click(screen.getByRole("button", { name: "fake search pick" }));
+    fireEvent.click(screen.getByRole("button", { name: "Rate 3 stars" }));
+    fireEvent.click(screen.getByRole("button", { name: "Switch" }));
+    expect(screen.getByTestId("pour-bottle")).toHaveTextContent("Eagle Rare 10");
+    expect(screen.getByRole("button", { name: "Clear rating" })).toBeInTheDocument();
+  });
 });

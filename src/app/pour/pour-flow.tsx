@@ -178,17 +178,28 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
     else router.push("/");
   }
 
+  // What the sheet holds right now, for toast actions created earlier.
+  const currentRef = useRef({ bottleId: bottle?.id ?? null, round: scanRound });
+  useEffect(() => {
+    currentRef.current = { bottleId: bottle?.id ?? null, round: scanRound };
+  }, [bottle, scanRound]);
+
   function pick(next: ScanBottle, meta: PickMeta) {
     // Keep-scanning: the same bottle read again is not a new pick.
     if (bottle && bottle.id === next.id) return;
     // Keep-scanning: another bottle came into view mid-entry. Never move a
     // rating or note typed for one bottle onto another — ask instead.
     if (bottle && entryHasContent()) {
+      const forBottle = bottle.id;
+      const round = scanRound;
       toast.show({
         message: `Read ${next.name} — save this pour first, or switch`,
         action: {
           label: "Switch",
           onClick: () => {
+            // A stale toast (that pour was saved, or the bottle changed since)
+            // must not wipe whatever is being entered now.
+            if (currentRef.current.bottleId !== forBottle || currentRef.current.round !== round) return;
             clearEntry();
             applyPick(next, meta);
           },
@@ -415,7 +426,7 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
             {notItOpen && (
               <div className="flex flex-wrap gap-1.5" role="group" aria-label="Other bottles with this barcode">
                 {(pickedVia?.alternatives ?? []).map((alt) => (
-                  <button key={alt.id} type="button" onClick={() => pick(alt, { via: "search" })} className="chip min-h-11 px-3 text-xs text-foreground/90">
+                  <button key={alt.id} type="button" onClick={() => applyPick(alt, { via: "search" })} className="chip min-h-11 px-3 text-xs text-foreground/90">
                     {alt.name}
                   </button>
                 ))}
