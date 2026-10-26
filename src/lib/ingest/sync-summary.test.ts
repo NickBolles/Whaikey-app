@@ -56,10 +56,10 @@ describe("aggregateSyncSummaries", () => {
   it("is degraded, not failed, when a third party is unavailable", () => {
     const s = aggregateSyncSummaries([
       ok("iowa", 3031),
-      { source: "whiskyedition", status: "degraded", message: "returned HTML (STRATO - Domain not available)" },
+      { source: "vinmonopolet", status: "degraded", message: "returned HTML (STRATO - Domain not available)" },
     ]);
     expect(s.overall).toBe("degraded");
-    expect(s.problems).toEqual(["whiskyedition: degraded — returned HTML (STRATO - Domain not available)"]);
+    expect(s.problems).toEqual(["vinmonopolet: degraded — returned HTML (STRATO - Domain not available)"]);
   });
 
   it("fails on an empty or failed source, and on an expected source that wrote nothing", () => {
@@ -92,7 +92,7 @@ describe("renderSyncSummaryMarkdown", () => {
   it("renders a table row per source with status, delta and escaped notes", () => {
     const md = renderSyncSummaryMarkdown(
       aggregateSyncSummaries(
-        [ok("iowa", 3031), { source: "whiskyedition", status: "degraded", message: "a | b" }],
+        [ok("iowa", 3031), { source: "vinmonopolet", status: "degraded", message: "a | b" }],
         [ok("iowa", 3000)],
       ),
       { runUrl: "https://example.test/run/1" },

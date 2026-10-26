@@ -4,10 +4,12 @@ import { getDb } from "@/db";
 import { getSessionUser } from "@/lib/session";
 import { isOperator } from "@/lib/operator";
 import { flavorCoverage } from "@/lib/ingest/flavor-tiers";
-import { getSettings, spendByDay, spendByRun, spendSince } from "@/lib/enrich/budget";
+import { enrichedByDay, getSettings, spendByDay, spendByRun, spendSeries, spendSince, utcMonthStart } from "@/lib/enrich/budget";
 import { recentRuns } from "@/lib/enrich/batch";
 import { enrichEnabledByEnv, getEnrichProvider } from "@/lib/enrich/providers";
 import { queueStats, recentJobs } from "@/lib/enrich/queue";
+import { POPULAR_REFRESH_TOP, topPopularBottles } from "@/lib/popularity";
+import { EnrichedChart, SpendChart } from "./charts";
 import { EnrichmentControls } from "./controls";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +21,7 @@ const when = (d: Date | null) => (d ? d.toISOString().replace("T", " ").slice(0,
 function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
     <div className="flex flex-col rounded-lg border border-border-subtle px-3 py-2">
-      <span className="text-[11px] uppercase tracking-wide text-muted">{label}</span>
+      <span className="text-xs uppercase tracking-wide text-muted">{label}</span>
       <span className="text-lg font-semibold tabular-nums">{value}</span>
       {hint && <span className="text-xs text-muted">{hint}</span>}
     </div>
@@ -28,7 +30,7 @@ function Stat({ label, value, hint }: { label: string; value: string; hint?: str
 
 function H2({ id, children }: { id: string; children: React.ReactNode }) {
   return (
-    <h2 id={id} className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+    <h2 id={id} className="text-xs font-semibold uppercase tracking-wide text-muted">
       {children}
     </h2>
   );
@@ -47,7 +49,7 @@ export default async function AdminEnrichmentPage() {
   const db = getDb();
   const provider = getEnrichProvider();
   const enabled = enrichEnabledByEnv();
-  const [coverage, settings, stats, jobs, runs, days, today] = await Promise.all([
+  const [coverage, settings, stats, jobs, runs, days, today, monthToDate, spend30, enriched30, popular] = await Promise.all([
     flavorCoverage(db),
     getSettings(db),
     queueStats(db),
@@ -55,6 +57,10 @@ export default async function AdminEnrichmentPage() {
     recentRuns(db, 15),
     spendByDay(db, 14),
     spendSince(db),
+    spendSince(db, utcMonthStart()),
+    spendSeries(db, 30),
+    enrichedByDay(db, 30),
+    topPopularBottles(db, 10),
   ]);
   const runSpend = await spendByRun(db, runs.map((r) => r.id));
 
@@ -97,10 +103,14 @@ export default async function AdminEnrichmentPage() {
       <section aria-labelledby="spend" className="flex flex-col gap-2">
         <H2 id="spend">Spend (estimated)</H2>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          <Stat label="Today (UTC)" value={usd(today)} hint={`cap ${usd(settings.dailyBudgetUsd)}`} />
+          <Stat label="Today (UTC)" value={usd(today)} hint={`cap ${usd(settings.dailyBudgetUsd)} · ${Math.round((today / Math.max(settings.dailyBudgetUsd, 0.01)) * 100)}% used`} />
+          <Stat label="Month to date" value={usd(monthToDate)} hint={`max ${usd(settings.dailyBudgetUsd * 31)}/mo at this cap`} />
           <Stat label="Queue" value={num(stats.queued)} hint={`${num(stats.due)} due · ${num(stats.running)} running`} />
-          <Stat label="Done" value={num(stats.done)} />
-          <Stat label="Failed" value={num(stats.failed)} />
+          <Stat label="Done · failed" value={`${num(stats.done)} · ${num(stats.failed)}`} />
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <SpendChart series={spend30} capUsd={settings.dailyBudgetUsd} />
+          <EnrichedChart series={enriched30} />
         </div>
         <div className="overflow-x-auto"><table className="w-full min-w-[30rem] text-xs">
           <thead className="text-muted">
@@ -125,6 +135,37 @@ export default async function AdminEnrichmentPage() {
                 <td className="py-1 pr-3 text-right tabular-nums">{num(d.inputTokens)} / {num(d.outputTokens)}</td>
                 <td className="py-1 pr-3 text-right tabular-nums">{num(d.webSearches)}</td>
                 <td className="py-1 text-right tabular-nums">{usd(d.usd)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table></div>
+      </section>
+
+      <section aria-labelledby="popular" className="flex flex-col gap-2">
+        <H2 id="popular">Most looked-for bottles</H2>
+        <p className="text-xs text-muted">
+          Popularity = pours, shelf/wishlist adds, scans, search appearances and page opens (90 days) plus retail breadth. The top{" "}
+          {num(POPULAR_REFRESH_TOP)} get web-grounded refreshes first, including untracked legacy profiles.
+        </p>
+        <div className="overflow-x-auto"><table className="w-full min-w-[30rem] text-xs" data-testid="enrich-popular">
+          <thead className="text-muted">
+            <tr>
+              <th className="py-1 pr-3 text-left font-normal">Bottle</th>
+              <th className="py-1 pr-3 text-right font-normal">Score</th>
+              <th className="py-1 pr-3 text-right font-normal">Searches · views · scans</th>
+              <th className="py-1 text-left font-normal">Profile</th>
+            </tr>
+          </thead>
+          <tbody>
+            {popular.length === 0 && (
+              <tr><td colSpan={4} className="py-1 text-muted">No signals yet.</td></tr>
+            )}
+            {popular.map((b) => (
+              <tr key={b.id} className="border-t border-border-subtle">
+                <td className="py-1 pr-3"><Link href={`/bottles/${b.id}`} className="text-accent hover:underline">{b.name}</Link></td>
+                <td className="py-1 pr-3 text-right tabular-nums">{num(Math.round(b.popularity))}</td>
+                <td className="py-1 pr-3 text-right tabular-nums">{num(b.searches)} · {num(b.views)} · {num(b.scans)}</td>
+                <td className="py-1">{b.tier ?? (b.legacy ? "legacy" : "none")}</td>
               </tr>
             ))}
           </tbody>

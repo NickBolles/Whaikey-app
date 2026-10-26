@@ -2,7 +2,7 @@
 #
 # Runs `pnpm ingest` against the DATABASE_URL secret:
 #   - iowa:   full Iowa Liquor Products sync (feed updates monthly; idempotent)
-#   - oregon/utah/bc/systembolaget/whiskyedition/vinmonopolet: secondary
+#   - oregon/utah/bc/systembolaget/vinmonopolet: secondary
 #             retail catalogs (docs/DATA_SOURCES.md §2.2b) — each is
 #             best-effort like cola; a flaky external feed only marks the
 #             run partial instead of blocking the rest
@@ -119,17 +119,6 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: pnpm ingest systembolaget --summary "$SUMMARY_DIR/systembolaget.json"
 
-      - id: whiskyedition
-        name: Sync WHISKY:EDITION review catalog
-        # thewhiskyedition.com served a STRATO "Domain not available" page
-        # from Sept 2026 and has refused the TLS handshake since Oct 2026; the
-        # adapter reports both as `degraded` (exit 0) rather than failing the
-        # run, and the alert issue tracks it.
-        continue-on-error: true
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: pnpm ingest whiskyedition --summary "$SUMMARY_DIR/whiskyedition.json"
-
       - id: vinmonopolet
         name: Sync Vinmonopolet products
         continue-on-error: true
@@ -210,7 +199,7 @@ jobs:
         name: Catalog sync report
         if: ${{ always() }}
         run: |
-          expected="iowa,oregon,utah,bc,systembolaget,whiskyedition,vinmonopolet,cola"
+          expected="iowa,oregon,utah,bc,systembolaget,vinmonopolet,cola"
           if [ "${{ steps.enrich.outcome }}" != "skipped" ]; then expected="$expected,enrich"; fi
           previous=()
           if [ -f "$RUNNER_TEMP/previous/report/summary.json" ]; then previous=(--previous "$RUNNER_TEMP/previous/report/summary.json"); fi

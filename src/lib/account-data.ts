@@ -1462,6 +1462,8 @@ export const NOT_LINKED: Readonly<Record<string, string>> = {
   enrichment_reservations: "In-flight enrichment spend holds (estimated USD, expiry); no user column.",
   enrichment_runs: "Scheduled/operator enrichment batch runs; no user column.",
   enrichment_settings: "Operator enrichment settings (pause, daily budget); no user column.",
+  bottle_popularity_daily:
+    "Per-bottle daily counts of search appearances, page opens and scan matches; no user, session, IP or query-text column.",
   catalog_sources: "Where catalog data came from; no user column.",
   bottle_resources: "Links attached to catalog rows; no user column.",
   bottle_claims: "Sourced facts about a bottle; no user column.",

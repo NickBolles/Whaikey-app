@@ -182,6 +182,7 @@ const INVENTORY: Record<string, Verdict> = {
   enrichment_reservations: { notPersonal: "In-flight catalog enrichment spend holds." },
   enrichment_runs: { notPersonal: "Catalog enrichment batch runs." },
   enrichment_settings: { notPersonal: "Operator enrichment settings." },
+  bottle_popularity_daily: { disclosed: "a daily tally per catalog bottle" },
   catalog_sources: { notPersonal: "Where catalog data came from." },
   bottle_resources: { notPersonal: "Links attached to catalog rows." },
   bottle_claims: { notPersonal: "Sourced factual claims about a bottle." },

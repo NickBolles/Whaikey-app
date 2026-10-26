@@ -27,6 +27,8 @@ import { PullQuote, isQuotable } from "@/components/pull-quote";
 import { appNow } from "@/lib/clock";
 import { getEnrichmentView, LIVE_REASONS } from "@/lib/enrich/queue";
 import { LiveEnrichment, SourcedNotes } from "@/components/live-enrichment";
+import { headers } from "next/headers";
+import { noteBottleSignals } from "@/lib/popularity";
 
 /** A finished job keeps its panel this long, so a refresh right after completion still shows it. */
 const LIVE_PANEL_LINGER_MS = 3 * 60_000;
@@ -72,6 +74,8 @@ export default async function BottleDetailPage({
   if (!detail) notFound();
 
   const { bottle, distillery, communityStats, userBottle, pairings, resources, media } = detail;
+  // Popularity: +1 page open on the bottle's anonymous daily tally (src/lib/popularity.ts).
+  noteBottleSignals(db, [bottle.id], "view", (await headers()).get("user-agent"));
 
   const [submission, personal, enrichment] = await Promise.all([
     // Only the submitter of a bottle still outside the shared catalog sees

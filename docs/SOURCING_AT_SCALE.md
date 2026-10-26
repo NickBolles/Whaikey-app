@@ -117,7 +117,7 @@ BAXUS (hackathon API endpoint now 404s; no public API), EU e-label (no central r
 | 6 | Nordic sources: ✅ Systembolaget mirror (`pnpm ingest systembolaget`); ✅ Vinmonopolet (`pnpm ingest vinmonopolet` with `VINMONOPOLET_API_KEY` — the sanctioned API is names-only now, so it contributes name coverage + sold-evidence, not attributes); Alko's Excel is bot-blocked from datacenter IPs — fetch manually or from a residential runner | Alko left | European/Scotch coverage + numeric taste-clock flavor data |
 | 7 | WhiskyAnalysis sheet (with permission) + Reddit archive join | ~1–2 days | Flavor clusters, ratings, real prices for the head of the catalog |
 | 8 | TTB permittee list as distillery entity table | ~1 day | Producer normalization backbone |
-| 9 | ✅ WHISKY:EDITION ingested (`pnpm ingest whiskyedition`, CC BY 4.0 attribution required); WhiskyDB pluggable at scan time via `WHAIKEY_WHISKY_UPC_URL`/`_KEY` once licensed | hours | Whisky-specialized data in catalog + scanner |
+| 9 | WHISKY:EDITION ingested Jul 2026, source removed Oct 2026 (domain lapsed; imported bottles kept, CC BY 4.0 attribution); WhiskyDB pluggable at scan time via `WHAIKEY_WHISKY_UPC_URL`/`_KEY` once licensed | hours | Whisky-specialized data in catalog + scanner |
 
 ### Legal checklist additions (extends DATA_SOURCES.md)
 - [ ] WhiskyAnalysis: author permission before commercial use of meta-critic scores.
@@ -125,4 +125,4 @@ BAXUS (hackathon API endpoint now 404s; no public API), EU e-label (no central r
 - [ ] Seelbach's/Shopify: ToS review before crawling `/products.json`.
 - [ ] `spacenship/whiskeyClassification`: establish provenance/licensing before any training use.
 - [ ] OHLQ: HTML sitemap crawl only — `/api/` is robots-disallowed.
-- [ ] WHISKY:EDITION: attribution requirement + written terms before integration.
+- [x] WHISKY:EDITION: source removed Oct 2026 (domain lapsed); attribution still owed for bottles imported earlier.

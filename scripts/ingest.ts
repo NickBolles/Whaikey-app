@@ -5,7 +5,7 @@
  *   pnpm ingest iowa [--dry-run]
  *   pnpm ingest cola --since 2026-01-01 [--until 2026-07-01] [--dry-run]
  *   pnpm ingest cola --full [--until 2026-07-01] [--dry-run]
- *   pnpm ingest oregon|utah|bc|systembolaget|whiskyedition|vinmonopolet [--dry-run]
+ *   pnpm ingest oregon|utah|bc|systembolaget|vinmonopolet [--dry-run]
  *   pnpm ingest resources --manifest ./path/to/manifest.json [--apply]
  *   pnpm ingest enrich [--limit N] [--batch-size N] [--no-web] [--dry-run]
  *   pnpm ingest prune            # delete imported bottles untouched by users
@@ -35,8 +35,6 @@
  *   systembolaget — Swedish monopoly assortment via the community data mirror
  *            (susbolaget.emrik.org): European/Scotch names, categories, ABV.
  *            Prices are SEK and not imported. Enrichment source only.
- *   whiskyedition — WHISKY:EDITION review API (CC BY 4.0, attribution
- *            required): ~500 reviewed bottlings with region, age, ABV.
  *   vinmonopolet — official Norwegian monopoly products API (free key from
  *            api.vinmonopolet.no via VINMONOPOLET_API_KEY). The sanctioned
  *            API returns names only; value is European name coverage and
@@ -67,7 +65,6 @@ import {
   fetchSystembolagetCandidates,
   fetchUtahCandidates,
   fetchVinmonopoletCandidates,
-  fetchWhiskyEditionCandidates,
   ingestCandidates,
   ingestSourceManifest,
   pruneImportedBottles,
@@ -170,7 +167,6 @@ async function main(): Promise<void> {
     utah: { label: "Utah DABS product list", run: () => fetchUtahCandidates() },
     bc: { label: "BC Liquor price list", run: () => fetchBcCandidates() },
     systembolaget: { label: "Systembolaget assortment mirror", run: () => fetchSystembolagetCandidates() },
-    whiskyedition: { label: "WHISKY:EDITION review catalog", run: () => fetchWhiskyEditionCandidates() },
     vinmonopolet: {
       label: "Vinmonopolet products API (needs VINMONOPOLET_API_KEY)",
       run: () => fetchVinmonopoletCandidates(),
@@ -233,7 +229,7 @@ async function main(): Promise<void> {
   }
 
   console.error(
-    "Usage: pnpm ingest <iowa|cola|oregon|utah|bc|systembolaget|whiskyedition|vinmonopolet|resources|enrich|prune> [--manifest FILE] [--apply] [--since YYYY-MM-DD|--full] [--until YYYY-MM-DD] [--limit N] [--batch-size N] [--no-web] [--dry-run]",
+    "Usage: pnpm ingest <iowa|cola|oregon|utah|bc|systembolaget|vinmonopolet|resources|enrich|prune> [--manifest FILE] [--apply] [--since YYYY-MM-DD|--full] [--until YYYY-MM-DD] [--limit N] [--batch-size N] [--no-web] [--dry-run]",
   );
   process.exit(1);
 }

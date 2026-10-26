@@ -12,6 +12,7 @@ import {
 } from "@/lib/scan";
 import { recordScanEvent } from "@/lib/observability/scan-telemetry";
 import { communitySuggestions } from "@/lib/upc-crowd";
+import { noteBottleSignals } from "@/lib/popularity";
 import type { ScanSource } from "@/db/schema";
 
 export const runtime = "nodejs";
@@ -68,6 +69,8 @@ export async function POST(request: Request) {
         resultCount: matches.length,
         latencyMs: Date.now() - started,
       });
+      // Popularity: the bottle this barcode resolves to (anonymous daily tally).
+      noteBottleSignals(db, [matches[0].id], "scan", request.headers.get("user-agent"));
       return NextResponse.json({ upc, matches, candidates: [], externalName: null });
     }
 

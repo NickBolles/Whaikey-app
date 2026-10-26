@@ -26,15 +26,6 @@
       "fetchPolicy": "link_only",
       "mediaPolicy": "link_only",
       "attribution": "Whisky Advocate"
-    },
-    {
-      "id": "whisky-edition",
-      "name": "WHISKY:EDITION",
-      "kind": "editorial",
-      "baseUrl": "https://thewhiskyedition.com",
-      "fetchPolicy": "structured",
-      "mediaPolicy": "review_required",
-      "attribution": "WHISKY:EDITION — CC BY 4.0"
     }
   ],
   "resources": []

@@ -12,7 +12,22 @@ import {
 import { createTestBottle, createTestUser, setupTestDb, uid } from "@/test/helpers";
 import { setAnthropicForTests } from "@/lib/ai/client";
 import { runBatch } from "./batch";
-import { canSpend, DEFAULT_DAILY_BUDGET_USD, getSettings, releaseReservation, reserveSpend, RESERVATION_TTL_MS, spendByDay, spendByRun, spendSince, updateSettings } from "./budget";
+import {
+  canSpend,
+  DEFAULT_DAILY_BUDGET_USD,
+  enrichedByDay,
+  getSettings,
+  lastUtcDays,
+  releaseReservation,
+  reserveSpend,
+  RESERVATION_TTL_MS,
+  spendByDay,
+  spendByRun,
+  spendSeries,
+  spendSince,
+  updateSettings,
+  utcMonthStart,
+} from "./budget";
 import { settleKicks } from "./kick";
 import { quickPrompt, webPrompt } from "./prompts";
 import {
@@ -201,8 +216,10 @@ describe("anthropicProvider", () => {
         usage: { input_tokens: 50, output_tokens: 20, cache_read_input_tokens: 5 },
       });
     const p = anthropicProvider({ messages: { create } } as never);
-    const res = await p.complete({ prompt: "x", model: p.webModel, web: true, timeoutMs: 10_000, maxOutputTokens: 100 });
+    const res = await p.complete({ prompt: "x", model: p.webModel, web: true, timeoutMs: 10_000, maxOutputTokens: 1_000, maxSearches: 3 });
     expect(create).toHaveBeenCalledTimes(2);
+    // The continuation only gets what the first request left of the allowance.
+    expect(create.mock.calls[1][0]).toMatchObject({ max_tokens: 990, tools: [{ max_uses: 1 }] });
     expect(res.text).toContain("part two");
     expect(res.usage).toEqual({ inputTokens: 150, outputTokens: 30, cachedInputTokens: 5, webSearches: 2 });
   });
@@ -412,6 +429,19 @@ describe("live jobs", () => {
     expect((await recentJobs(db))[0].bottleName).toBe(bottle.name);
   });
 
+  it("re-enrich never resets a job whose step is running right now", async () => {
+    const { bottle } = await newBottle();
+    const jobId = await requeueBottle(db, bottle.id, "admin");
+    const lease = new Date(Date.now() + 60_000);
+    await db.update(bottleEnrichmentJobs).set({ state: "running", leaseExpiresAt: lease, stepsDone: ["keyword"] }).where(eq(bottleEnrichmentJobs.id, jobId));
+    expect(await requeueBottle(db, bottle.id, "admin")).toBe(jobId);
+    expect(await job(jobId)).toMatchObject({ state: "running", stepsDone: ["keyword"] });
+    // Once the lease lapses, it can be reopened.
+    await db.update(bottleEnrichmentJobs).set({ leaseExpiresAt: new Date(Date.now() - 1_000) }).where(eq(bottleEnrichmentJobs.id, jobId));
+    await requeueBottle(db, bottle.id, "admin");
+    expect(await job(jobId)).toMatchObject({ state: "queued", stepsDone: [] });
+  });
+
   it("sweeps old progress lines and telemetry", async () => {
     setEnrichProviderForTests(fakeProvider().provider);
     const { bottle } = await newBottle();
@@ -473,6 +503,59 @@ describe("batch runs", () => {
     const [j] = await db.select().from(bottleEnrichmentJobs).where(eq(bottleEnrichmentJobs.bottleId, b.id));
     expect(j.reason).toBe("refresh");
     expect(j.state).toBe("done");
+  });
+
+  it("refreshes a top-searched legacy profile with a sourced answer, but never one with tasting notes", async () => {
+    const { provider, calls } = fakeProvider();
+    setEnrichProviderForTests(provider);
+    const legacy = { fruity: 1, floral: 1, grain: 1, sweet: 1, woody: 1, spicy: 1, peaty: 9, feinty: 1 };
+    const searched = await createTestBottle(db, { flavorProfile: legacy, status: "verified", name: "Searched Legacy" });
+    const noted = await createTestBottle(db, { flavorProfile: legacy, status: "verified", name: "Noted Legacy" });
+    const { bottlePopularityDaily, pours, tastingNotes } = await import("@/db/schema");
+    const { utcDay } = await import("@/lib/popularity");
+    await db.insert(bottlePopularityDaily).values([
+      { bottleId: searched.id, day: utcDay(), searches: 20 },
+      { bottleId: noted.id, day: utcDay(), searches: 40 },
+    ]);
+    const user = await createTestUser(db);
+    const pourId = uid("pour");
+    await db.insert(pours).values({ id: pourId, userId: user.id, bottleId: noted.id, rating: 4 });
+    await db.insert(tastingNotes).values({ id: uid("note"), pourId, nose: "smoke" });
+
+    const result = await runBatch(db, { trigger: "cron", tiers: ["web"], budgetMs: 120_000 });
+    expect(result.counts.webSteps).toBe(1);
+    expect(calls.filter((c) => c.web)).toHaveLength(1);
+    const read = async (id: string) => (await db.select({ p: bottles.flavorProfile }).from(bottles).where(eq(bottles.id, id)))[0].p;
+    expect(await read(searched.id)).toEqual(WEB_PROFILE);
+    expect(await read(noted.id)).toEqual(legacy);
+    const [p] = await db.select().from(bottleFlavorProvenance).where(eq(bottleFlavorProvenance.bottleId, searched.id));
+    expect(p).toMatchObject({ tier: "model_web", replacedLegacyProfile: legacy });
+  });});
+
+describe("admin series", () => {
+  it("spend and profiles per day cover every day, oldest first", async () => {
+    const now = new Date("2026-10-26T15:00:00Z");
+    await db.insert(enrichmentCalls).values([
+      { id: uid("c"), step: "web", provider: "anthropic", model: "claude-sonnet-5", inputTokens: 8000, outputTokens: 600, webSearches: 2, ok: true, createdAt: new Date("2026-10-26T01:00:00Z") },
+      { id: uid("c"), step: "quick", provider: "anthropic", model: "claude-haiku-4-5", inputTokens: 1000, outputTokens: 300, ok: true, createdAt: new Date("2026-10-24T01:00:00Z") },
+    ]);
+    const a = await createTestBottle(db);
+    const b = await createTestBottle(db);
+    await db.insert(bottleFlavorProvenance).values([
+      { bottleId: a.id, tier: "model_web", confidence: 0.75, method: "x", pass: "heavy", enrichedAt: new Date("2026-10-26T02:00:00Z") },
+      { bottleId: b.id, tier: "keyword", confidence: 0.3, method: "x", pass: "free", enrichedAt: new Date("2026-10-25T02:00:00Z") },
+    ]);
+    const spend = await spendSeries(db, 30, now);
+    expect(spend).toHaveLength(30);
+    expect(spend[29].day).toBe("2026-10-26");
+    expect(spend[29].usd).toBeGreaterThan(0);
+    expect(spend[28].usd).toBe(0);
+    expect(spend[27].calls).toBe(1);
+    const enriched = await enrichedByDay(db, 30, now);
+    expect(enriched.map((d) => d.day)).toEqual(lastUtcDays(30, now));
+    expect(enriched[29]).toMatchObject({ total: 1, byTier: { model_web: 1, keyword: 0 } });
+    expect(enriched[28]).toMatchObject({ total: 1, byTier: { keyword: 1 } });
+    expect(utcMonthStart(now).toISOString()).toBe("2026-10-01T00:00:00.000Z");
   });
 });
 

@@ -15,6 +15,7 @@ import {
 import { catalogVisibleTo } from "@/lib/catalog-visibility";
 import { keywordInputHash, keywordProfile, TIER_CONFIDENCE, writeTieredProfiles, type KeywordInputs } from "@/lib/ingest/flavor-tiers";
 import { reportInBackground } from "@/lib/observability/errors";
+import { inPopularTop, sweepPopularity } from "@/lib/popularity";
 import { recordCall, releaseReservation, reserveSpend } from "./budget";
 import { quickPrompt, webPrompt, type PromptBottle } from "./prompts";
 import { enrichLive, getEnrichProvider, ProviderCallError } from "./providers";
@@ -33,8 +34,9 @@ import { parseQuickResult, parseWebResult, profileHeadline, type WebDetails } fr
  *
  * The server owns every decision that matters: the provider gate (ENRICH_ENABLED,
  * pause, daily $ cap — src/lib/enrich/budget.ts), validation, the tier guard
- * on profile writes (`writeTieredProfiles`: never over a higher tier, a legacy
- * profile or community notes), filling only empty columns, and the copy users
+ * on profile writes (`writeTieredProfiles`: never over a higher tier or
+ * community notes; over a legacy profile only for a sourced refresh of a
+ * top-popular bottle), filling only empty columns, and the copy users
  * read. User notes are never sent to a model.
  */
 
@@ -161,8 +163,18 @@ export async function requeueBottle(
         claimedAt: null,
         createdAt: now,
       },
+      // A step that is running right now keeps its lease: resetting it would
+      // let a second worker claim the job and make duplicate paid calls.
+      setWhere: sql`NOT (${bottleEnrichmentJobs.state} = 'running' AND ${bottleEnrichmentJobs.leaseExpiresAt} >= ${ts(now)})`,
     })
     .returning({ id: bottleEnrichmentJobs.id });
+  if (!row) {
+    const [running] = await db
+      .select({ id: bottleEnrichmentJobs.id })
+      .from(bottleEnrichmentJobs)
+      .where(eq(bottleEnrichmentJobs.bottleId, bottleId));
+    return running.id;
+  }
   await appendEvent(db, row.id, { kind: "queued", message: "Queued — checking sources shortly" });
   return row.id;
 }
@@ -447,7 +459,9 @@ async function applyWeb(db: DB, job: BottleEnrichmentJob, model: string, raw: st
       // Without a cited source a "web" answer is the model's own knowledge:
       // recorded at the quick tier, not as web-grounded.
       const tier: FlavorProfileTier = sourced ? "model_web" : "model";
-      if (await writeProfile(db, job.bottleId, result.profile, tier, model)) {
+      // A sourced profile may replace an untracked legacy one, for top-popular bottles only.
+      const allowLegacy = tier === "model_web" && (await inPopularTop(db, [job.bottleId])).has(job.bottleId);
+      if (await writeProfile(db, job.bottleId, result.profile, tier, model, null, allowLegacy)) {
         stored.profileTier = tier;
         await appendEvent(db, job.id, {
           kind: "found",
@@ -506,6 +520,7 @@ async function writeProfile(
   tier: FlavorProfileTier,
   model: string | null,
   inputHash: string | null = null,
+  allowLegacy = false,
 ): Promise<boolean> {
   const pass = tier === "keyword" ? "free" : tier === "model" ? "cheap" : "heavy";
   const written = await writeTieredProfiles(db, [
@@ -518,6 +533,7 @@ async function writeProfile(
       model,
       pass,
       inputHash,
+      allowLegacy,
     },
   ]);
   return written.length > 0;
@@ -744,4 +760,5 @@ export async function sweepEnrichment(db: DB, now = new Date()): Promise<void> {
     WHERE e.job_id = j.id AND j.state IN ('done', 'failed') AND j.finished_at < ${ts(cutoff30)}`);
   await db.execute(sql`DELETE FROM enrichment_calls WHERE created_at < ${ts(cutoff90)}`);
   await db.execute(sql`DELETE FROM enrichment_runs WHERE started_at < ${ts(cutoff90)}`);
+  await sweepPopularity(db, now);
 }

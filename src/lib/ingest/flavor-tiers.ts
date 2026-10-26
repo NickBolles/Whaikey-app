@@ -4,6 +4,7 @@ import type { DB } from "@/db";
 import { FLAVOR_PROFILE_TIERS, type FlavorProfileTier } from "@/db/schema";
 import { parseModelJson } from "@/lib/ai/json";
 import { WEDGE_IDS, isValidLeaf, matchLeafIds, rollUpToWedges, wedgeForLeaf } from "@/lib/flavor-wheel";
+import { inPopularTop, LEGACY_REFRESH_SAFE, POPULAR_REFRESH_TOP, popularitySql } from "@/lib/popularity";
 import { MIN_COMMUNITY_RATERS } from "@/lib/search";
 import { buildEnrichPrompt, cleanProfile, profileFromNotes, type EnrichableBottle } from "./enrich";
 
@@ -18,7 +19,11 @@ import { buildEnrichPrompt, cleanProfile, profileFromNotes, type EnrichableBottl
  *
  * Every write records provenance (tier, confidence, method/model, pass, date)
  * in `bottle_flavor_provenance` and only lands over an equal-or-lower tier.
- * Profiles with no provenance row predate tracking and are never touched.
+ * Profiles with no provenance row predate tracking ("legacy") and are left
+ * alone — except by a web-grounded (`model_web`) write flagged
+ * `allowLegacy`, which callers set only for bottles in the top popularity set
+ * (src/lib/popularity.ts) and which still never lands on a user submission or
+ * a bottle with tasting notes. The replaced profile is kept in provenance.
  */
 
 export const TIER_RANK: Record<FlavorProfileTier, number> = {
@@ -46,6 +51,8 @@ export interface ProfileWrite {
   model: string | null;
   pass: FlavorPass;
   inputHash: string | null;
+  /** May replace an untracked legacy profile (model_web only; top-popular refresh). */
+  allowLegacy?: boolean;
 }
 
 /** Idempotent DDL, identical to the drizzle migration, so a branch run never needs `migrateDb`. */
@@ -62,6 +69,17 @@ export async function ensureFlavorProvenanceTable(db: DB): Promise<void> {
     "enriched_at" timestamp with time zone DEFAULT now() NOT NULL
   )`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "bottle_flavor_provenance_tier_idx" ON "bottle_flavor_provenance" USING btree ("tier")`);
+  await db.execute(sql`ALTER TABLE "bottle_flavor_provenance" ADD COLUMN IF NOT EXISTS "replaced_legacy_profile" jsonb`);
+  await db.execute(sql`CREATE TABLE IF NOT EXISTS "bottle_popularity_daily" (
+    "bottle_id" text NOT NULL
+      CONSTRAINT "bottle_popularity_daily_bottle_id_bottles_id_fk" REFERENCES "bottles"("id") ON DELETE cascade,
+    "day" text NOT NULL,
+    "searches" integer DEFAULT 0 NOT NULL,
+    "views" integer DEFAULT 0 NOT NULL,
+    "scans" integer DEFAULT 0 NOT NULL,
+    CONSTRAINT "bottle_popularity_daily_bottle_id_day_pk" PRIMARY KEY("bottle_id","day")
+  )`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "bottle_popularity_daily_day_idx" ON "bottle_popularity_daily" USING btree ("day")`);
 }
 
 /** Strict 8-wedge validation: exactly the wheel's wedge ids, integers 0-10, not all zero. */
@@ -94,27 +112,47 @@ export async function writeTieredProfiles(db: DB, writes: ProfileWrite[], chunkS
   for (let i = 0; i < writes.length; i += chunkSize) {
     const chunk = writes.slice(i, i + chunkSize);
     const values = sql.join(
-      chunk.map((w) => sql`(${w.bottleId}::text, ${JSON.stringify(w.profile)}::jsonb, ${w.tier}::text, ${w.confidence}::double precision, ${w.method}::text, ${w.model}::text, ${w.pass}::text, ${w.inputHash}::text)`),
+      chunk.map(
+        (w) =>
+          sql`(${w.bottleId}::text, ${JSON.stringify(w.profile)}::jsonb, ${w.tier}::text, ${w.confidence}::double precision, ${w.method}::text, ${w.model}::text, ${w.pass}::text, ${w.inputHash}::text, ${w.allowLegacy === true && w.tier === "model_web"}::boolean)`,
+      ),
       sql`, `,
     );
-    const result = await db.execute(sql`
-      WITH v(bottle_id, profile, tier, confidence, method, model, pass, input_hash) AS (VALUES ${values}),
+    // Lock the bottles first (id order, so concurrent writers can't deadlock),
+    // then guard + write in a statement whose snapshot starts after the lock:
+    // a lower tier queued behind a higher-tier writer sees the new provenance
+    // and stays out. `prev` reads the rows as they were before the write, so a
+    // replaced legacy profile is kept in provenance.
+    const result = await db.transaction(async (tx) => {
+      const ids = [...new Set(chunk.map((w) => w.bottleId))].sort();
+      await tx.execute(sql`SELECT id FROM bottles WHERE id IN (${sql.join(ids.map((id) => sql`${id}`), sql`, `)}) ORDER BY id FOR UPDATE`);
+      return tx.execute(sql`
+      WITH v(bottle_id, profile, tier, confidence, method, model, pass, input_hash, allow_legacy) AS (VALUES ${values}),
+      prev AS (
+        SELECT b.id, b.flavor_profile AS old_profile, p.tier AS old_tier
+        FROM bottles b JOIN v ON v.bottle_id = b.id LEFT JOIN bottle_flavor_provenance p ON p.bottle_id = b.id
+      ),
       upd AS (
         UPDATE bottles b SET flavor_profile = v.profile
         FROM v LEFT JOIN bottle_flavor_provenance p ON p.bottle_id = v.bottle_id
         WHERE b.id = v.bottle_id
-          AND (b.flavor_profile IS NULL OR (p.tier IS NOT NULL AND ${rankSql(sql`p.tier`)} <= ${rankSql(sql`v.tier`)}))
+          AND (b.flavor_profile IS NULL
+            OR (p.tier IS NOT NULL AND ${rankSql(sql`p.tier`)} <= ${rankSql(sql`v.tier`)})
+            OR (p.tier IS NULL AND v.allow_legacy AND v.tier = 'model_web' AND ${LEGACY_REFRESH_SAFE}))
         RETURNING b.id
       )
-      INSERT INTO bottle_flavor_provenance (bottle_id, tier, confidence, method, model, pass, input_hash, enriched_at)
-      SELECT v.bottle_id, v.tier, v.confidence, v.method, v.model, v.pass, v.input_hash, now()
-      FROM v JOIN upd ON upd.id = v.bottle_id
+      INSERT INTO bottle_flavor_provenance (bottle_id, tier, confidence, method, model, pass, input_hash, replaced_legacy_profile, enriched_at)
+      SELECT v.bottle_id, v.tier, v.confidence, v.method, v.model, v.pass, v.input_hash,
+             CASE WHEN prev.old_profile IS NOT NULL AND prev.old_tier IS NULL THEN prev.old_profile END, now()
+      FROM v JOIN upd ON upd.id = v.bottle_id JOIN prev ON prev.id = v.bottle_id
       ON CONFLICT (bottle_id) DO UPDATE SET
         tier = excluded.tier, confidence = excluded.confidence, method = excluded.method,
         model = excluded.model, pass = excluded.pass, input_hash = excluded.input_hash,
+        replaced_legacy_profile = COALESCE(bottle_flavor_provenance.replaced_legacy_profile, excluded.replaced_legacy_profile),
         enriched_at = excluded.enriched_at
       RETURNING bottle_id
     `);
+    });
     const rows = (Array.isArray(result) ? result : (result as { rows?: unknown[] }).rows ?? []) as Array<{ bottle_id: string }>;
     for (const row of rows) written.push(row.bottle_id);
   }
@@ -315,7 +353,11 @@ export interface ExportOptions {
   /** Max bottles for the cheap pass (missing profiles, then keyword-tier ones). */
   cheapLimit: number;
   cheapBatchSize?: number;
-  /** Top-N most popular bottles (pours, shelves, retail breadth) below model_web tier for the heavy pass. */
+  /**
+   * Top-N most popular bottles (src/lib/popularity.ts: pours, shelves, scans,
+   * searches, views, retail breadth) below model_web tier for the heavy pass —
+   * including untracked legacy profiles inside the top set.
+   */
   heavyTop: number;
   heavyBatchSize?: number;
   /** Include keyword-tier bottles in the cheap pass once missing ones are exhausted. */
@@ -324,7 +366,7 @@ export interface ExportOptions {
 
 export interface ExportResult {
   generatedAt: string;
-  counts: { missing: number; keywordTier: number; cheap: number; heavy: number; popularBelowWeb: number };
+  counts: { missing: number; keywordTier: number; cheap: number; heavy: number; popularBelowWeb: number; heavyLegacy: number };
   batches: ExportBatch[];
 }
 
@@ -340,34 +382,35 @@ interface CandidateRow {
   has_profile: boolean;
   tier: FlavorProfileTier | null;
   popularity: number;
+  legacy: boolean;
 }
 
 const HEAVY_PROMPT_SUFFIX = [
   "",
-  "You have a web search tool. For each bottle, run at most one search (e.g. \"<bottle name> tasting notes review\") when you do not already know the specific bottling well, and ground the profile in published tasting notes.",
+  "You have a web search tool. For each bottle, run at most one search (e.g. \"<bottle name> tasting notes review\") and ground the profile in published tasting notes.",
+  "Add a \"sources\" array to each object: the https URLs of the published tasting notes or reviews you actually used for that bottle. Use [] when you found none — never invent a URL.",
   "Your final message must be the STRICT JSON array only.",
 ].join("\n");
 
 export async function exportModelCandidates(db: DB, opts: ExportOptions): Promise<ExportResult> {
   await ensureFlavorProvenanceTable(db);
   const rows = rowsOf<CandidateRow>(await db.execute(sql`
-    WITH pop AS (
-      -- Pre-launch there are few pours, so retail breadth (how many price
-      -- feeds list the bottle) and barcode presence stand in for demand.
-      SELECT bottle_id, SUM(w) AS popularity FROM (
-        SELECT bottle_id, 20 AS w FROM pours
-        UNION ALL SELECT bottle_id, 10 FROM user_bottles
-        UNION ALL SELECT bottle_id, 2 FROM (SELECT DISTINCT bottle_id, source FROM price_history) ph
-        UNION ALL SELECT DISTINCT bottle_id, 1 FROM bottle_upcs
-      ) s GROUP BY bottle_id
+    WITH pop AS (${popularitySql()}),
+    -- The top set: legacy (untracked) profiles inside it may be refreshed.
+    top AS (
+      SELECT pop.bottle_id FROM pop JOIN bottles b ON b.id = pop.bottle_id
+      WHERE b.status <> 'user_submitted'
+      ORDER BY pop.popularity DESC, pop.bottle_id LIMIT ${Math.max(0, opts.heavyTop)}
     )
     SELECT b.id, b.name, b.category, d.name AS distillery, b.region, b.abv, b.age_years, b.description,
-           (b.flavor_profile IS NOT NULL) AS has_profile, p.tier, COALESCE(pop.popularity, 0)::int AS popularity
+           (b.flavor_profile IS NOT NULL) AS has_profile, p.tier, COALESCE(pop.popularity, 0)::int AS popularity,
+           (b.flavor_profile IS NOT NULL AND p.bottle_id IS NULL) AS legacy
     FROM bottles b
     LEFT JOIN distilleries d ON d.id = b.distillery_id
     LEFT JOIN bottle_flavor_provenance p ON p.bottle_id = b.id
     LEFT JOIN pop ON pop.bottle_id = b.id
     WHERE b.flavor_profile IS NULL OR p.tier IN ('keyword', 'model')
+       OR (p.bottle_id IS NULL AND b.id IN (SELECT bottle_id FROM top) AND ${LEGACY_REFRESH_SAFE})
     ORDER BY COALESCE(pop.popularity, 0) DESC, (b.description IS NOT NULL) DESC, b.id`));
   const toEnrichable = (r: CandidateRow): EnrichableBottle => ({
     id: r.id, name: r.name, category: r.category, distillery: r.distillery, region: r.region,
@@ -375,7 +418,8 @@ export async function exportModelCandidates(db: DB, opts: ExportOptions): Promis
   });
   const missing = rows.filter((r) => !r.has_profile);
   const keywordTier = rows.filter((r) => r.tier === "keyword");
-  // Heavy: popular bottles (any interaction) not yet at model_web or better.
+  // Heavy: popular bottles (any interaction) not yet at model_web or better,
+  // plus legacy profiles in the top set — most popular first.
   const popularBelowWeb = rows.filter((r) => r.popularity > 0);
   const heavy = popularBelowWeb.slice(0, opts.heavyTop);
   // Cheap covers every missing bottle (popular first) so coverage never waits
@@ -395,7 +439,14 @@ export async function exportModelCandidates(db: DB, opts: ExportOptions): Promis
   chunk(cheap, opts.cheapBatchSize ?? 25, "cheap");
   return {
     generatedAt: new Date().toISOString(),
-    counts: { missing: missing.length, keywordTier: keywordTier.length, cheap: cheap.length, heavy: heavy.length, popularBelowWeb: popularBelowWeb.length },
+    counts: {
+      missing: missing.length,
+      keywordTier: keywordTier.length,
+      cheap: cheap.length,
+      heavy: heavy.length,
+      popularBelowWeb: popularBelowWeb.length,
+      heavyLegacy: heavy.filter((r) => r.legacy).length,
+    },
     batches,
   };
 }
@@ -415,10 +466,32 @@ export interface ApplyReport {
   rejected: number;
   written: number;
   byPass: Record<string, { parsed: number; written: number }>;
+  /** Untracked legacy profiles replaced (top-popular, web-grounded writes only). */
+  legacyReplaced: number;
   dryRun: boolean;
 }
 
-const MODEL_ID = /^[a-z0-9][a-z0-9._-]{1,63}$/i;
+// Provider-qualified ids ("anthropic/claude-haiku-4.5") are fine; anything else odd is not.
+const MODEL_ID = /^[a-z0-9][a-z0-9._-]{1,63}(\/[a-z0-9][a-z0-9._-]{1,63})?$/i;
+
+/** At least one cited public https page (same rule as the live web step's sources). */
+export function hasPublicHttpsSource(value: unknown): boolean {
+  if (!Array.isArray(value)) return false;
+  return value.some((item) => {
+    const raw = typeof item === "string" ? item : (item as { url?: unknown } | null)?.url;
+    if (typeof raw !== "string" || raw.length > 500) return false;
+    try {
+      const url = new URL(raw.trim());
+      const host = url.hostname.toLowerCase();
+      return (
+        url.protocol === "https:" && !url.username && !url.password &&
+        host.includes(".") && !/^[\d.]+$/.test(host) && !host.includes(":") && !host.endsWith(".local")
+      );
+    } catch {
+      return false;
+    }
+  });
+}
 
 /** Turn raw model batches into guarded profile writes. Ids outside the batch, bad shapes and duplicates are dropped. */
 export function parseModelResults(results: ModelResultBatch[]): { writes: ProfileWrite[]; rejected: number } {
@@ -437,7 +510,7 @@ export function parseModelResults(results: ModelResultBatch[]): { writes: Profil
     const seen = new Set<string>();
     for (const entry of entries) {
       if (typeof entry !== "object" || entry === null) continue;
-      const { id, profile } = entry as { id?: unknown; profile?: unknown };
+      const { id, profile, sources } = entry as { id?: unknown; profile?: unknown; sources?: unknown };
       if (typeof id !== "string" || !allowed.has(id) || seen.has(id)) continue;
       // Validate the raw output first: clamping/rounding would turn a 100 into
       // a 10 and let malformed output through the exact-8-key, integer-0–10 check.
@@ -445,7 +518,10 @@ export function parseModelResults(results: ModelResultBatch[]): { writes: Profil
       const clean = cleanProfile(profile);
       if (!clean || !isValidWedgeProfile(clean)) continue;
       seen.add(id);
-      const tier: FlavorProfileTier = batch.pass === "heavy" ? "model_web" : "model";
+      // Web-grounded only with cited evidence: a heavy answer without a public
+      // https source is the model's recall and is stored at the quick tier
+      // (so it can never replace a legacy profile either).
+      const tier: FlavorProfileTier = batch.pass === "heavy" && hasPublicHttpsSource(sources) ? "model_web" : "model";
       const prev = best.get(id);
       if (prev && TIER_RANK[prev.tier] >= TIER_RANK[tier]) continue;
       best.set(id, {
@@ -458,19 +534,42 @@ export function parseModelResults(results: ModelResultBatch[]): { writes: Profil
   return { writes: [...best.values()], rejected };
 }
 
-export async function applyModelResults(db: DB, results: ModelResultBatch[], opts: { dryRun?: boolean } = {}): Promise<ApplyReport> {
+export async function applyModelResults(
+  db: DB,
+  results: ModelResultBatch[],
+  opts: { dryRun?: boolean; legacyTop?: number } = {},
+): Promise<ApplyReport> {
   await ensureFlavorProvenanceTable(db);
   const { writes, rejected } = parseModelResults(results);
-  const report: ApplyReport = { batches: results.length, parsed: writes.length, rejected, written: 0, byPass: {}, dryRun: opts.dryRun ?? false };
+  // Legacy overwrite is decided HERE, from the live ranking, never from the
+  // results file: only web-grounded writes for bottles in the top set.
+  const heavyIds = writes.filter((w) => w.tier === "model_web").map((w) => w.bottleId);
+  const top = await inPopularTop(db, heavyIds, opts.legacyTop ?? POPULAR_REFRESH_TOP);
+  for (const w of writes) if (w.tier === "model_web" && top.has(w.bottleId)) w.allowLegacy = true;
+  const report: ApplyReport = {
+    batches: results.length, parsed: writes.length, rejected, written: 0, byPass: {}, legacyReplaced: 0, dryRun: opts.dryRun ?? false,
+  };
   for (const w of writes) {
     const b = (report.byPass[w.pass] ??= { parsed: 0, written: 0 });
     b.parsed += 1;
   }
   if (report.dryRun) return report;
+  const legacyBefore = await legacyIds(db, writes.filter((w) => w.allowLegacy).map((w) => w.bottleId));
   const written = new Set(await writeTieredProfiles(db, writes));
   report.written = written.size;
+  report.legacyReplaced = [...legacyBefore].filter((id) => written.has(id)).length;
   for (const w of writes) if (written.has(w.bottleId)) report.byPass[w.pass].written += 1;
   return report;
+}
+
+/** Of these ids, the bottles whose profile is untracked (legacy). */
+async function legacyIds(db: DB, ids: string[]): Promise<Set<string>> {
+  if (ids.length === 0) return new Set();
+  const rows = rowsOf<{ id: string }>(await db.execute(sql`
+    SELECT b.id FROM bottles b LEFT JOIN bottle_flavor_provenance p ON p.bottle_id = b.id
+    WHERE b.flavor_profile IS NOT NULL AND p.bottle_id IS NULL
+      AND b.id IN (${sql.join(ids.map((id) => sql`${id}`), sql`, `)})`));
+  return new Set(rows.map((r) => r.id));
 }
 
 export interface CoverageReport {

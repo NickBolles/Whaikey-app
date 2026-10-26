@@ -52,7 +52,7 @@ An AI-native whiskey tracking app, inspired by wine apps like **Vivino** (social
 - **Social S1–S2 and most of S3:** share links with revocation, comparison on the link, profiles as palate cards, follow/approve/block, per-pour visibility (default Only me), "From your friends" Home module, Same Dram, cheers, comments + reports, taste twins, phone (HMAC) and QR discovery, one-tap "make everything private".
 - **Passport:** countries / regions / styles met, catalog-share tier badges (Oak → Amber) that never downgrade, crests on profile and bottle, passport hooks on the discovery rail.
 - **Whiskey School:** 9 lessons with quizzes and a flavor-wheel explorer.
-- **Catalog pipeline:** 9 source adapters (TTB COLA, Iowa, Oregon, Utah, BC, Systembolaget, Vinmonopolet, WHISKY:EDITION, CSV), enrichment, sold-verification queue with a subscription-CLI worker, a source-provenance graph, issue-driven feedback review, 4 scheduled workflows.
+- **Catalog pipeline:** 8 source adapters (TTB COLA, Iowa, Oregon, Utah, BC, Systembolaget, Vinmonopolet, CSV; WHISKY:EDITION removed Oct 2026), enrichment, sold-verification queue with a subscription-CLI worker, a source-provenance graph, issue-driven feedback review, 4 scheduled workflows.
 - **Native:** Capacitor shell loading the deployed site, capability layer with web fallbacks, PKCE + state-bound device-code sign-in, offline pour queue, push-token registration, Android debug + iOS compile in CI, release workflow awaiting credentials.
 - **Adding a bottle the catalog lacks:** `POST /api/bottles` with a dedupe prompt, reached from the search empty state, the scan decision sheet and an unmatched import row (`/bottles/new`). See §2.2 for what "added" means before review.
 - **Age gate:** date of birth + market at first authenticated use, per-market minimum, answered once (§9.1); `/responsible` is the resources page it links to.
@@ -433,7 +433,7 @@ Still owed: an appeals note in the ToS pointing at `/support` (the route exists;
 ### 9.5 Data licensing checklist (single list; owners and dates to be filled)
 - [ ] TTB COLA image posture documented
 - [ ] Open Food Facts (ODbL) never merged into our tables — verified by code review
-- [ ] WHISKY:EDITION (CC BY 4.0) attribution surface live wherever its data appears
+- [ ] WHISKY:EDITION (CC BY 4.0) attribution surface for bottles imported before the source was removed (Oct 2026)
 - [ ] Systembolaget mirror, BC OGL, Vinmonopolet terms reviewed
 - [ ] Affiliate feed ToS reviewed before any link ships
 - [ ] Whiskybase: licensing conversation only; no scraping
