@@ -79,6 +79,15 @@ describe("NewBottleForm", () => {
     await waitFor(() => expect(push).toHaveBeenCalledWith("/scan"));
   });
 
+  it("hands an outing's quick add the new bottle's id", async () => {
+    mockApi(() => Response.json({ bottle: { id: "new-1" } }, { status: 201 }));
+    const user = userEvent.setup();
+    renderForm({ initialName: "Cask 1142 sample", returnTo: "/o/abcdef1234" });
+
+    await user.click(screen.getByRole("button", { name: /add this bottle/i }));
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/o/abcdef1234?added=new-1"));
+  });
+
   it("shows the near-matches rather than writing a duplicate, and adds on confirmation", async () => {
     const calls = mockApi((body) =>
       body.confirmNew

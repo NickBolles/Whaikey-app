@@ -414,14 +414,15 @@ test.describe("tasting night: guest link → rate → reveal", () => {
   });
 });
 
-test.describe("challenges: breadth only", () => {
+test.describe("trails (renamed challenges): breadth only", () => {
   test.beforeEach(async ({ context, baseURL }) => {
     await signIn(context, baseURL!, DEMO_SESSION_TOKEN);
   });
 
-  test("/challenges lists this month's three curated challenges and joining one shows progress", async ({ page }) => {
-    await page.goto("/challenges");
-    await expect(page.getByRole("heading", { name: "This month" })).toBeVisible();
+  test("/trails lists this month's three curated trails and joining one shows progress", async ({ page }) => {
+    await page.goto("/trails");
+    await expect(page.getByRole("heading", { name: "Trails this month" })).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "Social sections" }).getByRole("link", { name: "Trails" })).toHaveAttribute("aria-current", "page");
     const cards = page.locator("li.card");
     await expect(cards).toHaveCount(3);
     const first = cards.first();
@@ -430,5 +431,106 @@ test.describe("challenges: breadth only", () => {
     await expect(first.getByText(/\d+ of \d+/)).toBeVisible();
     // The friend board is opt-in and says what it counts.
     await expect(page.getByText(/Never how much/)).toBeVisible();
+  });
+});
+
+test.describe("trails: the old /challenges address", () => {
+  test("redirects to /trails, keeping the board choice", async ({ context, baseURL, page }) => {
+    await signIn(context, baseURL!, DEMO_SESSION_TOKEN);
+    await page.goto("/challenges?board=distilleries");
+    await expect(page).toHaveURL(/\/trails\?board=distilleries$/);
+    await expect(page.getByRole("heading", { name: "Trails this month" })).toBeVisible();
+  });
+});
+
+// Outings (docs/SOCIAL.md D22): the owner's distillery trip, on a phone. A
+// friend without the app joins from the host's link as a guest, logs a cask
+// sample that is in no catalog, and sees the group recap when the host ends it.
+test.describe("outing: guest link → log a cask sample → recap", () => {
+  test("a signed-out guest joins after the age check, logs by name, and sees the recap", async ({ browser, baseURL }) => {
+    const hostCtx = await browser.newContext();
+    await signIn(hostCtx, baseURL!, DEMO_SESSION_TOKEN);
+    const created = await hostCtx.request.post(`${baseURL}/api/outings`, {
+      data: { title: "E2E distillery day", distilleryName: "Buffalo Trace", location: "Frankfort, KY", visitOn: "2026-10-31" },
+    });
+    expect(created.status()).toBe(201);
+    const { path, joinCode } = (await created.json()) as { path: string; joinCode: string };
+
+    const guestCtx = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const guest = await guestCtx.newPage();
+    await guest.goto(path);
+    await expect(guest.getByRole("heading", { name: "E2E distillery day" })).toBeVisible();
+    // A bystander with the link sees no feed.
+    await expect(guest.getByRole("heading", { name: /feed/ })).toHaveCount(0);
+    await guest.getByLabel("First name").fill("Pat");
+    await guest.getByLabel("Date of birth").fill("1990-05-05");
+    await guest.getByRole("button", { name: "Join the outing" }).click();
+    await expect(guest.getByText(/You’re a guest|You're a guest/)).toBeVisible({ timeout: 15000 });
+    await expect(guest.getByRole("complementary", { name: "Getting there and back" })).toBeVisible();
+
+    await guest.getByLabel("What did they pour?").fill("Cask 1142 sample");
+    await guest.getByRole("button", { name: /Log “Cask 1142 sample” as poured here/ }).click();
+    await guest.getByRole("radiogroup", { name: /Rating for Cask 1142 sample/ }).getByRole("radio", { name: "4 stars" }).click();
+    await guest.getByRole("button", { name: "Vanilla" }).click();
+    await guest.getByRole("button", { name: "Log it" }).click();
+    await expect(guest.getByText("Logged to the outing.")).toBeVisible({ timeout: 15000 });
+    await expect(guest.locator("li", { hasText: "You tasted Cask 1142 sample" })).toBeVisible();
+
+    await guest.getByLabel("Add a note for the group").fill("Barrel thief!");
+    await guest.getByRole("button", { name: "Post" }).click();
+    await expect(guest.getByText("Barrel thief!")).toBeVisible({ timeout: 15000 });
+
+    // The host logs the same sample (consensus) and ends the outing.
+    const hostLog = await hostCtx.request.post(`${baseURL}/api/outings/${joinCode}/tastings`, {
+      data: { label: "cask 1142 sample", rating: 5, flavorTags: { vanilla: 2, oak: 1 } },
+    });
+    expect(hostLog.status()).toBe(201);
+    const ended = await hostCtx.request.post(`${baseURL}/api/outings/${joinCode}/state`, { data: { to: "ended" } });
+    expect(ended.status()).toBe(200);
+
+    await guest.reload();
+    const recap = guest.locator("section", { has: guest.getByRole("heading", { name: "The recap" }) });
+    await expect(recap).toBeVisible();
+    await expect(recap.getByText("Group favorite")).toBeVisible();
+    await expect(recap.getByText("★ 4.5").first()).toBeVisible();
+    await expect(recap.getByText("Flavor spread")).toBeVisible();
+    // No per-person counts or amounts anywhere on the page.
+    await expect(guest.getByText(/\b\d+\s*(ml|oz|pours?|drinks?)\b/i)).toHaveCount(0);
+    // Logging is closed once the outing ends.
+    await expect(guest.getByRole("heading", { name: "Log a tasting" })).toHaveCount(0);
+
+    // The host can delete it (this is how a test outing is cleaned up).
+    const del = await hostCtx.request.delete(`${baseURL}/api/outings/${joinCode}`);
+    expect(del.status()).toBe(200);
+    await hostCtx.close();
+    await guestCtx.close();
+  });
+
+  test("an underage guest is turned away and gets no seat", async ({ browser, baseURL }) => {
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const page = await ctx.newPage();
+    await page.goto("/o/demotrip01");
+    await page.getByLabel("First name").fill("Kid");
+    await page.getByLabel("Date of birth").fill("2012-01-01");
+    await page.getByRole("button", { name: "Join the outing" }).click();
+    await expect(page.getByText(/legal drinking age/)).toBeVisible({ timeout: 15000 });
+    const res = await ctx.request.post(`${baseURL}/api/outings/demotrip01/tastings`, { data: { label: "Sneaky sample" } });
+    expect(res.status()).toBe(403);
+    await ctx.close();
+  });
+
+  test("the host plans an outing from /clubs on a phone", async ({ context, baseURL, page }) => {
+    await signIn(context, baseURL!, DEMO_SESSION_TOKEN);
+    await page.goto("/clubs");
+    await page.getByRole("link", { name: "Plan one →" }).click();
+    await expect(page.getByRole("heading", { name: "Plan an outing" })).toBeVisible();
+    await page.getByLabel("Distillery").fill("Maker's Mark");
+    await page.getByLabel("Day", { exact: true }).fill("2026-11-01");
+    await page.getByRole("button", { name: "Create the outing" }).click();
+    await expect(page.getByRole("heading", { name: "Day at Maker's Mark" })).toBeVisible({ timeout: 15000 });
+    await expect(page.getByRole("img", { name: /QR code to join/ })).toBeVisible();
+    page.once("dialog", (d) => void d.accept());
+    await page.getByRole("button", { name: "Delete outing" }).click();
+    await expect(page).toHaveURL(/\/clubs$/, { timeout: 15000 });
   });
 });

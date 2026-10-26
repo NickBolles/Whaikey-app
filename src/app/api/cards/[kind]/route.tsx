@@ -8,6 +8,7 @@ import { getPalateCard } from "@/lib/social";
 import { leafLabel } from "@/lib/flavor-wheel";
 import { getWrapped, wrappedAvailable } from "@/lib/wrapped";
 import { findTaster, flightVisibleTo, getFlightView } from "@/lib/flights";
+import { findOutingSeat, formatVisitDay, getOutingView, outingVisibleTo } from "@/lib/outings";
 
 export const runtime = "nodejs";
 
@@ -135,6 +136,28 @@ export async function GET(req: Request, ctx: { params: Promise<{ kind: string }>
         .map((s) => ({ value: `${s.slot} · ${s.results!.average!.toFixed(1)}★`, label: s.bottle?.name ?? "" })),
       chips: view.slots.flatMap((s) => s.results?.sharedTags ?? []).slice(0, 8),
       footer: `${view.tasters.length} at the table`,
+    };
+  } else if (kind === "outing") {
+    // The outing recap, rendered as the person who shared it and only while
+    // they are still on it. Breadth and consensus only — no amounts, no
+    // per-person tallies (§3.1).
+    const byId = await db.query.outings.findFirst({ where: eq(schema.outings.id, subject) });
+    const outing = byId && extra && (await outingVisibleTo(db, byId, extra)) ? byId : null;
+    if (!outing || outing.state !== "ended") return notFound();
+    const seat = await findOutingSeat(db, outing.id, { userId: extra });
+    if (!seat) return notFound();
+    const view = await getOutingView(db, outing, extra, seat);
+    const recap = view.recap!;
+    card = {
+      format,
+      eyebrow: `WHAIKEY · OUTING · ${formatVisitDay(view.visitOn).toUpperCase()}`,
+      title: view.title,
+      stats: [
+        { value: String(recap.bottles.length), label: recap.bottles.length === 1 ? "bottle explored together" : "bottles explored together" },
+        ...(recap.favorite ? [{ value: recap.favorite.average != null ? `${recap.favorite.average.toFixed(1)}★` : "★", label: `${recap.favorite.consensus ? "Group favorite" : "Top rated"}: ${recap.favorite.label}` }] : []),
+      ],
+      chips: [...recap.spread.map((s) => `${s.label} ${s.share}%`), ...recap.topTags].slice(0, 10),
+      footer: view.distilleryName,
     };
   }
   if (!card) return notFound();

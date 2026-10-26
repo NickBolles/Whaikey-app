@@ -238,6 +238,30 @@ async function seedFootprint(db: DB, subject: schema.User, counterpart: schema.U
     { id: uid("fe"), participantId: theirSeatAtMine, flightId: hosted, slot: "A", rating: 3 },
   ]);
 
+  // --- Outings (D22)
+  const myOuting = uid("out");
+  const theirOuting = uid("out");
+  await db.insert(schema.outings).values([
+    { id: myOuting, hostId: subject.id, title: `${tag} outing`, distilleryName: "Buffalo Trace", visitOn: "2026-10-31", joinCode: uid("oc").slice(-12) },
+    { id: theirOuting, hostId: counterpart.id, title: `${tag} their outing`, distilleryName: "Ardbeg", visitOn: "2026-11-01", joinCode: uid("oc").slice(-12) },
+  ]);
+  const myOutingSeat = uid("oseat");
+  const myHostSeat = uid("oseat");
+  const theirOutingSeatAtMine = uid("oseat");
+  await db.insert(schema.outingParticipants).values([
+    { id: myOutingSeat, outingId: theirOuting, userId: subject.id },
+    { id: myHostSeat, outingId: myOuting, userId: subject.id },
+    { id: theirOutingSeatAtMine, outingId: myOuting, userId: counterpart.id },
+  ]);
+  await db.insert(schema.outingTastings).values([
+    { id: uid("ot"), outingId: theirOuting, participantId: myOutingSeat, label: "Cask sample #7", rating: 4, note: `${tag} my outing note` },
+    { id: uid("ot"), outingId: myOuting, participantId: theirOutingSeatAtMine, bottleId: catalog.id, label: "Catalog", rating: 3 },
+  ]);
+  await db.insert(schema.outingNotes).values([
+    { id: uid("on"), outingId: theirOuting, participantId: myOutingSeat, body: `${tag} the warehouse tour` },
+    { id: uid("on"), outingId: myOuting, participantId: theirOutingSeatAtMine, body: `${tag} their line` },
+  ]);
+
   // --- Challenges (social M2)
   const challengeId = uid("ch");
   await db.insert(schema.challenges).values({

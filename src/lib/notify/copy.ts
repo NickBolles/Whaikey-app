@@ -1,4 +1,5 @@
 import type { NotificationCategory } from "@/db/schema";
+import { TRAIL } from "@/lib/challenges/term";
 
 /**
  * Notification copy and grouping (docs/SOCIAL.md §7.5, D18).
@@ -44,15 +45,15 @@ export const NOTIFICATION_GROUPS = [
   },
   {
     key: "clubs",
-    label: "Clubs and tasting nights",
-    description: "Club invites and joins, a tasting night opening or being revealed.",
-    categories: ["club", "flight"],
+    label: "Clubs, tasting nights and outings",
+    description: "Club invites and joins, a tasting night opening or being revealed, an outing invite or its recap.",
+    categories: ["club", "flight", "outing"],
     defaultOn: true,
   },
   {
     key: "challenges",
-    label: "Challenges",
-    description: "A friend invites you to a challenge, or you complete one.",
+    label: TRAIL.many,
+    description: `A friend invites you to a ${TRAIL.lower}, or you complete one.`,
     categories: ["challenge"],
     defaultOn: true,
   },
@@ -126,9 +127,16 @@ export function renderNotification(input: CopyInput): RenderedCopy {
       if (d.event === "revealed") return { text: `The bottles in ${title} are revealed`, deepLink: link };
       return { text: `${title} has an update`, deepLink: link };
     }
+    case "outing": {
+      const title = str(d.outingTitle, "an outing");
+      const link = `/o/${input.subjectId}`;
+      if (d.event === "invite") return { text: `${who} invited you to ${title}`, deepLink: link };
+      if (d.event === "recap") return { text: `The recap for ${title} is ready`, deepLink: link };
+      return { text: `${title} has an update`, deepLink: link };
+    }
     case "challenge": {
-      const title = str(d.challengeTitle, "a challenge");
-      const link = `/challenges#${str(d.slug, input.subjectId ?? "")}`;
+      const title = str(d.challengeTitle, `a ${TRAIL.lower}`);
+      const link = `${TRAIL.path}#${str(d.slug, input.subjectId ?? "")}`;
       if (d.event === "completed") return { text: `You completed ${title} — new crest on your passport`, deepLink: link };
       if (d.event === "invite") return { text: `${who} invited you to ${title}`, deepLink: link };
       return { text: `${title} has an update`, deepLink: link };

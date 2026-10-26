@@ -276,14 +276,14 @@ Tracks run in parallel and are named so that "Phase 2" is never ambiguous: **C**
 - **N:** store launch — closed test, screenshots, store records, credentials (NATIVE_APP.md N4).
 - **S:** ~~re-open S3's remainder only after the S1/S2 overlap numbers are published~~ — **superseded 2026-10 (owner decision, SOCIAL.md D15):** the S3 remainder and the M2 social set — Friends-tab feed, clubs, blind flights / tasting nights with guest view, breadth challenges, friend breadth boards, notifications with a sender, share-out cards, shelf/wishlist sharing, Wrapped — are open now. §3.1 bans and the read-path invariant are unchanged; samples stay out pending a legal read.
 - **Monetization:** entitlements + billing (§6.6) after beta usage data.
-- **Later:** distillery visits (needs geolocation in the shell), club passports, S4 community scale (after the jurisdiction review), Wrapped, widgets, price alerts, gift mode.
+- **Now (owner decision 2026-10-26, SOCIAL.md D22):** distillery visits, starting with group Outings — no geolocation needed (the host types the destination). **Later:** location-assisted visit check-in, club passports, S4 community scale (after the jurisdiction review), Wrapped, widgets, price alerts, gift mode.
 
 ### 5.4 Frozen scope (and what unfreezes it)
 
 | Frozen | Unfreezes when |
 |---|---|
 | ~~Clubs, blind flights, passport diffing, club passports~~ | **Unfrozen 2026-10** (SOCIAL.md D15) — with challenges, friend breadth boards, the Friends-tab feed, notifications and Wrapped |
-| Samples / bottle shares, distillery visits | Samples: a legal read on facilitating alcohol transfers between users. Visits: geolocation in the shell (D14) |
+| Samples / bottle shares | A legal read on facilitating alcohol transfers between users. (~~Distillery visits~~ — **unfrozen 2026-10-26**, SOCIAL.md D22; location-assisted check-in still follows §8.3.) |
 | S4 community consensus and public discovery (and the community segment already live on `/bottles/[id]/compare` is a §12 decision) | Jurisdiction review done |
 | New Whiskey School content, AI personalisation, Pro gating of lessons | Progress persisted server-side; v1 line closed |
 | Catalog pipeline feature work (batch API migration, new sources) | Steady-state cost model and budget alarm exist; maintenance and cost control only until then |
