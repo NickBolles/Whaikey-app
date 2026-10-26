@@ -153,7 +153,7 @@ function EntryEditor({
         void save();
       }}
     >
-      <StarRating value={rating} onChange={setRating} size={32} />
+      <StarRating value={rating} onChange={setRating} />
       <div className="flex flex-wrap gap-1.5" role="group" aria-label="Serving">
         {SERVING_STYLES.map((style) => (
           <button

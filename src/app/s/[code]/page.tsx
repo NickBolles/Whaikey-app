@@ -275,6 +275,8 @@ export default async function SharedPourPage({ params }: Props) {
           {/* Pour size is deliberately not shown: a volume metric never renders
               to another user, even on an opt-in share (docs/SOCIAL.md §3.1). */}
           {share.locationLabel && <span>at {share.locationLabel}</span>}
+          {/* An edited note says so: a link already sent must not change silently. */}
+          {share.pour.editedAt && <span data-testid="share-edited">Edited</span>}
         </div>
         {Object.keys(leafHeat).length > 0 && (
           <section className="flex flex-col items-center gap-2">

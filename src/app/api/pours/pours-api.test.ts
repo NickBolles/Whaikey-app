@@ -381,6 +381,12 @@ describe("/api/pours", () => {
     expect(row?.visibilityAtCreation).toBe(pour.visibilityAtCreation);
     expect(row?.amountMl).toBe(pour.amountMl);
 
+    // A public share link already sent carries the edited marker.
+    const { createPourShare, getPublicPourShare } = await import("@/lib/pour-sharing");
+    await db.insert(schema.userProfiles).values({ userId: user.id, handle: "editor", displayName: "Editor", socialEnabled: true });
+    const share = await createPourShare(db, user.id, pour.id);
+    expect((await getPublicPourShare(db, share!.code))?.pour.editedAt).toBeInstanceOf(Date);
+
     const undo = await PATCH(jsonRequest(`/api/pours/${pour.id}`, "PATCH", body.previous), ctx(pour.id));
     expect(undo.status).toBe(200);
     const undone = await undo.json();

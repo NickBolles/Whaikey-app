@@ -663,6 +663,11 @@ export async function updatePourEntry(
 ): Promise<EditedPour | null> {
   const edit = pourEditSchema.parse(input);
   const result = await db.transaction(async (tx) => {
+    // Serialize edits of one entry: two concurrent PATCHes of different note
+    // fields must not both merge onto the same stale read, and a first note
+    // must not be inserted twice. Ownership is checked right after, so a
+    // stranger's id only ever waits on its own lock key.
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`pour-edit:${pourId}`}))`);
     const own = await tx.query.pours.findFirst({
       where: and(eq(schema.pours.id, pourId), eq(schema.pours.userId, userId)),
     });
@@ -727,9 +732,15 @@ export async function updatePourEntry(
           await tx.delete(schema.tastingNotes).where(eq(schema.tastingNotes.id, existingNote.id));
           note = null;
         } else if (existingNote) {
+          // Only the columns this edit sent: nothing it didn't name is rewritten.
+          const changed: Partial<typeof merged> = {};
+          for (const field of NOTE_FIELDS) {
+            if (edit.note[field] !== undefined) changed[field] = merged[field];
+          }
+          if (edit.note.flavorTags !== undefined) changed.flavorTags = merged.flavorTags;
           [note] = await tx
             .update(schema.tastingNotes)
-            .set(merged)
+            .set(changed)
             .where(eq(schema.tastingNotes.id, existingNote.id))
             .returning();
         } else if (!empty) {
