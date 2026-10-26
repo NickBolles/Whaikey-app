@@ -198,6 +198,8 @@ export function PourScanSlot({
           haptic("lock");
           setStatus(null);
           setMiss(null);
+          // An exact read supersedes any earlier suggestions.
+          setChoice(null);
           onPickRef.current(decision.bottle, { via: "barcode", alternatives: decision.alternatives });
         } else if (decision.kind === "choose") {
           haptic("tap");

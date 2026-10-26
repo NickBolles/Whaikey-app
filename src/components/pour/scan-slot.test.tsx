@@ -318,3 +318,24 @@ describe("teachMessage", () => {
     expect(teachMessage("X", null)).toMatch(/barcode noted/);
   });
 });
+
+describe("PourScanSlot — stale suggestions", () => {
+  it("an exact match clears the previous barcode's suggestions", async () => {
+    let call = 0;
+    const codes = ["080244003302"];
+    fakeCamera(codes);
+    stubFetch((url) => {
+      if (url !== "/api/scan/upc") return undefined;
+      call += 1;
+      return call === 1
+        ? { upc: "080244003302", matches: [], candidates: [blantons], externalName: null }
+        : { upc: "088004021344", matches: [{ ...blantons, id: "eagle", name: "Eagle Rare 10" }], candidates: [], externalName: null };
+    });
+    const onPick = vi.fn();
+    render(<PourScanSlot onPick={onPick} compact keepScanning onKeepScanningChange={vi.fn()} />);
+    await screen.findByRole("group", { name: "Is it one of these?" }, { timeout: 3000 });
+    codes[0] = "088004021344";
+    await waitFor(() => expect(onPick).toHaveBeenCalledWith(expect.objectContaining({ id: "eagle" }), expect.anything()), { timeout: 3000 });
+    expect(screen.queryByRole("group", { name: "Is it one of these?" })).not.toBeInTheDocument();
+  });
+});

@@ -299,6 +299,8 @@ describe("PourFlow — keep scanning", () => {
     fireEvent.click(screen.getByRole("button", { name: "fake second pick" }));
     expect(screen.getByTestId("pour-bottle")).toHaveTextContent("Eagle Rare 10");
     expect(await screen.findByText(/Read Lagavulin 16 — save this pour first/)).toBeInTheDocument();
+    // The rejected read does not start a new round (that would re-prompt every frame).
+    expect(screen.getByTestId("fake-slot")).toHaveAttribute("data-round", "0");
     fireEvent.click(screen.getByRole("button", { name: "Switch" }));
     expect(screen.getByTestId("pour-bottle")).toHaveTextContent("Lagavulin 16");
     expect(screen.getByRole("button", { name: "Rate 4 stars" })).toHaveAttribute("aria-pressed", "false");

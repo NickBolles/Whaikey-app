@@ -194,8 +194,8 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
           },
         },
       });
-      // Let the same barcode be read again once this pour is saved.
-      setScanRound((n) => n + 1);
+      // No new round here: B stays "seen" so it can't re-prompt every frame;
+      // saving this pour starts the next round and B reads again then.
       return;
     }
     applyPick(next, meta);
