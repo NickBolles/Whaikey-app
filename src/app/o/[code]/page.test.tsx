@@ -22,8 +22,9 @@ const bottle = { id: "b1", name: "Fresh submission", status: "user_submitted", s
 vi.mock("@/db", () => ({ getDb: () => ({ query: { bottles: { findFirst: async () => bottle } } }) }));
 
 let outing: { id: string; joinCode: string } | null = { id: "o1", joinCode: "abc123def4" };
-let seat: { participantId: string; userId: string | null; guest: boolean } | null = null;
-let guestSeat: typeof seat = null;
+type Seat = { participantId: string; userId: string | null; guest: boolean } | null;
+let seat: Seat = null;
+let guestSeat: Seat = null;
 let view: OutingView;
 vi.mock("@/lib/outings", () => ({
   outingGuestCookieName: (c: string) => `whaikey_outing_${c}`,
