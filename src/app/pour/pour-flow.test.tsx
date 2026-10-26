@@ -24,6 +24,9 @@ vi.mock("@/components/pour/scan-slot", () => ({
       <button type="button" onClick={() => onPick({ id: "eagle", name: "Eagle Rare 10" }, { via: "search" })}>
         fake search pick
       </button>
+      <button type="button" onClick={() => onPick({ id: "lagavulin", name: "Lagavulin 16" }, { via: "search" })}>
+        fake second pick
+      </button>
     </div>
   ),
 }));
@@ -284,5 +287,30 @@ describe("PourFlow — keep scanning", () => {
       fireEvent.click(screen.getByRole("button", { name: "Save pour" }));
     });
     expect(back).toHaveBeenCalled();
+  });
+
+  it("another bottle read mid-entry never inherits the first one's rating — it asks", async () => {
+    window.sessionStorage.setItem("whaikey:pour-keep-scanning", "1");
+    stubFetch(async () => ok({}));
+    renderFlow();
+    await act(async () => {});
+    fireEvent.click(screen.getByRole("button", { name: "fake search pick" }));
+    fireEvent.click(screen.getByRole("button", { name: "Rate 4 stars" }));
+    fireEvent.click(screen.getByRole("button", { name: "fake second pick" }));
+    expect(screen.getByTestId("pour-bottle")).toHaveTextContent("Eagle Rare 10");
+    expect(await screen.findByText(/Read Lagavulin 16 — save this pour first/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Switch" }));
+    expect(screen.getByTestId("pour-bottle")).toHaveTextContent("Lagavulin 16");
+    expect(screen.getByRole("button", { name: "Rate 4 stars" })).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("with nothing entered yet, another bottle simply replaces the first", async () => {
+    window.sessionStorage.setItem("whaikey:pour-keep-scanning", "1");
+    stubFetch(async () => ok({}));
+    renderFlow();
+    await act(async () => {});
+    fireEvent.click(screen.getByRole("button", { name: "fake search pick" }));
+    fireEvent.click(screen.getByRole("button", { name: "fake second pick" }));
+    expect(screen.getByTestId("pour-bottle")).toHaveTextContent("Lagavulin 16");
   });
 });

@@ -181,6 +181,40 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
   function pick(next: ScanBottle, meta: PickMeta) {
     // Keep-scanning: the same bottle read again is not a new pick.
     if (bottle && bottle.id === next.id) return;
+    // Keep-scanning: another bottle came into view mid-entry. Never move a
+    // rating or note typed for one bottle onto another — ask instead.
+    if (bottle && entryHasContent()) {
+      toast.show({
+        message: `Read ${next.name} — save this pour first, or switch`,
+        action: {
+          label: "Switch",
+          onClick: () => {
+            clearEntry();
+            applyPick(next, meta);
+          },
+        },
+      });
+      // Let the same barcode be read again once this pour is saved.
+      setScanRound((n) => n + 1);
+      return;
+    }
+    applyPick(next, meta);
+  }
+
+  function entryHasContent(): boolean {
+    return Boolean(
+      rating != null ||
+        servingStyle ||
+        nose.trim() ||
+        palate.trim() ||
+        finish.trim() ||
+        freeform.trim() ||
+        companions.trim() ||
+        Object.keys(flavorTags).length > 0,
+    );
+  }
+
+  function applyPick(next: ScanBottle, meta: PickMeta) {
     setBottle(next);
     setPickedVia(meta);
     setNotItOpen(false);
@@ -191,6 +225,8 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
         undo: () => {
           setBottle(null);
           setPickedVia(null);
+          // The slot may still be mounted (keep scanning): re-arm that barcode.
+          setScanRound((n) => n + 1);
         },
       });
     }
@@ -290,10 +326,8 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
     }
   };
 
-  function resetForNext() {
-    setBottle(null);
-    setPickedVia(null);
-    setNotItOpen(false);
+  /** The per-bottle fields; size and visibility carry over. */
+  function clearEntry() {
     setRating(null);
     setServingStyle(null);
     setNose("");
@@ -303,6 +337,13 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
     setFlavorTags({});
     setCompanions("");
     setDetailOpen(false);
+  }
+
+  function resetForNext() {
+    setBottle(null);
+    setPickedVia(null);
+    setNotItOpen(false);
+    clearEntry();
     setDraftRestored(false);
     finishedRef.current = false;
     setScanRound((n) => n + 1);
