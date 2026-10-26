@@ -43,6 +43,19 @@ RELEASE_TAG = "flavor-enrichment-data"
 STATE = Path(os.environ.get("FLAVOR_STATE_DIR", Path.home() / ".whaikey-flavor"))
 
 
+def load_gh_token() -> None:
+    """Cron/background shells don't inherit the interactive GH_TOKEN; read it
+    (only that key) from the Hermes env file. Never printed."""
+    if os.environ.get("GH_TOKEN"):
+        return
+    for env_file in (os.environ.get("FLAVOR_ENV_FILE"), "/home/hermes/.hermes/.env"):
+        if env_file and Path(env_file).is_file():
+            for line in Path(env_file).read_text().splitlines():
+                if line.startswith("GH_TOKEN="):
+                    os.environ["GH_TOKEN"] = line.split("=", 1)[1].strip().strip('"').strip("'")
+                    return
+
+
 def now() -> str:
     return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -340,6 +353,7 @@ def main() -> int:
     r.add_argument("--skip-pass", choices=["cheap", "heavy"])
     sub.add_parser("usage")
     a = ap.parse_args()
+    load_gh_token()
     if a.cmd == "usage":
         print(json.dumps(codex_usage(), indent=2))
         return 0

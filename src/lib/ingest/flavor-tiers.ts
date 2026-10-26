@@ -269,7 +269,7 @@ export interface ExportOptions {
   /** Max bottles for the cheap pass (missing profiles, then keyword-tier ones). */
   cheapLimit: number;
   cheapBatchSize?: number;
-  /** Top-N most popular bottles below model_web tier for the heavy pass. */
+  /** Top-N most popular bottles (pours, shelves, retail breadth) below model_web tier for the heavy pass. */
   heavyTop: number;
   heavyBatchSize?: number;
   /** Include keyword-tier bottles in the cheap pass once missing ones are exhausted. */
@@ -306,9 +306,13 @@ export async function exportModelCandidates(db: DB, opts: ExportOptions): Promis
   await ensureFlavorProvenanceTable(db);
   const rows = rowsOf<CandidateRow>(await db.execute(sql`
     WITH pop AS (
+      -- Pre-launch there are few pours, so retail breadth (how many price
+      -- feeds list the bottle) and barcode presence stand in for demand.
       SELECT bottle_id, SUM(w) AS popularity FROM (
-        SELECT bottle_id, 3 AS w FROM pours
-        UNION ALL SELECT bottle_id, 2 FROM user_bottles
+        SELECT bottle_id, 20 AS w FROM pours
+        UNION ALL SELECT bottle_id, 10 FROM user_bottles
+        UNION ALL SELECT bottle_id, 2 FROM (SELECT DISTINCT bottle_id, source FROM price_history) ph
+        UNION ALL SELECT DISTINCT bottle_id, 1 FROM bottle_upcs
       ) s GROUP BY bottle_id
     )
     SELECT b.id, b.name, b.category, d.name AS distillery, b.region, b.abv, b.age_years, b.description,
@@ -328,8 +332,9 @@ export async function exportModelCandidates(db: DB, opts: ExportOptions): Promis
   // Heavy: popular bottles (any interaction) not yet at model_web or better.
   const popularBelowWeb = rows.filter((r) => r.popularity > 0);
   const heavy = popularBelowWeb.slice(0, opts.heavyTop);
-  const heavyIds = new Set(heavy.map((r) => r.id));
-  const cheapPool = [...missing, ...(opts.upgradeKeyword ? keywordTier : [])].filter((r) => !heavyIds.has(r.id));
+  // Cheap covers every missing bottle (popular first) so coverage never waits
+  // on heavy-pass budget; heavy then upgrades the popular ones to model_web.
+  const cheapPool = [...missing, ...(opts.upgradeKeyword ? keywordTier : [])];
   const cheap = cheapPool.slice(0, opts.cheapLimit);
 
   const batches: ExportBatch[] = [];
@@ -371,9 +376,10 @@ const MODEL_ID = /^[a-z0-9][a-z0-9._-]{1,63}$/i;
 
 /** Turn raw model batches into guarded profile writes. Ids outside the batch, bad shapes and duplicates are dropped. */
 export function parseModelResults(results: ModelResultBatch[]): { writes: ProfileWrite[]; rejected: number } {
-  const writes: ProfileWrite[] = [];
+  // One write per bottle: a bottle can appear in a cheap AND a heavy batch;
+  // keep the higher tier (a duplicate id in one statement would also abort it).
+  const best = new Map<string, ProfileWrite>();
   let rejected = 0;
-  const seen = new Set<string>();
   for (const batch of results) {
     if ((batch.pass !== "cheap" && batch.pass !== "heavy") || !MODEL_ID.test(batch.model)) {
       rejected += batch.bottleIds.length;
@@ -382,7 +388,7 @@ export function parseModelResults(results: ModelResultBatch[]): { writes: Profil
     const allowed = new Set(batch.bottleIds);
     const parsed = parseModelJson(batch.raw);
     const entries = Array.isArray(parsed) ? parsed : parsed != null ? [parsed] : [];
-    let ok = 0;
+    const seen = new Set<string>();
     for (const entry of entries) {
       if (typeof entry !== "object" || entry === null) continue;
       const { id, profile } = entry as { id?: unknown; profile?: unknown };
@@ -390,16 +396,17 @@ export function parseModelResults(results: ModelResultBatch[]): { writes: Profil
       const clean = cleanProfile(profile);
       if (!clean || !isValidWedgeProfile(clean)) continue;
       seen.add(id);
-      ok += 1;
       const tier: FlavorProfileTier = batch.pass === "heavy" ? "model_web" : "model";
-      writes.push({
+      const prev = best.get(id);
+      if (prev && TIER_RANK[prev.tier] >= TIER_RANK[tier]) continue;
+      best.set(id, {
         bottleId: id, profile: clean, tier, confidence: TIER_CONFIDENCE[tier],
         method: `codex:${batch.model}`, model: batch.model, pass: batch.pass, inputHash: null,
       });
     }
-    rejected += batch.bottleIds.length - ok;
+    rejected += batch.bottleIds.length - seen.size;
   }
-  return { writes, rejected };
+  return { writes: [...best.values()], rejected };
 }
 
 export async function applyModelResults(db: DB, results: ModelResultBatch[], opts: { dryRun?: boolean } = {}): Promise<ApplyReport> {

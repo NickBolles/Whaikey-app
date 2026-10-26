@@ -166,7 +166,7 @@ describe("model export/apply", () => {
     const heavy = exported.batches.filter((b) => b.pass === "heavy");
     const cheap = exported.batches.filter((b) => b.pass === "cheap");
     expect(heavy.flatMap((b) => b.bottleIds)).toEqual([popular.id]);
-    expect(cheap.flatMap((b) => b.bottleIds)).toEqual([quiet.id]);
+    expect(cheap.flatMap((b) => b.bottleIds)).toEqual([popular.id, quiet.id]);
     expect(cheap[0].prompt).toContain(quiet.id);
 
     const report = await applyModelResults(db, [
@@ -181,6 +181,16 @@ describe("model export/apply", () => {
     expect((await prov(db, popular.id))!).toMatchObject({ tier: "model_web", model: "gpt-6.1-sol", pass: "heavy" });
     expect((await prov(db, quiet.id))!).toMatchObject({ tier: "model", method: "codex:gpt-6-luna" });
     expect(await flavorCoverage(db)).toMatchObject({ bottles: 2, withProfile: 2, coveragePct: 100, byTier: { model: 1, model_web: 1 } });
+  });
+
+  it("keeps the higher tier when a bottle is in both a cheap and a heavy batch", () => {
+    const raw = (n: number) => JSON.stringify([{ id: "a", profile: profile({ sweet: n }) }]);
+    const { writes } = parseModelResults([
+      { pass: "heavy", model: "gpt-6.1-sol", bottleIds: ["a"], raw: raw(9), completedAt: "" },
+      { pass: "cheap", model: "gpt-6-luna", bottleIds: ["a"], raw: raw(2), completedAt: "" },
+    ]);
+    expect(writes).toHaveLength(1);
+    expect(writes[0]).toMatchObject({ tier: "model_web", profile: { sweet: 9 } });
   });
 
   it("drops ids outside the batch, bad shapes, and unknown passes", () => {
