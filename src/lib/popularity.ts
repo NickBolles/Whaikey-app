@@ -98,8 +98,8 @@ export function popularitySql(now = new Date()): SQL {
   const cap = POPULARITY_DAILY_CAP;
   return sql`
     SELECT bottle_id, SUM(w)::float8 AS popularity FROM (
-      SELECT bottle_id, ${sql.raw(String(w.pour))} AS w FROM pours
-      UNION ALL SELECT bottle_id, ${sql.raw(String(w.shelf))} FROM user_bottles
+      SELECT bottle_id, ${sql.raw(String(w.pour))} AS w FROM pours WHERE created_at >= ${since}::date
+      UNION ALL SELECT bottle_id, ${sql.raw(String(w.shelf))} FROM user_bottles WHERE created_at >= ${since}::date
       UNION ALL SELECT bottle_id, ${sql.raw(String(w.retailFeed))} FROM (SELECT DISTINCT bottle_id, source FROM price_history) ph
       UNION ALL SELECT DISTINCT bottle_id, ${sql.raw(String(w.barcode))} FROM bottle_upcs
       UNION ALL SELECT bottle_id,

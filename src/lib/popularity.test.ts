@@ -89,6 +89,19 @@ describe("popularity ranking", () => {
     expect(await tally(a.id)).toEqual([]);
   });
 
+  it("counts only pours and shelf additions inside the window", async () => {
+    const stale = await createTestBottle(db, { name: "Stale" });
+    const user = await createTestUser(db);
+    const long = new Date(Date.now() - (POPULARITY_WINDOW_DAYS + 5) * 86_400_000);
+    await db.insert(pours).values({ id: uid("pour"), userId: user.id, bottleId: stale.id, rating: 4, createdAt: long });
+    await db
+      .insert(userBottles)
+      .values({ id: uid("ub"), userId: user.id, bottleId: stale.id, relationship: "own", createdAt: long });
+    expect(await topPopularBottles(db)).toEqual([]);
+    await db.insert(pours).values({ id: uid("pour"), userId: user.id, bottleId: stale.id, rating: 3 });
+    expect((await topPopularBottles(db))[0]).toMatchObject({ id: stale.id, popularity: 20 });
+  });
+
   it("leaves user submissions out of the top set", async () => {
     const user = await createTestUser(db);
     const mine = await createTestBottle(db, { status: "user_submitted", submittedBy: user.id });
