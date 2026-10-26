@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render as rtlRender, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render as rtlRender, screen } from "@testing-library/react";
 import type { ReactElement } from "react";
 
 vi.mock("@/components/pour-share-button", () => ({
@@ -36,6 +36,7 @@ function pour(over: Partial<TimelinePour> = {}): TimelinePour {
     amountMl: over.amountMl ?? 30,
     createdAt: over.createdAt ?? "2026-03-14T18:30:00.000Z",
     visibility: over.visibility ?? "private",
+    editedAt: over.editedAt ?? null,
     note: over.note ?? null,
   };
 }
@@ -118,50 +119,10 @@ describe("HistoryTimeline", () => {
     expect(screen.getByText(new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")))).toBeInTheDocument();
   });
 
-  it("edits an entry in place, marks it edited, and Undo PATCHes back the server's previous values", async () => {
-    const calls: Array<Record<string, unknown>> = [];
-    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
-      const body = JSON.parse(String(init?.body));
-      calls.push(body);
-      const undo = calls.length > 1;
-      return {
-        ok: true,
-        json: async () => ({
-          pour: { rating: undo ? 4 : 4, servingStyle: undo ? "neat" : "rocks", visibility: "private", editedAt: "2026-03-15T00:00:00.000Z" },
-          note: undo ? null : { nose: null, palate: null, finish: null, freeform: "on ice now", flavorTags: null },
-          previous: undo ? {} : { servingStyle: "neat", note: { freeform: null } },
-        }),
-      } as Response;
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    render(<HistoryTimeline pours={[pour()]} />);
+  it("Edit opens the pour sheet prefilled (STORYBOARD §3.8), and an edited entry says so", () => {
+    render(<HistoryTimeline pours={[pour({ id: "p 1", editedAt: "2026-03-15T00:00:00.000Z" })]} />);
     fireEvent.click(screen.getByRole("button", { name: "More for Test Bourbon" }));
-    fireEvent.click(screen.getByRole("button", { name: /Edit/ }));
-    fireEvent.click(screen.getByRole("button", { name: "rocks" }));
-    fireEvent.change(screen.getByLabelText("Notes"), { target: { value: "on ice now" } });
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    });
-    expect(calls[0]).toEqual({ servingStyle: "rocks", note: { freeform: "on ice now" } });
-    expect(await screen.findByText("on ice now")).toBeInTheDocument();
-    expect(screen.getByText(/edited/)).toBeInTheDocument();
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Undo" }));
-    });
-    await waitFor(() => expect(calls[1]).toEqual({ servingStyle: "neat", note: { freeform: null } }));
-    await waitFor(() => expect(screen.queryByText("on ice now")).not.toBeInTheDocument());
-    vi.unstubAllGlobals();
-  });
-
-  it("an edit with nothing changed sends nothing", () => {
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-    render(<HistoryTimeline pours={[pour()]} />);
-    fireEvent.click(screen.getByRole("button", { name: "More for Test Bourbon" }));
-    fireEvent.click(screen.getByRole("button", { name: /Edit/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(screen.queryByRole("form")).not.toBeInTheDocument();
-    vi.unstubAllGlobals();
+    expect(screen.getByRole("link", { name: /Edit/ })).toHaveAttribute("href", "/pour?edit=p%201");
+    expect(screen.getByText(/· edited/)).toBeInTheDocument();
   });
 });

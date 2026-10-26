@@ -349,6 +349,14 @@ test.describe("signed in (demo collector)", () => {
     await expect(page).toHaveScreenshot(shot("pour-note-capture"), { fullPage: true });
   });
 
+  test("pour flow: editing a journal entry", async ({ page }) => {
+    await page.goto("/pour?edit=demo-pour-1");
+    await expect(page.getByRole("heading", { name: "Edit pour" })).toBeVisible();
+    await expect(page.getByTestId("pour-bottle")).toBeVisible();
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("pour-edit"), { fullPage: true });
+  });
+
   test("history journal", async ({ page }) => {
     await page.goto("/history");
     await expect(page.getByText(/Lagavulin/i).first()).toBeVisible();

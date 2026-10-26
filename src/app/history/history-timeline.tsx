@@ -7,9 +7,7 @@ import { MoreHorizontal, Pencil, Star, Trash2 } from "lucide-react";
 import { useToast } from "@/components/toast";
 import { PourShareButton } from "@/components/pour-share-button";
 import { VisibilityControl } from "@/components/visibility-control";
-import { SERVING_STYLES, type PourVisibility } from "@/db/schema";
-import { StarRating } from "@/components/star-rating";
-import { VisibilityChips } from "@/components/visibility-chips";
+import type { PourVisibility } from "@/db/schema";
 import { FLAVOR_WHEEL, leafLabel, wedgeForLeaf } from "@/lib/flavor-wheel";
 import { IntensityDots } from "@/components/flavor-chip";
 
@@ -61,196 +59,12 @@ function dayKey(date: Date, now: Date): string {
   });
 }
 
-type EntryEdit = {
-  rating?: number | null;
-  servingStyle?: string | null;
-  visibility?: PourVisibility;
-  note?: Partial<Record<"nose" | "palate" | "finish" | "freeform", string | null>> & {
-    flavorTags?: Record<string, number> | null;
-  };
-};
-
-type EditResponse = {
-  pour: { rating: number | null; servingStyle: string | null; visibility: PourVisibility; editedAt: string | null };
-  note: TimelinePour["note"];
-  previous: EntryEdit;
-};
-
-async function patchEntry(pourId: string, edit: EntryEdit): Promise<EditResponse> {
-  const res = await fetch(`/api/pours/${encodeURIComponent(pourId)}`, {
-    method: "PATCH",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(edit),
-  });
-  const body = (await res.json().catch(() => null)) as (EditResponse & { message?: string }) | null;
-  if (!res.ok || !body?.pour) throw new Error(body?.message ?? "");
-  return body;
-}
-
-const NOTE_LABELS = [
-  ["nose", "Nose"],
-  ["palate", "Palate"],
-  ["finish", "Finish"],
-] as const;
-
-/**
- * Inline edit of one journal entry: rating, serving, note text, visibility.
- * Saves only what changed; the parent shows the Undo toast.
- */
-function EntryEditor({
-  pour,
-  onSaved,
-  onCancel,
-}: {
-  pour: TimelinePour;
-  onSaved: (res: EditResponse) => void;
-  onCancel: () => void;
-}) {
-  const [rating, setRating] = useState<number | null>(pour.rating);
-  const [serving, setServing] = useState<string | null>(pour.servingStyle);
-  const [visibility, setVisibility] = useState<PourVisibility>(pour.visibility);
-  const [fields, setFields] = useState({
-    nose: pour.note?.nose ?? "",
-    palate: pour.note?.palate ?? "",
-    finish: pour.note?.finish ?? "",
-    freeform: pour.note?.freeform ?? "",
-  });
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const shownStructured = NOTE_LABELS.filter(([key]) => Boolean(pour.note?.[key]));
-
-  async function save() {
-    const edit: EntryEdit = {};
-    if (rating !== pour.rating) edit.rating = rating;
-    if (serving !== pour.servingStyle) edit.servingStyle = serving;
-    if (visibility !== pour.visibility) edit.visibility = visibility;
-    const note: NonNullable<EntryEdit["note"]> = {};
-    for (const key of ["nose", "palate", "finish", "freeform"] as const) {
-      const next = fields[key].trim() || null;
-      if (next !== (pour.note?.[key] ?? null)) note[key] = next;
-    }
-    if (Object.keys(note).length > 0) edit.note = note;
-    if (Object.keys(edit).length === 0) {
-      onCancel();
-      return;
-    }
-    setSaving(true);
-    setError(null);
-    try {
-      onSaved(await patchEntry(pour.id, edit));
-    } catch (err) {
-      setError((err as Error).message || "Couldn't save that edit. Try again.");
-      setSaving(false);
-    }
-  }
-
-  return (
-    <form
-      className="flex flex-col gap-3"
-      aria-label={`Edit pour of ${pour.bottleName}`}
-      onSubmit={(e) => {
-        e.preventDefault();
-        void save();
-      }}
-    >
-      <StarRating value={rating} onChange={setRating} />
-      <div className="flex flex-wrap gap-1.5" role="group" aria-label="Serving">
-        {SERVING_STYLES.map((style) => (
-          <button
-            key={style}
-            type="button"
-            aria-pressed={serving === style}
-            onClick={() => setServing(serving === style ? null : style)}
-            className={`chip min-h-11 px-3 text-sm capitalize ${serving === style ? "chip-active font-medium" : "hover:bg-surface-raised"}`}
-          >
-            {style}
-          </button>
-        ))}
-      </div>
-      {shownStructured.map(([key, label]) => (
-        <label key={key} className="flex flex-col gap-1 text-xs text-muted">
-          {label}
-          <textarea
-            value={fields[key]}
-            maxLength={2000}
-            rows={2}
-            onChange={(e) => setFields((f) => ({ ...f, [key]: e.target.value }))}
-            className="resize-y rounded-lg border border-border bg-surface p-2.5 text-sm text-foreground placeholder:text-muted focus:border-accent focus:outline-none"
-          />
-        </label>
-      ))}
-      <label className="flex flex-col gap-1 text-xs text-muted">
-        Notes
-        <textarea
-          value={fields.freeform}
-          maxLength={5000}
-          rows={3}
-          onChange={(e) => setFields((f) => ({ ...f, freeform: e.target.value }))}
-          className="resize-y rounded-lg border border-border bg-surface p-2.5 text-sm text-foreground placeholder:text-muted focus:border-accent focus:outline-none"
-        />
-      </label>
-      <VisibilityChips value={visibility} onChange={setVisibility} idPrefix={`edit-vis-${pour.id}`} />
-      {error && (
-        <p role="alert" className="text-xs text-danger">
-          {error}
-        </p>
-      )}
-      <div className="flex gap-2">
-        <button type="submit" disabled={saving} className="btn-primary min-h-11 px-4 text-sm disabled:opacity-60">
-          {saving ? "Saving…" : "Save"}
-        </button>
-        <button type="button" onClick={onCancel} className="btn-secondary min-h-11 px-4 text-sm">
-          Cancel
-        </button>
-      </div>
-    </form>
-  );
-}
-
-function PourRow({ pour: initial }: { pour: TimelinePour }) {
+function PourRow({ pour }: { pour: TimelinePour }) {
   const router = useRouter();
   const toast = useToast();
-  const [pour, setPour] = useState<TimelinePour>(initial);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [editing, setEditing] = useState(false);
   const [hidden, setHidden] = useState(false);
-  const visibility = pour.visibility;
-  const setVisibility = (next: PourVisibility) => setPour((p) => ({ ...p, visibility: next }));
-
-  function applyResponse(res: EditResponse) {
-    setPour((p) => ({
-      ...p,
-      rating: res.pour.rating,
-      servingStyle: res.pour.servingStyle,
-      visibility: res.pour.visibility,
-      editedAt: res.pour.editedAt,
-      note: res.note,
-    }));
-  }
-
-  /**
-   * An edit commits at once (it is reversible, unlike a delete) and the toast
-   * carries Undo, which PATCHes back the server's own record of what the
-   * fields were — not the client's guess.
-   */
-  function saved(res: EditResponse) {
-    applyResponse(res);
-    setEditing(false);
-    setMenuOpen(false);
-    toast.show({
-      message: `Updated your pour of ${pour.bottleName}`,
-      undo: async () => {
-        try {
-          applyResponse(await patchEntry(pour.id, res.previous));
-          router.refresh();
-        } catch (err) {
-          toast.error(`Couldn't undo that edit of ${pour.bottleName}.`);
-          throw err;
-        }
-      },
-    });
-    router.refresh();
-  }
+  const [visibility, setVisibility] = useState<PourVisibility>(pour.visibility);
   const snippet = noteSnippet(pour.note);
   const tags = pour.note?.flavorTags ? Object.entries(pour.note.flavorTags) : [];
   const shownTags = tags.slice(0, 3);
@@ -338,15 +152,12 @@ function PourRow({ pour: initial }: { pour: TimelinePour }) {
       {/* Row ⋯ (STORYBOARD D9): sharing and visibility moved in here so a row
           is one line of identity plus one of meta, not a stack of controls. */}
       <div id={menuId} hidden={!menuOpen} className="mt-2 flex flex-col gap-2 rounded-lg border border-border bg-surface p-2.5">
-        {editing ? (
-          <EntryEditor pour={pour} onSaved={saved} onCancel={() => setEditing(false)} />
-        ) : (
-        <>
-        <VisibilityControl key={visibility} pourId={pour.id} visibility={visibility} onChange={setVisibility} />
+        <VisibilityControl pourId={pour.id} visibility={visibility} onChange={setVisibility} />
         <div className="flex flex-wrap items-center gap-2">
-          <button type="button" onClick={() => setEditing(true)} className="btn-secondary flex min-h-11 items-center gap-1.5 px-3 text-sm">
+          {/* STORYBOARD §3.8: Edit opens the pour sheet, prefilled. */}
+          <Link href={`/pour?edit=${encodeURIComponent(pour.id)}`} className="btn-secondary flex min-h-11 items-center gap-1.5 px-3 text-sm">
             <Pencil size={14} strokeWidth={1.8} aria-hidden /> Edit
-          </button>
+          </Link>
           <PourShareButton pourId={pour.id} bottleName={pour.bottleName} />
           <Link href={`/history?bottleId=${encodeURIComponent(pour.bottleId)}`} className="btn-secondary flex min-h-11 items-center px-3 text-sm">
             All pours of this bottle
@@ -355,8 +166,6 @@ function PourRow({ pour: initial }: { pour: TimelinePour }) {
             <Trash2 size={14} strokeWidth={1.8} aria-hidden /> Delete
           </button>
         </div>
-        </>
-        )}
       </div>
     </li>
   );
