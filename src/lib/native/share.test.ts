@@ -53,6 +53,6 @@ describe("share", () => {
   });
 
   it("reports unavailable when there is no text or url to copy", async () => {
-    await expect(share({ title: "Whaikey" })).resolves.toBe("unavailable");
+    await expect(share({ title: "Caskfolk" })).resolves.toBe("unavailable");
   });
 });

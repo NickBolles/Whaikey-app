@@ -16,7 +16,7 @@ const serverUrl = process.env.CAP_SERVER_URL ?? process.env.NEXT_PUBLIC_APP_URL 
 
 const config: CapacitorConfig = {
   appId: "com.whaikey.app",
-  appName: "Whaikey",
+  appName: "Caskfolk",
   webDir: "native/shell",
   ...(serverUrl
     ? {
@@ -33,14 +33,14 @@ const config: CapacitorConfig = {
     // Never let WKWebView guess at insets — the layout handles notch and home
     // indicator through `env(safe-area-inset-*)` (see globals.css).
     contentInset: "never",
-    backgroundColor: "#14100b",
+    backgroundColor: "#0d1410",
   },
   android: {
-    backgroundColor: "#14100b",
+    backgroundColor: "#0d1410",
   },
   plugins: {
     SplashScreen: {
-      backgroundColor: "#14100b",
+      backgroundColor: "#0d1410",
       showSpinner: false,
       // NativeShell hides the splash as soon as the app paints; this is only the
       // backstop for a WebView that never gets far enough to run that code.
@@ -50,9 +50,9 @@ const config: CapacitorConfig = {
       androidScaleType: "CENTER_CROP",
     },
     StatusBar: {
-      // "DARK" means light content — the app background is #14100b.
+      // "DARK" means light content — the app background is #0d1410.
       style: "DARK",
-      backgroundColor: "#14100b",
+      backgroundColor: "#0d1410",
       overlaysWebView: false,
     },
     Keyboard: {

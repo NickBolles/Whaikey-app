@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { BRAND_NAME } from "@/lib/brand";
 
 /**
  * One question, asked once (PLAN.md §9.1).
@@ -70,7 +71,7 @@ export function AgeGateForm({
       <header className="flex flex-col gap-2">
         <h1 className="font-display text-2xl font-semibold">One thing before we start</h1>
         <p className="text-sm text-muted leading-relaxed">
-          Whaikey is a whiskey journal, so there&apos;s a legal minimum age and it depends on
+          {BRAND_NAME} is a whiskey journal, so there&apos;s a legal minimum age and it depends on
           where you are. We ask once and keep the answer.
         </p>
       </header>
@@ -133,7 +134,7 @@ export function AgeGateForm({
       </form>
 
       <p className="text-xs text-muted leading-relaxed">
-        Whaikey never encourages drinking more, and never rewards drinking often.{" "}
+        {BRAND_NAME} never encourages drinking more, and never rewards drinking often.{" "}
         <Link href="/responsible" className="text-accent font-medium">
           Drinking responsibly
         </Link>{" "}

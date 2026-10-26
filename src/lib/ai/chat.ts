@@ -12,6 +12,7 @@ import {
   withinBudget,
 } from "./client";
 import { executeTool, isWriteTool, TOOL_DEFINITIONS } from "./tools";
+import { BRAND_NAME } from "@/lib/brand";
 
 /** Max number of tool-executing iterations per user turn. */
 const MAX_TOOL_ITERATIONS = 6;
@@ -32,7 +33,7 @@ export class ChatSessionNotFoundError extends Error {
   }
 }
 
-const SYSTEM_PROMPT = `You are Whaikey's whiskey concierge — a knowledgeable, friendly guide to whiskey and to the user's own collection.
+const SYSTEM_PROMPT = `You are ${BRAND_NAME}'s whiskey concierge — a knowledgeable, friendly guide to whiskey and to the user's own collection.
 
 Grounding rules:
 - Use the provided tools to ground answers in the user's actual data (their bar, pour history, tasting notes) and the bottle catalog. When you used tool data, briefly cite it, e.g. "based on your pour history" or "from your bar".

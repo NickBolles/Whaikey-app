@@ -355,7 +355,7 @@ describe("account data routes", () => {
       const res = await EXPORT(new Request("http://localhost:3000/api/account/export"));
       expect(res.status).toBe(200);
       expect(res.headers.get("content-type")).toContain("application/json");
-      expect(res.headers.get("content-disposition")).toMatch(/^attachment; filename="whaikey-export-\d{4}-\d{2}-\d{2}\.json"$/);
+      expect(res.headers.get("content-disposition")).toMatch(/^attachment; filename="caskfolk-export-\d{4}-\d{2}-\d{2}\.json"$/);
       expect(res.headers.get("cache-control")).toBe("no-store");
     });
 
@@ -429,7 +429,7 @@ describe("account data routes", () => {
       const res = await EXPORT(new Request("http://localhost:3000/api/account/export?format=csv"));
       expect(res.status).toBe(200);
       expect(res.headers.get("content-type")).toBe("application/zip");
-      expect(res.headers.get("content-disposition")).toMatch(/whaikey-export-\d{4}-\d{2}-\d{2}\.zip"$/);
+      expect(res.headers.get("content-disposition")).toMatch(/caskfolk-export-\d{4}-\d{2}-\d{2}\.zip"$/);
 
       const files = unzipSync(new Uint8Array(await res.arrayBuffer()));
       for (const slice of ACCOUNT_DATA.filter((s) => s.export)) {

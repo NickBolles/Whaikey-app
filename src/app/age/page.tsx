@@ -6,6 +6,7 @@ import { getSessionUser } from "@/lib/session";
 import { safeReturnPath } from "@/lib/return-path";
 import { AgeGateForm } from "./age-gate-form";
 import { SignOutButton } from "./sign-out-button";
+import { BRAND_NAME } from "@/lib/brand";
 
 export const dynamic = "force-dynamic";
 
@@ -48,7 +49,7 @@ export default async function AgePage({
         <div aria-hidden className="text-5xl">🥃</div>
         <h1 className="font-display text-2xl font-semibold">Not just yet</h1>
         <p className="text-muted leading-relaxed">
-          Whaikey is for people over {state.record.minimumAge} where you are. Based on what you
+          {BRAND_NAME} is for people over {state.record.minimumAge} where you are. Based on what you
           told us, that&apos;s{" "}
           {state.eligibleOn ? (
             <>

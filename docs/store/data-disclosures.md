@@ -30,7 +30,7 @@ generator + a test that fails on an undisclosed table; not built in this pass).
 | Contact Info → Name | `account` (from Google/Apple) | Yes | App functionality |
 | Contact Info → Email Address | `account`; support contact (`support_messages`) | Yes | App functionality, customer support |
 | Contact Info → Phone Number | `phone_lookups` — **keyed hash + last 2 digits only, optional** | Yes | App functionality (friend finding). Declare: Apple counts hashed identifiers as collected |
-| User Content → Photos | Label photos sent to the AI provider for identification; **not stored** by Whaikey | Yes (processed in a signed-in request) | App functionality |
+| User Content → Photos | Label photos sent to the AI provider for identification; **not stored** by Caskfolk | Yes (processed in a signed-in request) | App functionality |
 | User Content → Other User Content | `shelf`, `pours`, `tasting_notes`, `concierge_*`, `comments_written`, `profile`, `bottle_submissions` | Yes | App functionality |
 | User Content → Customer Support | `support_messages` | Yes | Customer support |
 | Purchases → Purchase History | `shelf` purchase price the user types (judgement call — it is user-entered, not an in-app purchase; declaring is the conservative answer) | Yes | App functionality |

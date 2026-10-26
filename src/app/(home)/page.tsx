@@ -19,19 +19,22 @@ import { FriendsModule, type FriendFeedItem } from "@/components/friends-module"
 import { LatestBadgeCard, pickLatestBadge } from "@/components/latest-badge-card";
 import { getPassport } from "@/lib/passport";
 import { ChevronRight, GraduationCap, Star } from "lucide-react";
+import { BRAND_NAME, BRAND_TAGLINE } from "@/lib/brand";
+import { BrandMark } from "@/components/brand-mark";
 
 export const dynamic = "force-dynamic";
 
 function SignedOutHero() {
   return (
     <div className="flex min-h-[78dvh] flex-col items-center justify-center gap-7 px-6 text-center">
-      <div aria-hidden className="text-6xl drop-shadow-[0_0_24px_rgba(232,161,60,0.25)]">
-        🥃
+      <div aria-hidden className="text-foreground">
+        <BrandMark size={64} />
       </div>
       <div>
         <h1 className="font-display text-5xl font-semibold tracking-tight text-gradient-amber">
-          Whaikey
+          {BRAND_NAME}
         </h1>
+        <p className="mt-2 font-display text-lg italic text-editorial">{BRAND_TAGLINE}</p>
         <p className="mx-auto mt-4 max-w-sm leading-relaxed text-muted">
           Track your bottles, log your pours, map your palate — and ask the AI concierge anything
           about whiskey or your own bar.
@@ -195,7 +198,7 @@ export default async function HomePage() {
         </section>
       )}
 
-      <section aria-label="More from Whaikey" className="flex flex-col gap-2.5">
+      <section aria-label={`More from ${BRAND_NAME}`} className="flex flex-col gap-2.5">
         <Link
           href="/learn"
           className="card-flat flex min-h-11 items-center gap-3 px-4 py-3 transition-colors hover:bg-surface-raised"

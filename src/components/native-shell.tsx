@@ -287,7 +287,7 @@ export function NativeShell({ userId }: { userId?: string | null }) {
         aria-label="Checking for an update"
         className="fixed inset-0 z-[100] flex items-center justify-center bg-background"
       >
-        <span aria-hidden className="text-5xl drop-shadow-[0_0_24px_rgba(232,161,60,0.25)]">
+        <span aria-hidden className="text-5xl drop-shadow-[0_0_24px_rgba(210,123,62,0.25)]">
           🥃
         </span>
       </div>

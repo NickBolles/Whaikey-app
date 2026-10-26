@@ -20,7 +20,7 @@ describe("AppHeader", () => {
   it("shows the wordmark plus search, journal and profile links when signed in with a social profile", () => {
     render(<AppHeader user={{ name: "Ada", image: null }} profileHandle="ada" />);
 
-    expect(screen.getByRole("link", { name: "Whaikey" })).toHaveAttribute("href", "/");
+    expect(screen.getByRole("link", { name: "Caskfolk" })).toHaveAttribute("href", "/");
     expect(screen.getByRole("link", { name: "Search" })).toHaveAttribute("href", "/search");
     expect(screen.getByRole("link", { name: "Journal" })).toHaveAttribute("href", "/history");
     expect(screen.getByRole("link", { name: "Your profile" })).toHaveAttribute("href", "/u/ada");
@@ -34,7 +34,7 @@ describe("AppHeader", () => {
   it("shows only the wordmark and search when signed out", () => {
     render(<AppHeader user={null} profileHandle={null} />);
 
-    expect(screen.getByRole("link", { name: "Whaikey" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Caskfolk" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Search" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Journal" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Your profile" })).not.toBeInTheDocument();
@@ -55,7 +55,7 @@ describe("AppHeader back slot", () => {
   it.each(["/", "/bar", "/search", "/friends"])("keeps the wordmark, not a back button, on the tab route %s", (path) => {
     pathname = path;
     render(<AppHeader user={{ name: "Ada", image: null }} profileHandle="ada" />);
-    expect(screen.getByRole("link", { name: "Whaikey" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Caskfolk" })).toBeInTheDocument();
     expect(screen.queryByTestId("header-back")).not.toBeInTheDocument();
   });
 
@@ -63,7 +63,7 @@ describe("AppHeader back slot", () => {
     pathname = "/bottles/eagle-rare-10";
     render(<AppHeader user={{ name: "Ada", image: null }} profileHandle="ada" />);
 
-    expect(screen.queryByRole("link", { name: "Whaikey" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Caskfolk" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Back to My Bar" })).toHaveAttribute("href", "/bar");
     expect(screen.getByRole("link", { name: "Search" })).toBeInTheDocument();
   });

@@ -9,12 +9,15 @@ import { leafLabel } from "@/lib/flavor-wheel";
 import { getWrapped, wrappedAvailable } from "@/lib/wrapped";
 import { findTaster, flightVisibleTo, getFlightView } from "@/lib/flights";
 import { findOutingSeat, formatVisitDay, getOutingView, outingVisibleTo } from "@/lib/outings";
+import { BRAND_NAME } from "@/lib/brand";
+
+const BRAND_UPPER = BRAND_NAME.toUpperCase();
 
 export const runtime = "nodejs";
 
-const BG = { background: "#14100b", color: "#f4ecdd", backgroundImage: "radial-gradient(circle at 80% 10%, #5a3513, #14100b 55%)" };
-const ACCENT = "#e8a13c";
-const MUTED = "#a3927a";
+const BG = { background: "#0d1410", color: "#eee7d6", backgroundImage: "radial-gradient(circle at 80% 10%, #1c3226, #0d1410 55%)" };
+const ACCENT = "#d27b3e";
+const MUTED = "#93a092";
 
 interface Stat {
   value: string;
@@ -34,12 +37,12 @@ function Card({ format, eyebrow, title, stats, chips, footer }: { format: CardFo
           {stats.map((s) => (
             <div key={s.label} style={{ display: "flex", flexDirection: "column", minWidth: story ? 380 : 220 }}>
               <div style={{ display: "flex", fontSize: story ? 120 : 64, fontWeight: 700, color: ACCENT, lineHeight: 1 }}>{s.value}</div>
-              <div style={{ display: "flex", fontSize: story ? 36 : 24, color: "#d7c6ab" }}>{s.label}</div>
+              <div style={{ display: "flex", fontSize: story ? 36 : 24, color: "#d3cdbb" }}>{s.label}</div>
             </div>
           ))}
         </div>
         {chips.length > 0 && (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 14, fontSize: story ? 34 : 22, color: "#d7c6ab" }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 14, fontSize: story ? 34 : 22, color: "#d3cdbb" }}>
             {chips.slice(0, story ? 10 : 6).map((c) => (
               <div key={c} style={{ display: "flex", border: `2px solid ${MUTED}`, borderRadius: 999, padding: story ? "10px 26px" : "6px 18px" }}>
                 {c}
@@ -86,7 +89,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ kind: string }>
       const p = await getPalateCard(db, subject);
       card = {
         format,
-        eyebrow: kind === "palate" ? "WHAIKEY · PALATE" : "WHAIKEY · PASSPORT",
+        eyebrow: kind === "palate" ? `${BRAND_UPPER} · PALATE` : `${BRAND_UPPER} · PASSPORT`,
         title: kind === "palate" ? `${name}'s palate` : `${name}'s whiskey passport`,
         stats:
           kind === "passport"
@@ -105,7 +108,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ kind: string }>
       const w = await getWrapped(db, subject, year);
       card = {
         format,
-        eyebrow: `WHAIKEY WRAPPED · ${year}`,
+        eyebrow: `${BRAND_UPPER} WRAPPED · ${year}`,
         title: w.bestNewFind ? `Best new find: ${w.bestNewFind.name}` : `${name}'s ${year}, explored`,
         stats: [
           { value: String(w.discovered.countries.length), label: "new countries" },
@@ -128,7 +131,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ kind: string }>
     const view = await getFlightView(db, flight, extra, seat);
     card = {
       format,
-      eyebrow: view.blind ? "WHAIKEY · BLIND TASTING RESULTS" : "WHAIKEY · TASTING NIGHT",
+      eyebrow: view.blind ? `${BRAND_UPPER} · BLIND TASTING RESULTS` : `${BRAND_UPPER} · TASTING NIGHT`,
       title: view.title,
       stats: view.slots
         .filter((s) => s.results?.average != null)
@@ -150,7 +153,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ kind: string }>
     const recap = view.recap!;
     card = {
       format,
-      eyebrow: `WHAIKEY · OUTING · ${formatVisitDay(view.visitOn).toUpperCase()}`,
+      eyebrow: `${BRAND_UPPER} · OUTING · ${formatVisitDay(view.visitOn).toUpperCase()}`,
       title: view.title,
       stats: [
         { value: String(recap.bottles.length), label: recap.bottles.length === 1 ? "bottle explored together" : "bottles explored together" },

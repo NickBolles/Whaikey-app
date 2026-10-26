@@ -18,6 +18,7 @@ import {
   RateGlass,
   RevealWatcher,
 } from "@/components/social/flight-client";
+import { BRAND_NAME } from "@/lib/brand";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Tasting night", robots: { index: false, follow: false } };
@@ -50,7 +51,7 @@ export default async function FlightPage({ params }: { params: Promise<{ code: s
         <p className="section-label">{view.blind ? "Blind tasting" : "Tasting night"}{view.club ? ` · ${view.club.name}` : ""}</p>
         <h1 className="font-display text-[1.75rem] font-semibold leading-tight">{view.title}</h1>
         <p className="text-xs text-muted">
-          Hosted by {view.host ? `@${view.host.handle}` : "a Whaikey member"} · {view.tasters.length} at the table
+          Hosted by {view.host ? `@${view.host.handle}` : `a ${BRAND_NAME} member`} · {view.tasters.length} at the table
           {view.scheduledAt && (
             <>
               {" · "}

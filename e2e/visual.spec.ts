@@ -112,7 +112,7 @@ test.describe("signed out", () => {
    */
   test("update required", async ({ page }) => {
     await page.goto("/app-update");
-    await expect(page.getByRole("heading", { name: "Update Whaikey" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Update Caskfolk" })).toBeVisible();
     await settle(page);
     await expect(page).toHaveScreenshot(shot("app-update"), { fullPage: true });
   });

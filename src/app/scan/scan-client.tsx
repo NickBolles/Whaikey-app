@@ -50,6 +50,7 @@ import {
   type FrameStats,
   type Guidance,
 } from "./guidance";
+import { BRAND_NAME } from "@/lib/brand";
 
 /**
  * Rapid-fire scanning built around an async capture queue: every barcode hit,
@@ -315,7 +316,7 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
         const teach = data.teach;
         showToast(
           teach?.taught
-            ? `You taught Whaikey this barcode — ${bottle.name}`
+            ? `You taught ${BRAND_NAME} this barcode — ${bottle.name}`
             : teach?.state === "pending"
               ? `Added ${bottle.name} — barcode saved for review`
               : updated
@@ -376,7 +377,7 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
           status: "review",
           title: "New one on us 🥃",
           subtitle:
-            "We don't know this barcode yet. Find the bottle or snap the label — your confirmation teaches Whaikey for everyone.",
+            `We don't know this barcode yet. Find the bottle or snap the label — your confirmation teaches ${BRAND_NAME} for everyone.`,
           options: [],
         });
       } catch {
@@ -1124,7 +1125,7 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
             />
           )}
           <div aria-hidden className="absolute inset-0 pointer-events-none flex items-center justify-center">
-            <div className="w-3/4 h-1/3 rounded-2xl border-2 border-accent/70 shadow-[0_0_24px_rgba(232,161,60,0.25)]" />
+            <div className="w-3/4 h-1/3 rounded-2xl border-2 border-accent/70 shadow-[0_0_24px_rgba(210,123,62,0.25)]" />
           </div>
           {liveReading && (
             <div
@@ -1333,7 +1334,7 @@ export function ScanClient({ forPour = false }: { forPour?: boolean } = {}) {
           </p>
           <p className="text-sm text-muted leading-relaxed">
             Type or wedge-scan the barcode number below — or snap a photo of the label and let
-            Whaikey read it.
+            {BRAND_NAME} read it.
           </p>
         </div>
       )}

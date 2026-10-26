@@ -7,7 +7,7 @@ import type { KeyboardEvent } from "react";
  * 12 o'clock; `c` is the square viewBox's center coordinate.
  */
 
-export const SERIF = "var(--font-fraunces), Georgia, serif";
+export const SERIF = "var(--font-brand-display), Georgia, serif";
 
 /** Nudge a wedge hue toward the warm brass palette so the wheel sits in the room. */
 export function warmify(hex: string): string {
@@ -141,10 +141,10 @@ type RGB = [number, number, number];
 
 /** Card surface the wheel is composited over (surface gradient midpoint). */
 const BACKDROP: RGB = [36, 29, 21];
-const DARK_INK = "#16110c";
+const DARK_INK = "#101a14";
 const LIGHT_INK = "var(--foreground)";
 const DARK_INK_RGB: RGB = [22, 17, 12];
-const LIGHT_INK_RGB: RGB = [244, 236, 221];
+const LIGHT_INK_RGB: RGB = [238, 231, 214];
 
 function toRgb(hex: string): RGB {
   const n = parseInt(hex.slice(1), 16);

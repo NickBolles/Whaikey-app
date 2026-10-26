@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import QRCode from "qrcode";
 import { share } from "@/lib/native/share";
+import { BRAND_NAME } from "@/lib/brand";
 
 async function send(url: string, method: string, body?: unknown) {
   const res = await fetch(url, {
@@ -89,7 +90,7 @@ export function ClubInvite({ clubId, clubName }: { clubId: string; clubName: str
             <p className="break-all text-xs text-muted">{link}</p>
             <button
               type="button"
-              onClick={() => void share({ title: `Join ${clubName} on Whaikey`, text: `Join ${clubName} on Whaikey`, url: link })}
+              onClick={() => void share({ title: `Join ${clubName} on ${BRAND_NAME}`, text: `Join ${clubName} on ${BRAND_NAME}`, url: link })}
               className="btn-secondary w-fit px-3 py-1.5 text-sm"
             >
               Share link

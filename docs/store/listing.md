@@ -5,7 +5,7 @@ never volume; no consumption prompts; no prices as facts.
 
 ## Shared
 
-- **App name:** Whaikey *(App Store name ≤ 30; Play title ≤ 30)*
+- **App name:** Caskfolk *(App Store name ≤ 30; Play title ≤ 30)*
 - **Category:** Apple — Food & Drink (secondary: Lifestyle). Play — Food & Drink.
 - **Price:** Free. No ads. No in-app purchases (v1).
 - **Privacy policy URL:** `https://{{DOMAIN}}/privacy`
@@ -18,7 +18,7 @@ never volume; no consumption prompts; no prices as facts.
 - **Subtitle (29/30):** `Whiskey journal & bar tracker`
 - **Promotional text (141/170):** `Scan a bottle, land on it in seconds. Log a pour in two taps, build your flavour map, and compare notes with friends — breadth, never volume.`
 - **Keywords (94/100):** `whisky,bourbon,scotch,rye,tasting notes,collection,bar,flavor wheel,distillery,spirits,journal`
-  *(Name and subtitle words are indexed already, so "whaikey"/"whiskey" are not repeated.)*
+  *(Name and subtitle words are indexed already, so "caskfolk"/"whiskey" are not repeated.)*
 
 ## Play
 
@@ -27,7 +27,7 @@ never volume; no consumption prompts; no prices as facts.
 ## Full description (both stores, ≤ 4000)
 
 ```
-Whaikey is a whiskey journal for people who like to explore.
+Caskfolk is a whiskey journal for people who like to explore.
 
 SCAN ANY BOTTLE
 Point the camera at a barcode or a label and land on the bottle in seconds. Barcode
@@ -39,7 +39,7 @@ Track what you own, what you've tried and what you want to try next. Fill levels
 dates and what you paid stay private to you — always.
 
 TASTING NOTES THAT TEACH YOU YOUR PALATE
-Rate a pour, tap flavours on the wheel, and Whaikey builds a picture of what you
+Rate a pour, tap flavours on the wheel, and Caskfolk builds a picture of what you
 actually like: the regions, casks and styles you keep coming back to, and the ones you
 haven't met yet.
 
@@ -49,7 +49,7 @@ from your own notes and the catalog — it never invents prices or availability.
 
 BREADTH, NEVER VOLUME
 Earn passport stamps for distinct regions, countries, distilleries and cask types you've
-met. Nothing in Whaikey rewards drinking more or more often: no streaks, no volume
+met. Nothing in Caskfolk rewards drinking more or more often: no streaks, no volume
 badges, no consumption leaderboards.
 
 FRIENDS, ON YOUR TERMS
@@ -60,7 +60,7 @@ YOUR DATA IS YOURS
 Export everything as JSON or CSV at any time, free. Delete your account in the app or
 at {{DOMAIN}}/delete-account.
 
-Whaikey is for adults of legal drinking age. Please drink responsibly.
+Caskfolk is for adults of legal drinking age. Please drink responsibly.
 ```
 
 > Check before submitting: every feature named above is live in the build being

@@ -2,10 +2,11 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { legalIdentity } from "@/lib/legal";
 import { FeedbackForm } from "./feedback-form";
+import { BRAND_NAME } from "@/lib/brand";
 
 export const metadata: Metadata = {
   title: "Support",
-  description: "Get help with Whaikey, or tell us what went wrong.",
+  description: `Get help with ${BRAND_NAME}, or tell us what went wrong.`,
 };
 
 export const dynamic = "force-dynamic";

@@ -7,6 +7,7 @@ import type { NotificationCategory, PushState } from "@/db/schema";
 import { reportInBackground } from "@/lib/observability/errors";
 import { isPushConfigured, sendPush } from "@/lib/push/send";
 import { NOTIFICATION_GROUPS, groupFor, renderNotification, type NotificationGroupKey } from "./copy";
+import { BRAND_NAME } from "@/lib/brand";
 
 export { NOTIFICATION_GROUPS, renderNotification } from "./copy";
 
@@ -243,7 +244,7 @@ export async function deliverNotification(db: DB, notificationId: string): Promi
   });
   const result = await sendPush(db, claimed.userId, {
     category: claimed.category,
-    title: "Whaikey",
+    title: BRAND_NAME,
     body: copy.text,
     deepLink: copy.deepLink,
   });

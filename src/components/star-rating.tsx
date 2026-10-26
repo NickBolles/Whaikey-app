@@ -38,7 +38,7 @@ function Star({ size, fraction }: { size: number; fraction: number }) {
             stroke="var(--accent)"
             strokeWidth={1.25}
             strokeLinejoin="round"
-            style={{ filter: "drop-shadow(0 0 5px rgba(232, 161, 60, 0.45))" }}
+            style={{ filter: "drop-shadow(0 0 5px rgba(210, 123, 62, 0.45))" }}
           />
         </g>
       )}

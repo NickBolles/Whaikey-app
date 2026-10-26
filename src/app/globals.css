@@ -1,35 +1,68 @@
 @import "tailwindcss";
 
 :root {
-  /* Ledger × Paper, dark (docs/DESIGN.md, amended 2026-10-26): Paper's layout
-     printed on oak — paper becomes the dark ground, ink becomes cream, and the
-     ink rules become warm brass hairlines so the masthead's double rule still
-     reads as print. Amber stays the one action colour. */
-  --background: #120e0a;
-  --surface: #1a140e;
-  --surface-raised: #231b12;
-  --border: #3a2e20;
+  /* Caskfolk (owner decision 2026-10-26, "for now"; rebrand v2 board) on the
+     Ledger × Paper layout (docs/DESIGN.md): rickhouse-green ground, linen ink,
+     brass hairlines for the masthead's double rule, copper as the one action
+     colour. Only colour and type changed from the hybrid; radii, density,
+     pull-quotes, badge art and the wheel are untouched. */
+  --background: #0d1410;
+  --surface: #142019;
+  --surface-raised: #1b2a21;
+  --border: #26392d;
   /* Paper's ink rule, in the dark: the masthead double rule, the bottle spec
      strip and pull-quote frames. Stronger than --border, never a fill. */
-  --rule: #5a4733;
-  --foreground: #f2e9d8;
-  --muted: #a5937a;
+  --rule: #41604b;
+  --foreground: #eee7d6;
+  --muted: #93a092;
   /* The editorial voice — section kickers and quote marks. Softer than the
      accent so a label never competes with the screen's one primary action. */
-  --editorial: #d9a25a;
+  --editorial: #c9a46a;
   /* Pull-quote text: a touch warmer than --foreground, the one large italic
      line on a card. */
-  --quote: #f2e3c4;
-  --accent: #e8a13c;
-  --accent-deep: #b96f1e;
+  --quote: #f0e6cf;
+  /* Copper. Text on a copper fill is the dark ground (5.9:1), not linen
+     (2.9:1), so primary buttons pass WCAG AA. */
+  --accent: #d27b3e;
+  --accent-hover: #dc8b52;
+  --accent-deep: #a9581f;
+  --accent-foreground: #0d1410;
+  --border-strong: #35503f;
   --danger: #e05d5d;
-  --success: #7d8a5c;
+  --success: #a7c47a;
   /* Calibration buckets: your notes read against published ones. Three
      categories, never a grade — a red/green pass-fail would be the wrong
      frame for tasting, so these sit apart from --danger/--success. */
   --taste-shared: #9db463;
   --taste-blind: #69a3bd;
   --taste-signature: #bb8ad0;
+}
+
+/* Light tokens (Caskfolk "linen"), opt-in with <html data-theme="light">.
+   Dark stays the default everywhere — native chrome, the status bar and the
+   visual baselines all assume it — so nothing switches on its own yet. Every
+   text pair here is ≥4.5:1 (fg 14.5, muted 5.5, accent 5.2, editorial 5.5). */
+:root[data-theme="light"] {
+  --background: #f5efe2;
+  --surface: #fbf7ee;
+  --surface-raised: #ece4d2;
+  --border: #d9cfba;
+  --rule: #a99878;
+  --foreground: #16211a;
+  --muted: #55635a;
+  --editorial: #7a5a26;
+  --quote: #1f2e24;
+  --accent: #9c4f1b;
+  --accent-hover: #8a4517;
+  --accent-deep: #7a3c12;
+  --accent-foreground: #fbf7ee;
+  --border-strong: #bfb294;
+  --danger: #b3261e;
+  --success: #4c6a2a;
+  --taste-shared: #5d7a2a;
+  --taste-blind: #2f6f8c;
+  --taste-signature: #7d4f94;
+  color-scheme: light;
 }
 
 @theme inline {
@@ -45,27 +78,26 @@
   --color-muted: var(--muted);
   --color-accent: var(--accent);
   --color-accent-deep: var(--accent-deep);
+  --color-accent-foreground: var(--accent-foreground);
   --color-danger: var(--danger);
   --color-success: var(--success);
   --color-taste-shared: var(--taste-shared);
   --color-taste-blind: var(--taste-blind);
   --color-taste-signature: var(--taste-signature);
-  --font-sans: var(--font-geist-sans);
+  --font-sans: var(--font-brand-sans);
   --font-mono: var(--font-geist-mono);
-  --font-display: var(--font-fraunces);
+  --font-display: var(--font-brand-display);
 }
 
 body {
-  background:
-    radial-gradient(120% 60% at 50% -10%, rgba(232, 161, 60, 0.06), transparent 60%),
-    var(--background);
+  background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans), system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 
 .font-display {
-  font-family: var(--font-fraunces), Georgia, serif;
+  font-family: var(--font-brand-display), Georgia, serif;
   font-optical-sizing: auto;
 }
 
@@ -79,7 +111,7 @@ body {
   border-radius: 0.75rem;
   /* Paper's printed-card cue, in the dark: a hard 3px offset, no blur. */
   box-shadow:
-    inset 0 1px 0 rgba(244, 236, 221, 0.04),
+    inset 0 1px 0 rgba(238, 231, 214, 0.04),
     3px 3px 0 rgba(0, 0, 0, 0.55);
 }
 
@@ -106,7 +138,7 @@ body {
   transition: background-color 160ms ease;
 }
 .ledger-row:hover {
-  background: rgba(244, 236, 221, 0.03);
+  background: rgba(238, 231, 214, 0.03);
 }
 
 /* An inline stat line ("47 bottles · 31 open · 4.2 avg"): numbers in the
@@ -117,27 +149,32 @@ body {
   font-variant-numeric: tabular-nums;
 }
 .stat-inline b {
-  font-family: var(--font-fraunces), Georgia, serif;
+  font-family: var(--font-brand-display), Georgia, serif;
   font-weight: 500;
   font-size: 15px;
   color: var(--foreground);
 }
 
+/* Buttons are flat (owner, 2026-10-26: no gradients): a solid copper fill, a
+   1px deeper-copper edge, and a small lightness step on hover/press. */
 .btn-primary {
-  background: linear-gradient(180deg, #f0b054, var(--accent) 45%, var(--accent-deep));
-  color: #1b130a;
+  background: var(--accent);
+  color: var(--accent-foreground);
+  border: 1px solid var(--accent-deep);
   font-weight: 600;
   border-radius: 0.5rem;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.25),
-    0 6px 16px -8px rgba(232, 161, 60, 0.5);
-  transition: filter 160ms ease;
+  transition: background-color 160ms ease, border-color 160ms ease;
 }
 .btn-primary:hover {
-  filter: brightness(1.06);
+  background: var(--accent-hover);
 }
 .btn-primary:active {
-  filter: brightness(0.96);
+  background: var(--accent-deep);
+  border-color: var(--accent-deep);
+}
+.btn-primary:disabled,
+.btn-primary[aria-disabled="true"] {
+  opacity: 0.55;
 }
 
 .btn-secondary {
@@ -148,7 +185,7 @@ body {
 }
 .btn-secondary:hover {
   background: var(--surface-raised);
-  border-color: #4a3c2a;
+  border-color: var(--border-strong);
 }
 
 .chip {
@@ -159,8 +196,8 @@ body {
   transition: color 160ms ease, border-color 160ms ease, background-color 160ms ease;
 }
 .chip-active {
-  border-color: rgba(232, 161, 60, 0.55);
-  background: rgba(232, 161, 60, 0.12);
+  border-color: rgba(210, 123, 62, 0.55);
+  background: rgba(210, 123, 62, 0.12);
   color: var(--accent);
 }
 
@@ -191,7 +228,7 @@ body {
 
 .section-label {
   /* Paper's kicker: serif small caps in the editorial brass. */
-  font-family: var(--font-fraunces), Georgia, serif;
+  font-family: var(--font-brand-display), Georgia, serif;
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.16em;
@@ -211,7 +248,7 @@ body {
 /* A small serif kicker above a title or a feed card ("Tasting note",
    "Badge earned"). Same voice as .section-label, sized to sit inline. */
 .kicker {
-  font-family: var(--font-fraunces), Georgia, serif;
+  font-family: var(--font-brand-display), Georgia, serif;
   font-size: 11px;
   line-height: 1.2;
   text-transform: uppercase;
@@ -231,9 +268,9 @@ body {
 }
 .pull-quote > blockquote {
   margin: 0;
-  font-family: var(--font-fraunces), Georgia, serif;
+  font-family: var(--font-brand-display), Georgia, serif;
   font-style: italic;
-  font-weight: 400;
+  font-weight: 500;
   font-size: 18px;
   line-height: 1.28;
   color: var(--quote);
@@ -244,7 +281,7 @@ body {
   position: absolute;
   left: -0.125rem;
   top: -0.875rem;
-  font-family: var(--font-fraunces), Georgia, serif;
+  font-family: var(--font-brand-display), Georgia, serif;
   font-style: italic;
   font-weight: 600;
   font-size: 40px;
@@ -270,22 +307,21 @@ body {
 }
 
 .stat-number {
-  font-family: var(--font-fraunces), Georgia, serif;
+  font-family: var(--font-brand-display), Georgia, serif;
   font-optical-sizing: auto;
   font-weight: 500;
   font-variant-numeric: lining-nums;
 }
 
+/* Formerly an amber text gradient; flat since the Caskfolk pass. The class
+   name stays so call sites don't churn. */
 .text-gradient-amber {
-  background: linear-gradient(120deg, #f0b054, var(--accent-deep));
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+  color: var(--foreground);
 }
 
 :where(button, a, input, [role="tab"], [role="button"]):focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px rgba(232, 161, 60, 0.6);
+  box-shadow: 0 0 0 2px rgba(210, 123, 62, 0.7);
 }
 
 ::-webkit-scrollbar {

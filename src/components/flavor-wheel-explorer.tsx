@@ -176,7 +176,7 @@ export function FlavorWheelExplorer() {
                 dominantBaseline="central"
                 fontSize={12}
                 fontWeight={isSelected ? 700 : 600}
-                fill="#16110c"
+                fill="#101a14"
                 opacity={dimmed ? 0.45 : 0.92}
                 pointerEvents="none"
               >

@@ -13,7 +13,7 @@ afterEach(cleanup);
 describe("ShellUpdateRequired", () => {
   it("says what happened without promising anything it can't keep", () => {
     render(<ShellUpdateRequired />);
-    expect(screen.getByRole("heading", { name: "Update Whaikey" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Update Caskfolk" })).toBeInTheDocument();
     // The one reassurance offered, and it is true: the pour queue is local and
     // survives an update.
     expect(screen.getByText(/nothing you've logged is lost/i)).toBeInTheDocument();

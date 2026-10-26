@@ -81,7 +81,7 @@ describe("PushOffer", () => {
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Turn on" }));
     });
-    expect(screen.getByText(/off for Whaikey in your phone's settings/)).toBeInTheDocument();
+    expect(screen.getByText(/off for Caskfolk in your phone's settings/)).toBeInTheDocument();
   });
 
   it("an unavailable result keeps the offer alive instead of ending it", async () => {

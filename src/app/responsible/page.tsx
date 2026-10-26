@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { BRAND_NAME } from "@/lib/brand";
 
 export const metadata: Metadata = {
   title: "Drinking responsibly",
-  description: "Where to find help, and what Whaikey will and won't do.",
+  description: `Where to find help, and what ${BRAND_NAME} will and won't do.`,
 };
 
 /**
@@ -23,7 +24,7 @@ export default function ResponsiblePage() {
           Drinking responsibly
         </h1>
         <p className="text-muted leading-relaxed">
-          Whaikey is a tasting journal. It is built to help you notice what you like — not to
+          {BRAND_NAME} is a tasting journal. It is built to help you notice what you like — not to
           help you drink more of it.
         </p>
       </header>
@@ -56,7 +57,7 @@ export default function ResponsiblePage() {
       <section className="flex flex-col gap-3">
         <h2 className="font-display text-xl font-semibold">What a pour actually is</h2>
         <p className="text-sm text-muted leading-relaxed">
-          Whaikey&apos;s default pour is 45 ml. At 45% ABV that is about 20 ml of pure alcohol;
+          {BRAND_NAME}&apos;s default pour is 45 ml. At 45% ABV that is about 20 ml of pure alcohol;
           at cask strength, closer to 30 ml. For reference, a US standard drink is defined as
           14 g of pure alcohol, which is a little under 18 ml. Whiskey served neat is easy to
           under-count precisely because the glass looks empty long before a pint would.

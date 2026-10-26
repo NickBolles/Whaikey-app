@@ -207,7 +207,7 @@ describe("getBottleComparison", () => {
     expect(cmp!.professional.tags).toEqual({ peat: 3, campfire: 2, tar: 2 });
     expect(cmp!.professional.critics[0].publication).toBe("Whisky Review");
     expect(cmp!.professional.critics[0].sourceUrl).toBe("https://example.com/review");
-    // The catalog description is Whaikey's editorial copy, not the producer's
+    // The catalog description is Caskfolk's editorial copy, not the producer's
     // prose, so it never rides along under the producer's attribution.
     expect(cmp!.professional.producer).toEqual({
       sourceLabel: "Distillery tasting notes",

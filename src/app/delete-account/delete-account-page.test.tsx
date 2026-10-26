@@ -23,9 +23,9 @@ afterEach(() => {
 describe("/delete-account", () => {
   it("signed out: explains the in-app path, offers sign-in and a request form", async () => {
     render(await DeleteAccountPage());
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toMatch(/Delete your Whaikey account/);
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toMatch(/Delete your Caskfolk account/);
     expect(document.body.textContent).toMatch(/Settings/);
-    expect(document.body.textContent).toMatch(/published by the Whaikey developer/);
+    expect(document.body.textContent).toMatch(/published by the Caskfolk developer/);
     const signIn = screen.getByRole("link", { name: "Sign in to delete" });
     expect(signIn.getAttribute("href")).toBe("/sign-in?next=%2Fdelete-account");
     expect(screen.getByRole("button", { name: "Request deletion" })).toBeTruthy();

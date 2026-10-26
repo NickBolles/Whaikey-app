@@ -7,6 +7,8 @@ import { signIn } from "@/lib/auth-client";
 import { startNativeSignIn } from "@/lib/native/auth";
 import { signInWithAppleNative } from "@/lib/native/apple-sign-in";
 import { safeReturnPath } from "@/lib/return-path";
+import { BRAND_NAME } from "@/lib/brand";
+import { BrandMark } from "@/components/brand-mark";
 
 type Provider = "google" | "apple";
 
@@ -108,11 +110,11 @@ function SignInForm() {
   return (
     <div className="flex flex-col items-center justify-center min-h-[85dvh] px-6 gap-9">
       <div className="text-center">
-        <div aria-hidden className="text-5xl mb-4 drop-shadow-[0_0_24px_rgba(232,161,60,0.25)]">
-          🥃
-        </div>
+        <div aria-hidden className="mb-4 text-foreground">
+        <BrandMark size={56} />
+      </div>
         <h1 className="font-display text-4xl font-semibold tracking-tight text-gradient-amber">
-          Whaikey
+          {BRAND_NAME}
         </h1>
         <p className="text-muted mt-3 max-w-xs leading-relaxed">
           Your bar, your palate, your pours — with an AI concierge who knows them all.
@@ -148,7 +150,7 @@ function SignInForm() {
         )}
       </div>
       <p className="text-xs text-muted/70 text-center max-w-xs">
-        Sip responsibly. Whaikey never rewards drinking frequency — only curiosity.{" "}
+        Sip responsibly. {BRAND_NAME} never rewards drinking frequency — only curiosity.{" "}
         <Link href="/responsible" className="underline underline-offset-2">
           What that means
         </Link>

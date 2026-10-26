@@ -54,6 +54,7 @@ import {
   userProfiles,
   userSocialPrefs,
 } from "@/db/schema";
+import { BRAND_NAME } from "@/lib/brand";
 
 /**
  * What happens to a person's data when they export it and when they delete
@@ -1543,7 +1544,7 @@ export function toCsv(columns: readonly string[], rows: readonly ExportRow[]): s
   return `${lines.join("\r\n")}\r\n`;
 }
 
-const CSV_README = `Whaikey — your data
+const CSV_README = `${BRAND_NAME} — your data
 
 One CSV file per section, UTF-8 with a byte-order mark so spreadsheet apps read
 accents correctly. Times are ISO 8601 in UTC. Cells holding structured values

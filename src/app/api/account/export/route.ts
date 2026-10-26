@@ -3,6 +3,7 @@ import { getDb } from "@/db";
 import { accountExportZip, buildAccountExport } from "@/lib/account-data";
 import { appNow } from "@/lib/clock";
 import { UnauthorizedError, getSessionUser, withErrorHandling } from "@/lib/session";
+import { BRAND_SLUG } from "@/lib/brand";
 
 /**
  * GET /api/account/export — everything the signed-in account wrote, one tap,
@@ -40,7 +41,7 @@ export async function GET(req: Request) {
         headers: {
           ...headers,
           "content-type": "application/zip",
-          "content-disposition": `attachment; filename="whaikey-export-${stamp}.zip"`,
+          "content-disposition": `attachment; filename="${BRAND_SLUG}-export-${stamp}.zip"`,
         },
       });
     }
@@ -48,7 +49,7 @@ export async function GET(req: Request) {
       headers: {
         ...headers,
         "content-type": "application/json; charset=utf-8",
-        "content-disposition": `attachment; filename="whaikey-export-${stamp}.json"`,
+        "content-disposition": `attachment; filename="${BRAND_SLUG}-export-${stamp}.json"`,
       },
     });
   });

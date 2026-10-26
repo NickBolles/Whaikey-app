@@ -8,6 +8,7 @@ import { getAgeGateState, isUngatedPath } from "@/lib/age-gate";
 import { getOwnProfile } from "@/lib/social";
 import { getSessionUser } from "@/lib/session";
 import { PATH_HEADER } from "@/proxy";
+import { BRAND_BACKGROUND, BRAND_NAME, BRAND_TAGLINE } from "@/lib/brand";
 import { AppHeader } from "@/components/app-header";
 import { AppNav } from "@/components/app-nav";
 import { NativeShell } from "@/components/native-shell";
@@ -30,14 +31,17 @@ import { ToastProvider } from "@/components/toast";
  * deliberately replaces them — a reviewable diff — which is what
  * docs/DESIGN.md's baseline workflow assumes.
  *
- * These are the exact latin-subset files Google was serving when the current
- * baselines were rendered, lifted out of a `next/font/google` build, so
- * vendoring them changed nothing visually. Both faces are OFL-1.1; the licence
- * texts sit beside them.
+ * These are the latin-subset files Google Fonts served on 2026-10-26, when the
+ * Caskfolk pass swapped Fraunces/Geist for Zilla Slab/Work Sans and the
+ * baselines were regenerated. All faces are OFL-1.1; the licence texts sit
+ * beside them.
  */
-const geistSans = localFont({
-  src: "./fonts/geist-latin-variable.woff2",
-  variable: "--font-geist-sans",
+// Caskfolk type (rebrand v2 board): Work Sans for the UI, Zilla Slab for the
+// display face, pull-quotes (its italic) and the wordmark. Geist Mono stays for
+// code-ish figures.
+const workSans = localFont({
+  src: "./fonts/work-sans-latin-variable.woff2",
+  variable: "--font-brand-sans",
   weight: "100 900",
   display: "swap",
   adjustFontFallback: "Arial",
@@ -49,22 +53,26 @@ const geistMono = localFont({
   display: "swap",
   adjustFontFallback: "Arial",
 });
-const fraunces = localFont({
-  src: "./fonts/fraunces-latin-variable.woff2",
-  variable: "--font-fraunces",
-  weight: "100 900",
+const zillaSlab = localFont({
+  src: [
+    { path: "./fonts/zilla-slab-latin-500.woff2", weight: "500", style: "normal" },
+    { path: "./fonts/zilla-slab-latin-500-italic.woff2", weight: "500", style: "italic" },
+    { path: "./fonts/zilla-slab-latin-600.woff2", weight: "600", style: "normal" },
+    { path: "./fonts/zilla-slab-latin-700.woff2", weight: "700", style: "normal" },
+  ],
+  variable: "--font-brand-display",
   display: "swap",
   // Display face is a serif, so the swap-time metric stand-in should be too.
   adjustFontFallback: "Times New Roman",
 });
 
 export const metadata: Metadata = {
-  title: { default: "Whaikey", template: "%s · Whaikey" },
-  description: "AI-native whiskey tracking: your bar, your palate, your pours.",
+  title: { default: BRAND_NAME, template: `%s · ${BRAND_NAME}` },
+  description: `${BRAND_NAME} — ${BRAND_TAGLINE} A whiskey journal for you and the friends you pour with.`,
 };
 
 export const viewport: Viewport = {
-  themeColor: "#120e0a",
+  themeColor: BRAND_BACKGROUND,
   width: "device-width",
   initialScale: 1,
   // The native shell draws under the notch and home indicator; the layout pays
@@ -118,7 +126,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} ${fraunces.variable} antialiased`}
+      className={`${workSans.variable} ${geistMono.variable} ${zillaSlab.variable} antialiased`}
     >
       <body className="min-h-dvh">
         {/* One toast region for the whole app (docs/STORYBOARD.md §1.2), above

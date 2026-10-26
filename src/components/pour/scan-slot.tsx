@@ -9,6 +9,7 @@ import { haptic } from "@/lib/native/haptics";
 import { ToggleSwitch } from "@/components/toggle-switch";
 import { identifyLabel } from "@/lib/label-scan";
 import { bottleMeta, decideScan, productCode, type ScanBottle, type ScanDecision, type UpcLookup } from "./scan-decision";
+import { BRAND_NAME } from "@/lib/brand";
 
 /** D16: the camera pauses itself after ~2 minutes with nothing read. */
 export const CAMERA_AUTO_PAUSE_MS = 120_000;
@@ -55,7 +56,7 @@ interface TeachResponse {
 /** The sentence a crowd-confirm outcome earns (same flow as the scanner, #100). */
 export function teachMessage(bottleName: string, data: TeachResponse | null): string {
   const teach = data?.teach;
-  if (teach?.taught) return `You taught Whaikey this barcode — ${bottleName}`;
+  if (teach?.taught) return `You taught ${BRAND_NAME} this barcode — ${bottleName}`;
   if (teach?.state === "pending") {
     const left = Math.max(0, (teach.required ?? 2) - (teach.confirmations ?? 1));
     return left > 0

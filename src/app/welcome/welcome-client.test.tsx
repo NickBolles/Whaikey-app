@@ -74,7 +74,7 @@ describe("WelcomeClient", () => {
     const user = userEvent.setup();
     render(<WelcomeClient {...baseProps} />);
 
-    expect(screen.getByText("Whaikey")).toBeInTheDocument();
+    expect(screen.getByText("Caskfolk")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Set me up" }));
     expect(screen.getByRole("heading", { name: "Your profile" })).toBeInTheDocument();
 
@@ -361,7 +361,7 @@ describe("WelcomeClient", () => {
     expect(screen.getByRole("button", { name: "Add your first bottle" })).toBeInTheDocument();
   });
 
-  it("finishing shows the You're set moment, sets the cookie, and Open Whaikey goes home", async () => {
+  it("finishing shows the You're set moment, sets the cookie, and Open Caskfolk goes home", async () => {
     stubFetch((url) => {
       if (url.startsWith("/api/bottles/search")) return { status: 200, body: { results: [] } };
       return undefined;
@@ -375,7 +375,7 @@ describe("WelcomeClient", () => {
     expect(hasOnboardedCookie()).toBe(true);
     expect(screen.getByText("You're set.")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Open Whaikey" }));
+    await user.click(screen.getByRole("button", { name: "Open Caskfolk" }));
     expect(push).toHaveBeenCalledWith("/");
     expect(refresh).toHaveBeenCalled();
   });

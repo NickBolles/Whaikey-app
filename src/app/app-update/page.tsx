@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { ShellUpdateRequired } from "@/components/shell-update-required";
+import { BRAND_NAME } from "@/lib/brand";
 
-export const metadata: Metadata = { title: "Update Whaikey" };
+export const metadata: Metadata = { title: `Update ${BRAND_NAME}` };
 
 /**
  * The update gate as a page (docs/STORYBOARD.md §3.15).

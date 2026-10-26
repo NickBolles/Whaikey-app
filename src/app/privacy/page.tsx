@@ -2,10 +2,11 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { PolicyPage } from "@/components/policy-page";
 import { isErrorMonitoringConfigured } from "@/lib/observability/errors";
+import { BRAND_NAME } from "@/lib/brand";
 
 export const metadata: Metadata = {
   title: "Privacy",
-  description: "What Whaikey stores, who can see it, and how long it is kept.",
+  description: `What ${BRAND_NAME} stores, who can see it, and how long it is kept.`,
 };
 
 /**
@@ -44,9 +45,9 @@ export default function PrivacyPage() {
             <strong className="text-foreground">Your account</strong> — the name, email address and
             avatar your sign-in provider gives us. There is no password: sign-in is Google or Apple
             only, so we never see one. Signing in also leaves the tokens the provider issues for it,
-            encrypted at rest. They exist because sign-in works that way; Whaikey never uses them to
+            encrypted at rest. They exist because sign-in works that way; {BRAND_NAME} never uses them to
             read anything from Google or Apple, and they are deleted with the account. If you stop
-            using Sign in with Apple for Whaikey or delete your Apple ID, Apple tells us so directly;
+            using Sign in with Apple for {BRAND_NAME} or delete your Apple ID, Apple tells us so directly;
             we keep that notice from Apple with your account and sign you out everywhere.
           </li>
           <li>
@@ -214,7 +215,7 @@ export default function PrivacyPage() {
         </p>
       </Section>
 
-      <Section title="Where it goes outside Whaikey">
+      <Section title={`Where it goes outside ${BRAND_NAME}`}>
         <ul className="list-disc pl-5 flex flex-col gap-1.5">
           <li>
             <strong className="text-foreground">The AI provider</strong> — OpenRouter or Anthropic,
@@ -251,7 +252,7 @@ export default function PrivacyPage() {
             you enable notifications.
           </li>
         </ul>
-        <p>We do not sell your data, and there is no advertising in Whaikey.</p>
+        <p>We do not sell your data, and there is no advertising in {BRAND_NAME}.</p>
       </Section>
 
       <Section title="How long we keep it">
@@ -384,7 +385,7 @@ export default function PrivacyPage() {
 
       <Section title="Children">
         <p>
-          Whaikey is not for anyone under the legal drinking age where they are, and the gate at
+          {BRAND_NAME} is not for anyone under the legal drinking age where they are, and the gate at
           first use is how we ask. An account that answers below the minimum is held, not used.
         </p>
       </Section>

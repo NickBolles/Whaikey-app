@@ -31,7 +31,7 @@ const SUGGESTIONS = [
 function SetupCard() {
   return (
     <div className="flex flex-col items-center justify-center min-h-[70dvh] px-6 text-center gap-6">
-      <div aria-hidden className="text-5xl drop-shadow-[0_0_24px_rgba(232,161,60,0.25)]">🔌</div>
+      <div aria-hidden className="text-5xl drop-shadow-[0_0_24px_rgba(210,123,62,0.25)]">🔌</div>
       <div>
         <h1 className="font-display text-3xl font-semibold tracking-tight">
           The concierge is off duty
@@ -364,7 +364,7 @@ export function ChatClient({ aiConfigured, initialMessage = null }: { aiConfigur
             <MessageCircle
               size={40}
               strokeWidth={1.8}
-              className="text-accent drop-shadow-[0_0_18px_rgba(232,161,60,0.35)]"
+              className="text-accent drop-shadow-[0_0_18px_rgba(210,123,62,0.35)]"
               aria-hidden
             />
             <div>

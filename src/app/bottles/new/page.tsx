@@ -40,7 +40,7 @@ export default async function NewBottlePage({ searchParams }: { searchParams: Pa
     const next = `/bottles/new${query ? `?${query}` : ""}`;
     return (
       <div className="flex flex-col items-center justify-center min-h-[60dvh] px-6 text-center gap-5">
-        <div aria-hidden className="text-5xl drop-shadow-[0_0_24px_rgba(232,161,60,0.25)]">
+        <div aria-hidden className="text-5xl drop-shadow-[0_0_24px_rgba(210,123,62,0.25)]">
           🥃
         </div>
         <div>

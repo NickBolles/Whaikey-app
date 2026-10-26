@@ -125,7 +125,7 @@ export function QrScanButton() {
               <div className="pointer-events-none flex flex-1 items-center justify-center p-10">
                 <div
                   aria-hidden
-                  className="aspect-square w-full max-w-[18rem] rounded-3xl border-2 border-accent/70 shadow-[0_0_24px_rgba(232,161,60,0.25)]"
+                  className="aspect-square w-full max-w-[18rem] rounded-3xl border-2 border-accent/70 shadow-[0_0_24px_rgba(210,123,62,0.25)]"
                 />
               </div>
               <div className="flex items-center justify-between gap-3 bg-gradient-to-t from-black/70 to-transparent p-6 pb-10">
