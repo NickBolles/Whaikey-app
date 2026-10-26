@@ -13,8 +13,11 @@ vi.mock("@/lib/nav-history", () => ({ previousPath: () => prev }));
 // The camera slot is exercised on its own; here it only has to hand the sheet
 // a bottle the way an exact barcode or a search pick would.
 vi.mock("@/components/pour/scan-slot", () => ({
-  PourScanSlot: ({ onPick }: { onPick: (b: unknown, m: unknown) => void }) => (
-    <div>
+  PourScanSlot: ({ onPick, keepScanning, onKeepScanningChange, round }: { onPick: (b: unknown, m: unknown) => void; keepScanning?: boolean; onKeepScanningChange?: (v: boolean) => void; round?: number }) => (
+    <div data-testid="fake-slot" data-round={round}>
+      <button type="button" aria-pressed={Boolean(keepScanning)} onClick={() => onKeepScanningChange?.(!keepScanning)}>
+        fake keep scanning
+      </button>
       <button type="button" onClick={() => onPick({ id: "blantons", name: "Blanton's Original", distillery: "Buffalo Trace", abv: 46.5 }, { via: "barcode", alternatives: [{ id: "blantons-gold", name: "Blanton's Gold" }] })}>
         fake barcode hit
       </button>
@@ -238,5 +241,48 @@ describe("PourFlow — draft (notes before the bottle)", () => {
     await act(async () => {});
     expect(screen.getByPlaceholderText("What do you smell?")).toHaveValue("Private thoughts");
     expect(screen.getByText(/Only me can see/)).toBeInTheDocument();
+  });
+});
+
+describe("PourFlow — keep scanning", () => {
+  beforeEach(() => window.sessionStorage.clear());
+
+  it("keeps the camera slot up after a pick and resets for the next bottle after Save", async () => {
+    prev = "/bar";
+    stubFetch(async (url, init) => {
+      const href = String(url);
+      if (href === "/api/pours" && init?.method === "POST") return ok({ pour: { id: "p1" } });
+      return ok({});
+    });
+    renderFlow();
+    await act(async () => {});
+    fireEvent.click(screen.getByRole("button", { name: "fake keep scanning" }));
+    expect(window.sessionStorage.getItem("whaikey:pour-keep-scanning")).toBe("1");
+    fireEvent.click(screen.getByRole("button", { name: "fake search pick" }));
+    // The slot stays mounted beside the picked bottle.
+    expect(screen.getByTestId("fake-slot")).toBeInTheDocument();
+    expect(screen.getByTestId("pour-bottle")).toHaveTextContent("Eagle Rare 10");
+    fireEvent.click(screen.getByRole("button", { name: "Rate 4 stars" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Save pour" }));
+    });
+    expect(back).not.toHaveBeenCalled();
+    expect(push).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("pour-bottle")).not.toBeInTheDocument();
+    expect(screen.getByTestId("fake-slot")).toHaveAttribute("data-round", "1");
+    expect(await screen.findByText(/Poured Eagle Rare 10/)).toBeInTheDocument();
+  });
+
+  it("without keep scanning a pick replaces the slot and Save leaves as before", async () => {
+    prev = "/bar";
+    stubFetch(async (url, init) => (String(url) === "/api/pours" && init?.method === "POST" ? ok({ pour: { id: "p1" } }) : ok({})));
+    renderFlow();
+    await act(async () => {});
+    fireEvent.click(screen.getByRole("button", { name: "fake search pick" }));
+    expect(screen.queryByTestId("fake-slot")).not.toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Save pour" }));
+    });
+    expect(back).toHaveBeenCalled();
   });
 });

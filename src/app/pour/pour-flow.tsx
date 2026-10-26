@@ -56,11 +56,31 @@ const VISIBILITY_SUMMARY: Record<PourVisibility, string> = {
  * After Save a toast carries Undo and the sheet returns where you came from —
  * there is no "Poured." page any more.
  */
+const KEEP_SCANNING_KEY = "whaikey:pour-keep-scanning";
+
 export function PourFlow({ userId, initialBottle = null, initialBottleMissing = false }: { userId?: string; initialBottle?: BottlePick | null; initialBottleMissing?: boolean }) {
   const router = useRouter();
   const toast = useToast();
   const [bottle, setBottle] = useState<ScanBottle | null>(initialBottle);
   const [pickedVia, setPickedVia] = useState<PickMeta | null>(null);
+  // Keep-scanning (tastings): the camera stays up after a pick and a saved
+  // pour resets the sheet for the next bottle instead of leaving. Per-tab and
+  // off by default — a running camera is a battery cost the user opts into.
+  const [keepScanning, setKeepScanningState] = useState(false);
+  const [scanRound, setScanRound] = useState(0);
+  useEffect(() => {
+    try {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot restore from sessionStorage, which the server render can't see
+      if (sessionStorage.getItem(KEEP_SCANNING_KEY) === "1") setKeepScanningState(true);
+    } catch {}
+  }, []);
+  const setKeepScanning = (next: boolean) => {
+    setKeepScanningState(next);
+    try {
+      if (next) sessionStorage.setItem(KEEP_SCANNING_KEY, "1");
+      else sessionStorage.removeItem(KEEP_SCANNING_KEY);
+    } catch {}
+  };
   const [notItOpen, setNotItOpen] = useState(false);
   const [rating, setRating] = useState<number | null>(null);
   const [servingStyle, setServingStyle] = useState<ServingStyle | null>(null);
@@ -159,6 +179,8 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
   }
 
   function pick(next: ScanBottle, meta: PickMeta) {
+    // Keep-scanning: the same bottle read again is not a new pick.
+    if (bottle && bottle.id === next.id) return;
     setBottle(next);
     setPickedVia(meta);
     setNotItOpen(false);
@@ -242,7 +264,13 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
           : undefined,
         action: { label: "Journal", onClick: () => router.push("/history") },
       });
-      leave();
+      if (keepScanning) {
+        // Ready for the next bottle: the sheet stays, the camera stays on,
+        // size and visibility carry over (they rarely change mid-tasting).
+        resetForNext();
+      } else {
+        leave();
+      }
       router.refresh();
     } catch (err) {
       // No signal where the whiskey is (PLAN.md §4.2): queue rather than lose
@@ -261,6 +289,24 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
       setSubmitting(false);
     }
   };
+
+  function resetForNext() {
+    setBottle(null);
+    setPickedVia(null);
+    setNotItOpen(false);
+    setRating(null);
+    setServingStyle(null);
+    setNose("");
+    setPalate("");
+    setFinish("");
+    setFreeform("");
+    setFlavorTags({});
+    setCompanions("");
+    setDetailOpen(false);
+    setDraftRestored(false);
+    finishedRef.current = false;
+    setScanRound((n) => n + 1);
+  }
 
   function discard() {
     finishedRef.current = true;
@@ -282,9 +328,20 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
           </div>
         </header>
 
-        {!bottle ? (
-          <PourScanSlot onPick={pick} missingNotice={initialBottleMissing} />
-        ) : (
+        {(!bottle || keepScanning) && (
+          <div className={bottle ? "mb-2" : undefined}>
+            <PourScanSlot
+              onPick={pick}
+              missingNotice={!bottle && initialBottleMissing}
+              compact={Boolean(bottle)}
+              keepScanning={keepScanning}
+              onKeepScanningChange={setKeepScanning}
+              onNotice={(message) => toast.show({ message })}
+              round={scanRound}
+            />
+          </div>
+        )}
+        {bottle && (
           <section aria-label="Bottle" className="flex flex-col gap-1.5">
             {pickedVia?.via === "barcode" && (
               <p className="flex items-center justify-between gap-2 text-xs">
