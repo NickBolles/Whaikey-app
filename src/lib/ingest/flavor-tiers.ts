@@ -62,8 +62,15 @@ export interface ProfileWrite {
  * can hold the rows for a moment.
  */
 export function isTransientDbError(error: unknown): boolean {
-  const code = (error as { code?: unknown } | null)?.code;
-  return code === "57014" || code === "55P03" || code === "40P01" || code === "40001";
+  // Drizzle wraps driver errors (DrizzleQueryError) with the PostgresError on
+  // `.cause`, so walk the cause chain (bounded) for the SQLSTATE.
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && current != null && typeof current === "object"; depth += 1) {
+    const code = (current as { code?: unknown }).code;
+    if (code === "57014" || code === "55P03" || code === "40P01" || code === "40001") return true;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
 }
 
 /** Run `fn`, retrying transient Postgres errors with a short backoff. Each attempt must be idempotent. */

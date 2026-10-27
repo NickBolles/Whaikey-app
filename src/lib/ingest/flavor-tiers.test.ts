@@ -357,11 +357,15 @@ describe("statement-timeout hardening", () => {
     expect(isTransientDbError({ code: "23505" })).toBe(false);
     expect(isTransientDbError(new Error("boom"))).toBe(false);
     expect(isTransientDbError(null)).toBe(false);
+    // Drizzle's DrizzleQueryError carries the driver error on `.cause`.
+    const wrapped = new Error("Failed query: UPDATE bottles …", { cause: Object.assign(new Error("canceling statement due to statement timeout"), { code: "57014" }) });
+    expect(isTransientDbError(wrapped)).toBe(true);
+    expect(isTransientDbError(new Error("Failed query", { cause: { code: "23505" } }))).toBe(false);
   });
 
   it("retries transient errors with backoff and gives up on the rest", async () => {
     const flaky = vi.fn()
-      .mockRejectedValueOnce(Object.assign(new Error("canceling statement due to statement timeout"), { code: "57014" }))
+      .mockRejectedValueOnce(new Error("Failed query", { cause: Object.assign(new Error("canceling statement due to statement timeout"), { code: "57014" }) }))
       .mockResolvedValueOnce("ok");
     await expect(withDbRetry(flaky, { baseDelayMs: 1 })).resolves.toBe("ok");
     expect(flaky).toHaveBeenCalledTimes(2);
