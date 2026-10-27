@@ -62,4 +62,13 @@ describe("AppNav", () => {
     render(<AppNav />);
     expect(screen.getByRole("navigation", { name: "Primary" })).toHaveAttribute("data-app-nav");
   });
+  it("stands down on the signed-out front door, and only there", () => {
+    pathname = "/";
+    const { container, unmount } = render(<AppNav signedIn={false} />);
+    expect(container).toBeEmptyDOMElement();
+    unmount();
+    pathname = "/search";
+    render(<AppNav signedIn={false} />);
+    expect(screen.getByRole("navigation", { name: "Primary" })).toBeInTheDocument();
+  });
 });

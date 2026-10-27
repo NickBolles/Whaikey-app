@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isChromeless, isTabRoute, parentRoute, routeLabel, TABS } from "@/lib/app-routes";
+import { isChromeless, isMarketingRoute, isTabRoute, parentRoute, routeLabel, TABS } from "@/lib/app-routes";
 
 const SIGNED_IN = { signedIn: true, profileHandle: "ada" };
 const SIGNED_OUT = { signedIn: false, profileHandle: null };
@@ -105,5 +105,15 @@ describe("parentRoute — where back goes with no in-app history", () => {
     for (const path of ["/history", "/search", "/pour", "/terms", "/nope/nothing"]) {
       expect(parentRoute(path, SIGNED_IN)).toEqual({ href: "/", label: "Home" });
     }
+  });
+});
+
+describe("isMarketingRoute", () => {
+  it("is the root, signed out — nothing else", () => {
+    expect(isMarketingRoute("/", false)).toBe(true);
+    expect(isMarketingRoute("/?ref=x", false)).toBe(true);
+    expect(isMarketingRoute("/", true)).toBe(false);
+    expect(isMarketingRoute("/search", false)).toBe(false);
+    expect(isMarketingRoute("/responsible", false)).toBe(false);
   });
 });

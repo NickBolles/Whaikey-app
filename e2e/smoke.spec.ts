@@ -143,7 +143,11 @@ test.describe("signed-out smoke", () => {
   });
 
   test("bottom nav is Home · Bar · ＋ · Explore · Social, and ＋ opens the pour sheet", async ({ page }) => {
+    // Signed out, `/` is the marketing landing and carries no app chrome
+    // (owner feedback 2026-10-26); the nav is there on every app route.
     await page.goto("/");
+    await expect(page.getByRole("navigation", { name: "Primary" })).toHaveCount(0);
+    await page.goto("/search");
     const nav = page.getByRole("navigation", { name: "Primary" });
     for (const label of ["Home", "Bar", "Explore", "Social"]) {
       await expect(nav.getByText(label, { exact: true })).toBeVisible();
