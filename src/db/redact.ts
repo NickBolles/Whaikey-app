@@ -1,3 +1,5 @@
+import { inspect } from "node:util";
+
 /**
  * Safe-to-log descriptions of a database connection string.
  *
@@ -57,8 +59,13 @@ export function scrubDbUrl(text: string, url: string | undefined | null): string
   return out;
 }
 
-/** Format an unknown thrown value for logging with the DB URL scrubbed out. */
+/**
+ * Format an unknown thrown value for logging with the DB URL scrubbed out.
+ * Uses util.inspect so the whole `cause` chain and driver fields (SQLSTATE
+ * `code`, `detail`, `hint`, …) survive — Drizzle wraps the Postgres error in
+ * `cause`, and that is where the real failure reason lives.
+ */
 export function formatDbError(err: unknown, url: string | undefined | null): string {
-  const text = err instanceof Error ? (err.stack ?? `${err.name}: ${err.message}`) : String(err);
+  const text = typeof err === "string" ? err : inspect(err, { depth: 6, breakLength: Infinity });
   return scrubDbUrl(text, url);
 }

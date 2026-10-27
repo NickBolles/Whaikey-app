@@ -58,6 +58,16 @@ describe("scrubDbUrl / formatDbError", () => {
     expect(formatDbError(`raw ${PASSWORD}`, URL_WITH_PASSWORD)).toBe("raw ***");
     expect(formatDbError("plain", undefined)).toBe("plain");
   });
+
+  it("keeps the cause chain and SQLSTATE (Drizzle wraps the driver error)", () => {
+    const pgErr = Object.assign(new Error(`permission denied to create extension "pg_trgm" (${URL_WITH_PASSWORD})`), { code: "42501" });
+    const wrapped = new Error("Failed query: CREATE EXTENSION pg_trgm", { cause: pgErr });
+    const out = formatDbError(wrapped, URL_WITH_PASSWORD);
+    expect(out).toContain("Failed query: CREATE EXTENSION pg_trgm");
+    expect(out).toContain("permission denied to create extension");
+    expect(out).toContain("42501");
+    expect(out).not.toContain(PASSWORD);
+  });
 });
 
 describe("check-secret-logs guard", () => {
