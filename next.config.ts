@@ -27,15 +27,31 @@ import type { NextConfig } from "next";
  */
 const isDev = process.env.NODE_ENV !== "production";
 
+/**
+ * Vercel's toolbar (deployment Comments, the owner's feedback channel) loads
+ * from vercel.live and talks over Pusher. Only on Vercel builds; without it
+ * every toolbar load files a dozen CSP reports and an enforced policy would
+ * break commenting on deployments.
+ */
+const VERCEL_TOOLBAR = process.env.VERCEL
+  ? {
+      script: " https://vercel.live",
+      style: " https://vercel.live",
+      font: " https://vercel.live https://assets.vercel.com",
+      connect: " https://vercel.live wss://ws-us3.pusher.com",
+      frame: "https://vercel.live",
+    }
+  : { script: "", style: "", font: "", connect: "", frame: "'none'" };
+
 const CSP = [
   "default-src 'self'",
   "img-src 'self' data: https:",
   "media-src 'self' data: blob:",
-  "font-src 'self'",
-  "style-src 'self' 'unsafe-inline'",
-  `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,
-  "connect-src 'self'",
-  "frame-src 'none'",
+  `font-src 'self'${VERCEL_TOOLBAR.font}`,
+  `style-src 'self' 'unsafe-inline'${VERCEL_TOOLBAR.style}`,
+  `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}${VERCEL_TOOLBAR.script}`,
+  `connect-src 'self'${VERCEL_TOOLBAR.connect}`,
+  `frame-src ${VERCEL_TOOLBAR.frame}`,
   "object-src 'none'",
   "frame-ancestors 'none'",
   "base-uri 'none'",

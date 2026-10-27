@@ -18,6 +18,7 @@ import { RecommendationRail } from "@/components/recommendation-rail";
 import { FriendsModule, type FriendFeedItem } from "@/components/friends-module";
 import { LatestBadgeCard, pickLatestBadge } from "@/components/latest-badge-card";
 import { getPassport } from "@/lib/passport";
+import { withFallback } from "@/lib/settle";
 import { ChevronRight, GraduationCap, Star } from "lucide-react";
 import { BRAND_NAME, BRAND_TAGLINE } from "@/lib/brand";
 import { BrandMark } from "@/components/brand-mark";
@@ -84,10 +85,15 @@ export default async function HomePage() {
   // one), so it rides the same round rather than waiting on `following`.
   // The viewer's own passport feeds Home's "Badge earned" card (read only:
   // stamping a tier stays the job of opening the passport itself).
+  //
+  // Only the onboarding check and the month in review are load-bearing; every
+  // other widget goes through `withFallback`, so one slow or failing read
+  // renders that widget empty instead of holding the whole page (2026-10-27:
+  // a stuck read here kept signed-in Home spinning to the 300 s limit).
   const [onboarding, dashboard, recentPours, ownProfile, following, friendFeed, passport] = await Promise.all([
     cookieStore.get(ONBOARDING_COOKIE) ? false : needsOnboarding(db, user.id),
     getDashboard(db, user.id, appNow()),
-    db
+    withFallback(db
       .select({
         id: schema.pours.id,
         rating: schema.pours.rating,
@@ -99,11 +105,11 @@ export default async function HomePage() {
       .innerJoin(schema.bottles, eq(schema.pours.bottleId, schema.bottles.id))
       .where(eq(schema.pours.userId, user.id))
       .orderBy(desc(schema.pours.createdAt))
-      .limit(3),
-    getOwnProfile(db, user.id),
-    listFollowing(db, user.id),
-    getFriendFeed(db, user.id, { limit: 3 }),
-    getPassport(db, user.id),
+      .limit(3), [], "home:recent-pours"),
+    withFallback(getOwnProfile(db, user.id), null, "home:own-profile"),
+    withFallback(listFollowing(db, user.id), [], "home:following"),
+    withFallback(getFriendFeed(db, user.id, { limit: 3 }), [], "home:friend-feed"),
+    withFallback(getPassport(db, user.id), null, "home:passport"),
   ]);
   if (onboarding) redirect("/welcome");
 
@@ -114,10 +120,14 @@ export default async function HomePage() {
   // and keeping a top slice would drop the chip from a recent note whenever
   // its author sat outside that slice — the feed picks by recency, not by
   // match, so the two orderings must not be conflated.
-  const matchByUserId = await getPalateMatches(
-    db,
-    user.id,
-    friendFeedRaw.map((f) => f.author.userId),
+  const matchByUserId = await withFallback(
+    getPalateMatches(
+      db,
+      user.id,
+      friendFeedRaw.map((f) => f.author.userId),
+    ),
+    new Map<string, number>(),
+    "home:palate-matches",
   );
   const friendFeedItems: FriendFeedItem[] = friendFeedRaw.map((f) => ({
     pourId: f.pourId,
@@ -139,7 +149,7 @@ export default async function HomePage() {
     palateMatchPercent: matchByUserId.get(f.author.userId) ?? null,
   }));
 
-  const latestBadge = pickLatestBadge(passport);
+  const latestBadge = passport ? pickLatestBadge(passport) : null;
   const bottleCount = dashboard.shelfTotal;
   const pourCount = dashboard.totalPours;
 

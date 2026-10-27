@@ -119,3 +119,29 @@ describe("popularity ranking", () => {
     expect((await topPopularBottles(db))[0]).toMatchObject({ id: a.id, popularity: 20 });
   });
 });
+
+describe("recordBottleSignals on hosted Postgres", () => {
+  it("runs the tally in a short transaction with SET LOCAL statement/lock timeouts", async () => {
+    // A hosted handle is a postgres-js client (a function). Route its
+    // transaction to the PGlite test DB and record what it was asked to run.
+    const statements: string[] = [];
+    const hosted = Object.create(db) as DB & { $client: unknown };
+    Object.defineProperty(hosted, "$client", { value: () => undefined });
+    hosted.transaction = (async (fn: (tx: DB) => Promise<unknown>) =>
+      db.transaction(async (tx) => {
+        const spy = Object.create(tx) as DB;
+        spy.execute = ((q: Parameters<DB["execute"]>[0]) => {
+          const chunks = (q as unknown as { queryChunks?: Array<{ value?: string[] }> }).queryChunks ?? [];
+          statements.push(chunks.map((c) => (c.value ?? []).join("")).join("").trim());
+          return tx.execute(q);
+        }) as DB["execute"];
+        return fn(spy);
+      })) as DB["transaction"];
+
+    const bottle = await createTestBottle(db);
+    await expect(recordBottleSignals(hosted, [bottle.id], "view")).resolves.toBe(1);
+    expect(statements[0]).toBe("SET LOCAL statement_timeout = '3s'");
+    expect(statements[1]).toBe("SET LOCAL lock_timeout = '1s'");
+    expect(statements[2]).toMatch(/INSERT INTO bottle_popularity_daily/);
+  });
+});

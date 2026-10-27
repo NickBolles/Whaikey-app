@@ -1,5 +1,5 @@
 import { sql, type SQL } from "drizzle-orm";
-import type { DB } from "@/db";
+import { isHostedDb, type DB } from "@/db";
 import { kick } from "@/lib/enrich/kick";
 import { TELEMETRY_RETENTION_DAYS } from "@/lib/observability/metrics";
 
@@ -64,13 +64,21 @@ export async function recordBottleSignals(db: DB, bottleIds: string[], signal: B
   const ids = [...new Set(bottleIds.filter((id) => typeof id === "string" && id.length > 0 && id.length <= 200))].slice(0, 10);
   if (ids.length === 0) return 0;
   const col = sql.raw(COLUMN[signal]);
-  const result = await db.execute(sql`
+  const upsert = sql`
     INSERT INTO bottle_popularity_daily (bottle_id, day, ${col})
     SELECT b.id, ${utcDay(now)}, 1 FROM bottles b
     WHERE b.id IN (${sql.join(ids.map((id) => sql`${id}`), sql`, `)})
     ON CONFLICT (bottle_id, day) DO UPDATE SET ${col} = bottle_popularity_daily.${col} + 1
-    RETURNING bottle_id`);
-  return rowsOf(result).length;
+    RETURNING bottle_id`;
+  if (!isHostedDb(db)) return rowsOf(await db.execute(upsert)).length;
+  // A tally is worth nothing next to a page render: on hosted Postgres give
+  // it a hard 3 s budget and never wait on a row lock for more than 1 s
+  // (SET LOCAL works through Supavisor's transaction mode; SET does not).
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`SET LOCAL statement_timeout = '3s'`);
+    await tx.execute(sql`SET LOCAL lock_timeout = '1s'`);
+    return rowsOf(await tx.execute(upsert)).length;
+  });
 }
 
 /**
