@@ -45,11 +45,11 @@ export default function ResponsiblePage() {
         </p>
       </section>
 
-      <section aria-labelledby="wont-do" className="card p-5 flex flex-col gap-4">
+      <section aria-labelledby="wont-do" className="card p-3 flex flex-col gap-3">
         <h2 id="wont-do" className="font-display text-xl font-semibold">
           What this app won&apos;t do
         </h2>
-        <ul className="flex flex-col gap-4">
+        <ul className="flex flex-col gap-3">
           <WontDo title={<>No streaks, and no &ldquo;you haven&apos;t poured in a while&rdquo;.</>}>
             Nothing here rewards drinking often, and nothing nudges you to pour.
           </WontDo>

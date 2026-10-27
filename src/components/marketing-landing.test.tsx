@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
 import { MarketingLanding } from "@/components/marketing-landing";
+
+afterEach(cleanup);
 
 describe("MarketingLanding", () => {
   it("is a landing page with one way in, and keeps the responsible-drinking stance on it", () => {

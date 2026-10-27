@@ -62,25 +62,25 @@ export function MarketingLanding() {
         </Link>
       </div>
 
-      <section className="flex flex-col items-center gap-6 px-6 pb-12 pt-14 text-center">
+      <section className="flex flex-col items-center gap-4 px-3 pb-6 pt-6 text-center">
         <div aria-hidden className="text-foreground">
-          <BrandMark size={72} />
+          <BrandMark size={56} />
         </div>
         <div>
           <p className="kicker text-editorial">{BRAND_TAGLINE}</p>
-          <h1 className="mt-3 font-display text-[2.6rem] font-semibold leading-[1.05] tracking-tight text-gradient-amber">
+          <h1 className="mt-2 font-display text-[2.6rem] font-semibold leading-[1.05] tracking-tight text-gradient-amber">
             {BRAND_NAME}
           </h1>
-          <p className="mt-3 font-display text-xl leading-snug text-foreground">
+          <p className="mt-2 font-display text-xl leading-snug text-foreground">
             The whiskey journal for the people around the table.
           </p>
-          <p className="mx-auto mt-4 max-w-sm leading-relaxed text-muted">
+          <p className="mx-auto mt-2 max-w-sm text-sm leading-relaxed text-muted">
             Track your bottles, keep tasting notes worth rereading, learn your palate — and share the good
             ones with friends.
           </p>
         </div>
-        <div className="flex w-full max-w-xs flex-col gap-3">
-          <Link href="/sign-in" className="btn-primary px-10 py-3.5 text-base">
+        <div className="flex w-full max-w-xs flex-col gap-2">
+          <Link href="/sign-in" className="btn-primary px-10 py-3 text-base">
             Get started
           </Link>
           <Link href="/search" className="btn-secondary px-6 py-3 text-sm">
@@ -90,54 +90,55 @@ export function MarketingLanding() {
         <p className="text-xs text-muted/70">Your notes stay yours. Of legal drinking age only.</p>
       </section>
 
-      <section aria-labelledby="landing-features" className="border-t border-border px-4 py-10">
+      <section aria-labelledby="landing-features" className="border-t border-border px-3 py-4">
         <h2 id="landing-features" className="section-label text-center">
           What it does
         </h2>
-        <ul className="mt-6 grid gap-3 sm:grid-cols-2">
+        <ul className="mt-3 grid gap-2 sm:grid-cols-2">
           {FEATURES.map(({ icon: Icon, title, body }) => (
-            <li key={title} className="card-flat flex gap-3 p-4">
+            <li key={title} className="card-flat flex gap-3 p-3">
               <span
                 aria-hidden
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-accent/10 text-accent"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent/10 text-accent"
               >
-                <Icon size={20} strokeWidth={1.8} />
+                <Icon size={18} strokeWidth={1.8} />
               </span>
               <div>
-                <h3 className="font-display text-lg font-semibold leading-snug">{title}</h3>
-                <p className="mt-1 text-sm leading-relaxed text-muted">{body}</p>
+                <h3 className="font-display text-base font-semibold leading-snug">{title}</h3>
+                <p className="mt-0.5 text-sm leading-relaxed text-muted">{body}</p>
               </div>
             </li>
           ))}
         </ul>
       </section>
 
-      <section aria-labelledby="landing-promise" className="px-4 pb-10">
-        <div className="card flex flex-col gap-3 p-5">
+      <section aria-labelledby="landing-promise" className="px-3 pb-4">
+        <div className="card flex flex-col gap-2 p-3">
           <div className="flex items-center gap-2 text-accent">
             <ShieldCheck size={20} strokeWidth={1.8} aria-hidden />
-            <h2 id="landing-promise" className="font-display text-xl font-semibold text-foreground">
+            <h2 id="landing-promise" className="font-display text-lg font-semibold text-foreground">
               Built for noticing, not for more
             </h2>
           </div>
           <p className="text-sm leading-relaxed text-muted">
-            Pours are private by default, and nothing is shared until you choose to share it. No streaks, no
-            volume badges, no leaderboards for how much anyone drinks, and nothing that nudges you to pour.
+            You decide who sees each pour — only you, or your friends — and what you paid is never
+            shown to anyone. No streaks, no volume badges, no leaderboards for how much anyone drinks, and
+            nothing that nudges you to pour.
           </p>
-          <Link href="/responsible" className="text-sm font-medium text-accent">
+          <Link href="/responsible" className="tap-target inline-flex min-h-11 items-center text-sm font-medium text-accent">
             How we think about drinking responsibly →
           </Link>
         </div>
       </section>
 
-      <section className="flex flex-col items-center gap-4 border-t border-border px-6 py-12 text-center">
-        <p className="font-display text-2xl font-semibold">Pull up a chair.</p>
-        <Link href="/sign-in" className="btn-primary px-10 py-3.5 text-base">
+      <section className="flex flex-col items-center gap-3 border-t border-border px-3 py-6 text-center">
+        <p className="font-display text-xl font-semibold">Pull up a chair.</p>
+        <Link href="/sign-in" className="btn-primary px-10 py-3 text-base">
           Create your account
         </Link>
       </section>
 
-      <footer className="flex flex-wrap items-center justify-center gap-x-1 border-t border-border px-4 py-6 text-xs text-muted">
+      <footer className="flex flex-wrap items-center justify-center gap-x-1 border-t border-border px-3 py-3 text-xs text-muted">
         {[
           ["/responsible", "Drinking responsibly"],
           ["/privacy", "Privacy"],
