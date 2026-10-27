@@ -175,6 +175,37 @@ describe("createResilientClient", () => {
   });
 });
 
+describe("concurrency slots", () => {
+  it("holds queries beyond the pool size until a slot frees, so nothing pipelines", async () => {
+    const { factory, clients } = fakeFactory();
+    const client = createResilientClient(factory, { queryTimeoutMs: 0, concurrency: 2, slotWaitMs: 60_000 });
+    const ps = [1, 2, 3].map((n) => Promise.resolve(client.unsafe(`select ${n}`, [])));
+    await flush();
+    expect(clients[0].pending.size).toBe(2);
+    [...clients[0].pending][0].succeed("a");
+    await flush();
+    await flush();
+    expect(clients[0].executed).toBe(3);
+    for (const q of [...clients[0].pending]) q.succeed("b");
+    await expect(Promise.all(ps)).resolves.toHaveLength(3);
+  });
+
+  it("lets a waiter through after slotWaitMs instead of deadlocking", async () => {
+    vi.useFakeTimers();
+    const { factory, clients } = fakeFactory();
+    const client = createResilientClient(factory, { queryTimeoutMs: 0, concurrency: 1, slotWaitMs: 2000 });
+    void client.begin(() => new Promise(() => {}));
+    await flush();
+    const inner = Promise.resolve(client.unsafe("select 1", []));
+    await flush();
+    expect(clients[0].executed).toBe(0);
+    await vi.advanceTimersByTimeAsync(2001);
+    expect(clients[0].executed).toBe(1);
+    [...clients[0].pending][0].succeed("ok");
+    await expect(inner).resolves.toBe("ok");
+  });
+});
+
 describe("hostedDbSettings", () => {
   it("defaults to a small pool, with the watchdog only on Vercel", () => {
     expect(hostedDbSettings({})).toEqual({ max: 4, queryTimeoutMs: 0, transactionTimeoutMs: 0 });
@@ -203,13 +234,13 @@ describe("poolerMode / describeQuery", () => {
 });
 
 describe("createDb (postgres-js options)", () => {
-  it("never pipelines, keeps a small pool and recycles idle/old sockets", async () => {
+  it("bounds pipelining, keeps a small pool and recycles idle/old sockets", async () => {
     const { createDb, closeDb } = await import("./index");
     // No query is sent, so nothing connects.
     const db = createDb("postgres://u:p@127.0.0.1:6543/postgres");
     const client = (db as unknown as { $client: { options: Record<string, unknown> } }).$client;
     expect(typeof client).toBe("function");
-    expect(client.options.max_pipeline).toBe(0);
+    expect(client.options.max_pipeline).toBe(1);
     expect(client.options.max).toBe(4);
     expect(client.options.idle_timeout).toBe(20);
     expect(client.options.max_lifetime).toBe(300);

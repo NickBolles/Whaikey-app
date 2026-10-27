@@ -62,6 +62,10 @@ export interface ResilientOptions {
   graceMs?: number;
   /** A whole transaction (drizzle `db.transaction`) may run this long. 0 disables. */
   transactionTimeoutMs?: number;
+  /** Max queries/transactions in flight (= pool size) so postgres-js never pipelines. 0 = unlimited. */
+  concurrency?: number;
+  /** How long a query waits for a slot before going through anyway. */
+  slotWaitMs?: number;
   /** Observability hook (never receives parameters or credentials). */
   onEvent?: (event: { kind: "cancel" | "reset"; query: string; elapsedMs: number }) => void;
 }
@@ -92,56 +96,106 @@ export function createResilientClient(factory: () => PgClientLike, opts: Resilie
   }
 
   /**
-   * Arm the watchdog when the query is actually sent. postgres-js queries are
-   * lazy (they run on the first `then`), and drizzle calls `.values()` before
-   * awaiting, so subscribing early would run the query in the wrong mode.
+   * Slots: at most `concurrency` queries/transactions in flight, so
+   * postgres-js always finds an idle (or not-yet-opened) connection and never
+   * pipelines a query behind another on a busy socket (its router falls back
+   * to a busy connection only when none is free). A waiter that cannot get a
+   * slot within `slotWaitMs` goes through anyway: pipelining beats a deadlock
+   * (e.g. a query issued on the top-level handle from inside a transaction).
+   */
+  const concurrency = opts.concurrency ?? 0;
+  const slotWaitMs = opts.slotWaitMs ?? 2000;
+  let inFlight = 0;
+  const waiters: Array<() => void> = [];
+  function acquire(): Promise<() => void> {
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      inFlight -= 1;
+      const next = waiters.shift();
+      if (next) next();
+    };
+    if (!concurrency || inFlight < concurrency) {
+      inFlight += 1;
+      return Promise.resolve(release);
+    }
+    return new Promise((resolve) => {
+      let granted = false;
+      const grant = () => {
+        if (granted) return;
+        granted = true;
+        clearTimeout(timer);
+        inFlight += 1;
+        resolve(release);
+      };
+      const timer = setTimeout(() => {
+        const i = waiters.indexOf(grant);
+        if (i >= 0) waiters.splice(i, 1);
+        grant();
+      }, slotWaitMs);
+      (timer as { unref?: () => void }).unref?.();
+      waiters.push(grant);
+    });
+  }
+
+  /**
+   * Run the query once a slot is free, and arm the watchdog when it is sent.
+   * postgres-js queries are lazy (they run on the first `then`), and drizzle
+   * calls `.values()` before awaiting, so nothing here subscribes early.
    */
   function watch(q: PgQueryLike, query: string): PgQueryLike {
-    if (!opts.queryTimeoutMs || typeof q.then !== "function") return q;
+    if ((!opts.queryTimeoutMs && !concurrency) || typeof q.then !== "function") return q;
     const base = opts.queryTimeoutMs;
     const originalThen = q.then.bind(q);
-    let armed = false;
-    let settled = false;
-    let t1: ReturnType<typeof setTimeout> | undefined;
-    let t2: ReturnType<typeof setTimeout> | undefined;
-    const done = () => {
-      settled = true;
-      if (t1) clearTimeout(t1);
-      if (t2) clearTimeout(t2);
-    };
+    let run: Promise<unknown> | undefined;
+    const start = () =>
+      acquire().then((release) => {
+        let settled = false;
+        let t1: ReturnType<typeof setTimeout> | undefined;
+        let t2: ReturnType<typeof setTimeout> | undefined;
+        if (base) {
+          const startedAt = Date.now();
+          const owner = current;
+          const limit = Math.max(base, budget.getStore() ?? 0);
+          t1 = setTimeout(() => {
+            if (settled) return;
+            opts.onEvent?.({ kind: "cancel", query: describeQuery(query), elapsedMs: Date.now() - startedAt });
+            try {
+              void Promise.resolve(q.cancel?.()).catch(() => {});
+            } catch {
+              /* cancel is best-effort */
+            }
+            t2 = setTimeout(() => {
+              // Only reset the pool this query was sent on (another watchdog may have already).
+              if (!settled && owner === current) reset(query, startedAt);
+            }, grace);
+            (t2 as { unref?: () => void }).unref?.();
+          }, limit);
+          (t1 as { unref?: () => void }).unref?.();
+        }
+        const finish = () => {
+          settled = true;
+          if (t1) clearTimeout(t1);
+          if (t2) clearTimeout(t2);
+          release();
+        };
+        return new Promise<unknown>((resolve, reject) => {
+          originalThen(
+            (value) => {
+              finish();
+              resolve(value);
+            },
+            (error) => {
+              finish();
+              reject(error);
+            },
+          );
+        });
+      });
     (q as { then: PromiseLike<unknown>["then"] }).then = ((onFulfilled, onRejected) => {
-      if (!armed) {
-        armed = true;
-        const startedAt = Date.now();
-        const owner = current;
-        const limit = Math.max(base, budget.getStore() ?? 0);
-        t1 = setTimeout(() => {
-          if (settled) return;
-          opts.onEvent?.({ kind: "cancel", query: describeQuery(query), elapsedMs: Date.now() - startedAt });
-          try {
-            void Promise.resolve(q.cancel?.()).catch(() => {});
-          } catch {
-            /* cancel is best-effort */
-          }
-          t2 = setTimeout(() => {
-            // Only reset the pool this query was sent on (another watchdog may have already).
-            if (!settled && owner === current) reset(query, startedAt);
-          }, grace);
-          (t2 as { unref?: () => void }).unref?.();
-        }, limit);
-        (t1 as { unref?: () => void }).unref?.();
-      }
-      return originalThen(
-        (value) => {
-          done();
-          return onFulfilled ? onFulfilled(value) : value;
-        },
-        (error) => {
-          done();
-          if (onRejected) return onRejected(error);
-          throw error;
-        },
-      );
+      run ??= start();
+      return run.then(onFulfilled, onRejected);
     }) as PromiseLike<unknown>["then"];
     // `.values()` returns the same query object in postgres-js; keep the
     // wrapped `then` on whatever it hands back.
@@ -161,22 +215,26 @@ export function createResilientClient(factory: () => PgClientLike, opts: Resilie
 
   Object.defineProperty(facade, "options", { get: () => current.options, enumerable: true });
   facade.unsafe = (query, params, options) => watch(current.unsafe(query, params, options), query);
-  facade.begin = (...args: unknown[]) => {
+  facade.begin = async (...args: unknown[]) => {
+    const release = await acquire();
     const owner = current;
-    const run = owner.begin(...args);
     const configured = opts.transactionTimeoutMs ?? 0;
-    if (!configured) return run;
-    const limit = Math.max(configured, budget.getStore() ?? 0);
+    const limit = configured ? Math.max(configured, budget.getStore() ?? 0) : 0;
     const startedAt = Date.now();
     let settled = false;
-    const timer = setTimeout(() => {
-      if (!settled && owner === current) reset("BEGIN … (transaction)", startedAt);
-    }, limit + grace);
-    (timer as { unref?: () => void }).unref?.();
-    return run.finally(() => {
+    const timer = limit
+      ? setTimeout(() => {
+          if (!settled && owner === current) reset("BEGIN … (transaction)", startedAt);
+        }, limit + grace)
+      : undefined;
+    (timer as { unref?: () => void } | undefined)?.unref?.();
+    try {
+      return await owner.begin(...args);
+    } finally {
       settled = true;
-      clearTimeout(timer);
-    });
+      if (timer) clearTimeout(timer);
+      release();
+    }
   };
   facade.end = (options) => current.end(options);
   facade.resets = () => resets;

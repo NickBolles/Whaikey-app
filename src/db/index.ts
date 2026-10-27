@@ -82,21 +82,21 @@ export function createDb(url: string): DB {
     // none lives past 5 min, so a connection that died while the instance
     // was frozen is not reused. See ./resilient-client.ts for the watchdog.
     //
-    // `max_pipeline: 0` is the important one. postgres-js pipelines up to
-    // 100 queries on a busy connection by default, and the signed-in home
-    // fires seven at once. Through Supavisor's transaction mode that left a
-    // backend holding a lone PARSE (the home page's `passport_tiers` read)
-    // until Supabase's 2-minute cap cancelled it (57014, command tag PARSE,
-    // 22:57Z and 00:40Z on 2026-10-26/27) while the client waited for an
-    // answer that never came. With 0 a connection takes its next query only
-    // after the previous one finished (1 would still allow one pipelined
-    // behind the active query), so a message sequence can never be split
-    // across pooled backends. The option exists at runtime (postgres@3.4
-    // src/connection.js) but not in the typings, hence the spread.
+    // No pipelining is the important part. postgres-js pipelines up to 100
+    // queries on a busy connection by default, and the signed-in home fires
+    // seven at once. Through Supavisor's transaction mode that left a backend
+    // holding a lone PARSE (the home page's `passport_tiers` read) until
+    // Supabase's 2-minute cap cancelled it (57014, command tag PARSE, 22:57Z
+    // and 00:40Z on 2026-10-26/27) while the client waited for an answer that
+    // never came. The resilient client caps in-flight work at the pool size,
+    // so every query gets a connection of its own; `max_pipeline: 1` bounds
+    // the fallback (0 would break `sql.begin`'s connection reservation). The
+    // option exists at runtime (postgres@3.4 src/connection.js) but not in
+    // the typings, hence the cast.
     const options = {
       prepare: false,
       max: settings.max,
-      max_pipeline: 0,
+      max_pipeline: 1,
       idle_timeout: 20,
       max_lifetime: 60 * 5,
       connect_timeout: 10,
@@ -115,6 +115,7 @@ export function createDb(url: string): DB {
     }
     const client = createResilientClient(factory, {
       queryTimeoutMs: settings.queryTimeoutMs,
+      concurrency: settings.max,
       transactionTimeoutMs: settings.transactionTimeoutMs,
       graceMs: 4000,
       onEvent: (e) =>
