@@ -5,6 +5,7 @@ import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import { drizzle as drizzlePostgres } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import * as schema from "./schema";
+import { createResilientClient, poolerMode, type PgClientLike } from "./resilient-client";
 
 /**
  * Unified handle over the two Postgres drivers we run against:
@@ -73,12 +74,81 @@ function createLocalDb(url: string): DB {
  */
 export function createDb(url: string): DB {
   if (isPostgresUrl(url)) {
+    const settings = hostedDbSettings();
     // `prepare: false` keeps us compatible with Supabase's transaction pooler
-    // (pgbouncer); `max: 1` suits short-lived serverless invocations.
-    const client = postgres(url, { prepare: false, max: 1 });
-    return drizzlePostgres(client, { schema });
+    // (Supavisor, port 6543). A small pool (not 1) so one slow statement — a
+    // page widget, an after() popularity write — cannot queue every other
+    // request on the instance behind it. Idle sockets close after 20 s and
+    // none lives past 5 min, so a connection that died while the instance
+    // was frozen is not reused. See ./resilient-client.ts for the watchdog.
+    //
+    // No pipelining is the important part. postgres-js pipelines up to 100
+    // queries on a busy connection by default, and the signed-in home fires
+    // seven at once. Through Supavisor's transaction mode that left a backend
+    // holding a lone PARSE (the home page's `passport_tiers` read) until
+    // Supabase's 2-minute cap cancelled it (57014, command tag PARSE, 22:57Z
+    // and 00:40Z on 2026-10-26/27) while the client waited for an answer that
+    // never came. The resilient client caps in-flight work at the pool size,
+    // so every query gets a connection of its own; `max_pipeline: 1` bounds
+    // the fallback (0 would break `sql.begin`'s connection reservation). The
+    // option exists at runtime (postgres@3.4 src/connection.js) but not in
+    // the typings, hence the cast.
+    const options = {
+      prepare: false,
+      max: settings.max,
+      max_pipeline: 1,
+      idle_timeout: 20,
+      max_lifetime: 60 * 5,
+      connect_timeout: 10,
+      connection: { application_name: "caskfolk" },
+    };
+    const factory = () => postgres(url, options as postgres.Options<Record<string, never>>) as unknown as PgClientLike;
+    if (process.env.VERCEL && !loggedMode) {
+      loggedMode = true;
+      const mode = poolerMode(url);
+      // Names only, never the URL. Session mode / direct connections hold a
+      // server connection per client and exhaust Supabase's small pool.
+      console.info(`[db] postgres pooler mode: ${mode} (pool max ${settings.max}, query watchdog ${settings.queryTimeoutMs} ms)`);
+      if (mode !== "transaction") {
+        console.warn("[db] DATABASE_URL is not the Supabase transaction pooler (port 6543); serverless should use it.");
+      }
+    }
+    const client = createResilientClient(factory, {
+      queryTimeoutMs: settings.queryTimeoutMs,
+      concurrency: settings.max,
+      transactionTimeoutMs: settings.transactionTimeoutMs,
+      graceMs: 4000,
+      onEvent: (e) =>
+        console.warn(`[db] ${e.kind === "cancel" ? "cancelling slow query" : "resetting stuck pool"} after ${e.elapsedMs} ms: ${e.query}`),
+    });
+    return drizzlePostgres(client as unknown as postgres.Sql, { schema }) as unknown as DB;
   }
   return createLocalDb(url);
+}
+
+let loggedMode = false;
+
+/**
+ * Pool size and watchdog limits. The watchdog is on by default only on Vercel
+ * (a request must never outlive the platform limit); one-shot CLIs such as the
+ * flavor apply run their own `SET LOCAL statement_timeout` and long scans.
+ */
+export function hostedDbSettings(env: Record<string, string | undefined> = process.env) {
+  const num = (v: string | undefined, d: number) => {
+    const n = Number(v);
+    return v !== undefined && v !== "" && Number.isFinite(n) && n >= 0 ? n : d;
+  };
+  const onVercel = Boolean(env.VERCEL);
+  return {
+    max: Math.max(1, Math.min(10, num(env.DB_POOL_MAX, 4))),
+    queryTimeoutMs: num(env.DB_QUERY_TIMEOUT_MS, onVercel ? 15_000 : 0),
+    transactionTimeoutMs: num(env.DB_TRANSACTION_TIMEOUT_MS, onVercel ? 45_000 : 0),
+  };
+}
+
+/** Hosted Postgres (postgres-js, a function) rather than PGlite (an object). */
+export function isHostedDb(db: DB): boolean {
+  return typeof (db as unknown as { $client?: unknown }).$client === "function";
 }
 
 const globalForDb = globalThis as unknown as { __whaikeyDb?: DB };

@@ -7,6 +7,7 @@ import { LEGACY_REFRESH_SAFE, POPULAR_REFRESH_TOP, popularitySql } from "@/lib/p
 import { canSpend, getSettings, recordCall, releaseReservation, reserveSpend, updateSettings } from "./budget";
 import { getEnrichProvider, ProviderCallError } from "./providers";
 import { dueJobIds, requeueBottle, runJobToCompletion, STEP_HEADROOM_MS } from "./queue";
+import { withDbBudget } from "@/db/resilient-client";
 
 /**
  * Scheduled / operator-started enrichment in bounded chunks
@@ -49,6 +50,15 @@ function rowsOf<T>(result: unknown): T[] {
 }
 
 export async function runBatch(
+  db: DB,
+  opts: { trigger: "cron" | "admin"; tiers: BatchTier[]; budgetMs: number },
+): Promise<BatchResult> {
+  // Catalog-wide scans (the free pass) may legitimately run longer than the
+  // request watchdog in src/db/resilient-client.ts; give them the chunk budget.
+  return withDbBudget(Math.max(opts.budgetMs, 60_000), () => runBatchInner(db, opts));
+}
+
+async function runBatchInner(
   db: DB,
   opts: { trigger: "cron" | "admin"; tiers: BatchTier[]; budgetMs: number },
 ): Promise<BatchResult> {
