@@ -64,6 +64,15 @@ export function isChromeless(pathname: string): boolean {
 }
 
 /**
+ * The signed-out front door: `/` with nobody signed in is the marketing
+ * landing (owner feedback 2026-10-26), so the header and bottom nav — an app
+ * a visitor cannot use yet — stand down there. Signed in, `/` is Home.
+ */
+export function isMarketingRoute(pathname: string, signedIn: boolean): boolean {
+  return !signedIn && normalize(pathname) === "/";
+}
+
+/**
  * What a back button says when it returns to `pathname` — "labelled with
  * where you came from" (STORYBOARD §1.1). Short enough for a header slot;
  * a route with no good name gets `null` and the caller says "Back".

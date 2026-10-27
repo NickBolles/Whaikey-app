@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Compass, Home, Plus, Users, Wine } from "lucide-react";
-import { TABS as TAB_ROUTES, isChromeless, type TabHref } from "@/lib/app-routes";
+import { TABS as TAB_ROUTES, isChromeless, isMarketingRoute, type TabHref } from "@/lib/app-routes";
 
 // Home · Bar · ＋ · Explore · Social (STORYBOARD D1; design board C1). The
 // destinations live in src/lib/app-routes.ts, which also tells the header a
@@ -24,11 +24,11 @@ const TABS = TAB_ROUTES.map((tab) => ({ ...tab, label: NAV_LABELS[tab.href] ?? t
  * in between would only cost a tap. Shelf-building (batch scan, import) lives
  * behind Bar → Add.
  */
-export function AppNav() {
+export function AppNav({ signedIn = true }: { signedIn?: boolean } = {}) {
   const pathname = usePathname();
   // Same routes the header leaves out: sign-in, the welcome tour, share
   // pages, the age gate, the update screen and the pour sheet itself.
-  if (isChromeless(pathname)) return null;
+  if (isChromeless(pathname) || isMarketingRoute(pathname, signedIn)) return null;
 
   const isActive = (href: string) => (href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(`${href}/`));
   return (

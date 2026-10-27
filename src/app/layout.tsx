@@ -153,7 +153,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
                 profileHandle={profile?.handle ?? null}
               />
               <main className="flex-1">{children}</main>
-              <AppNav />
+              <AppNav signedIn={Boolean(user)} />
             </div>
           )}
         </ToastProvider>

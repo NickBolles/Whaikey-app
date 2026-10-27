@@ -32,12 +32,19 @@ describe("AppHeader", () => {
   });
 
   it("shows only the wordmark and search when signed out", () => {
+    pathname = "/search";
     render(<AppHeader user={null} profileHandle={null} />);
 
     expect(screen.getByRole("link", { name: "Caskfolk" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Search" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Journal" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Your profile" })).not.toBeInTheDocument();
+  });
+
+  it("stands down on the signed-out front door: the landing carries its own masthead", () => {
+    pathname = "/";
+    render(<AppHeader user={null} profileHandle={null} />);
+    expect(screen.queryByRole("banner")).not.toBeInTheDocument();
   });
 
   it.each(["/welcome", "/sign-in", "/s/sashalagav16", "/age", "/app-update"])(

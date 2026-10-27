@@ -20,34 +20,10 @@ import { LatestBadgeCard, pickLatestBadge } from "@/components/latest-badge-card
 import { getPassport } from "@/lib/passport";
 import { withFallback } from "@/lib/settle";
 import { ChevronRight, GraduationCap, Star } from "lucide-react";
-import { BRAND_NAME, BRAND_TAGLINE } from "@/lib/brand";
-import { BrandMark } from "@/components/brand-mark";
+import { BRAND_NAME } from "@/lib/brand";
+import { MarketingLanding } from "@/components/marketing-landing";
 
 export const dynamic = "force-dynamic";
-
-function SignedOutHero() {
-  return (
-    <div className="flex min-h-[78dvh] flex-col items-center justify-center gap-7 px-6 text-center">
-      <div aria-hidden className="text-foreground">
-        <BrandMark size={64} />
-      </div>
-      <div>
-        <h1 className="font-display text-5xl font-semibold tracking-tight text-gradient-amber">
-          {BRAND_NAME}
-        </h1>
-        <p className="mt-2 font-display text-lg italic text-editorial">{BRAND_TAGLINE}</p>
-        <p className="mx-auto mt-4 max-w-sm leading-relaxed text-muted">
-          Track your bottles, log your pours, map your palate — and ask the AI concierge anything
-          about whiskey or your own bar.
-        </p>
-      </div>
-      <Link href="/sign-in" className="btn-primary px-10 py-3.5 text-base">
-        Get started
-      </Link>
-      <p className="text-xs text-muted/70">Your notes stay yours. Sip responsibly.</p>
-    </div>
-  );
-}
 
 /**
  * Deterministic (no clock, no locale surprises) date label for journal rows,
@@ -59,7 +35,7 @@ function pourDateLabel(date: Date): string {
 
 export default async function HomePage() {
   const user = await getSessionUser();
-  if (!user) return <SignedOutHero />;
+  if (!user) return <MarketingLanding />;
 
   const db = getDb();
   const cookieStore = await cookies();

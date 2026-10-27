@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { X } from "lucide-react";
 import { BRAND_NAME } from "@/lib/brand";
 
 export const metadata: Metadata = {
@@ -29,28 +30,40 @@ export default function ResponsiblePage() {
         </p>
       </header>
 
-      <section className="card p-5 flex flex-col gap-3">
-        <h2 className="font-display text-xl font-semibold">What this app won&apos;t do</h2>
-        <ul className="flex flex-col gap-2.5 text-sm leading-relaxed text-muted">
-          <li>
-            <strong className="text-foreground">No streaks, and no &quot;you haven&apos;t
-            poured in a while&quot;.</strong> Nothing here rewards drinking often, and nothing
-            nudges you to pour.
-          </li>
-          <li>
-            <strong className="text-foreground">No volume, proof or time-of-day badges.</strong>{" "}
-            The passport counts distinct things you have met — regions, distilleries, cask types
-            — so a 15 ml sample of something new counts the same as a bottle, and a second pour
-            of the same bottle counts for nothing.
-          </li>
-          <li>
-            <strong className="text-foreground">No leaderboards for how much anyone
-            drinks.</strong> Friends&apos; surfaces compare notes and palates, never quantities.
-          </li>
-          <li>
-            <strong className="text-foreground">The AI never encourages drinking</strong>, and
-            never invents a price, a rating, or a claim about a bottle.
-          </li>
+      {/* Owner feedback 2026-10-26: "a good spot for introducing koinonia".
+          The why comes before the won't-do list: the table is the point. */}
+      <section aria-labelledby="koinonia" className="flex flex-col gap-3">
+        <p className="kicker text-editorial">Koinonia · κοινωνία</p>
+        <h2 id="koinonia" className="font-display text-xl font-semibold">
+          The company is the point
+        </h2>
+        <p className="text-sm text-muted leading-relaxed">
+          Koinonia is an old Greek word for fellowship — the things people hold in common when they
+          share a table. It is the idea {BRAND_NAME} is built around: a bottle is a reason to pull up a
+          chair, and the conversation around it is what is worth remembering. That is why everything
+          social here compares notes and palates, and nothing counts how much anyone poured.
+        </p>
+      </section>
+
+      <section aria-labelledby="wont-do" className="card p-3 flex flex-col gap-3">
+        <h2 id="wont-do" className="font-display text-xl font-semibold">
+          What this app won&apos;t do
+        </h2>
+        <ul className="flex flex-col gap-3">
+          <WontDo title={<>No streaks, and no &ldquo;you haven&apos;t poured in a while&rdquo;.</>}>
+            Nothing here rewards drinking often, and nothing nudges you to pour.
+          </WontDo>
+          <WontDo title="No volume, proof or time-of-day badges.">
+            The passport counts distinct things you have met — regions, distilleries, cask types — so
+            a 15 ml sample of something new counts the same as a bottle, and a second pour of the same
+            bottle counts for nothing.
+          </WontDo>
+          <WontDo title="No leaderboards for how much anyone drinks.">
+            Friends&apos; surfaces compare notes and palates, never quantities.
+          </WontDo>
+          <WontDo title="The AI never encourages drinking.">
+            It never invents a price, a rating, or a claim about a bottle either.
+          </WontDo>
         </ul>
       </section>
 
@@ -126,6 +139,22 @@ export default function ResponsiblePage() {
         </p>
       </section>
     </div>
+  );
+}
+
+/**
+ * One promise in the won't-do card. The lead-in sits on its own line above the
+ * explanation (owner feedback 2026-10-26: "this is misaligned" — run-in bold
+ * lead-ins wrapped at a different point in every item, so the explanations
+ * started at a different place each time), with a ✕ in a fixed column.
+ */
+function WontDo({ title, children }: { title: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <li className="grid grid-cols-[1.25rem_1fr] gap-x-3">
+      <X aria-hidden size={16} strokeWidth={2.4} className="mt-1 text-accent" />
+      <strong className="text-sm font-semibold leading-snug text-foreground">{title}</strong>
+      <p className="col-start-2 mt-1 text-sm leading-relaxed text-muted">{children}</p>
+    </li>
   );
 }
 

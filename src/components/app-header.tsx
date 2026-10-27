@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { BookOpen, Search } from "lucide-react";
 import { UserAvatar } from "@/components/user-avatar";
 import { BackButton } from "@/components/back-button";
-import { isChromeless, isTabRoute, parentRoute } from "@/lib/app-routes";
+import { isChromeless, isMarketingRoute, isTabRoute, parentRoute } from "@/lib/app-routes";
 import { BrandLockup } from "@/components/brand-mark";
 
 /**
@@ -36,7 +36,7 @@ export function AppHeader({
   profileHandle: string | null;
 }) {
   const pathname = usePathname();
-  if (isChromeless(pathname)) return null;
+  if (isChromeless(pathname) || isMarketingRoute(pathname, Boolean(user))) return null;
 
   return (
     // Paper's masthead: a double rule under a plain ground, not a chrome bar.
