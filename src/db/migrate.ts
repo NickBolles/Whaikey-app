@@ -2,6 +2,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { migrate as migratePostgres } from "drizzle-orm/postgres-js/migrator";
 import { createDb, isPostgresUrl, resolveDbUrl, type DB } from "./index";
+import { describeDbUrl, formatDbError } from "./redact";
 
 const MIGRATIONS_FOLDER = path.join(process.cwd(), "src", "db", "migrations");
 const nodeRequire = createRequire(import.meta.url);
@@ -29,11 +30,12 @@ if (process.argv[1]?.endsWith("migrate.ts")) {
   const db = createDb(url);
   migrateDb(db, url)
     .then(() => {
-      console.log(`Migrated ${url}`);
+      // Never print `url` itself: it carries the password (Vercel build logs).
+      console.log(`Migrated ${describeDbUrl(url)}`);
       process.exit(0);
     })
     .catch((err) => {
-      console.error(err);
+      console.error(formatDbError(err, url));
       process.exit(1);
     });
 }

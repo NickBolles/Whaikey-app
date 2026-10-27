@@ -31,6 +31,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm lint
+      # Fail if any script/workflow prints DATABASE_URL or another secret to a
+      # log (Vercel build logs are long-lived) — scripts/check-secret-logs.mjs.
+      - run: pnpm lint:secrets
       # The full suite (PGlite) with the coverage floor from vitest.config.ts
       # (review REL-8.7) — same tests as `pnpm test`, plus the ratchet.
       - run: pnpm test:coverage
