@@ -171,14 +171,17 @@ test.describe("app shell", () => {
     await expect(page.getByRole("link", { name: "Caskfolk" })).toHaveCount(0);
     await back.click();
     await expect(page).toHaveURL(/\/search$/);
-    // A tab route gets the wordmark back instead.
-    await page.goto("/");
+    // A tab route gets the wordmark back instead. (Signed out, `/` is the
+    // marketing landing with its own masthead, so use another tab.)
+    await page.goto("/search");
     await expect(page.getByRole("link", { name: "Caskfolk" })).toBeVisible();
     await expect(page.getByTestId("header-back")).toHaveCount(0);
   });
 
   test("back names the page you came from and returns to it through history", async ({ page }) => {
-    await page.goto("/");
+    // Signed out, `/` is the chromeless marketing landing: start on a page
+    // that carries the header instead.
+    await page.goto("/learn");
     await page.getByRole("link", { name: "Search" }).click();
     await expect(page).toHaveURL(/\/search$/);
     await page.getByRole("searchbox").first().fill("lagavulin 16");
@@ -194,7 +197,9 @@ test.describe("app shell", () => {
   });
 
   test("the browser's own back (and so the iOS swipe) keeps the header's label honest", async ({ page }) => {
-    await page.goto("/");
+    // Signed out, `/` is the chromeless marketing landing: start on a page
+    // that carries the header instead.
+    await page.goto("/learn");
     await page.getByRole("link", { name: "Search" }).click();
     await expect(page).toHaveURL(/\/search$/);
     await page.getByRole("searchbox").first().fill("eagle rare");
