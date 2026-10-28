@@ -46,12 +46,12 @@ describe("logoAllowedOn", () => {
 
 describe("photoPriorityOrder", () => {
   const dialect = new PgDialect();
-  it("is a constant when no source has a priority", () => {
-    expect(dialect.sqlToQuery(photoPriorityOrder(sql.raw("s.id"), [{ id: "a" }])).sql).toBe("0");
+  it("is a typed constant (never a bare ORDER BY position) when no source has a priority", () => {
+    expect(dialect.sqlToQuery(photoPriorityOrder(sql.raw("s.id"), [{ id: "a" }])).sql).toBe("0::int");
   });
   it("ranks prioritized sources first, the rest last", () => {
     const q = dialect.sqlToQuery(photoPriorityOrder(sql.raw("s.id"), [{ id: "a", photoPriority: 2 }, { id: "b", photoPriority: 1 }, { id: "c" }]));
-    expect(q.sql).toBe("(case s.id when $1 then $2 when $3 then $4 else 1000000 end)");
+    expect(q.sql).toBe("(case s.id when $1 then $2 when $3 then $4 else 1000000 end)::int");
     expect(q.params).toEqual(["a", 2, "b", 1]);
   });
 });

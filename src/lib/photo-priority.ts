@@ -14,8 +14,9 @@ export function photoPriorityOrder(
   sources: SourceEntry[] = (catalogSources as { sources: SourceEntry[] }).sources,
 ): SQL {
   const ranked = sources.filter((s) => s.id && typeof s.photoPriority === "number");
-  if (ranked.length === 0) return sql`0`;
+  // A cast, not a bare literal: `ORDER BY 0` would be read as a column position.
+  if (ranked.length === 0) return sql`0::int`;
   const whens = sql.join(ranked.map((s) => sql`when ${s.id} then ${s.photoPriority}`), sql` `);
-  return sql`(case ${sourceIdColumn} ${whens} else 1000000 end)`;
+  return sql`(case ${sourceIdColumn} ${whens} else 1000000 end)::int`;
 }
 
