@@ -1,6 +1,6 @@
 import type { DB } from "@/db";
 import { listMyClubs } from "@/lib/clubs";
-import { listMyFlights } from "@/lib/flights";
+import { countOpenFlights } from "@/lib/flights";
 import { formatVisitDay, nextOutingFor } from "@/lib/outings";
 
 /**
@@ -53,10 +53,10 @@ export function pickNextOuting(rows: OutingRow[], now: Date): NextOuting | null 
 }
 
 export async function getGatherings(db: DB, userId: string, now: Date): Promise<Gatherings> {
-  const [next, clubs, flights] = await Promise.all([nextOutingFor(db, userId, isoDay(now)), listMyClubs(db, userId), listMyFlights(db, userId)]);
+  const [next, clubs, openNights] = await Promise.all([nextOutingFor(db, userId, isoDay(now)), listMyClubs(db, userId), countOpenFlights(db, userId)]);
   return {
     nextOuting: pickNextOuting(next ? [next] : [], now),
     clubCount: clubs.length,
-    openNights: flights.filter((f) => f.state === "open").length,
+    openNights,
   };
 }

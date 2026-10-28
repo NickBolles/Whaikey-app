@@ -32,6 +32,7 @@ import {
   saveEntry,
   setFlightState,
   listMyFlights,
+  countOpenFlights,
   sweepGuests,
   visibleFlightByCode,
 } from "@/lib/flights";
@@ -274,9 +275,11 @@ describe("tasting nights", () => {
     expect(await visibleFlightByCode(db, flight.joinCode, t.id)).not.toBeNull();
     await joinAsUser(db, flight.id, t.id);
     expect((await listMyFlights(db, t.id)).map((f) => f.joinCode)).toEqual([flight.joinCode]);
+    expect(await countOpenFlights(db, t.id)).toBe(1);
     await blockUser(db, host.id, t.id);
     expect(await visibleFlightByCode(db, flight.joinCode, t.id)).toBeNull();
     expect(await listMyFlights(db, t.id)).toEqual([]);
+    expect(await countOpenFlights(db, t.id)).toBe(0);
     expect(await visibleFlightByCode(db, flight.joinCode, host.id)).not.toBeNull();
     await db.update(schema.userProfiles).set({ suspendedAt: new Date() }).where(eq(schema.userProfiles.userId, host.id));
     expect(await visibleFlightByCode(db, flight.joinCode, null)).toBeNull();

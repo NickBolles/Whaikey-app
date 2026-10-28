@@ -536,6 +536,16 @@ export function hostVisibleSql(viewerId: string) {
   ))`;
 }
 
+/** Tasting nights the user is seated at that are still being tasted — counted in SQL, not over the 20-row list. */
+export async function countOpenFlights(db: DB, userId: string): Promise<number> {
+  const [row] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(schema.flightParticipants)
+    .innerJoin(schema.flights, eq(schema.flights.id, schema.flightParticipants.flightId))
+    .where(and(eq(schema.flightParticipants.userId, userId), eq(schema.flights.state, "open"), hostVisibleSql(userId)));
+  return Number(row?.n ?? 0);
+}
+
 export async function listMyFlights(db: DB, userId: string) {
   return db
     .select({ title: schema.flights.title, joinCode: schema.flights.joinCode, state: schema.flights.state, createdAt: schema.flights.createdAt })

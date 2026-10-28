@@ -73,5 +73,10 @@ describe("MyCodeButton", () => {
     expect(await screen.findByText(/Couldn't load your code/)).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    // A failed read is not sticky: reopening asks again.
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({ profile: { handle: "sam" } }) })));
+    await userEvent.click(screen.getByRole("button", { name: "My code" }));
+    expect(await screen.findByText("@sam")).toBeInTheDocument();
   });
 });
