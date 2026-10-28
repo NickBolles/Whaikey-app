@@ -1,4 +1,5 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { verifyProviderIdToken } from "better-auth/oauth2";
 import { apple } from "better-auth/social-providers";
 
 /**
@@ -112,14 +113,18 @@ export function appleProviderOptions(secret: string, env: Env = process.env) {
     ...(config.bundleId ? { appBundleIdentifier: config.bundleId } : {}),
     audience,
   };
-  // Better Auth's own verification (Apple JWKS, issuer, audience, 1h max age,
-  // sha256(nonce) claim), wrapped so it never runs without a nonce we minted.
+  // Better Auth's own verification (Apple JWKS, RS256, issuer, audience, 1h
+  // max age, sha256(nonce) claim), wrapped so it never runs without a nonce we
+  // minted. Since 1.7 providers no longer carry a `verifyIdToken` method: they
+  // declare an `idToken` config and the shared `verifyProviderIdToken` checks
+  // it. `reference` is built from `base`, which has no `verifyIdToken` of its
+  // own, so this delegates to that declarative Apple config and cannot recurse.
   const reference = apple(base);
   return {
     ...base,
-    verifyIdToken: async (token: string, nonce: string | undefined): Promise<boolean> => {
+    verifyIdToken: async (token: string, nonce?: string): Promise<boolean> => {
       if (!verifyAppleNonce(nonce, secret)) return false;
-      return reference.verifyIdToken(token, nonce);
+      return verifyProviderIdToken(reference, token, nonce);
     },
   };
 }
