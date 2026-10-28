@@ -82,7 +82,7 @@ export default async function FriendsPeoplePage() {
     <div className="mx-auto flex max-w-lg flex-col gap-6 px-4 pb-24 pt-8">
       <header className="flex flex-col gap-4">
         <h1 className="font-display text-[2rem] font-semibold leading-tight">Friends</h1>
-        <SocialTabs unread={unread} />
+        <SocialTabs unread={unread} handle={profile.handle} />
         <div className="card flex items-center gap-3 p-4">
           <UserAvatar name={profile.displayName || profile.handle} image={profile.avatarUrl} size={48} />
           <div className="min-w-0 flex-1">

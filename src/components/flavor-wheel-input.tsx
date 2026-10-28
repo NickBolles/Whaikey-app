@@ -29,6 +29,8 @@ export interface FlavorWheelInputProps {
   /** {leafId: intensity 1-3} */
   value: Record<string, number>;
   onChange: (value: Record<string, number>) => void;
+  /** The Log sheet's smaller wheel (max 296 px), so it fits above the fold at 390×844. */
+  compact?: boolean;
 }
 
 const SIZE = 340;
@@ -54,7 +56,7 @@ const INTENSITY_HAPTIC: Record<1 | 2 | 3, "intensity-1" | "intensity-2" | "inten
  * out to a descriptor, then release: farther outward means more presence.
  * Selected tags render as removable chips below the wheel. Controlled: {value, onChange}.
  */
-export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
+export function FlavorWheelInput({ value, onChange, compact = false }: FlavorWheelInputProps) {
   const [selectedWedgeId, setSelectedWedgeId] = useState<string | null>(null);
   const [gestureLeafId, setGestureLeafId] = useState<string | null>(null);
   const gestureLeafIdRef = useRef<string | null>(null);
@@ -245,11 +247,11 @@ export function FlavorWheelInput({ value, onChange }: FlavorWheelInputProps) {
   const wedgeSpan = 360 / FLAVOR_WHEEL.length;
 
   return (
-    <div className="flex flex-col items-center gap-3">
+    <div className={`flex flex-col items-center ${compact ? "gap-2" : "gap-3"}`}>
       <svg
         ref={wheelRef}
         viewBox={`0 0 ${SIZE} ${SIZE}`}
-        className="w-full max-w-[360px] select-none touch-pan-y"
+        className={`w-full ${compact ? "max-w-[296px]" : "max-w-[360px]"} select-none touch-pan-y`}
         role="application"
         aria-label="Flavor wheel"
         onPointerDown={startGesture}

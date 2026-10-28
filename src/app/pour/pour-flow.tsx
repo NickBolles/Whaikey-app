@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Check, ChevronDown, ChevronUp, Eye, X } from "lucide-react";
+import { Check, Eye, X } from "lucide-react";
 import { SERVING_STYLES, type PourVisibility, type ServingStyle } from "@/db/schema";
 import { matchLeafIds } from "@/lib/flavor-wheel";
 import { previousPath } from "@/lib/nav-history";
@@ -47,8 +47,10 @@ const VISIBILITY_SUMMARY: Record<PourVisibility, string> = {
  * amended by the design board's direction B and decisions S1–S6).
  *
  * Top to bottom: the bottle slot (live viewfinder, type beneath, recents) →
- * rating (optional) → serving → "Add notes, wheel, photo", which expands the
- * full D3 richness in place → one sticky Save. An exact barcode fills the slot
+ * rating (optional) → serving → pour size → the flavor wheel, all on the
+ * sheet with no disclosure (owner feedback 2026-10-26: the wheel and pour
+ * size are the defining controls and sit above the fold), then notes,
+ * auto-fill, tags, company and visibility → one sticky Save. An exact barcode fills the slot
  * without a confirm step ("Not it?" + Undo cover a wrong read), so a bottle in
  * front of you is ＋ → ★ → Save: three taps. A prefilled bottle (any Pour
  * button) is the same three.
@@ -119,9 +121,6 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
   const [servingStyle, setServingStyle] = useState<ServingStyle | null>((editEntry?.servingStyle as ServingStyle | null) ?? null);
   const [amountMl, setAmountMl] = useState<number>(editEntry?.amountMl ?? 45);
   const [activeSection, setActiveSection] = useState<NoteSection>("nose");
-  const [detailOpen, setDetailOpen] = useState(
-    Boolean(editEntry && (editEntry.note.nose || editEntry.note.palate || editEntry.note.finish || editEntry.note.freeform || Object.keys(editEntry.note.flavorTags ?? {}).length > 0)),
-  );
   const [companions, setCompanions] = useState("");
   const [tags, setTags] = useState<string[]>([]);
   const [nose, setNose] = useState(editEntry?.note.nose ?? "");
@@ -184,7 +183,6 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
       setVisibilityChosen(true);
       setVisibility(draft.visibility);
     }
-    if (draft.freeform || draft.nose || draft.palate || draft.finish || Object.keys(draft.flavorTags ?? {}).length > 0) setDetailOpen(true);
     setDraftRestored(true);
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [userId, initialBottle, editing]);
@@ -433,7 +431,6 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
     setFlavorTags({});
     setCompanions("");
     setTags([]);
-    setDetailOpen(false);
   }
 
   function resetForNext() {
@@ -534,100 +531,94 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
           </section>
         )}
 
-        <section aria-label="Your rating" className="mt-3 flex flex-col items-center gap-1 border-t border-border pt-3">
-          <h2 className="section-label">Your rating <span className="font-normal normal-case tracking-normal">· optional</span></h2>
-          <StarRating value={rating} onChange={setRating} size={40} />
+        {/* Everything is on the sheet — no "more" disclosure (owner feedback
+            2026-10-26): rating and serving share a compact block, then pour
+            size and the flavor wheel, so at 390×844 both sit above the fold
+            once a bottle is picked. Notes, auto-fill, tags, company and
+            visibility follow below the wheel. */}
+        <section aria-label="Your rating" className="mt-2.5 flex items-center justify-between gap-2 border-t border-border pt-2.5">
+          <h2 className="section-label">Rating <span className="font-normal normal-case tracking-normal">· optional</span></h2>
+          <StarRating value={rating} onChange={setRating} size={30} />
         </section>
 
-        <section aria-label="Serving" className="mt-2 flex flex-wrap justify-center gap-1.5" role="group">
+        <section aria-label="Serving" className="-mx-3 mt-1.5 flex gap-1 overflow-x-auto px-3 pb-0.5 [scrollbar-width:none]" role="group">
           {SERVING_STYLES.map((style) => (
             <button
               key={style}
               type="button"
               aria-pressed={servingStyle === style}
               onClick={() => setServingStyle((cur) => (cur === style ? null : style))}
-              className={`chip min-h-11 px-3.5 text-sm capitalize ${servingStyle === style ? "chip-active font-medium" : "hover:bg-surface-raised"}`}
+              className={`chip tap-target min-h-9 shrink-0 px-2.5 text-[13px] capitalize ${servingStyle === style ? "chip-active font-medium" : "hover:bg-surface-raised"}`}
             >
               {style}
             </button>
           ))}
         </section>
 
-        {/* Tag edits on a logged pour aren't supported yet (#109 edits rating,
-            serving, notes and visibility), so the row only shows for a new pour. */}
         {!editing && (
-          <div className="mt-3">
-            <TagsRow value={tags} onChange={setTags} />
-          </div>
+          <section aria-label="Pour size" className="mt-2.5">
+            <PourSizePicker value={amountMl} onChange={setAmountMl} />
+          </section>
         )}
 
-        <button
-          type="button"
-          onClick={() => setDetailOpen((o) => !o)}
-          aria-expanded={detailOpen}
-          className="mt-3 flex min-h-11 w-full items-center justify-between gap-3 rounded-lg border border-border bg-surface px-3 text-left text-sm hover:bg-surface-raised"
-        >
-          <span>Add notes, wheel, size, who can see</span>
-          {detailOpen ? <ChevronUp size={18} strokeWidth={1.8} className="text-muted" aria-hidden /> : <ChevronDown size={18} strokeWidth={1.8} className="text-muted" aria-hidden />}
-        </button>
+        <section aria-label="Flavor wheel" className="mt-2.5 flex flex-col gap-1 border-t border-border pt-2.5" data-testid="pour-wheel">
+          <h2 className="section-label">Flavor wheel <span className="font-normal normal-case tracking-normal">· tap a family, then a flavor</span></h2>
+          <FlavorWheelInput value={flavorTags} onChange={setFlavorTags} compact />
+        </section>
 
-        {detailOpen && (
-          <div className="mt-3 flex flex-col gap-3" data-testid="pour-detail">
-            <section aria-label="Capture your note" className="flex flex-col gap-2">
-              <NoteCapture
-                freeform={freeform}
-                onFreeformChange={setFreeform}
-                onApplyExtraction={applyExtraction}
-                label="Say what you taste"
-                placeholder="“Loads of vanilla and charred oak, long warm finish — about a four.”"
-                hint="Auto-fill turns your words into a rating, flavors, and nose/palate/finish."
-              />
-            </section>
-            <section aria-label="Tasting notes" className="flex flex-col gap-2 border-t border-border pt-3">
-              <div role="tablist" aria-label="Note section" className="flex gap-1.5">
-                {NOTE_SECTIONS.map((section) => {
-                  const text = { nose, palate, finish }[section.key];
-                  const count = matchLeafIds(text).length;
-                  const active = activeSection === section.key;
-                  return (
-                    <button
-                      key={section.key}
-                      role="tab"
-                      aria-selected={active}
-                      onClick={() => setActiveSection(section.key)}
-                      className={`tap-target inline-flex min-h-9 flex-1 items-center justify-center gap-1 rounded-full border px-2 text-xs font-medium transition-colors ${active ? "chip-active" : "border-border text-muted hover:text-foreground"}`}
-                    >
-                      {section.label}
-                      {count > 0 && <span className="font-mono text-xs opacity-70 tabular-nums"> · {count}</span>}
-                    </button>
-                  );
-                })}
-              </div>
+        <div className="mt-3 flex flex-col gap-3" data-testid="pour-detail">
+          <section aria-label="Tasting notes" className="flex flex-col gap-2 border-t border-border pt-3">
+            <div role="tablist" aria-label="Note section" className="flex gap-1.5">
               {NOTE_SECTIONS.map((section) => {
-                if (section.key !== activeSection) return null;
-                const [value, set] = section.key === "nose" ? ([nose, setNose] as const) : section.key === "palate" ? ([palate, setPalate] as const) : ([finish, setFinish] as const);
+                const text = { nose, palate, finish }[section.key];
+                const count = matchLeafIds(text).length;
+                const active = activeSection === section.key;
                 return (
-                  <label key={section.key} className="flex flex-col gap-1.5">
-                    <span className="sr-only">{section.label}</span>
-                    <textarea
-                      value={value}
-                      onChange={(e) => set(e.target.value)}
-                      rows={2}
-                      placeholder={section.placeholder}
-                      className="resize-y rounded-lg border border-border bg-surface p-2.5 text-sm placeholder:text-muted focus:border-accent focus:outline-none"
-                    />
-                  </label>
+                  <button
+                    key={section.key}
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => setActiveSection(section.key)}
+                    className={`tap-target inline-flex min-h-9 flex-1 items-center justify-center gap-1 rounded-full border px-2 text-xs font-medium transition-colors ${active ? "chip-active" : "border-border text-muted hover:text-foreground"}`}
+                  >
+                    {section.label}
+                    {count > 0 && <span className="font-mono text-xs opacity-70 tabular-nums"> · {count}</span>}
+                  </button>
                 );
               })}
-              <FlavorWheelInput value={flavorTags} onChange={setFlavorTags} />
-            </section>
+            </div>
+            {NOTE_SECTIONS.map((section) => {
+              if (section.key !== activeSection) return null;
+              const [value, set] = section.key === "nose" ? ([nose, setNose] as const) : section.key === "palate" ? ([palate, setPalate] as const) : ([finish, setFinish] as const);
+              return (
+                <label key={section.key} className="flex flex-col gap-1.5">
+                  <span className="sr-only">{section.label}</span>
+                  <textarea
+                    value={value}
+                    onChange={(e) => set(e.target.value)}
+                    rows={2}
+                    placeholder={section.placeholder}
+                    className="resize-y rounded-lg border border-border bg-surface p-2.5 text-sm placeholder:text-muted focus:border-accent focus:outline-none"
+                  />
+                </label>
+              );
+            })}
+          </section>
+          <section aria-label="Capture your note" className="flex flex-col gap-2">
+            <NoteCapture
+              freeform={freeform}
+              onFreeformChange={setFreeform}
+              onApplyExtraction={applyExtraction}
+              label="Say what you taste"
+              placeholder="“Loads of vanilla and charred oak, long warm finish — about a four.”"
+              hint="Auto-fill turns your words into a rating, flavors, and nose/palate/finish."
+            />
+          </section>
+          {/* Tag edits on a logged pour aren't supported yet (#109 edits rating,
+              serving, notes and visibility), so the row only shows for a new pour. */}
+          {!editing && <TagsRow value={tags} onChange={setTags} />}
+          <section aria-label="More" className="flex flex-col gap-2 border-t border-border pt-3">
             {!editing && (
-            <section aria-label="Pour size" className="border-t border-border pt-3">
-              <PourSizePicker value={amountMl} onChange={setAmountMl} />
-            </section>
-            )}
-            <section aria-label="More" className="flex flex-col gap-2 border-t border-border pt-3">
-              {!editing && (
               <label className="flex flex-col gap-1">
                 <span className="section-label">With…</span>
                 <input
@@ -637,20 +628,19 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
                   className="h-11 rounded-lg border border-border bg-surface px-3 text-sm placeholder:text-muted focus:border-accent focus:outline-none"
                 />
               </label>
-              )}
-              <span className="section-label">Who can see this</span>
-              <VisibilityChips
-                value={visibility}
-                onChange={(value) => {
-                  visibilityDirtyRef.current = true;
-                  setVisibilityChosen(true);
-                  setVisibility(value);
-                }}
-                idPrefix="pour-visibility"
-              />
-            </section>
-          </div>
-        )}
+            )}
+            <span className="section-label">Who can see this</span>
+            <VisibilityChips
+              value={visibility}
+              onChange={(value) => {
+                visibilityDirtyRef.current = true;
+                setVisibilityChosen(true);
+                setVisibility(value);
+              }}
+              idPrefix="pour-visibility"
+            />
+          </section>
+        </div>
 
         <p className="mt-2 flex items-center justify-between gap-2 text-xs text-muted">
           <span className="flex items-center gap-1">

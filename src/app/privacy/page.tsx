@@ -33,9 +33,11 @@ export default function PrivacyPage() {
     <PolicyPage title="Privacy">
       <Section title="The short version">
         <p>
-          Your notes and your shelf are private by default. Nothing becomes visible to another
-          person because of something we did — only because you chose it, per object, and you can
-          take it back. What you paid for a bottle never appears in anything anyone else can see.
+          Nothing you log is visible to anyone until you set up a social profile. After that, each
+          pour uses your default audience — Friends (people you follow who follow you back) for new
+          accounts — and you can switch that default, or any single pour, to Only me, and take a
+          share back. Your
+          shelf stays private. What you paid for a bottle never appears in anything anyone else can see.
         </p>
       </Section>
 

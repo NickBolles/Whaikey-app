@@ -4,6 +4,7 @@ import { useState, type FormEvent } from "react";
 import { Pencil, X } from "lucide-react";
 import { UserAvatar } from "@/components/user-avatar";
 import { ToggleSwitch } from "@/components/toggle-switch";
+import { MyCodeButton } from "@/components/my-code-button";
 import type { SocialProfile } from "@/lib/social";
 
 /** Self-view of /u/[handle]: identity display plus the inline "Edit profile" form (PATCH /api/social/profile). */
@@ -86,6 +87,11 @@ export function ProfileEditor({ profile: initial }: { profile: SocialProfile }) 
           {!profile.isPublic && (
             <p className="text-xs text-muted">Private profile — only approved followers see your palate.</p>
           )}
+          {/* Your friend-add QR, one tap from your own profile (owner feedback 2026-10-26). */}
+          <div className="flex flex-wrap items-center gap-2">
+            <MyCodeButton handle={profile.handle} variant="button" />
+            <span className="text-xs text-muted">Friends scan it to add you.</span>
+          </div>
         </>
       )}
 

@@ -174,14 +174,14 @@ describe("PourFlow — the 3-tap path", () => {
 });
 
 describe("PourFlow — detail and visibility", () => {
-  it("keeps notes, wheel and visibility one tap away, and states the saved default", async () => {
+  it("shows notes, wheel, size and visibility on the sheet with no extra tap, and states the saved default", async () => {
     stubFetch(async (url) => (String(url).includes("/api/social/prefs") ? ok({ defaultPourVisibility: "friends" }) : ok({})));
     renderFlow({ initialBottle: { id: "b1", name: "Test Bourbon" } });
     await act(async () => {});
     expect(screen.getByText(/Friends can see/)).toBeInTheDocument();
-    expect(screen.queryByRole("group", { name: "Who can see this" })).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: /Add notes/ }));
+    expect(screen.queryByRole("button", { name: /Add notes/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("application", { name: "Flavor wheel" })).toBeInTheDocument();
+    expect(screen.getByRole("slider", { name: "Pour size" })).toBeInTheDocument();
     const group = screen.getByRole("group", { name: "Who can see this" });
     expect(within(group).getByRole("button", { name: "Friends" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("tablist", { name: "Note section" })).toBeInTheDocument();
@@ -200,7 +200,6 @@ describe("PourFlow — draft (notes before the bottle)", () => {
     stubFetch(async () => ok({}));
     const first = renderFlow();
     await act(async () => {});
-    fireEvent.click(screen.getByRole("button", { name: /Add notes/ }));
     fireEvent.change(screen.getByPlaceholderText("What do you smell?"), { target: { value: "Cherry and leather" } });
     await act(async () => {
       await new Promise((r) => setTimeout(r, 400));
@@ -234,7 +233,6 @@ describe("PourFlow — draft (notes before the bottle)", () => {
     stubFetch(async (url) => (String(url).includes("/api/social/prefs") ? ok({ defaultPourVisibility: "public" }) : ok({})));
     const first = renderFlow();
     await act(async () => {});
-    fireEvent.click(screen.getByRole("button", { name: /Add notes/ }));
     fireEvent.click(within(screen.getByRole("group", { name: "Who can see this" })).getByRole("button", { name: "Only me" }));
     fireEvent.change(screen.getByPlaceholderText("What do you smell?"), { target: { value: "Private thoughts" } });
     // Closed at once: the unmount flush, not the debounce, has to keep it.

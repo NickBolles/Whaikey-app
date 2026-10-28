@@ -27,10 +27,10 @@ export function PourSizePicker({
   const valueLabel = value === NORMAL_POUR_ML ? `${value} ml — normal pour` : `${value} ml`;
 
   return (
-    <div className="flex flex-col gap-2.5" aria-label="Pour size">
+    <div className="flex flex-col gap-1" aria-label="Pour size">
       <div className="flex items-baseline justify-between gap-3">
         <span className="section-label">Pour size</span>
-        <output htmlFor="pour-size" className="font-display text-lg text-accent" aria-live="polite">
+        <output htmlFor="pour-size" className="font-display text-base text-accent" aria-live="polite">
           {valueLabel}
         </output>
       </div>
@@ -63,7 +63,7 @@ export function PourSizePicker({
         <datalist id="common-pour-sizes">
           {COMMON_POUR_SIZES.map((size) => <option key={size} value={size} />)}
         </datalist>
-        <div className="relative mx-2.5 mt-1 h-8 text-[11px] text-muted">
+        <div className="relative mx-2.5 mt-0.5 h-4 text-[11px] text-muted">
           {POUR_MARKERS.map(({ size, position }, index) => (
             <span
               key={size}
@@ -72,7 +72,7 @@ export function PourSizePicker({
               } ${size === NORMAL_POUR_ML ? "text-foreground" : ""}`}
               style={{ left: `${position}%` }}
             >
-              {size} ml{size === NORMAL_POUR_ML ? " normal" : ""}
+              {size} ml
             </span>
           ))}
         </div>

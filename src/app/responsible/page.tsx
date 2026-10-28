@@ -115,8 +115,10 @@ export default function ResponsiblePage() {
       <section className="flex flex-col gap-3">
         <h2 className="font-display text-xl font-semibold">Your data</h2>
         <p className="text-sm text-muted leading-relaxed">
-          Your notes and your shelf are private by default. Nothing you log is shared until you
-          choose to share it, and what you paid never appears anywhere another person can see.
+          Nothing you log is visible to anyone until you set up a social profile. Once you have
+          one, each pour uses your default audience — Friends (people you follow who follow you
+          back) for new accounts — and you can switch it, per pour or as the default, to Only me. Your shelf stays yours, and what you paid
+          never appears anywhere another person can see.
           Everything you have written can be downloaded, or deleted along with the account, in
           one tap.{" "}
           <Link href="/settings" className="text-accent font-medium">

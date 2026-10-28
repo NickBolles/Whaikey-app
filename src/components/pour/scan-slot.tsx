@@ -450,7 +450,7 @@ export function PourScanSlot({
         </p>
       )}
       <div
-        className={`card-viewfinder relative overflow-hidden rounded-lg border border-border bg-black/60 ${compact ? "h-[124px]" : "h-[150px]"}`}
+        className={`card-viewfinder relative overflow-hidden rounded-lg border border-border bg-black/60 ${compact ? "h-[112px]" : "h-[128px]"}`}
         data-testid="pour-viewfinder"
       >
         {showVideo && <video ref={videoRef} muted playsInline aria-hidden className="absolute inset-0 h-full w-full object-cover" />}
@@ -629,11 +629,12 @@ export function PourScanSlot({
 
       {recent.length > 0 && (
         <div>
-          <h2 className="section-label mb-1.5">Recent</h2>
-          <ul className="flex flex-wrap gap-1.5" aria-label="Recent bottles">
+          <h2 className="section-label mb-1">Recent</h2>
+          {/* One scrolling row, so the rating, size and wheel stay high on the sheet. */}
+          <ul className="-mx-3 flex gap-1.5 overflow-x-auto px-3 pb-0.5 [scrollbar-width:none]" aria-label="Recent bottles">
             {recent.map((b) => (
               <li key={b.id}>
-                <button type="button" onClick={() => finish(b, { via: "recent" })} className="chip min-h-11 px-3 text-xs text-foreground/90 hover:bg-surface-raised">
+                <button type="button" onClick={() => finish(b, { via: "recent" })} className="chip min-h-11 shrink-0 whitespace-nowrap px-3 text-xs text-foreground/90 hover:bg-surface-raised">
                   {b.name}
                 </button>
               </li>

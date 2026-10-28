@@ -8,6 +8,10 @@ import { toFeedItemJson } from "@/lib/feed";
 import { unreadCount } from "@/lib/notify";
 import { SocialTabs } from "@/components/social/social-tabs";
 import { SocialFeed } from "@/components/social/social-feed";
+import { GatherModule } from "@/components/gather-module";
+import { EMPTY_GATHERINGS, getGatherings } from "@/lib/gather";
+import { withFallback } from "@/lib/settle";
+import { appNow } from "@/lib/clock";
 
 export const dynamic = "force-dynamic";
 
@@ -43,10 +47,11 @@ export default async function FriendsFeedPage() {
   // Claiming a handle lives with the people controls.
   if (!profile) redirect("/friends/people");
 
-  const [feed, following, unread] = await Promise.all([
+  const [feed, following, unread, gatherings] = await Promise.all([
     getFriendFeed(db, user.id, { limit: PAGE }),
     listFollowing(db, user.id),
     unreadCount(db, user.id),
+    withFallback(getGatherings(db, user.id, appNow()), EMPTY_GATHERINGS, "friends:gatherings"),
   ]);
   const matches = await getPalateMatches(db, user.id, feed.map((f) => f.author.userId));
   const items = feed.map((f) => toFeedItemJson(f, matches));
@@ -58,8 +63,10 @@ export default async function FriendsFeedPage() {
     <div className="mx-auto flex max-w-lg flex-col gap-4 px-3 pb-24 pt-5">
       <header className="flex flex-col gap-3">
         <h1 className="font-display text-[1.75rem] font-semibold leading-tight">Friends</h1>
-        <SocialTabs unread={unread} />
+        <SocialTabs unread={unread} handle={profile.handle} />
       </header>
+
+      <GatherModule data={gatherings} compact />
 
       {!followsAnyone ? (
         <div className="card flex flex-col items-center gap-3 p-5 text-center">
