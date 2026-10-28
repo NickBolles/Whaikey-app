@@ -142,6 +142,54 @@ export const distilleries = pgTable(
   (t) => [index("distilleries_name_trgm_idx").using("gin", sql`${catalogSearchKey(t.name)} gin_trgm_ops`)],
 );
 
+export const BRAND_LOGO_SOURCES = ["wikidata", "commons", "website"] as const;
+export type BrandLogoSource = (typeof BRAND_LOGO_SOURCES)[number];
+export const BRAND_LOGO_STATUSES = ["ok", "none", "rejected"] as const;
+export type BrandLogoStatus = (typeof BRAND_LOGO_STATUSES)[number];
+
+/**
+ * A distillery/brand mark for identification (docs/DATA_SOURCES.md §5.4,
+ * src/lib/logos/*). One row per brand key, filled by the rate-limited,
+ * idempotent backfill (scripts/brand-logos.ts, run in GitHub Actions):
+ * Wikidata P154/P8972 → Wikimedia Commons (license + attribution read from
+ * the file page), then the official site's high-res icon under nominative
+ * use, else nothing and the UI draws the monogram. The image bytes are kept
+ * here (≤ 96 KB each, a few hundred rows) and served from our own origin by
+ * /api/brand-logo/[key], so a logo never hotlinks a brand's site and never
+ * spends the image optimizer's quota.
+ */
+export const brandLogos = pgTable(
+  "brand_logos",
+  {
+    key: text("key").primaryKey(),
+    name: text("name").notNull(),
+    country: text("country"),
+    /** Our distillery row, when the brand is one of them. */
+    distilleryId: text("distillery_id").references(() => distilleries.id, { onDelete: "set null" }),
+    wikidataId: text("wikidata_id"),
+    website: text("website"),
+    status: text("status").$type<BrandLogoStatus>().notNull().default("none"),
+    /** Where the bytes came from (the Commons file page or the icon URL). */
+    logoUrl: text("logo_url"),
+    logoSource: text("logo_source").$type<BrandLogoSource>(),
+    /** "PD-textlogo", "CC BY-SA 4.0", "nominative-use", … */
+    license: text("license"),
+    attribution: text("attribution"),
+    attributionUrl: text("attribution_url"),
+    /** True when the license wants a visible credit next to the mark. */
+    attributionRequired: boolean("attribution_required").notNull().default(false),
+    contentType: text("content_type"),
+    /** Base64 image bytes. */
+    logoData: text("logo_data"),
+    width: integer("width"),
+    height: integer("height"),
+    checkedAt: timestamp("checked_at", { withTimezone: true, mode: "date" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("brand_logos_status_idx").on(t.status)],
+);
+
 /**
  * flavorProfile: JSON object mapping the 8 core flavor-wheel wedges to 0-10
  * intensity, e.g. {"fruity":6,"floral":2,"grain":3,"sweet":8,"woody":7,
@@ -182,6 +230,14 @@ export const bottles = pgTable(
     producerFlavorSourceLabel: text("producer_flavor_source_label"),
     producerFlavorRetrievedAt: timestamp("producer_flavor_retrieved_at", { withTimezone: true, mode: "date" }),
     imageUrl: text("image_url"),
+    /**
+     * The brand/producer this bottle is filed under for its logo
+     * (`brand_logos.key`; src/lib/logos/match.ts). Assigned by the logo
+     * backfill (scripts/brand-logos.ts) from the distillery link or the
+     * longest known brand name the bottle's name starts with. Null = no
+     * confident match, and the card falls back to the monogram.
+     */
+    brandKey: text("brand_key"),
     status: text("status")
       .$type<"verified" | "user_submitted" | "imported">()
       .notNull()
@@ -208,6 +264,7 @@ export const bottles = pgTable(
     index("bottles_name_trgm_idx").using("gin", sql`${catalogSearchKey(t.name)} gin_trgm_ops`),
     // A distillery-name hit reaches its bottles through this, not a scan.
     index("bottles_distillery_idx").on(t.distilleryId),
+    index("bottles_brand_key_idx").on(t.brandKey),
     // WP-21 (REL-1.2): every shared-catalog read filters on status first —
     // discovery, the passport denominators and their refresh. Imported rows
     // are expected to outnumber verified ones many times over once the

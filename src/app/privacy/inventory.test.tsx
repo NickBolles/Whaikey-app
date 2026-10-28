@@ -187,6 +187,7 @@ const INVENTORY: Record<string, Verdict> = {
   bottle_resources: { notPersonal: "Links attached to catalog rows." },
   bottle_claims: { notPersonal: "Sourced factual claims about a bottle." },
   bottle_media: { notPersonal: "Catalog imagery." },
+  brand_logos: { notPersonal: "Producer and brand marks." },
   catalog_verification_runs: { notPersonal: "Catalog QA job state." },
   catalog_verification_work: { notPersonal: "Catalog QA job state." },
   catalog_verification_attempts: { notPersonal: "Catalog QA job state." },

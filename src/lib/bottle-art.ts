@@ -10,7 +10,7 @@ import catalogSources from "../../config/catalog-sources.json";
  * the image optimizer as `remotePatterns`, so nothing is hotlinked from a
  * host that hasn't granted it. Everything else gets the generated silhouette.
  */
-type SourceEntry = { baseUrl?: string; mediaPolicy?: string; mediaHosts?: string[] };
+export type SourceEntry = { id?: string; baseUrl?: string; mediaPolicy?: string; mediaHosts?: string[]; photoPriority?: number };
 
 export function displayImageHosts(sources: SourceEntry[] = (catalogSources as { sources: SourceEntry[] }).sources): string[] {
   const hosts = new Set<string>();

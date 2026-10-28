@@ -24,6 +24,7 @@ import {
   type UserBottle,
   type WhiskeyCategory,
 } from "@/db/schema";
+import { cardLogoKeySql } from "@/lib/logos/license";
 
 export interface BottleSearchResult {
   id: string;
@@ -38,6 +39,8 @@ export interface BottleSearchResult {
   abv: number | null;
   avgPrice: number | null;
   flavorProfile: Record<string, number> | null;
+  /** Brand key whose mark may show on a card (`/api/brand-logo/<key>`), else null. */
+  brandLogo?: string | null;
 }
 
 export interface SearchOptions {
@@ -169,6 +172,7 @@ const resultColumns = {
   abv: bottles.abv,
   avgPrice: bottles.avgPrice,
   flavorProfile: bottles.flavorProfile,
+  brandLogo: cardLogoKeySql,
 };
 
 const nameKey = catalogSearchKey(bottles.name);

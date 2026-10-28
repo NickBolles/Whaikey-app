@@ -3,6 +3,7 @@ import { BottleStamps } from "@/components/bottle-stamps";
 import { CategoryChip } from "@/components/category-chip";
 import { originLabel } from "@/lib/origin";
 import { BottleArt } from "@/components/bottle-art";
+import { ProducerLogo } from "@/components/producer-logo";
 
 export interface BottleCardProps {
   bottle: {
@@ -16,6 +17,8 @@ export interface BottleCardProps {
     abv: number | null;
     avgPrice: number | null;
     imageUrl?: string | null;
+    /** Brand key whose mark may sit on a card (src/lib/logos/license.ts). */
+    brandLogo?: string | null;
   };
 }
 
@@ -47,7 +50,14 @@ export function BottleCard({ bottle }: BottleCardProps) {
       />
       <div className="min-w-0 flex-1">
         <div className="font-medium text-foreground truncate">{bottle.name}</div>
-        {origin && <div className="text-sm text-muted truncate mt-0.5">{origin}</div>}
+        {(origin || bottle.brandLogo) && (
+          <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-sm text-muted">
+            {/* The producer's mark, small, when we hold a licensed one; the
+                silhouette already carries the monogram, so no fallback here. */}
+            <ProducerLogo logoKey={bottle.brandLogo} name={bottle.distillery ?? bottle.name} size={18} fallback="none" />
+            {origin && <span className="truncate">{origin}</span>}
+          </div>
+        )}
         <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-xs text-muted">
           <CategoryChip category={bottle.category} />
           {specs.length > 0 && <span>{specs.join(" · ")}</span>}

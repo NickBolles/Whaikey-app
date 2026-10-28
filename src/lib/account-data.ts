@@ -1469,6 +1469,7 @@ export const NOT_LINKED: Readonly<Record<string, string>> = {
   bottle_resources: "Links attached to catalog rows; no user column.",
   bottle_claims: "Sourced facts about a bottle; no user column.",
   bottle_media: "Catalog imagery; no user column.",
+  brand_logos: "Producer/brand marks for the catalog; no user column.",
   catalog_verification_runs: "Catalog QA job state; no user column.",
   catalog_verification_work: "Catalog QA job state; no user column.",
   catalog_verification_attempts: "Catalog QA job state; no user column.",

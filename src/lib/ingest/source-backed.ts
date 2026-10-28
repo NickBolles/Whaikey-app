@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { photoPriorityOrder } from "@/lib/photo-priority";
 import { lookup } from "node:dns/promises";
 import { request as httpsRequest } from "node:https";
 import { isIP } from "node:net";
@@ -802,7 +803,7 @@ export async function ingestSourceManifest(
                 eq(catalogSources.enabled, true),
                 hasNoEnabledRestrictedTwin,
               ))
-              .orderBy(desc(bottleMedia.isPrimary), asc(catalogSources.id), asc(bottleMedia.id))
+              .orderBy(desc(bottleMedia.isPrimary), asc(photoPriorityOrder(catalogSources.id)), asc(catalogSources.id), asc(bottleMedia.id))
               .limit(1);
             if (!fallback) continue;
             await db.update(bottles).set({ imageUrl: fallback.url }).where(eq(bottles.id, bottleId));
@@ -1167,6 +1168,7 @@ export async function ingestSourceManifest(
         ))
         .orderBy(
           desc(bottleMedia.canonicalized),
+          asc(photoPriorityOrder(catalogSources.id)),
           asc(catalogSources.id),
           asc(bottleResources.id),
           desc(bottleMedia.isPrimary),
