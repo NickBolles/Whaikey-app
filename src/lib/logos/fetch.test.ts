@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   commonsLogo,
+  commonsSearchLogo,
   foldProducers,
+  hostMatchesBrand,
   HostRateLimiter,
+  isPhotoMime,
   iconCandidates,
   isLogoFileFor,
   isSafeSvg,
@@ -162,5 +165,56 @@ describe("HostRateLimiter", () => {
     t += 200;
     await lim.wait("https://a.example/2");
     expect(waits).toEqual([800]);
+  });
+});
+
+describe("tightened matching (#136)", () => {
+  it("website icons must sit on the brand's own domain", () => {
+    expect(hostMatchesBrand("www.oldelk.com", "Old Elk")).toBe(true);
+    expect(hostMatchesBrand("heavenhilldistillery.com", "Heaven Hill")).toBe(true);
+    expect(hostMatchesBrand("www.taliskerwhisky.co.uk", "Talisker")).toBe(true);
+    expect(hostMatchesBrand("www.malts.com", "Talisker")).toBe(false);
+    expect(hostMatchesBrand("www.malts.com", "Clynelish")).toBe(false);
+    expect(hostMatchesBrand("x.com", "Ab")).toBe(false);
+  });
+
+  it("refuses a website whose domain is not the brand's", async () => {
+    const c = ctx({
+      "https://www.malts.com/robots.txt": [404, "text/plain", ""],
+      "https://www.malts.com/apple.png": [200, "image/png", pngBytes(180, 180)],
+      "https://www.malts.com": [200, "text/html", '<html><head><link rel="apple-touch-icon" href="/apple.png"></head><body>Talisker</body></html>'],
+    });
+    expect(await websiteLogo(c, "https://www.malts.com", () => true, "Talisker")).toBeNull();
+    expect(await websiteLogo(c, "https://www.malts.com", () => true)).not.toBeNull();
+  });
+
+  it("photos are never logos", async () => {
+    expect(isPhotoMime("image/jpeg")).toBe(true);
+    expect(isPhotoMime("image/png")).toBe(false);
+    const info = (title: string, mime: string) =>
+      JSON.stringify({ query: { pages: { "1": { title, imageinfo: [{ mime, thumburl: "https://upload.wikimedia.org/t.png", descriptionurl: "https://commons.wikimedia.org/wiki/F", extmetadata: { LicenseShortName: { value: "PD-textlogo" } } }] } } } });
+    const c = ctx({
+      "https://commons.wikimedia.org/w/api.php?action=query&format=json&prop=imageinfo&iiprop=url|mime|extmetadata&iiurlwidth=256&titles=File%3AArdbeg": [200, "application/json", info("File:Ardbeg bottle detail.jpg", "image/jpeg")],
+      "https://upload.wikimedia.org/": [200, "image/png", pngBytes(256, 90)],
+    });
+    expect(await commonsLogo(c, "Ardbeg bottle detail.jpg")).toBeNull();
+  });
+
+  it("a Commons search hit must be categorised as a drinks producer's mark", async () => {
+    const info = (cats: string) =>
+      JSON.stringify({ query: { pages: { "1": { title: "File:Jura-Logo.svg", imageinfo: [{ mime: "image/svg+xml", thumburl: "https://upload.wikimedia.org/t.png", descriptionurl: "https://commons.wikimedia.org/wiki/F", extmetadata: { LicenseShortName: { value: "PD-textlogo" }, Categories: { value: cats } } }] } } } });
+    const search = JSON.stringify({ query: { search: [{ title: "File:Jura-Logo.svg" }] } });
+    const canton = ctx({
+      "https://commons.wikimedia.org/w/api.php?action=query&format=json&list=search": [200, "application/json", search],
+      "https://commons.wikimedia.org/w/api.php?action=query&format=json&prop=imageinfo": [200, "application/json", info("Canton of Jura|Logos of Swiss cantons")],
+      "https://upload.wikimedia.org/": [200, "image/png", pngBytes(256, 90)],
+    });
+    expect(await commonsSearchLogo(canton, "Jura")).toBeNull();
+    const whisky = ctx({
+      "https://commons.wikimedia.org/w/api.php?action=query&format=json&list=search": [200, "application/json", search],
+      "https://commons.wikimedia.org/w/api.php?action=query&format=json&prop=imageinfo": [200, "application/json", info("Isle of Jura distillery|Whisky logos")],
+      "https://upload.wikimedia.org/": [200, "image/png", pngBytes(256, 90)],
+    });
+    expect(await commonsSearchLogo(whisky, "Jura")).not.toBeNull();
   });
 });
