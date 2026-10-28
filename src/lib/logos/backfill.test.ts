@@ -66,6 +66,8 @@ describe("logo backfill", () => {
     expect(elk).toMatchObject({ status: "ok", logoSource: "website", license: "nominative-use", attribution: "oldelk.com" });
 
     expect(first.coverage).toMatchObject({ distilleries: 1, distilleriesWithLogo: 1, bottles: 5, bottlesWithBrand: 4, bottlesWithAnyLogo: 4, bottlesWithCardLogo: 3 });
+    expect(first.coverage?.logos.every((l) => l.key && l.source && l.license)).toBe(true);
+    expect(first.coverage?.logos.length).toBeGreaterThanOrEqual(2);
     expect(coverageMarkdown(first)).toContain("| bottles (cards) | 3 | 5 | 60.0% |");
 
     // Second run: nothing re-filed, nothing re-fetched.

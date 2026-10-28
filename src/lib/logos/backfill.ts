@@ -68,6 +68,15 @@ export interface LogoCoverage {
   bottlesWithBrand: number;
   bottlesWithCardLogo: number;
   bottlesWithAnyLogo: number;
+  logos: Array<{
+    key: string;
+    name: string;
+    source: string | null;
+    license: string | null;
+    attribution: string | null;
+    attributionUrl: string | null;
+    card: boolean;
+  }>;
 }
 
 export interface LogoBackfillReport {
@@ -315,6 +324,9 @@ export async function logoCoverage(db: DB): Promise<LogoCoverage> {
       license: brandLogos.license,
       attributionRequired: brandLogos.attributionRequired,
       distilleryId: brandLogos.distilleryId,
+      name: brandLogos.name,
+      attribution: brandLogos.attribution,
+      attributionUrl: brandLogos.attributionUrl,
     })
     .from(brandLogos);
   const bySource: Record<string, number> = {};
@@ -354,6 +366,19 @@ export async function logoCoverage(db: DB): Promise<LogoCoverage> {
     bottlesWithBrand: withBrand,
     bottlesWithCardLogo: withCard,
     bottlesWithAnyLogo: withAny,
+    // For the contact sheet (no bytes; render them from /api/brand-logo/<key>).
+    logos: rows
+      .filter((r) => r.status === "ok")
+      .map((r) => ({
+        key: r.key,
+        name: r.name,
+        source: r.logoSource,
+        license: r.license,
+        attribution: r.attribution,
+        attributionUrl: r.attributionUrl,
+        card: card.has(r.key),
+      }))
+      .sort((a, b) => a.key.localeCompare(b.key)),
   };
 }
 
