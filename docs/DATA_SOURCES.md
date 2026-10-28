@@ -153,6 +153,30 @@ Given the 2024–25 secondary-market correction, our "collection value" = **rang
 3. **Brand press kits** (Diageo, Pernod, Beam Suntory, Sazerac media portals) — editorial-licensed bottle shots; doesn't scale to the long tail.
 4. **User photos** ⭐ — the scalable path and the eventual moat (Vivino's playbook): ownership/license assigned via our ToS; every scan improves the corpus.
 
+### 5.1.1 Display licence basis per source (photo audit 2026-10-28)
+A bottle photo is shown only when its source has `mediaPolicy: "display_remote"` in `config/catalog-sources.json`; `photoPriority` (lower wins) picks between several licensed shots. Each source's `photoReview` field records the decision. Full audit with samples: the owner's photo-source review (2026-10-28).
+
+| Source | Packshot quality | Terms (quoted basis) | Decision |
+|---|---|---|---|
+| Systembolaget product CDN (via C4illin mirror) | Excellent: 800 px wide, 1.6–3.1k px tall, transparent PNG | press.systembolaget.se/bilder: images "endast får användas i redaktionellt syfte … kommersiellt syfte är inte tillåtet"; general terms ban crawlers | **Not approved** |
+| Vinmonopolet (`bilder.vinmonopolet.no`) | High (up to 5000 px), placeholder for missing | "Bruk av bilder fra våre kanaler må avtales"; API ToS: no redistribution / third-party sharing | **Not approved** without a written agreement |
+| Buffalo Trace / Sazerac official site | Clean but small (165×750) | T&C: personal, non-commercial use only; no display without Sazerac's written consent | **Not approved** (`review_required`) |
+| Breaking Bourbon, Whisky Advocate | Editorial photos | Copyrighted editorial | `link_only` |
+| TTB COLA | Flat label artwork, not packshots | Public record; counsel review pending | Not a photo source |
+| Wikimedia Commons | Licence fine (CC BY/BY-SA/PD); ~30% single-bottle, none clean packshots | Per-file licence + attribution | Not a bulk source; hand-picked per bottle OK later |
+| Open Food Facts | User phone shots, thin spirits coverage | CC BY-SA / ODbL isolation (§3) | Not approved |
+
+Approval paths, in order: brand press kits with a written OK (each "yes" = one source entry with `display_remote` + `photoPriority`), affiliate feeds once an affiliate relationship exists, then first-party user photos. Vercel Hobby includes 5,000 image transformations/month; if a bulk source is approved, optimise only the bottle-page size and serve list thumbnails from the source's own small rendition with `unoptimized`.
+
+### 5.4 Brand / distillery logos
+Logos are trademarks shown under **nominative use** (identifying the producer of a listed bottle, never implying endorsement), and the image file's own copyright licence is recorded per logo. Pipeline (`src/lib/logos`, `pnpm logos`, weekly GitHub Action `brand-logos.yml`; never run from a private host):
+1. **Wikidata** P154 (logo image) / P8972 (small logo) on the matched brand or distillery item → the **Wikimedia Commons** file; licence, author and attribution URL are read from the file's extmetadata. Files under PD-textlogo / CC0 / CC BY(-SA) are accepted; others are skipped.
+2. A Commons file titled exactly "<brand> logo" (same licence checks).
+3. The **official website** (from Wikidata P856 or `config/brand-seeds.json`): `apple-touch-icon`, SVG icon or JSON-LD `logo`, only if robots.txt allows it and the homepage names the brand. Stored with licence `nominative-use` and the site as attribution.
+4. Otherwise none: the UI draws the generated monogram.
+
+Commons marks are fetched as a 256 px PNG rendition; site icons must be ≥ 120 px (or an SVG that passes a script/external-reference safety check); every file is ≤ 96 KB. Bytes are stored in `brand_logos` and served from `/api/brand-logo/<key>` with long CDN caching, so there is no hotlinking and no image-optimiser quota. Requests are rate limited per host (Wikimedia 1/s, brand sites 1 per 2 s) and brands are re-checked after 30 days. Marks whose licence wants a credit (CC BY/BY-SA) appear only on the bottle page next to the credit; PD/CC0 marks and nominative-use site icons may also appear on cards. A rights holder's takedown is a single `status='rejected'` update.
+
 ### 5.2 Recognition pipeline (matches FEATURES.md §2.2)
 - **Barcode-first** (what BAXUS and Distiller actually do — cheap, reliable), then:
 - **OCR text match** — spirits labels are text-heavy (brand, age, proof all printed); cloud Vision OCR or on-device OCR + fuzzy match against our catalog is a cheap, strong first visual pass; also the natural fallback UX ("we read 'Laphroaig 10' — is this it?").
