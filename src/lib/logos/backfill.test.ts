@@ -4,7 +4,7 @@ import * as schema from "@/db/schema";
 import type { DB } from "@/db";
 import { createTestBottle, setupTestDb } from "@/test/helpers";
 import { searchBottles } from "@/lib/search";
-import { coverageMarkdown, pageMentionsBrand, planBrands, runLogoBackfill } from "./backfill";
+import { coverageMarkdown, pageMentionsBrand, planBrands, rejectBrandLogos, runLogoBackfill } from "./backfill";
 import { HostRateLimiter, type WikidataProducer } from "./fetch";
 import { pngBytes, stubFetch } from "./test-utils";
 import { GET } from "@/app/api/brand-logo/[key]/route";
@@ -122,6 +122,57 @@ describe("logo backfill", () => {
     await runLogoBackfill(db, { ...opts, apply: true, force: true, fetchImpl: routes() });
     const [taken] = await db.select().from(schema.brandLogos).where(eq(schema.brandLogos.key, "glenfiddich"));
     expect(taken?.status).toBe("rejected");
+  });
+
+  it("rejects marks for good: bytes cleared, 404 from the route, never re-fetched (#136)", async () => {
+    const opts = { producers, seeds: [{ name: "Old Elk", country: "USA", website: "https://www.oldelk.com" }], limiter: noWait };
+    await runLogoBackfill(db, { ...opts, apply: true, fetchImpl: routes() });
+    const dry = await rejectBrandLogos(db, ["glenfiddich"]);
+    expect(dry.rejected).toEqual(["glenfiddich"]);
+    expect((await db.select().from(schema.brandLogos).where(eq(schema.brandLogos.key, "glenfiddich")))[0]?.status).toBe("ok");
+
+    const res = await rejectBrandLogos(db, [" Glenfiddich", "glenfiddich", "never-seen"], { apply: true });
+    expect(res).toEqual({ rejected: ["glenfiddich", "never-seen"], created: ["never-seen"] });
+    const [gf] = await db.select().from(schema.brandLogos).where(eq(schema.brandLogos.key, "glenfiddich"));
+    expect(gf).toMatchObject({ status: "rejected", logoData: null, logoSource: null, license: null });
+    expect((await GET(new Request("http://x"), { params: Promise.resolve({ key: "glenfiddich" }) })).status).toBe(404);
+
+    const fetch2 = routes();
+    await runLogoBackfill(db, { ...opts, apply: true, force: true, clearMissing: true, fetchImpl: fetch2 });
+    expect((await db.select().from(schema.brandLogos).where(eq(schema.brandLogos.key, "glenfiddich")))[0]?.status).toBe("rejected");
+    await expect(rejectBrandLogos(db, ["../etc"], { apply: true })).rejects.toThrow(/invalid brand key/);
+  });
+
+  it("refuses a website icon shared by two brands (group portfolio sites, #136)", async () => {
+    await createTestBottle(db, { id: "b-elk2", name: "Old Elkhorn Rye", category: "rye" });
+    const shared = stubFetch({
+      "https://commons.wikimedia.org/": [200, "application/json", JSON.stringify({ query: { search: [] } })],
+      "https://www.oldelk.com/robots.txt": [404, "text/plain", ""],
+      "https://www.oldelkhorn.com/robots.txt": [404, "text/plain", ""],
+      "https://www.oldelk.com/apple.png": [200, "image/png", pngBytes(180, 180)],
+      "https://www.oldelkhorn.com/apple.png": [200, "image/png", pngBytes(180, 180)],
+      "https://www.oldelk.com": [200, "text/html", '<html><head><link rel="apple-touch-icon" href="/apple.png"></head><body>Old Elk</body></html>'],
+      "https://www.oldelkhorn.com": [200, "text/html", '<html><head><link rel="apple-touch-icon" href="/apple.png"></head><body>Old Elkhorn</body></html>'],
+    });
+    const seeds = [
+      { name: "Old Elk", website: "https://www.oldelk.com" },
+      { name: "Old Elkhorn", website: "https://www.oldelkhorn.com" },
+    ];
+    const r = await runLogoBackfill(db, { apply: true, producers: [], seeds, limiter: noWait, fetchImpl: shared });
+    expect(r.found.website ?? 0).toBe(0);
+    const rows = await db.select().from(schema.brandLogos);
+    expect(rows.filter((x) => x.key.startsWith("old-elk")).every((x) => x.status === "none")).toBe(true);
+  });
+
+  it("clearMissing takes down a stored mark the tightened rules now refuse", async () => {
+    const opts = { producers, seeds: [], limiter: noWait };
+    await runLogoBackfill(db, { ...opts, apply: true, fetchImpl: routes() });
+    const none = stubFetch({
+      "https://commons.wikimedia.org/": [200, "application/json", JSON.stringify({ query: { pages: { "1": { missing: "" } }, search: [] } })],
+    });
+    await runLogoBackfill(db, { ...opts, apply: true, force: true, clearMissing: true, fetchImpl: none });
+    const [gf] = await db.select().from(schema.brandLogos).where(eq(schema.brandLogos.key, "glenfiddich"));
+    expect(gf).toMatchObject({ status: "none", logoData: null });
   });
 
   it("pageMentionsBrand guards against parked or wrong domains", () => {

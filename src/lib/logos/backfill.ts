@@ -1,4 +1,5 @@
-import { and, asc, eq, gt, isNull, lt, ne, or, sql } from "drizzle-orm";
+import { createHash } from "node:crypto";
+import { and, asc, eq, gt, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 import type { DB } from "@/db";
 import { bottles, brandLogos, distilleries } from "@/db/schema";
 import {
@@ -56,6 +57,13 @@ export interface LogoBackfillOptions {
   apply?: boolean;
   now?: Date;
   log?: (msg: string) => void;
+  /**
+   * When a (forced) re-check finds no acceptable mark, clear the stored one
+   * instead of keeping it. Use after tightening the matching rules so marks
+   * the new rules refuse come down. Without it a miss keeps the old mark,
+   * because a miss may only mean the source was unreachable.
+   */
+  clearMissing?: boolean;
 }
 
 export interface LogoCoverage {
@@ -206,7 +214,7 @@ export async function findLogo(ctx: FetchContext, plan: BrandPlan): Promise<Fetc
   const searched = await commonsSearchLogo(ctx, plan.name).catch(() => null);
   if (searched) return searched;
   if (plan.website) {
-    const site = await websiteLogo(ctx, plan.website, (html) => pageMentionsBrand(html, plan.name)).catch(() => null);
+    const site = await websiteLogo(ctx, plan.website, (html) => pageMentionsBrand(html, plan.name), plan.name).catch(() => null);
     if (site) return site;
   }
   return null;
@@ -286,14 +294,48 @@ export async function runLogoBackfill(db: DB, opts: LogoBackfillOptions = {}): P
 
   const found: Record<string, number> = {};
   let failures = 0;
+  const results: Array<{ plan: BrandPlan; logo: FetchedLogo | null; failed: boolean }> = [];
   for (const p of queue) {
     let logo: FetchedLogo | null = null;
+    let failed = false;
     try {
       logo = await findLogo(ctx, p);
     } catch (err) {
       failures++;
+      failed = true;
       log(`  ${p.key}: lookup failed (${(err as Error).message})`);
     }
+    results.push({ plan: p, logo, failed });
+  }
+
+  // A website icon shared by two or more brands is a group/portfolio site's
+  // icon (Diageo's "Malts" mark on Talisker and Clynelish), never a brand's
+  // own mark: refuse it for every brand that carries it (#136). Stored icons
+  // of brands outside this run count too.
+  const iconBrands = new Map<string, Set<string>>();
+  const addIcon = (hash: string, key: string) => iconBrands.set(hash, (iconBrands.get(hash) ?? new Set()).add(key));
+  for (const r of results) if (r.logo?.source === "website") addIcon(logoHash(r.logo.data), r.plan.key);
+  const queued = new Set(queue.map((p) => p.key));
+  const stored = await db
+    .select({ key: brandLogos.key, logoData: brandLogos.logoData })
+    .from(brandLogos)
+    .where(and(eq(brandLogos.status, "ok"), eq(brandLogos.logoSource, "website")));
+  for (const r of stored) if (!queued.has(r.key) && r.logoData) addIcon(logoHash(Buffer.from(r.logoData, "base64")), r.key);
+  const sharedKeys = new Set<string>();
+  for (const keys of iconBrands.values()) if (keys.size >= 2) for (const k of keys) sharedKeys.add(k);
+  for (const r of results) {
+    if (r.logo?.source === "website" && sharedKeys.has(r.plan.key)) {
+      log(`  ${r.plan.key}: website icon shared with other brands — refused`);
+      r.logo = null;
+    }
+  }
+  const sharedStored = [...sharedKeys].filter((k) => !queued.has(k));
+  if (apply && sharedStored.length > 0) {
+    log(`  clearing shared website icons: ${sharedStored.join(", ")}`);
+    await db.update(brandLogos).set(clearedLogo(now)).where(and(inArray(brandLogos.key, sharedStored), eq(brandLogos.status, "ok")));
+  }
+
+  for (const { plan: p, logo, failed } of results) {
     found[logo?.source ?? "none"] = (found[logo?.source ?? "none"] ?? 0) + 1;
     log(`  ${p.key} (${counts.get(p.key) ?? 0} bottles): ${logo ? `${logo.source} ${logo.license.license} ${logo.width}x${logo.height}` : "none"}`);
     if (!apply) continue;
@@ -316,14 +358,62 @@ export async function runLogoBackfill(db: DB, opts: LogoBackfillOptions = {}): P
               checkedAt: now,
               updatedAt: now,
             }
-          : // Keep a previously found mark when a re-check merely failed to reach the source.
-            { checkedAt: now, updatedAt: now },
+          : opts.clearMissing && !failed
+            ? clearedLogo(now)
+            : // Keep a previously found mark when a re-check merely failed to reach the source.
+              { checkedAt: now, updatedAt: now },
       )
       .where(eq(brandLogos.key, p.key));
   }
 
   const coverage = apply ? await logoCoverage(db) : null;
   return { apply, producers: producers.length, brands: live.length, bottlesReassigned: reassigned, checked: queue.length, found, failures, coverage };
+}
+
+function logoHash(data: Uint8Array): string {
+  return createHash("sha256").update(data).digest("hex");
+}
+
+/** Column values for "no mark" (keeps the identity columns). */
+function clearedLogo(now: Date) {
+  return {
+    status: "none" as const,
+    logoUrl: null,
+    logoSource: null,
+    license: null,
+    attribution: null,
+    attributionUrl: null,
+    attributionRequired: false,
+    contentType: null,
+    logoData: null,
+    width: null,
+    height: null,
+    checkedAt: now,
+    updatedAt: now,
+  };
+}
+
+/**
+ * Take marks down for good (#136): status `rejected`, bytes and credit
+ * cleared. Rejected rows are never re-fetched, even with `--force`, and
+ * `/api/brand-logo/<key>` and the bottle page only show `ok` rows. Unknown
+ * keys get a placeholder row so a later backfill can't fill them either.
+ */
+export async function rejectBrandLogos(db: DB, keys: string[], opts: { apply?: boolean; now?: Date } = {}): Promise<{ rejected: string[]; created: string[] }> {
+  const now = opts.now ?? new Date();
+  const clean = [...new Set(keys.map((k) => k.trim().toLowerCase()).filter(Boolean))];
+  const bad = clean.filter((k) => !/^[a-z0-9-]{1,80}$/.test(k));
+  if (bad.length > 0) throw new Error(`invalid brand key(s): ${bad.join(", ")}`);
+  if (clean.length === 0) return { rejected: [], created: [] };
+  const existing = new Set((await db.select({ key: brandLogos.key }).from(brandLogos).where(inArray(brandLogos.key, clean))).map((r) => r.key));
+  const created = clean.filter((k) => !existing.has(k));
+  if (opts.apply) {
+    await db.update(brandLogos).set({ ...clearedLogo(now), status: "rejected" }).where(inArray(brandLogos.key, clean));
+    for (const k of created) {
+      await db.insert(brandLogos).values({ key: k, name: k, status: "rejected", checkedAt: now, updatedAt: now }).onConflictDoNothing();
+    }
+  }
+  return { rejected: clean, created };
 }
 
 export async function logoCoverage(db: DB): Promise<LogoCoverage> {

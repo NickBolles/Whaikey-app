@@ -19,6 +19,13 @@ on:
         description: "Re-check brands checked in the last 30 days"
         type: boolean
         default: false
+      reject:
+        description: "Brand keys to take down for good (comma list); a reject run does nothing else"
+        default: ""
+      clear_missing:
+        description: "Clear a stored mark when the re-check finds none (use with force after tightening rules)"
+        type: boolean
+        default: false
       dry_run:
         description: "Plan and look up only; write nothing"
         type: boolean
@@ -54,13 +61,27 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Reject logos
+        if: ${{ inputs.reject != '' && inputs.reject != null }}
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          REJECT: ${{ inputs.reject }}
+          APPLY: ${{ inputs.dry_run && ' ' || '--apply' }}
+        run: |
+          if ! printf '%s' "$REJECT" | grep -Eq '^[a-z0-9, -]+$'; then
+            echo "::error::reject must be a comma list of brand keys (a-z, 0-9, -)."
+            exit 1
+          fi
+          pnpm logos $APPLY --reject "$REJECT" --summary logo-report.json
       - name: Backfill logos
+        if: ${{ inputs.reject == '' || inputs.reject == null }}
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           LIMIT: ${{ inputs.limit || '150' }}
           FORCE: ${{ inputs.force && '--force' || '' }}
+          CLEAR: ${{ inputs.clear_missing && '--clear-missing' || '' }}
           APPLY: ${{ inputs.dry_run && ' ' || '--apply' }}
-        run: pnpm logos $APPLY --limit "$LIMIT" $FORCE --summary logo-report.json
+        run: pnpm logos $APPLY --limit "$LIMIT" $FORCE $CLEAR --summary logo-report.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
