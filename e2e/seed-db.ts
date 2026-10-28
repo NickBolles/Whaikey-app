@@ -13,7 +13,7 @@
 import { createDb } from "../src/db/index";
 import { migrateDb } from "../src/db/migrate";
 import { seedDatabase } from "../src/db/seed/index";
-import { seedDemoUser } from "./demo-seed";
+import { seedDemoBrandLogo, seedDemoUser } from "./demo-seed";
 import { seedAccountUsers } from "./account-seed";
 
 async function main() {
@@ -22,6 +22,7 @@ async function main() {
   await migrateDb(db, dbDir);
   await seedDatabase(db);
   await seedDemoUser(db);
+  await seedDemoBrandLogo(db);
   await seedAccountUsers(db);
 }
 
