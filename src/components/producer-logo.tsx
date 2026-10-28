@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { monogram } from "@/lib/bottle-art";
 
 /**
@@ -68,6 +68,23 @@ export function ProducerLogo({
 }) {
   const [failed, setFailed] = useState(false);
   const [tone, setTone] = useState<"light" | "dark" | undefined>(undefined);
+  const sample = useCallback(
+    (img: HTMLImageElement) => {
+      if (!logoKey) return;
+      if (!toneCache.has(logoKey)) toneCache.set(logoKey, markTone(img));
+      setTone(toneCache.get(logoKey));
+    },
+    [logoKey],
+  );
+  // A server-rendered <img> can finish loading before hydration attaches
+  // onLoad, so the event never reaches React; sample an already-complete
+  // image when the element mounts.
+  const imgRef = useCallback(
+    (img: HTMLImageElement | null) => {
+      if (img && img.complete && img.naturalWidth > 0) sample(img);
+    },
+    [sample],
+  );
   if (logoKey && !failed) {
     const plate = (tone ?? toneCache.get(logoKey)) === "light" ? DARK_PLATE : LIGHT_PLATE;
     const pad = Math.max(2, Math.round(size * 0.12));
@@ -86,10 +103,8 @@ export function ProducerLogo({
           loading="lazy"
           decoding="async"
           className="h-full w-full object-contain"
-          onLoad={(e) => {
-            if (!toneCache.has(logoKey)) toneCache.set(logoKey, markTone(e.currentTarget));
-            setTone(toneCache.get(logoKey));
-          }}
+          ref={imgRef}
+          onLoad={(e) => sample(e.currentTarget)}
           onError={() => setFailed(true)}
         />
       </span>
