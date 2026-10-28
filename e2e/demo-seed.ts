@@ -888,3 +888,38 @@ export async function seedDemoUser(db: DB): Promise<void> {
     { id: "demo-on-2", outingId: "demo-outing-ended", participantId: "demo-oseat-sasha-2", body: "Ferry back at 6.", createdAt: ot2 },
   ]);
 }
+
+// ── demo brand logo (visual baseline for the producer-mark state, PR #134) ──
+// Append-only fence. One fixed `brand_logos` row (a tiny drawn mark, not a real
+// trademark) linked to lagavulin-16, so bottle detail, cards and search show
+// the logo + credit state that the brand-logo pipeline produces in production.
+export const DEMO_BRAND_LOGO_KEY = "demo-lagavulin";
+const DEMO_BRAND_LOGO_PNG =
+  "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAABWUlEQVR42u2bURLDIAhEw07OkfufKxdpT9AOKiDg8t0p7AMiRnNdNBrtZJNIZ8/zfLS/fd9XygMYEbwLiGQX7g1Cqgj3AiHVhFuDkGjxmoA9/tMFgCZQi1L19COZhUf4FesgItZvyxhQTbzGz8gz5M48pGh8rq5AWM3+DvEa/1ow4i0+qm1mY0TVzFtVAq7DDR2yv1IFsHKSHcIwgJ0bnMjhCZ2ybzYJdsv+P13olv3ReLkMEsAh/f9LHzr2/0jcbAECIAACIAACIAACmNpLV30H8BdA1alvdjo8vgXuCmXqWaXwDLQCWHTa/c1UDrzLNXtbods7gFE98KRb4aGKGWpZIcwc5R0/B7jfD8icfXUFZG+FlQQtnwzthrBanbdlEJEtYQXe9HQ4qhos7x3xpmi2gKL98LZ4pgeS5YwfCmAHiFRfjESCSP3NkCeIUl+NWQDp/naaRktiX2Hv/GZRLGnLAAAAAElFTkSuQmCC";
+
+export async function seedDemoBrandLogo(db: DB): Promise<void> {
+  await db
+    .insert(schema.brandLogos)
+    .values({
+      key: DEMO_BRAND_LOGO_KEY,
+      name: "Lagavulin",
+      country: "Scotland",
+      distilleryId: "lagavulin",
+      status: "ok",
+      logoUrl: "https://commons.wikimedia.org/wiki/File:Demo_logo.png",
+      logoSource: "commons",
+      license: "PD-textlogo",
+      attribution: "Wikimedia Commons",
+      attributionUrl: "https://commons.wikimedia.org/wiki/File:Demo_logo.png",
+      attributionRequired: false,
+      contentType: "image/png",
+      logoData: DEMO_BRAND_LOGO_PNG,
+      width: 64,
+      height: 64,
+      checkedAt: new Date("2026-07-01T00:00:00Z"),
+      createdAt: new Date("2026-07-01T00:00:00Z"),
+      updatedAt: new Date("2026-07-01T00:00:00Z"),
+    })
+    .onConflictDoNothing();
+  await db.update(schema.bottles).set({ brandKey: DEMO_BRAND_LOGO_KEY }).where(eq(schema.bottles.id, "lagavulin-16"));
+}

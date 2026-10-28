@@ -44,11 +44,14 @@ import {
   getTwinEndorsements,
   type TwinEndorsement,
 } from "@/lib/taste-twins";
+import { cardLogoKeySql } from "@/lib/logos/license";
 
 export interface Recommendation {
   bottleId: string;
   name: string;
   distillery: string | null;
+  /** Brand key whose mark may show on a card, else null (src/lib/logos). */
+  brandLogo?: string | null;
   category: string;
   region: string | null;
   country: string | null;
@@ -341,6 +344,7 @@ interface ScoredBottle {
   bottleId: string;
   name: string;
   distillery: string | null;
+  brandLogo?: string | null;
   category: string;
   region: string | null;
   country: string | null;
@@ -496,6 +500,7 @@ export async function discoveryCandidates(
       avgPrice: bottles.avgPrice,
       flavorProfile: bottles.flavorProfile,
       distillery: distilleries.name,
+      brandLogo: cardLogoKeySql,
     })
     .from(bottles)
     .leftJoin(distilleries, eq(bottles.distilleryId, distilleries.id))
@@ -542,6 +547,7 @@ async function tonightCandidates(
       avgPrice: bottles.avgPrice,
       flavorProfile: bottles.flavorProfile,
       distillery: distilleries.name,
+      brandLogo: cardLogoKeySql,
     })
     .from(userBottles)
     .innerJoin(bottles, eq(userBottles.bottleId, bottles.id))
@@ -557,6 +563,7 @@ async function tonightCandidates(
       bottleId: b.bottleId,
       name: b.name,
       distillery: b.distillery,
+      brandLogo: b.brandLogo ?? null,
       category: b.category,
       region: b.region,
       country: b.country,
@@ -648,6 +655,7 @@ export async function recommendBottles(
       bottleId: s.bottleId,
       name: s.name,
       distillery: s.distillery,
+      brandLogo: s.brandLogo ?? null,
       category: s.category,
       region: s.region,
       country: s.country,

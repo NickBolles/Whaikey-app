@@ -9,6 +9,7 @@ import { badgeProgressCaption, type BadgeProgress } from "@/lib/passport-progres
 import { originLabel } from "@/lib/origin";
 import { Compass } from "lucide-react";
 import { BottleArt } from "@/components/bottle-art";
+import { ProducerLogo } from "@/components/producer-logo";
 
 export interface RecommendationRailProps {
   mode: "discovery" | "tonight";
@@ -211,7 +212,12 @@ function RecCard({ rec, mode }: { rec: Recommendation; mode: RecommendationRailP
           <BottleArt name={rec.name} category={rec.category} distillery={rec.distillery} region={rec.region} country={rec.country} height={64} />
           <div className="flex min-w-0 flex-1 flex-col gap-1">
             <span className="font-medium text-foreground leading-snug line-clamp-2">{rec.name}</span>
-            {meta && <span className="text-xs text-muted line-clamp-2">{meta}</span>}
+            {(meta || rec.brandLogo) && (
+              <span className="flex min-w-0 items-start gap-1.5 text-xs text-muted">
+                <ProducerLogo logoKey={rec.brandLogo} name={rec.distillery ?? rec.name} size={18} fallback="none" />
+                {meta && <span className="line-clamp-2">{meta}</span>}
+              </span>
+            )}
             {rec.avgPrice != null && (
               <span className="stat-number text-base text-accent">${Math.round(rec.avgPrice)}</span>
             )}

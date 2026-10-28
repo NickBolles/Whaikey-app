@@ -1,4 +1,4 @@
-import Image from "next/image";
+import { RemoteBottleImage } from "@/components/remote-bottle-image";
 import { bottleShape, displayableImage, liquidTint, monogram, monogramColor, type BottleShape } from "@/lib/bottle-art";
 
 export interface BottleArtProps {
@@ -34,20 +34,13 @@ const OUTLINES: Record<BottleShape, string> = {
 export function BottleArt({ name, category, distillery, region, country, imageUrl, cask, height = 64, className = "" }: BottleArtProps) {
   const width = Math.round(height * 0.42);
   const remote = displayableImage(imageUrl);
-  if (remote) {
-    return (
-      <span className={`relative inline-block shrink-0 overflow-hidden rounded-md ${className}`} style={{ width, height }}>
-        <Image src={remote} alt="" fill sizes={`${width * 2}px`} className="object-contain" />
-      </span>
-    );
-  }
   const shape = bottleShape(category);
   const tint = liquidTint({ name: cask ? `${name} ${cask}` : name, category, region });
   const badge = monogramColor({ category, region, country });
   const letters = monogram(distillery || name);
   const outline = OUTLINES[shape];
   const clipId = `bottle-${shape}`;
-  return (
+  const silhouette = (
     <svg
       viewBox="0 0 40 100"
       width={width}
@@ -86,4 +79,10 @@ export function BottleArt({ name, category, distillery, region, country, imageUr
       </text>
     </svg>
   );
+  if (remote) {
+    // A 2x density hint is enough for a list thumbnail; the optimizer picks
+    // the nearest configured width and caches it (docs/DATA_SOURCES.md §5.5).
+    return <RemoteBottleImage src={remote} width={width} height={height} fallback={silhouette} className={className} />;
+  }
+  return silhouette;
 }

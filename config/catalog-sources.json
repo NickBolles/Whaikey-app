@@ -7,7 +7,8 @@
       "baseUrl": "https://www.buffalotracedistillery.com",
       "fetchPolicy": "structured",
       "mediaPolicy": "review_required",
-      "attribution": "Buffalo Trace Distillery"
+      "attribution": "Buffalo Trace Distillery",
+      "photoReview": "2026-10-28 photo audit: NOT approved for display. Site T&C allow personal, non-commercial use only and forbid display/redistribution without Sazerac's written consent. Packshot is clean but small (165x750). Path to yes: Sazerac press kit or written OK, then mediaPolicy=display_remote + photoPriority."
     },
     {
       "id": "breaking-bourbon",
@@ -16,7 +17,8 @@
       "baseUrl": "https://www.breakingbourbon.com",
       "fetchPolicy": "structured",
       "mediaPolicy": "link_only",
-      "attribution": "Breaking Bourbon"
+      "attribution": "Breaking Bourbon",
+      "photoReview": "2026-10-28 photo audit: editorial, copyrighted photography; link_only by design."
     },
     {
       "id": "whisky-advocate",
@@ -25,7 +27,8 @@
       "baseUrl": "https://whiskyadvocate.com",
       "fetchPolicy": "link_only",
       "mediaPolicy": "link_only",
-      "attribution": "Whisky Advocate"
+      "attribution": "Whisky Advocate",
+      "photoReview": "2026-10-28 photo audit: editorial, copyrighted photography; link_only by design."
     }
   ],
   "resources": []

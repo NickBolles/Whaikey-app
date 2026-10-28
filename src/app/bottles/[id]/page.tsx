@@ -14,6 +14,8 @@ import { getFriendNotesForBottle } from "@/lib/social";
 import { listPours } from "@/lib/pours";
 import { BottleStamps } from "@/components/bottle-stamps";
 import { BottleArt } from "@/components/bottle-art";
+import { ProducerLogo } from "@/components/producer-logo";
+import { logoAllowedOn, NOMINATIVE_USE } from "@/lib/logos/license";
 import { displayableImage } from "@/lib/bottle-art";
 import { CategoryChip } from "@/components/category-chip";
 import { FlavorRadar } from "@/components/flavor-radar";
@@ -191,6 +193,31 @@ export default async function BottleDetailPage({
       )[0]?.attribution ?? null)
     : null;
 
+  // The producer's mark (docs/DATA_SOURCES.md §5.4): shown here with its
+  // credit, so CC BY marks that cards may not carry can still appear.
+  const [brandLogo] = bottle.brandKey
+    ? await db
+        .select({
+          key: schema.brandLogos.key,
+          name: schema.brandLogos.name,
+          status: schema.brandLogos.status,
+          logoSource: schema.brandLogos.logoSource,
+          license: schema.brandLogos.license,
+          attribution: schema.brandLogos.attribution,
+          attributionUrl: schema.brandLogos.attributionUrl,
+          attributionRequired: schema.brandLogos.attributionRequired,
+        })
+        .from(schema.brandLogos)
+        .where(eq(schema.brandLogos.key, bottle.brandKey))
+        .limit(1)
+    : [];
+  const shownLogo = brandLogo && logoAllowedOn(brandLogo, "page") ? brandLogo : null;
+  const logoCredit = shownLogo
+    ? shownLogo.license === NOMINATIVE_USE
+      ? `Logo: ${shownLogo.name}, from ${shownLogo.attribution ?? "its official site"} (shown to identify the producer)`
+      : `Logo: ${shownLogo.attribution ?? "Wikimedia Commons"} · ${shownLogo.license}`
+    : null;
+
   const pairingGroups = (["food", "cigar", "cocktail"] as const)
     .map((type) => ({ type, rows: pairings.filter((p) => p.pairingType === type) }))
     .filter((g) => g.rows.length > 0);
@@ -215,8 +242,24 @@ export default async function BottleDetailPage({
             <h1 className="font-display text-[22px] leading-[1.15] font-semibold tracking-tight">
               {bottle.name}
             </h1>
-            {distillery && <p className="text-sm text-muted mt-0.5">{distillery.name}</p>}
+            {(distillery || shownLogo) && (
+              <p className="text-sm text-muted mt-1 flex items-center gap-2">
+                <ProducerLogo logoKey={shownLogo?.key} name={shownLogo?.name ?? distillery?.name} size={30} fallback="none" />
+                <span>{distillery?.name ?? shownLogo?.name}</span>
+              </p>
+            )}
             {imageCredit && <p className="mt-0.5 text-[10.5px] text-muted">Photo: {imageCredit}</p>}
+            {logoCredit && (
+              <p className="mt-0.5 text-xs text-muted">
+                {shownLogo?.attributionUrl ? (
+                  <a href={shownLogo.attributionUrl} rel="noopener noreferrer" target="_blank" className="tap-target underline decoration-dotted">
+                    {logoCredit}
+                  </a>
+                ) : (
+                  logoCredit
+                )}
+              </p>
+            )}
           </div>
           <div className="mt-1.5">
             <CategoryChip category={bottle.category} active />
