@@ -294,12 +294,27 @@ export async function runLogoBackfill(db: DB, opts: LogoBackfillOptions = {}): P
 
   const found: Record<string, number> = {};
   let failures = 0;
-  const results: Array<{ plan: BrandPlan; logo: FetchedLogo | null; failed: boolean }> = [];
+  const results: Array<{ plan: BrandPlan; logo: FetchedLogo | null; failed: boolean; refused?: boolean }> = [];
   for (const p of queue) {
     let logo: FetchedLogo | null = null;
+    // findLogo swallows network errors (each source falls through to the
+    // next), so count them here: a lookup that hit a timeout, a connection
+    // error or a 5xx is "unreachable", never "no mark" (--clear-missing).
+    let transport = 0;
+    const counted: typeof fetch = async (input, init) => {
+      try {
+        const res = await ctx.fetchImpl(input, init);
+        if (res.status >= 500 || res.status === 429) transport++;
+        return res;
+      } catch (err) {
+        transport++;
+        throw err;
+      }
+    };
     let failed = false;
     try {
-      logo = await findLogo(ctx, p);
+      logo = await findLogo({ ...ctx, fetchImpl: counted }, p);
+      failed = transport > 0 && !logo;
     } catch (err) {
       failures++;
       failed = true;
@@ -327,6 +342,7 @@ export async function runLogoBackfill(db: DB, opts: LogoBackfillOptions = {}): P
     if (r.logo?.source === "website" && sharedKeys.has(r.plan.key)) {
       log(`  ${r.plan.key}: website icon shared with other brands — refused`);
       r.logo = null;
+      r.refused = true;
     }
   }
   const sharedStored = [...sharedKeys].filter((k) => !queued.has(k));
@@ -335,7 +351,7 @@ export async function runLogoBackfill(db: DB, opts: LogoBackfillOptions = {}): P
     await db.update(brandLogos).set(clearedLogo(now)).where(and(inArray(brandLogos.key, sharedStored), eq(brandLogos.status, "ok")));
   }
 
-  for (const { plan: p, logo, failed } of results) {
+  for (const { plan: p, logo, failed, refused } of results) {
     found[logo?.source ?? "none"] = (found[logo?.source ?? "none"] ?? 0) + 1;
     log(`  ${p.key} (${counts.get(p.key) ?? 0} bottles): ${logo ? `${logo.source} ${logo.license.license} ${logo.width}x${logo.height}` : "none"}`);
     if (!apply) continue;
@@ -358,7 +374,8 @@ export async function runLogoBackfill(db: DB, opts: LogoBackfillOptions = {}): P
               checkedAt: now,
               updatedAt: now,
             }
-          : opts.clearMissing && !failed
+          : // A refused shared icon always comes down; otherwise only with --clear-missing and a clean lookup.
+            refused || (opts.clearMissing && !failed)
             ? clearedLogo(now)
             : // Keep a previously found mark when a re-check merely failed to reach the source.
               { checkedAt: now, updatedAt: now },

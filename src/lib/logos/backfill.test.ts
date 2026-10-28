@@ -162,6 +162,22 @@ describe("logo backfill", () => {
     expect(r.found.website ?? 0).toBe(0);
     const rows = await db.select().from(schema.brandLogos);
     expect(rows.filter((x) => x.key.startsWith("old-elk")).every((x) => x.status === "none")).toBe(true);
+
+    // A stored icon that a scheduled re-check finds shared comes down without --clear-missing.
+    await db.update(schema.brandLogos).set({ status: "ok", logoSource: "website", logoData: "aGk=" }).where(eq(schema.brandLogos.key, "old-elk"));
+    await runLogoBackfill(db, { apply: true, force: true, producers: [], seeds, limiter: noWait, fetchImpl: shared });
+    expect((await db.select().from(schema.brandLogos).where(eq(schema.brandLogos.key, "old-elk")))[0]).toMatchObject({ status: "none", logoData: null });
+  });
+
+  it("clearMissing keeps a stored mark when the lookup hit a network error", async () => {
+    const opts = { producers, seeds: [], limiter: noWait };
+    await runLogoBackfill(db, { ...opts, apply: true, fetchImpl: routes() });
+    const down = (async () => {
+      throw new Error("ECONNRESET");
+    }) as unknown as typeof fetch;
+    await runLogoBackfill(db, { ...opts, apply: true, force: true, clearMissing: true, fetchImpl: down });
+    const [gf] = await db.select().from(schema.brandLogos).where(eq(schema.brandLogos.key, "glenfiddich"));
+    expect(gf?.status).toBe("ok");
   });
 
   it("clearMissing takes down a stored mark the tightened rules now refuse", async () => {
