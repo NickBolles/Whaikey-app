@@ -543,7 +543,7 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
           <StarRating value={rating} onChange={setRating} size={30} />
         </section>
 
-        <section aria-label="Serving" className="-mx-3 mt-1.5 flex gap-1 overflow-x-auto px-3 pb-0.5 [scrollbar-width:none]" role="group">
+        <section aria-label="Serving" className="-mx-3 mt-0.5 flex gap-1 overflow-x-auto px-3 py-1 [scrollbar-width:none]" role="group">
           {SERVING_STYLES.map((style) => (
             <button
               key={style}

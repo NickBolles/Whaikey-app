@@ -26,6 +26,7 @@ import {
   joinOutingAsUser,
   listInvitableFriends,
   listMyOutings,
+  nextOutingFor,
   outingCsv,
   sweepOutingGuests,
   updateTasting,
@@ -125,6 +126,19 @@ describe("outings (D22)", () => {
     await addTasting(db, many, manySeat, { label: "Busy dram", flavorTags: { vanilla: 3, oak: 2, cherry: 2, honey: 1, "dark-fruit": 1 } });
     const csv = outingCsv(await getOutingView(db, many, host.id, manySeat));
     for (const d of ["Vanilla", "Oak", "Cherry", "Honey", "Dark fruit"]) expect(csv).toContain(d);
+  });
+
+  it("nextOutingFor is the soonest open outing from today, never an ended or past one", async () => {
+    const host = await person(db, "host_next");
+    const later = await createOuting(db, host.id, { ...input, title: "Later", visitOn: "2026-11-20" });
+    const soon = await createOuting(db, host.id, { ...input, title: "Soon", visitOn: "2026-10-29" });
+    await createOuting(db, host.id, { ...input, title: "Past", visitOn: "2026-10-01" });
+    expect((await nextOutingFor(db, host.id, "2026-10-27"))?.joinCode).toBe(soon.joinCode);
+    await endOuting(db, host.id, soon.id);
+    expect((await nextOutingFor(db, host.id, "2026-10-27"))?.joinCode).toBe(later.joinCode);
+    expect(await nextOutingFor(db, host.id, "2026-12-01")).toBeNull();
+    await db.update(schema.userProfiles).set({ suspendedAt: new Date() }).where(eq(schema.userProfiles.userId, host.id));
+    expect(await nextOutingFor(db, host.id, "2026-10-27")).toBeNull();
   });
 
   it("one voice per person per bottle: a second taste never weighs the consensus", () => {

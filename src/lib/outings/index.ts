@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { and, asc, desc, eq, isNotNull, isNull, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
@@ -698,6 +698,30 @@ export async function listMyOutings(db: DB, userId: string) {
     .where(and(eq(schema.outingParticipants.userId, userId), hostVisibleSql(userId)))
     .orderBy(desc(schema.outings.visitOn), desc(schema.outings.createdAt))
     .limit(20);
+}
+
+/**
+ * The soonest open outing on or after `today` (YYYY-MM-DD) the user is part
+ * of — the Home / Social "Get together" lead. Its own query rather than a
+ * filter over `listMyOutings`, whose newest-first 20-row window could drop
+ * the nearest trip for someone with many planned.
+ */
+export async function nextOutingFor(db: DB, userId: string, today: string) {
+  if (await isSuspended(db, userId)) return null;
+  const [row] = await db
+    .select({
+      title: schema.outings.title,
+      distilleryName: schema.outings.distilleryName,
+      visitOn: schema.outings.visitOn,
+      joinCode: schema.outings.joinCode,
+      state: schema.outings.state,
+    })
+    .from(schema.outingParticipants)
+    .innerJoin(schema.outings, eq(schema.outings.id, schema.outingParticipants.outingId))
+    .where(and(eq(schema.outingParticipants.userId, userId), eq(schema.outings.state, "open"), gte(schema.outings.visitOn, today), hostVisibleSql(userId)))
+    .orderBy(asc(schema.outings.visitOn), asc(schema.outings.createdAt))
+    .limit(1);
+  return row ?? null;
 }
 
 /** Nightly + opportunistic: guest seats past 24 h, and what they logged with them (D20). */
