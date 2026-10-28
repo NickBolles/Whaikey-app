@@ -193,7 +193,7 @@ function RecCard({ rec, mode }: { rec: Recommendation; mode: RecommendationRailP
         {(highlight || showMatch) && (
           <div className="flex items-center justify-between gap-2">
             {highlight ? (
-              <span data-testid="discover-highlight" className="chip chip-active inline-flex min-w-0 items-center gap-1 px-2 py-0.5 text-[11px] font-medium text-accent">
+              <span data-testid="discover-highlight" className="chip chip-active inline-flex min-w-0 items-center gap-1 px-2 py-0.5 text-xs font-medium text-accent">
                 <Compass size={12} strokeWidth={2} aria-hidden className="shrink-0" />
                 <span className="truncate">{highlight.text}</span>
               </span>
