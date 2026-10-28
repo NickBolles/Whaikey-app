@@ -1,7 +1,7 @@
 import type { DB } from "@/db";
 import { listMyClubs } from "@/lib/clubs";
 import { listMyFlights } from "@/lib/flights";
-import { formatVisitDay, listMyOutings } from "@/lib/outings";
+import { formatVisitDay, nextOutingFor } from "@/lib/outings";
 
 /**
  * "Get together" — the clubs, outings and tasting nights you're part of,
@@ -53,9 +53,9 @@ export function pickNextOuting(rows: OutingRow[], now: Date): NextOuting | null 
 }
 
 export async function getGatherings(db: DB, userId: string, now: Date): Promise<Gatherings> {
-  const [outings, clubs, flights] = await Promise.all([listMyOutings(db, userId), listMyClubs(db, userId), listMyFlights(db, userId)]);
+  const [next, clubs, flights] = await Promise.all([nextOutingFor(db, userId, isoDay(now)), listMyClubs(db, userId), listMyFlights(db, userId)]);
   return {
-    nextOuting: pickNextOuting(outings, now),
+    nextOuting: pickNextOuting(next ? [next] : [], now),
     clubCount: clubs.length,
     openNights: flights.filter((f) => f.state === "open").length,
   };

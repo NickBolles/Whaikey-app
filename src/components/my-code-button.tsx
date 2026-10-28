@@ -3,9 +3,11 @@
 import { useEffect, useId, useState } from "react";
 import { createPortal } from "react-dom";
 import QRCode from "qrcode";
-import { Check, Copy, QrCode, Share2, X } from "lucide-react";
+import { Check, QrCode, Share2, X } from "lucide-react";
 import { BRAND_NAME } from "@/lib/brand";
 import { QrScanButton } from "@/components/qr-scan-button";
+import { share as shareLink } from "@/lib/native/share";
+import { useScrollLock } from "@/lib/scroll-lock";
 
 /** The add-me link every friend-add path lands on (docs/SOCIAL.md §7.2). */
 export function addLink(origin: string, handle: string): string {
@@ -31,6 +33,8 @@ export function MyCodeButton({ handle: knownHandle, variant = "icon" }: { handle
   const [copied, setCopied] = useState(false);
   const titleId = useId();
   const handle = loaded?.handle ?? null;
+  // Hold the page behind the sheet still, and put it back where it was (DESIGN.md rule 13).
+  useScrollLock(open);
 
   useEffect(() => {
     if (!open || loaded) return;
@@ -73,22 +77,17 @@ export function MyCodeButton({ handle: knownHandle, variant = "icon" }: { handle
 
   async function share() {
     if (!handle) return;
-    const url = addLink(window.location.origin, handle);
-    const nav = navigator as Navigator & { share?: (data: ShareData) => Promise<void> };
-    if (typeof nav.share === "function") {
-      try {
-        await nav.share({ title: `Add @${handle} on ${BRAND_NAME}`, text: `Add me on ${BRAND_NAME}: @${handle}`, url });
-        return;
-      } catch (err) {
-        // The user closing the share sheet is not a failure worth a fallback.
-        if (err instanceof DOMException && err.name === "AbortError") return;
-      }
-    }
-    try {
-      await navigator.clipboard.writeText(url);
+    // The shared helper: the native share sheet on a device, Web Share in a
+    // browser that has it, the clipboard everywhere else (src/lib/native/share.ts).
+    const outcome = await shareLink({
+      title: `Add @${handle} on ${BRAND_NAME}`,
+      text: `Add me on ${BRAND_NAME}: @${handle}`,
+      url: addLink(window.location.origin, handle),
+    });
+    if (outcome === "copied") {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch {}
+    }
   }
 
   const trigger =
@@ -171,7 +170,7 @@ export function MyCodeButton({ handle: knownHandle, variant = "icon" }: { handle
                       disabled={!handle}
                       className="btn-primary tap-target inline-flex min-h-11 items-center justify-center gap-1.5 px-3 text-sm disabled:opacity-60"
                     >
-                      {copied ? <Check size={16} strokeWidth={1.8} aria-hidden /> : typeof navigator !== "undefined" && "share" in navigator ? <Share2 size={16} strokeWidth={1.8} aria-hidden /> : <Copy size={16} strokeWidth={1.8} aria-hidden />}
+                      {copied ? <Check size={16} strokeWidth={1.8} aria-hidden /> : <Share2 size={16} strokeWidth={1.8} aria-hidden />}
                       {copied ? "Link copied" : "Share link"}
                     </button>
                     <QrScanButton />
