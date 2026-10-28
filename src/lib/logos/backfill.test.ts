@@ -108,6 +108,12 @@ describe("logo backfill", () => {
     const [gf] = await db.select().from(schema.brandLogos).where(eq(schema.brandLogos.key, "glenfiddich"));
     expect(gf?.status).toBe("ok");
     expect(gf?.logoData).toBeTruthy();
+
+    // A takedown is final: a forced re-check must not resurrect it.
+    await db.update(schema.brandLogos).set({ status: "rejected" }).where(eq(schema.brandLogos.key, "glenfiddich"));
+    await runLogoBackfill(db, { ...opts, apply: true, force: true, fetchImpl: routes() });
+    const [taken] = await db.select().from(schema.brandLogos).where(eq(schema.brandLogos.key, "glenfiddich"));
+    expect(taken?.status).toBe("rejected");
   });
 
   it("pageMentionsBrand guards against parked or wrong domains", () => {

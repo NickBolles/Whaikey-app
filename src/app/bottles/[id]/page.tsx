@@ -250,7 +250,7 @@ export default async function BottleDetailPage({
             )}
             {imageCredit && <p className="mt-0.5 text-[10.5px] text-muted">Photo: {imageCredit}</p>}
             {logoCredit && (
-              <p className="mt-0.5 text-[10.5px] text-muted">
+              <p className="mt-0.5 text-xs text-muted">
                 {shownLogo?.attributionUrl ? (
                   <a href={shownLogo.attributionUrl} rel="noopener noreferrer" target="_blank" className="tap-target underline decoration-dotted">
                     {logoCredit}

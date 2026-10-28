@@ -1,4 +1,4 @@
-import { asc, eq, gt, isNull, lt, or, sql } from "drizzle-orm";
+import { and, asc, eq, gt, isNull, lt, ne, or, sql } from "drizzle-orm";
 import type { DB } from "@/db";
 import { bottles, brandLogos, distilleries } from "@/db/schema";
 import {
@@ -266,7 +266,13 @@ export async function runLogoBackfill(db: DB, opts: LogoBackfillOptions = {}): P
   const existing = await db
     .select({ key: brandLogos.key, checkedAt: brandLogos.checkedAt })
     .from(brandLogos)
-    .where(opts.force ? sql`true` : or(isNull(brandLogos.checkedAt), lt(brandLogos.checkedAt, staleBefore)));
+    .where(
+      and(
+        // A takedown (status 'rejected') is final: never re-fetch, even with --force.
+        ne(brandLogos.status, "rejected"),
+        opts.force ? sql`true` : or(isNull(brandLogos.checkedAt), lt(brandLogos.checkedAt, staleBefore)),
+      ),
+    );
   const due = new Set(existing.map((r) => r.key));
   const queue = live
     .filter((p) => (apply ? due.has(p.key) : true))

@@ -67,6 +67,9 @@ describe("robotsAllows", () => {
     expect(robotsAllows(robots, "/private/ok/y")).toBe(true);
     expect(robotsAllows("User-agent: CaskfolkLogoBot\nDisallow: /\n\nUser-agent: *\nAllow: /", "/x")).toBe(false);
     expect(robotsAllows("User-agent: *\nDisallow:\n", "/x")).toBe(true);
+    expect(robotsAllows("User-agent: *\nDisallow: /*\n", "/")).toBe(false);
+    expect(robotsAllows("User-agent: *\nDisallow: /*.png$\n", "/icon.png")).toBe(false);
+    expect(robotsAllows("User-agent: *\nDisallow: /*.png$\n", "/icon.png?v=2")).toBe(true);
   });
 });
 

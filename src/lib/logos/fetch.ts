@@ -272,6 +272,13 @@ export function iconCandidates(html: string, pageUrl: string): IconCandidate[] {
 }
 
 /** Minimal robots.txt check for our UA (or *) on a path. */
+/** robots.txt path rule with `*` wildcards and a trailing `$` anchor (RFC 9309). */
+export function robotsRuleMatches(rule: string, path: string): boolean {
+  const anchored = rule.endsWith("$");
+  const body = (anchored ? rule.slice(0, -1) : rule).split("*").map((part) => part.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join(".*");
+  return new RegExp(`^${body}${anchored ? "$" : ""}`).test(path);
+}
+
 export function robotsAllows(robots: string, path: string): boolean {
   let applies = false;
   let anyGroupForUs = false;
@@ -299,7 +306,7 @@ export function robotsAllows(robots: string, path: string): boolean {
   let best: { allow: boolean; path: string } | null = null;
   for (const r of use) {
     if (!r.path) continue;
-    if (path.startsWith(r.path) && (!best || r.path.length > best.path.length)) best = r;
+    if (robotsRuleMatches(r.path, path) && (!best || r.path.length > best.path.length)) best = r;
   }
   return best ? best.allow : true;
 }
