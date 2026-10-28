@@ -90,6 +90,10 @@ export function PolicyPage({
         ·{" "}
         <Link href="/responsible" className="text-accent">
           Drinking responsibly
+        </Link>{" "}
+        ·{" "}
+        <Link href="/sources" className="text-accent">
+          Sources
         </Link>
       </p>
     </div>
