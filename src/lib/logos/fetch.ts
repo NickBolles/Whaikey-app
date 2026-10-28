@@ -156,7 +156,26 @@ interface CommonsInfo {
 const stripHtml = (s: string | undefined) => (s ?? "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim() || null;
 
 /** A Commons file as a 256px-wide PNG thumbnail plus its license, or null. */
-export async function commonsLogo(ctx: FetchContext, fileName: string, source: BrandLogoSource = "wikidata"): Promise<FetchedLogo | null> {
+/** Words a whisky producer's logo file is categorised/described with on Commons. */
+const DRINKS_CONTEXT = /whisk(?:e)?y|distill|bourbon|scotch|\brye\b|spirits?\b|liquor|liqueur|alcoholic|beverage|drinks?\b|brewer|single malt|blended malt|islay|speyside/i;
+
+/** Original-file MIME types that are photographs, never logos (#136: bottle shots, distillery photos). */
+export function isPhotoMime(mime: string | undefined | null): boolean {
+  return /^image\/(jpeg|jpg|pjpeg|tiff|heic|heif)$/i.test((mime ?? "").trim());
+}
+
+export interface CommonsLogoOptions {
+  /**
+   * Require the file's categories/description to place it in the drinks
+   * world. Set for the free-text Commons search, where a short brand name
+   * ("Jura", "Imperial", "Rebel") also matches a canton, a college or a food
+   * company; Wikidata-linked files (P154/P8972) already come from a vetted
+   * producer entity.
+   */
+  requireDrinksContext?: boolean;
+}
+
+export async function commonsLogo(ctx: FetchContext, fileName: string, source: BrandLogoSource = "wikidata", opts: CommonsLogoOptions = {}): Promise<FetchedLogo | null> {
   const title = fileName.startsWith("File:") ? fileName : `File:${fileName}`;
   const api = `https://commons.wikimedia.org/w/api.php?action=query&format=json&prop=imageinfo&iiprop=url|mime|extmetadata&iiurlwidth=256&titles=${encodeURIComponent(title)}`;
   const info = await getJson<CommonsInfo>(ctx, api);
@@ -164,6 +183,12 @@ export async function commonsLogo(ctx: FetchContext, fileName: string, source: B
   const ii = page?.imageinfo?.[0];
   if (!page || page.missing != null || !ii) return null;
   const meta = ii.extmetadata ?? {};
+  // Photos (bottle details, distillery buildings) are never a logo.
+  if (isPhotoMime(ii.mime) || /\.(jpe?g|tiff?)$/i.test(page.title ?? title)) return null;
+  if (opts.requireDrinksContext) {
+    const context = [meta.Categories?.value, meta.ImageDescription?.value, meta.ObjectName?.value].map((v) => v ?? "").join(" ");
+    if (!DRINKS_CONTEXT.test(stripHtml(context) ?? "")) return null;
+  }
   const license = commonsLicense(meta.LicenseShortName?.value, meta.AttributionRequired?.value);
   if (!license) return null;
   const imageUrl = ii.thumburl ?? ii.url;
@@ -171,7 +196,7 @@ export async function commonsLogo(ctx: FetchContext, fileName: string, source: B
   const img = await politeFetch(ctx, imageUrl, "image/png,image/*", MAX_LOGO_BYTES);
   if (!img) return null;
   const sniffed = sniffImage(img.body);
-  if (!sniffed || sniffed.type === "image/svg+xml") return null;
+  if (!sniffed || sniffed.type === "image/svg+xml" || sniffed.type === "image/jpeg") return null;
   const artist = stripHtml(meta.Artist?.value);
   const credit = stripHtml(meta.Credit?.value);
   return {
@@ -202,7 +227,7 @@ export async function commonsSearchLogo(ctx: FetchContext, brandName: string): P
   const data = await getJson<{ query?: { search?: Array<{ title: string }> } }>(ctx, api);
   for (const hit of data?.query?.search ?? []) {
     if (!isLogoFileFor(hit.title, brandName)) continue;
-    const logo = await commonsLogo(ctx, hit.title, "commons");
+    const logo = await commonsLogo(ctx, hit.title, "commons", { requireDrinksContext: true });
     if (logo) return logo;
   }
   return null;
@@ -346,11 +371,28 @@ export async function robotsAllowsUrl(ctx: FetchContext, cache: Map<string, stri
   return robotsAllows(text, `${u.pathname || "/"}${u.search}`);
 }
 
+/**
+ * Does a host name carry the brand? `talisker` ↛ `malts.com` (Diageo's shared
+ * site, whose icon is not Talisker's mark); `old elk` → `oldelk.com`;
+ * `heaven hill` → `heavenhilldistillery.com`. Compared on letters/digits only,
+ * ignoring `www.` and the public suffix.
+ */
+export function hostMatchesBrand(host: string, brandName: string): boolean {
+  const core = coreName(brandName).replace(/[^a-z0-9]/g, "");
+  if (core.length < 3) return false;
+  const labels = host.toLowerCase().replace(/^www\./, "").split(".");
+  // Drop the public suffix (one label, or two for e.g. co.uk / com.au).
+  const body = labels.length > 2 && /^(co|com|org|net|ac|gov)$/.test(labels[labels.length - 2]!) ? labels.slice(0, -2) : labels.slice(0, -1);
+  const squashed = body.join("").replace(/[^a-z0-9]/g, "");
+  return squashed.includes(core);
+}
+
 /** Site icon of an official website, under nominative use — or null. */
 export async function websiteLogo(
   ctx: FetchContext,
   website: string,
   pageIsBrand: (html: string) => boolean = () => true,
+  brandName?: string,
 ): Promise<FetchedLogo | null> {
   let home: URL;
   try {
@@ -359,12 +401,15 @@ export async function websiteLogo(
     return null;
   }
   if (home.protocol !== "https:") return null;
+  // Website icons are only trusted on the brand's own domain (#136).
+  if (brandName != null && !hostMatchesBrand(home.hostname, brandName)) return null;
   const robotsCache = new Map<string, string>();
   if (!(await robotsAllowsUrl(ctx, robotsCache, home.toString()))) return null;
   const page = await politeFetch(ctx, home.toString(), "text/html", MAX_PAGE_BYTES).catch(() => null);
   if (!page || !page.type.includes("html")) return null;
   // A redirect may land on another origin with its own policy.
   if (!(await robotsAllowsUrl(ctx, robotsCache, page.url))) return null;
+  if (brandName != null && !hostMatchesBrand(new URL(page.url).hostname, brandName)) return null;
   const html = new TextDecoder().decode(page.body);
   if (!pageIsBrand(html)) return null;
   for (const c of iconCandidates(html, page.url).slice(0, 4)) {
@@ -374,6 +419,8 @@ export async function websiteLogo(
     if (img.url !== c.url && !(await robotsAllowsUrl(ctx, robotsCache, img.url))) continue;
     const sniffed = sniffImage(img.body);
     if (!sniffed) continue;
+    // JPEG "icons" are photos (hero shots, bottle crops), not marks.
+    if (sniffed.type === "image/jpeg") continue;
     if (sniffed.type !== "image/svg+xml" && Math.min(sniffed.width ?? 0, sniffed.height ?? 0) < MIN_RASTER_PX) continue;
     return {
       source: "website",
