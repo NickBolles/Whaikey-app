@@ -9,7 +9,7 @@ vi.mock("next/image", () => ({
   ),
 }));
 
-import { ProducerLogo } from "@/components/producer-logo";
+import { markTone, ProducerLogo } from "@/components/producer-logo";
 import { RemoteBottleImage } from "@/components/remote-bottle-image";
 
 afterEach(cleanup);
@@ -23,6 +23,36 @@ describe("ProducerLogo", () => {
     expect(img).toHaveAttribute("width", "22");
     expect(img.className).toContain("object-contain");
     expect(screen.getByTestId("producer-logo").className).toContain("bg-white");
+  });
+  it("moves a white-on-transparent mark onto a dark plate once it loads", () => {
+    const white = new Uint8ClampedArray(24 * 24 * 4);
+    for (let i = 0; i < white.length; i += 4) {
+      // a third transparent, the rest opaque white
+      const on = (i / 4) % 3 !== 0;
+      white.set(on ? [255, 255, 255, 255] : [0, 0, 0, 0], i);
+    }
+    const spy = vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+      drawImage: () => {},
+      getImageData: () => ({ data: white }),
+    } as unknown as CanvasRenderingContext2D);
+    render(<ProducerLogo logoKey="bowmore" name="Bowmore" size={30} />);
+    expect(screen.getByTestId("producer-logo").className).toContain("bg-white");
+    fireEvent.load(screen.getByRole("img"));
+    expect(screen.getByTestId("producer-logo").className).toContain("bg-[#2b2620]");
+    spy.mockRestore();
+  });
+  it("keeps a dark or unreadable mark on the white plate", () => {
+    const ink = new Uint8ClampedArray(24 * 24 * 4).fill(40);
+    const spy = vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+      drawImage: () => {},
+      getImageData: () => ({ data: ink.map((v, i) => (i % 4 === 3 ? 255 : v)) }),
+    } as unknown as CanvasRenderingContext2D);
+    render(<ProducerLogo logoKey="ardbeg-ink" name="Ink" />);
+    fireEvent.load(screen.getByRole("img"));
+    expect(screen.getByTestId("producer-logo").className).toContain("bg-white");
+    spy.mockReturnValue(null);
+    expect(markTone(document.createElement("img"))).toBe("dark");
+    spy.mockRestore();
   });
   it("falls back to the monogram when the logo fails, or to nothing on cards", () => {
     const { rerender } = render(<ProducerLogo logoKey="x" name="Buffalo Trace" />);
