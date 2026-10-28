@@ -931,7 +931,7 @@ describe("BarClient analytics-first layout", () => {
     render(<BarClient initialRows={[]} flavorHeat={heatMatrix()}
         calibration={calibrationMatrix()} palate={palate} />);
 
-    expect(screen.queryByRole("heading", { name: "For your palate" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Discover" })).not.toBeInTheDocument();
     expect(screen.queryByText(/pour tonight/i)).not.toBeInTheDocument();
   });
 

@@ -7,11 +7,15 @@ import { PassportBadgeIcon } from "@/components/passport-badge";
 import type { Recommendation } from "@/lib/recommend";
 import { badgeProgressCaption, type BadgeProgress } from "@/lib/passport-progress";
 import { originLabel } from "@/lib/origin";
+import { Compass } from "lucide-react";
+import { BottleArt } from "@/components/bottle-art";
 
 export interface RecommendationRailProps {
   mode: "discovery" | "tonight";
-  /** Serif section heading, e.g. "Bottles for you" or "What to pour tonight". */
+  /** Serif section heading, e.g. "Discover" or "What to pour tonight". */
   title: string;
+  /** A line under the heading (discovery: what the rail is for). */
+  subtitle?: string;
 }
 
 interface EmptyCopy {
@@ -69,8 +73,8 @@ function subscribeToLocalTime(onStoreChange: () => void) {
 const EMPTY_COPY: Record<RecommendationRailProps["mode"], EmptyCopy> = {
   discovery: {
     emoji: "🧭",
-    headline: "Log a few pours and I’ll learn your taste.",
-    sub: "Rate what you drink and personalized picks show up here.",
+    headline: "Tag a few flavors and I’ll learn your taste.",
+    sub: "Rate or tag what you try, and picks for somewhere new show up here.",
   },
   tonight: {
     emoji: "🥃",
@@ -84,7 +88,7 @@ const EMPTY_COPY: Record<RecommendationRailProps["mode"], EmptyCopy> = {
  * /api/recommendations on mount; renders a horizontally-scrollable row of
  * on-design cards. Works with no API key (reasons are deterministic server-side).
  */
-export function RecommendationRail({ mode, title }: RecommendationRailProps) {
+export function RecommendationRail({ mode, title, subtitle }: RecommendationRailProps) {
   const [recs, setRecs] = useState<Recommendation[] | null>(null);
   const [error, setError] = useState(false);
   const tonightContext = useSyncExternalStore(
@@ -115,7 +119,7 @@ export function RecommendationRail({ mode, title }: RecommendationRailProps) {
     <section aria-label={heading} className="flex flex-col gap-3">
       <div>
         <h2 className="section-label">{heading}</h2>
-        {tonightContext && <p className="mt-1 text-sm text-muted">{tonightContext.detail}</p>}
+        {(tonightContext?.detail ?? subtitle) && <p className="mt-1 text-sm text-muted">{tonightContext?.detail ?? subtitle}</p>}
       </div>
 
       {error && (
@@ -176,25 +180,39 @@ function RecCard({ rec, mode }: { rec: Recommendation; mode: RecommendationRailP
     .filter(Boolean)
     .join(" · ");
   const progress = rec.badgeProgress;
+  const highlight = mode === "discovery" ? rec.highlight : null;
+  // The match chip stays unless the highlight already says it.
+  const showMatch = rec.matchPercent != null && highlight?.kind !== "palate-match";
 
   return (
-    <div className="card snap-start shrink-0 w-64 flex flex-col p-4 gap-2">
+    <div className="card snap-start shrink-0 w-64 flex flex-col p-4 gap-2" data-testid="rec-card">
       <Link
         href={`/bottles/${rec.bottleId}`}
         className="flex flex-col gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 rounded-xl"
       >
-        <div className="flex items-start justify-between gap-2">
-          <span className="font-medium text-foreground leading-snug">{rec.name}</span>
-          {rec.matchPercent != null && (
-            <span className="chip chip-active shrink-0 px-2 py-0.5 text-[11px] font-medium text-accent whitespace-nowrap">
-              {rec.matchPercent}% match
-            </span>
-          )}
-        </div>
-        {meta && <span className="text-xs text-muted truncate">{meta}</span>}
-        {rec.avgPrice != null && (
-          <span className="stat-number text-base text-accent">${Math.round(rec.avgPrice)}</span>
+        {highlight && (
+          <span data-testid="discover-highlight" className="chip chip-active inline-flex max-w-full items-center gap-1 self-start px-2 py-0.5 text-[11px] font-medium text-accent">
+            <Compass size={12} strokeWidth={2} aria-hidden className="shrink-0" />
+            <span className="truncate">{highlight.text}</span>
+          </span>
         )}
+        <div className="flex items-start gap-3">
+          <BottleArt name={rec.name} category={rec.category} distillery={rec.distillery} region={rec.region} country={rec.country} height={64} />
+          <div className="flex min-w-0 flex-1 flex-col gap-1">
+            <div className="flex items-start justify-between gap-2">
+              <span className="font-medium text-foreground leading-snug">{rec.name}</span>
+              {showMatch && (
+                <span className="chip chip-active shrink-0 px-2 py-0.5 text-[11px] font-medium text-accent whitespace-nowrap">
+                  {rec.matchPercent}% match
+                </span>
+              )}
+            </div>
+            {meta && <span className="text-xs text-muted line-clamp-2">{meta}</span>}
+            {rec.avgPrice != null && (
+              <span className="stat-number text-base text-accent">${Math.round(rec.avgPrice)}</span>
+            )}
+          </div>
+        </div>
         <p className="text-sm text-muted leading-relaxed">{rec.reason}</p>
       </Link>
 

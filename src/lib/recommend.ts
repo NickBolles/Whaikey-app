@@ -71,6 +71,60 @@ export interface Recommendation {
    * can move. Null when the bottle reaches nothing within a tier's reach.
    */
   badgeProgress?: BadgeProgress | null;
+  /**
+   * Discovery only: the one-line "why this, why now" chip on the card —
+   * somewhere new, a gap on the flavor wheel, or a close palate match. Every
+   * kind rewards exploring something different; none counts pours.
+   */
+  highlight?: DiscoverHighlight | null;
+}
+
+export type DiscoverHighlightKind = "new-country" | "new-region" | "new-style" | "flavor-gap" | "palate-match";
+
+export interface DiscoverHighlight {
+  kind: DiscoverHighlightKind;
+  text: string;
+}
+
+/** A wedge the user's palate has barely touched counts as a gap below this share of their strongest wedge. */
+const GAP_SHARE = 0.15;
+/** …and the bottle must lean on it: at least this share of its own strongest wedge. */
+const GAP_BOTTLE_SHARE = 0.6;
+const HIGHLIGHT_MATCH_MIN = 70;
+
+/**
+ * Pick the card's highlight. Pure. Precedence: a stamp never met (the
+ * passport's "somewhere new"), then a flavor family the bottle is built on
+ * that the user's wheel hasn't explored, then a strong palate match.
+ */
+export function discoverHighlight(input: {
+  progress: BadgeProgress | null | undefined;
+  palate: PalateVector;
+  flavorProfile: Record<string, number> | null | undefined;
+  matchPercent: number | null;
+}): DiscoverHighlight | null {
+  const { progress, palate, flavorProfile, matchPercent } = input;
+  if (progress && progress.heldTier === 0) {
+    const kind = progress.family === "country" ? "new-country" : progress.family === "region" ? "new-region" : "new-style";
+    const noun = progress.family === "style" ? "style" : progress.family;
+    return { kind, text: `New ${noun} for you · ${progress.label}` };
+  }
+  if (flavorProfile) {
+    const palateMax = Math.max(0, ...Object.values(palate).map((v) => Math.abs(v)));
+    const bottleMax = Math.max(0, ...Object.values(flavorProfile).filter((v) => typeof v === "number"));
+    if (palateMax > 0 && bottleMax > 0) {
+      const gaps = Object.entries(flavorProfile)
+        .filter(([wedge, v]) => typeof v === "number" && v >= bottleMax * GAP_BOTTLE_SHARE && Math.abs(palate[wedge] ?? 0) < palateMax * GAP_SHARE)
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+      if (gaps[0]) return { kind: "flavor-gap", text: `Fills a gap on your wheel · ${capitalize(wedgeWord(gaps[0][0]))}` };
+    }
+  }
+  if (matchPercent != null && matchPercent >= HIGHLIGHT_MATCH_MIN) return { kind: "palate-match", text: `${matchPercent}% palate match` };
+  return null;
+}
+
+function capitalize(word: string): string {
+  return word ? word[0]!.toUpperCase() + word.slice(1) : word;
 }
 
 export type RecMode = "discovery" | "tonight";
@@ -597,6 +651,9 @@ export async function recommendBottles(
         ? { fillLevel: s.fillLevel, status: s.status, userBottleId: s.userBottleId }
         : { badgeProgress: badgeProgress.get(s.bottleId) ?? null }),
     };
+    if (mode === "discovery") {
+      rec.highlight = discoverHighlight({ progress: rec.badgeProgress, palate: palate.vector, flavorProfile: s.flavorProfile, matchPercent: rec.matchPercent });
+    }
     const detail = buildReasonDetail(mode, rec, palate.vector, ctx);
     rec.reason = detail.reason;
     if (detail.twinAttributed) rec.twinAttributed = true;

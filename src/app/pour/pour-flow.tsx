@@ -8,6 +8,7 @@ import { SERVING_STYLES, type PourVisibility, type ServingStyle } from "@/db/sch
 import { matchLeafIds } from "@/lib/flavor-wheel";
 import { previousPath } from "@/lib/nav-history";
 import { StarRating } from "@/components/star-rating";
+import { BottleArt } from "@/components/bottle-art";
 import { FlavorWheelInput } from "@/components/flavor-wheel-input";
 import { PourSizePicker } from "@/components/pour-size-picker";
 import { NoteCapture, type ExtractedTastingNote } from "@/components/note-capture";
@@ -488,7 +489,8 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
                 </button>
               </p>
             )}
-            <div className="card flex items-center gap-3 px-3 py-2.5" data-testid="pour-bottle">
+            <div className="card flex items-center gap-3 px-3 py-2" data-testid="pour-bottle">
+              <BottleArt name={bottle.name} category={bottle.category ?? ""} distillery={bottle.distillery} region={bottle.region} height={40} />
               <span className="min-w-0 flex-1">
                 <span className="block truncate font-display text-[17px] font-semibold leading-tight">{bottle.name}</span>
                 <span className="block truncate text-xs text-muted">{bottleMeta(bottle) || bottle.category}</span>

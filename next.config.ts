@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { displayImageHosts } from "./src/lib/bottle-art";
 
 /**
  * Content Security Policy (review SEC-H3).
@@ -102,6 +103,13 @@ const securityHeaders = [
 const nextConfig: NextConfig = {
   // Keep the dev-tools badge out of visual regression screenshots.
   devIndicators: false,
+  // Bottle imagery: the optimizer fetches (and caches) only hosts whose
+  // catalog source is `display_remote` (config/catalog-sources.json;
+  // docs/DATA_SOURCES.md §2.4). Today that list is empty, so every bottle
+  // shows its generated silhouette; adding a licensed source adds its host.
+  images: {
+    remotePatterns: displayImageHosts().map((hostname) => ({ protocol: "https" as const, hostname })),
+  },
   // Keep the DB drivers external (loaded via native require, not bundled):
   // postgres-js is server-only, and PGlite's WASM payload (local dev / tests)
   // must never enter the serverless bundle.

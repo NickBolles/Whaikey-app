@@ -13,6 +13,8 @@ import { hasPublishedProducerFlavorNotes } from "@/lib/bar";
 import { getFriendNotesForBottle } from "@/lib/social";
 import { listPours } from "@/lib/pours";
 import { BottleStamps } from "@/components/bottle-stamps";
+import { BottleArt } from "@/components/bottle-art";
+import { displayableImage } from "@/lib/bottle-art";
 import { CategoryChip } from "@/components/category-chip";
 import { FlavorRadar } from "@/components/flavor-radar";
 import { SameDram, type SameDramFriendNote, type SameDramProducer } from "@/components/same-dram";
@@ -176,6 +178,19 @@ export default async function BottleDetailPage({
   const descriptionAsQuote =
     !latestNote && bottle.description != null && bottle.description.length <= 160 ? bottle.description : null;
 
+  // A remote bottle shot renders only under its source's display_remote
+  // licence, and then always with its credit (docs/DATA_SOURCES.md §2.4).
+  const shownImage = displayableImage(bottle.imageUrl);
+  const imageCredit = shownImage
+    ? ((
+        await db
+          .select({ attribution: schema.bottleMedia.attribution })
+          .from(schema.bottleMedia)
+          .where(and(eq(schema.bottleMedia.bottleId, bottle.id), eq(schema.bottleMedia.url, shownImage), eq(schema.bottleMedia.rights, "display_remote")))
+          .limit(1)
+      )[0]?.attribution ?? null)
+    : null;
+
   const pairingGroups = (["food", "cigar", "cocktail"] as const)
     .map((type) => ({ type, rows: pairings.filter((p) => p.pairingType === type) }))
     .filter((g) => g.rows.length > 0);
@@ -185,12 +200,23 @@ export default async function BottleDetailPage({
       {/* Hero */}
       <header>
         <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
+          <BottleArt
+            name={bottle.name}
+            category={bottle.category}
+            distillery={distillery?.name ?? null}
+            region={bottle.region ?? distillery?.region}
+            country={bottle.country ?? distillery?.country}
+            imageUrl={imageCredit ? shownImage : null}
+            cask={bottle.caskTypes?.join(" ") ?? null}
+            height={92}
+          />
+          <div className="min-w-0 flex-1">
             {origin && <p className="kicker mb-1">{origin}</p>}
             <h1 className="font-display text-[22px] leading-[1.15] font-semibold tracking-tight">
               {bottle.name}
             </h1>
             {distillery && <p className="text-sm text-muted mt-0.5">{distillery.name}</p>}
+            {imageCredit && <p className="mt-0.5 text-[10.5px] text-muted">Photo: {imageCredit}</p>}
           </div>
           <div className="mt-1.5">
             <CategoryChip category={bottle.category} active />
