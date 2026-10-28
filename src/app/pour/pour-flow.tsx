@@ -539,7 +539,7 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
             once a bottle is picked. Notes, auto-fill, tags, company and
             visibility follow below the wheel. */}
         <section aria-label="Your rating" className="mt-2.5 flex items-center justify-between gap-2 border-t border-border pt-2.5">
-          <h2 className="section-label">Rating <span className="font-normal normal-case tracking-normal">· optional</span></h2>
+          <h2 className="section-label">Your rating <span className="font-normal normal-case tracking-normal">· optional</span></h2>
           <StarRating value={rating} onChange={setRating} size={30} />
         </section>
 
