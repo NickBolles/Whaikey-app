@@ -19,6 +19,15 @@ describe("/sources", () => {
     expect(screen.getByText(/Nothing in our Terms\s+limits what an open licence lets you do/)).toBeTruthy();
   });
 
+  it("credits producer logos by their Commons licence, and only CC BY marks on the bottle page", () => {
+    render(<SourcesPage />);
+    expect(screen.getByRole("link", { name: "Wikimedia Commons" }).getAttribute("href")).toBe(
+      "https://commons.wikimedia.org/",
+    );
+    expect(screen.getByText(/appear only on a bottle.s page, with the file.s author and licence/)).toBeTruthy();
+    expect(screen.getByText(/doesn.t mean that producer endorses/)).toBeTruthy();
+  });
+
   it("is readable without passing the age gate, like the policies it is linked from", () => {
     expect(isUngatedPath("/sources")).toBe(true);
   });

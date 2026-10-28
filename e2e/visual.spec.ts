@@ -74,6 +74,12 @@ test.describe("signed out", () => {
     await expect(page).toHaveScreenshot(shot("privacy"), { fullPage: true });
   });
 
+  test("sources and credits", async ({ page }) => {
+    await page.goto("/sources");
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("sources"), { fullPage: true });
+  });
+
   test("support", async ({ page }) => {
     await page.goto("/support");
     await settle(page);

@@ -155,9 +155,37 @@ export default function SourcesPage() {
 
       <Block title="Images and logos">
         <p>
-          Bottles without a licensed photo are drawn by {BRAND_NAME}. Where a producer&apos;s logo or a
-          bottle image from Wikimedia Commons or another free source is shown, its author and licence
-          are credited next to the image itself, as those licences require.
+          Bottles without a licensed photo are drawn by {BRAND_NAME}. A licensed bottle photo, where
+          one is shown, is credited next to the image.
+        </p>
+        <p>
+          Producer logos come from{" "}
+          <a
+            href="https://commons.wikimedia.org/"
+            className="text-accent"
+            rel="noopener noreferrer"
+            target="_blank"
+          >
+            Wikimedia Commons
+          </a>
+          , each used under that file&apos;s own licence. Public-domain and CC0 marks may appear
+          anywhere in the app. Marks under{" "}
+          <a
+            href="https://creativecommons.org/licenses/by-sa/4.0/"
+            className="text-accent"
+            rel="noopener noreferrer license"
+            target="_blank"
+          >
+            CC BY or CC BY-SA
+          </a>{" "}
+          appear only on a bottle&apos;s page, with the file&apos;s author and licence credited
+          next to the logo. Where Commons has no usable file, we may show the producer&apos;s own
+          site icon, unaltered, only to identify who makes the bottle; its bottle page says where
+          it came from.
+        </p>
+        <p>
+          Logos and trademarks belong to their owners. Showing them identifies a producer and
+          doesn&apos;t mean that producer endorses {BRAND_NAME}.
         </p>
       </Block>
 

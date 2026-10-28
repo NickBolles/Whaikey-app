@@ -144,6 +144,7 @@ export function MarketingLanding() {
           ["/privacy", "Privacy"],
           ["/terms", "Terms"],
           ["/support", "Support"],
+          ["/sources", "Sources"],
         ].map(([href, label]) => (
           <Link key={href} href={href} className="tap-target inline-flex min-h-11 items-center px-2">
             {label}

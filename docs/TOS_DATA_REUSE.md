@@ -1,6 +1,7 @@
 # Caskfolk — restricting reuse of our data (DRAFT, 2026-10-28)
 
-**Status: draft for owner + lawyer review. Not legal advice. Do not merge without both.**
+**Status: owner accepted the defaults below (2026-10-28). Not legal advice — a lawyer review is still
+recommended before relying on these Terms (open questions in §5).**
 Owner question: *"Does Caskfolk need some clauses in TOS to restrict the same data reuse?"* — i.e. stop
 others scraping/reusing our catalog, flavour profiles, tasting notes and photos, the way we can't reuse
 other sites' photos.
@@ -82,7 +83,9 @@ attributions (CC BY, OGL-BC, ODbL notice, Commons per-file credits).
 5. Tests: `robots.test.ts`, `sources/sources.test.tsx`, age-gate ungated list. Local run: 34/34 pass,
    `tsc` and eslint clean.
 
-**Not in the PR (owner action, free):** rate limiting via **Vercel WAF** — Hobby includes **1 rate-limit
+**Live since 2026-10-28 (owner-approved, outside the PR):** Vercel WAF custom rule
+`Rate limit public bottles API` — path starts with `/api/bottles` → fixed window 120 requests / 60 s per
+IP → 429 (burst test: 120 × 200 then 429s; there is no `/api/search`). Background: rate limiting via **Vercel WAF** — Hobby includes **1 rate-limit
 rule** (within 3 custom rules), fixed window 10 s–10 min, keyed on IP or JA4, 1M allowed requests/month
 included. Suggested rule: path starts with `/api/bottles` (search + bottle JSON) → 120 requests / 60 s
 per IP → 429. Dashboard: Project → Firewall → Configure → New rule → Rate limit. Also consider
@@ -91,7 +94,7 @@ in-memory limiter in `proxy.ts` was rejected: Vercel runs many isolates, so per-
 limit anything real, and a DB-backed limiter on every search adds a round-trip to the hot path. Once
 the WAF rule is live, the privacy paragraph can add "and the catalog is rate-limited".
 
-## 4. Owner decisions (defaults in the draft)
+## 4. Owner decisions (defaults accepted by the owner, 2026-10-28)
 
 | # | Decision | Default |
 |---|---|---|
@@ -140,9 +143,10 @@ the WAF rule is live, the privacy paragraph can add "and the catalog is rate-lim
 
 ## 6. Not done / follow-ups
 
-- No visual baseline for `/sources` yet (Codex will ask; generate with `[update-baselines]` when the
-  draft is approved — avoids burning Vercel deploys / baseline churn on a draft).
-- Footer/settings link to `/sources` not added (Terms + privacy link to it).
-- PR #134 (logos) will need its per-image credits to match the "Images and logos" paragraph — it already
-  does per its `license.ts`.
-- WAF rule is a dashboard change for the owner.
+- `/sources` has a visual baseline and is linked from the landing footer and every policy page's
+  footer row.
+- `/sources` "Images and logos" matches PR #134's `license.ts`: PD/CC0 Commons marks anywhere, CC BY /
+  BY-SA marks only on the bottle page with the per-file credit, producer site icons as nominative use.
+- WAF rule is live (see §3). `NEXT_PUBLIC_SUPPORT_EMAIL` is set in Vercel (Production + Preview) and
+  shows after the next production build.
+- Not done: DMCA designated agent (D6), entity + governing law (L11).
