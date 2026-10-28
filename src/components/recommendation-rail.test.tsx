@@ -80,7 +80,7 @@ describe("RecommendationRail", () => {
         },
       },
     ]);
-    render(<RecommendationRail mode="discovery" title="For your palate" />);
+    render(<RecommendationRail mode="discovery" title="Discover" />);
 
     await waitFor(() => expect(screen.getByText("Smoky Match")).toBeInTheDocument());
     // Both halves of the pitch: how it reads on the palate, and where it goes.
@@ -105,7 +105,7 @@ describe("RecommendationRail", () => {
         },
       },
     ]);
-    const { container } = render(<RecommendationRail mode="discovery" title="For your palate" />);
+    const { container } = render(<RecommendationRail mode="discovery" title="Discover" />);
 
     await waitFor(() => expect(screen.getByText("2 more to Silver III")).toBeInTheDocument());
     // Guardrail: the ladder counts distinct bottles met, never volume or
@@ -114,9 +114,27 @@ describe("RecommendationRail", () => {
     expect(container.textContent).not.toMatch(/streak|ml\b/i);
   });
 
+  it("leads a discovery card with its why-highlight, a bottle silhouette and the rail's subtitle", async () => {
+    mockFetchOnce([{ ...REC, highlight: { kind: "flavor-gap", text: "Fills a gap on your wheel · Smoky" } }]);
+    render(<RecommendationRail mode="discovery" title="Discover" subtitle="Something new for your palate." />);
+
+    await waitFor(() => expect(screen.getByText("Smoky Match")).toBeInTheDocument());
+    expect(screen.getByRole("heading", { name: "Discover" })).toBeInTheDocument();
+    expect(screen.getByText("Something new for your palate.")).toBeInTheDocument();
+    expect(screen.getByTestId("discover-highlight")).toHaveTextContent("Fills a gap on your wheel · Smoky");
+    expect(screen.getByTestId("bottle-art")).toBeInTheDocument();
+  });
+
+  it("drops the match chip when the highlight already is the palate match", async () => {
+    mockFetchOnce([{ ...REC, highlight: { kind: "palate-match", text: "87% palate match" } }]);
+    render(<RecommendationRail mode="discovery" title="Discover" />);
+    await waitFor(() => expect(screen.getByText("87% palate match")).toBeInTheDocument());
+    expect(screen.queryByText("87% match")).not.toBeInTheDocument();
+  });
+
   it("omits the badge row when a pick reaches nothing new", async () => {
     mockFetchOnce([{ ...REC, badgeProgress: null }]);
-    render(<RecommendationRail mode="discovery" title="For your palate" />);
+    render(<RecommendationRail mode="discovery" title="Discover" />);
 
     await waitFor(() => expect(screen.getByText("Smoky Match")).toBeInTheDocument());
     expect(screen.queryByText(/opens the badge|more to /)).not.toBeInTheDocument();

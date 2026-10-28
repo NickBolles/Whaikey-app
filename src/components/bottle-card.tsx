@@ -2,6 +2,7 @@ import Link from "next/link";
 import { BottleStamps } from "@/components/bottle-stamps";
 import { CategoryChip } from "@/components/category-chip";
 import { originLabel } from "@/lib/origin";
+import { BottleArt } from "@/components/bottle-art";
 
 export interface BottleCardProps {
   bottle: {
@@ -14,6 +15,7 @@ export interface BottleCardProps {
     ageYears: number | null;
     abv: number | null;
     avgPrice: number | null;
+    imageUrl?: string | null;
   };
 }
 
@@ -32,6 +34,17 @@ export function BottleCard({ bottle }: BottleCardProps) {
       href={`/bottles/${bottle.id}`}
       className="card-flat flex items-center gap-3 p-4 hover:bg-surface-raised transition-colors"
     >
+      {/* The leading slot: a licensed bottle shot when one may be shown,
+          otherwise the generated silhouette with the distillery monogram. */}
+      <BottleArt
+        name={bottle.name}
+        category={bottle.category}
+        distillery={bottle.distillery}
+        region={bottle.region}
+        country={bottle.country}
+        imageUrl={bottle.imageUrl}
+        height={56}
+      />
       <div className="min-w-0 flex-1">
         <div className="font-medium text-foreground truncate">{bottle.name}</div>
         {origin && <div className="text-sm text-muted truncate mt-0.5">{origin}</div>}

@@ -38,6 +38,7 @@ import {
 import { getUserPalate, getUserPriceBand } from "@/lib/palate-store";
 import { getPassport, type Passport, type PassportBadge } from "@/lib/passport";
 import { badgeProgressFor, type BadgeProgress } from "@/lib/passport-progress";
+import { getBarFlavorHeat } from "@/lib/bar";
 import {
   getTasteTwins,
   getTwinEndorsements,
@@ -71,6 +72,64 @@ export interface Recommendation {
    * can move. Null when the bottle reaches nothing within a tier's reach.
    */
   badgeProgress?: BadgeProgress | null;
+  /**
+   * Discovery only: the one-line "why this, why now" chip on the card —
+   * somewhere new, a gap on the flavor wheel, or a close palate match. Every
+   * kind rewards exploring something different; none counts pours.
+   */
+  highlight?: DiscoverHighlight | null;
+}
+
+export type DiscoverHighlightKind = "new-country" | "new-region" | "new-style" | "flavor-gap" | "palate-match";
+
+export interface DiscoverHighlight {
+  kind: DiscoverHighlightKind;
+  text: string;
+}
+
+/** A wedge counts as unexplored below this share of the user's most-explored wedge (unsigned heat). */
+const GAP_SHARE = 0.15;
+/** …and the bottle must lean on it: at least this share of its own strongest wedge. */
+const GAP_BOTTLE_SHARE = 0.6;
+const HIGHLIGHT_MATCH_MIN = 70;
+
+/**
+ * Pick the card's highlight. Pure. Precedence: a stamp never met (the
+ * passport's "somewhere new"), then a flavor family the bottle is built on
+ * that the user's wheel hasn't explored, then a strong palate match.
+ *
+ * `explored` is UNSIGNED exposure per wedge (the Bar's flavor heat, 0–1):
+ * the signed palate vector can cancel to zero for a family someone has
+ * tasted plenty of but rated both ways, which is not a gap.
+ */
+export function discoverHighlight(input: {
+  progress: BadgeProgress | null | undefined;
+  explored: Record<string, number>;
+  flavorProfile: Record<string, number> | null | undefined;
+  matchPercent: number | null;
+}): DiscoverHighlight | null {
+  const { progress, explored, flavorProfile, matchPercent } = input;
+  if (progress && progress.heldTier === 0) {
+    const kind = progress.family === "country" ? "new-country" : progress.family === "region" ? "new-region" : "new-style";
+    const noun = progress.family === "style" ? "style" : progress.family;
+    return { kind, text: `New ${noun} for you · ${progress.label}` };
+  }
+  if (flavorProfile) {
+    const exploredMax = Math.max(0, ...Object.values(explored).map((v) => Math.abs(v)));
+    const bottleMax = Math.max(0, ...Object.values(flavorProfile).filter((v) => typeof v === "number"));
+    if (exploredMax > 0 && bottleMax > 0) {
+      const gaps = Object.entries(flavorProfile)
+        .filter(([wedge, v]) => typeof v === "number" && v >= bottleMax * GAP_BOTTLE_SHARE && Math.abs(explored[wedge] ?? 0) < exploredMax * GAP_SHARE)
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+      if (gaps[0]) return { kind: "flavor-gap", text: `Fills a gap on your wheel · ${capitalize(wedgeWord(gaps[0][0]))}` };
+    }
+  }
+  if (matchPercent != null && matchPercent >= HIGHLIGHT_MATCH_MIN) return { kind: "palate-match", text: `${matchPercent}% palate match` };
+  return null;
+}
+
+function capitalize(word: string): string {
+  return word ? word[0]!.toUpperCase() + word.slice(1) : word;
 }
 
 export type RecMode = "discovery" | "tonight";
@@ -535,6 +594,8 @@ export async function recommendBottles(
   let ctx: ReasonContext;
   // Discovery only: which passport badge each candidate would open or advance.
   const badgeProgress = new Map<string, BadgeProgress>();
+  // Discovery only: where the user has tasted on the wheel (unsigned), for the "fills a gap" highlight.
+  let exploredHeat: Record<string, number> = {};
   if (mode === "tonight") {
     const { candidates, recentCategories } = await tonightCandidates(db, userId, palate);
     scored = candidates;
@@ -544,7 +605,8 @@ export async function recommendBottles(
     // Every candidate here is outside the user's bar, so none of them is
     // already met and the hook is honest about what meeting it would move.
     // Read first, because SQL ranks candidates by the bonus it implies.
-    const passport = await getPassport(db, userId);
+    const [passport, heat] = await Promise.all([getPassport(db, userId), getBarFlavorHeat(db, userId, "combined", "all")]);
+    exploredHeat = heat.wedges;
     scored = await discoveryCandidates(db, userId, palate, band, passport);
     ctx = { band };
     for (const candidate of scored) {
@@ -597,6 +659,9 @@ export async function recommendBottles(
         ? { fillLevel: s.fillLevel, status: s.status, userBottleId: s.userBottleId }
         : { badgeProgress: badgeProgress.get(s.bottleId) ?? null }),
     };
+    if (mode === "discovery") {
+      rec.highlight = discoverHighlight({ progress: rec.badgeProgress, explored: exploredHeat, flavorProfile: s.flavorProfile, matchPercent: rec.matchPercent });
+    }
     const detail = buildReasonDetail(mode, rec, palate.vector, ctx);
     rec.reason = detail.reason;
     if (detail.twinAttributed) rec.twinAttributed = true;

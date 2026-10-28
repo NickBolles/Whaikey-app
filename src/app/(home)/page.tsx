@@ -22,7 +22,7 @@ import { EMPTY_GATHERINGS, getGatherings } from "@/lib/gather";
 import { GatherModule } from "@/components/gather-module";
 import { withFallback } from "@/lib/settle";
 import { ChevronRight, GraduationCap, Star } from "lucide-react";
-import { BRAND_NAME } from "@/lib/brand";
+import { BottleArt } from "@/components/bottle-art";
 import { MarketingLanding } from "@/components/marketing-landing";
 
 export const dynamic = "force-dynamic";
@@ -78,6 +78,10 @@ export default async function HomePage() {
         createdAt: schema.pours.createdAt,
         bottleName: schema.bottles.name,
         bottleId: schema.bottles.id,
+        bottleCategory: schema.bottles.category,
+        bottleRegion: schema.bottles.region,
+        bottleCountry: schema.bottles.country,
+        bottleImageUrl: schema.bottles.imageUrl,
       })
       .from(schema.pours)
       .innerJoin(schema.bottles, eq(schema.pours.bottleId, schema.bottles.id))
@@ -136,6 +140,27 @@ export default async function HomePage() {
     <div className="flex flex-col gap-7 px-4 pt-5">
       {/* Home's upper half is the month in review — greyed skeleton and all,
           it renders for everyone; the skeleton is what motivates the first log. */}
+      {/* Ask & learn — the concierge and Whiskey School lead Home (owner
+          feedback 2026-10-26: "could be emphasized higher"). */}
+      <section aria-label="Ask and learn" className="flex flex-col gap-2.5">
+        {/* Unconfigured, the concierge's notice would lead Home with an
+            apology, so only a working concierge takes the top slot. */}
+        {isAiConfigured() && <HomeConcierge aiConfigured />}
+        <Link
+          href="/learn"
+          className="card-flat flex min-h-11 items-center gap-3 px-4 py-3 transition-colors hover:bg-surface-raised"
+        >
+          <span aria-hidden className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent/15 text-accent">
+            <GraduationCap size={18} strokeWidth={1.8} />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-medium">Whiskey School</span>
+            <span className="block truncate text-xs text-muted">Short lessons on styles, casks and the flavor wheel</span>
+          </span>
+          <ChevronRight size={18} strokeWidth={1.8} className="shrink-0 text-muted" aria-hidden />
+        </Link>
+      </section>
+
       <Dashboard data={dashboard} userName={user.name} userImage={user.image} />
 
       <HomeHero bottleCount={bottleCount} pourCount={pourCount} />
@@ -146,7 +171,13 @@ export default async function HomePage() {
 
       {/* Discovery pairs with tonight's pick: both answer "what's next?" —
           which is Home's job. My Bar stays about the bottles you own. */}
-      {bottleCount > 0 && <RecommendationRail mode="discovery" title="For your palate" />}
+      {bottleCount > 0 && (
+        <RecommendationRail
+          mode="discovery"
+          title="Discover"
+          subtitle="Something new for your palate — and the badge it would move."
+        />
+      )}
 
       {latestBadge && <LatestBadgeCard badge={latestBadge} />}
 
@@ -165,7 +196,8 @@ export default async function HomePage() {
           </div>
           <ul className="flex flex-col gap-2.5">
             {recentPours.map((p) => (
-              <li key={p.id} className="card-flat flex items-center gap-3 p-4">
+              <li key={p.id} className="card-flat flex items-center gap-3 px-3 py-2.5">
+                <BottleArt name={p.bottleName} category={p.bottleCategory} region={p.bottleRegion} country={p.bottleCountry} imageUrl={p.bottleImageUrl} height={44} />
                 <Link
                   href={`/bottles/${p.bottleId}`}
                   className="flex min-w-0 flex-1 items-center justify-between gap-3"
@@ -190,20 +222,6 @@ export default async function HomePage() {
           </ul>
         </section>
       )}
-
-      <section aria-label={`More from ${BRAND_NAME}`} className="flex flex-col gap-2.5">
-        <Link
-          href="/learn"
-          className="card-flat flex min-h-11 items-center gap-3 px-4 py-3 transition-colors hover:bg-surface-raised"
-        >
-          <GraduationCap size={18} strokeWidth={1.8} className="shrink-0 text-muted" aria-hidden />
-          <span className="min-w-0 flex-1 truncate text-sm">
-            Whiskey School — short lessons on styles, casks, and the flavor wheel.
-          </span>
-          <ChevronRight size={18} strokeWidth={1.8} className="shrink-0 text-muted" aria-hidden />
-        </Link>
-        <HomeConcierge aiConfigured={isAiConfigured()} />
-      </section>
     </div>
   );
 }

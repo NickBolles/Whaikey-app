@@ -44,9 +44,11 @@ describe("BottleCard", () => {
     // nothing on it has to wrap or truncate to make room, and the leading
     // slot stays free for a bottle shot or a distillery mark.
     const link = screen.getByRole("link");
-    const stamps = container.querySelector("[aria-hidden='true']");
+    const stamps = container.querySelector("[aria-hidden='true']:not([data-testid='bottle-art'])");
     expect(stamps?.parentElement).toBe(link);
     expect(link.firstElementChild).not.toBe(stamps);
+    // The leading slot is the bottle's picture (silhouette without a licensed shot).
+    expect(link.firstElementChild).toBe(screen.getByTestId("bottle-art"));
     expect(screen.getByText("Bourbon").closest("[aria-hidden='true']")).toBeNull();
   });
 
