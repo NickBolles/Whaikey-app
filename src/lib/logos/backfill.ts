@@ -211,10 +211,10 @@ export async function findLogo(ctx: FetchContext, plan: BrandPlan): Promise<Fetc
     const logo = await commonsLogo(ctx, file, "wikidata").catch(() => null);
     if (logo) return logo;
   }
-  const searched = await commonsSearchLogo(ctx, plan.name).catch(() => null);
+  const searched = await commonsSearchLogo(ctx, plan.name, plan.country).catch(() => null);
   if (searched) return searched;
   if (plan.website) {
-    const site = await websiteLogo(ctx, plan.website, (html) => pageMentionsBrand(html, plan.name), plan.name).catch(() => null);
+    const site = await websiteLogo(ctx, plan.website, (html) => pageMentionsBrand(html, plan.name), plan.name, plan.aliases).catch(() => null);
     if (site) return site;
   }
   return null;

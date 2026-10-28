@@ -22,8 +22,8 @@ const commonsInfo = (license: string) =>
 
 function routes(): typeof fetch {
   return stubFetch({
-    "https://commons.wikimedia.org/w/api.php?action=query&format=json&prop=imageinfo&iiprop=url|mime|extmetadata&iiurlwidth=256&titles=File%3AGlenfiddich": [200, "application/json", commonsInfo("PD-textlogo")],
-    "https://commons.wikimedia.org/w/api.php?action=query&format=json&prop=imageinfo&iiprop=url|mime|extmetadata&iiurlwidth=256&titles=File%3ALagavulin": [200, "application/json", commonsInfo("CC BY-SA 4.0")],
+    "https://commons.wikimedia.org/w/api.php?action=query&format=json&prop=imageinfo&iiprop=url|mime|size|extmetadata&iiurlwidth=256&titles=File%3AGlenfiddich": [200, "application/json", commonsInfo("PD-textlogo")],
+    "https://commons.wikimedia.org/w/api.php?action=query&format=json&prop=imageinfo&iiprop=url|mime|size|extmetadata&iiurlwidth=256&titles=File%3ALagavulin": [200, "application/json", commonsInfo("CC BY-SA 4.0")],
     "https://commons.wikimedia.org/w/api.php?action=query&format=json&list=search": [200, "application/json", JSON.stringify({ query: { search: [] } })],
     "https://upload.wikimedia.org/": [200, "image/png", pngBytes(256, 90)],
     "https://www.oldelk.com/robots.txt": [404, "text/plain", ""],

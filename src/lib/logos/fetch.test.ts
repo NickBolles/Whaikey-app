@@ -6,6 +6,9 @@ import {
   hostMatchesBrand,
   HostRateLimiter,
   isPhotoMime,
+  commonsContextMatches,
+  isParentGroupHost,
+  jpegLooksLikeLogo,
   iconCandidates,
   isLogoFileFor,
   isSafeSvg,
@@ -194,7 +197,7 @@ describe("tightened matching (#136)", () => {
     const info = (title: string, mime: string) =>
       JSON.stringify({ query: { pages: { "1": { title, imageinfo: [{ mime, thumburl: "https://upload.wikimedia.org/t.png", descriptionurl: "https://commons.wikimedia.org/wiki/F", extmetadata: { LicenseShortName: { value: "PD-textlogo" } } }] } } } });
     const c = ctx({
-      "https://commons.wikimedia.org/w/api.php?action=query&format=json&prop=imageinfo&iiprop=url|mime|extmetadata&iiurlwidth=256&titles=File%3AArdbeg": [200, "application/json", info("File:Ardbeg bottle detail.jpg", "image/jpeg")],
+      "https://commons.wikimedia.org/w/api.php?action=query&format=json&prop=imageinfo&iiprop=url|mime|size|extmetadata&iiurlwidth=256&titles=File%3AArdbeg": [200, "application/json", info("File:Ardbeg bottle detail.jpg", "image/jpeg")],
       "https://upload.wikimedia.org/": [200, "image/png", pngBytes(256, 90)],
     });
     expect(await commonsLogo(c, "Ardbeg bottle detail.jpg")).toBeNull();
@@ -216,5 +219,138 @@ describe("tightened matching (#136)", () => {
       "https://upload.wikimedia.org/": [200, "image/png", pngBytes(256, 90)],
     });
     expect(await commonsSearchLogo(whisky, "Jura")).not.toBeNull();
+  });
+});
+
+/** A JPEG SOF0 header of the given size, padded to `bytes` (bytes/pixel drives the photo check). */
+function jpegBytes(w: number, h: number, bytes = 64): Uint8Array {
+  const b = new Uint8Array(Math.max(bytes, 20));
+  b.set([0xff, 0xd8, 0xff, 0xc0, 0, 17, 8, h >> 8, h & 255, w >> 8, w & 255, 3]);
+  return b;
+}
+
+const commonsInfo = (title: string, mime: string, cats: string, size: { w: number; h: number; bytes: number } | null = null) =>
+  JSON.stringify({
+    query: {
+      pages: {
+        "1": {
+          title,
+          imageinfo: [{
+            mime,
+            ...(size ? { width: size.w, height: size.h, size: size.bytes } : {}),
+            thumburl: "https://upload.wikimedia.org/t",
+            descriptionurl: "https://commons.wikimedia.org/wiki/F",
+            extmetadata: { LicenseShortName: { value: "PD-textlogo" }, Categories: { value: cats } },
+          }],
+        },
+      },
+    },
+  });
+
+describe("loosened matching (#139): lost logos come back", () => {
+  it("domain: brand-name token prefixes and aliases (proper-no-twelve, eden-mill, whistlepig, highland-park)", () => {
+    expect(hostMatchesBrand("www.properwhiskey.com", "Proper No. Twelve")).toBe(true);
+    expect(hostMatchesBrand("www.edenmill.com", "Eden Mill St Andrews")).toBe(true);
+    expect(hostMatchesBrand("www.whistlepigwhiskey.com", "WhistlePig")).toBe(true);
+    expect(hostMatchesBrand("www.highlandparkwhisky.com", "Highland Park Distillery")).toBe(true);
+    expect(hostMatchesBrand("www.glenels.de", "Elsburn", ["Glen Els"])).toBe(true);
+    // A generic first word alone is not the brand ("highland" ↛ Highland Park).
+    expect(hostMatchesBrand("www.highlandspring.com", "Highland Park")).toBe(false);
+    // The prefix must START the domain, not sit inside another word.
+    expect(hostMatchesBrand("www.improperbrands.com", "Proper No. Twelve")).toBe(false);
+  });
+
+  it("domain: parent-company sites stay refused even via Wikidata P856 (bookers, ardnamurchan, mars-tsunuki, saburomaru, croithli)", () => {
+    expect(isParentGroupHost("www.beamdistilling.com")).toBe(true);
+    expect(hostMatchesBrand("www.beamdistilling.com", "Booker's")).toBe(false);
+    expect(hostMatchesBrand("www.adelphidistillery.com", "Ardnamurchan")).toBe(false);
+    expect(hostMatchesBrand("www.hombo.co.jp", "Mars Tsunuki")).toBe(false);
+    expect(hostMatchesBrand("www.wakatsuru.co.jp", "Saburomaru")).toBe(false);
+    expect(hostMatchesBrand("thecrollydistillery.com", "Croithlí")).toBe(false);
+    expect(hostMatchesBrand("www.malts.com", "Talisker")).toBe(false);
+  });
+
+  it("JPEG: allowed when named a logo and flat; photos still refused", () => {
+    expect(jpegLooksLikeLogo("https://cdn.example/63e4_WP_%20Logo_256x256.jpg", 28_081, 256, 256)).toBe(true); // WhistlePig
+    expect(jpegLooksLikeLogo("File:Glen-Els-Logo.jpg", 39_013, 392, 218, { maxSide: 2000 })).toBe(true); // Elsburn
+    expect(jpegLooksLikeLogo("https://cdn.example/hero.jpg", 9_000, 256, 256)).toBe(false); // not named a logo
+    expect(jpegLooksLikeLogo("https://cdn.example/logo-bottle.jpg", 9_000, 256, 256)).toBe(false); // a bottle shot
+    expect(jpegLooksLikeLogo("https://cdn.example/logo.jpg", 256 * 256 * 2, 256, 256)).toBe(false); // compresses like a photo
+    // Highland Park's Commons hit is a 3122px LA-neighbourhood graphic: too big a frame.
+    expect(jpegLooksLikeLogo("File:Highland Park Logo.jpg", 945_493, 3122, 3122, { maxSide: 2000 })).toBe(false);
+  });
+
+  it("websiteLogo keeps WhistlePig's logo JPEG apple-touch-icon but not a photo JPEG", async () => {
+    const html = (href: string) => `<html><head><link rel="apple-touch-icon" href="${href}"></head><body>WhistlePig</body></html>`;
+    const logo = ctx({
+      "https://www.whistlepigwhiskey.com/robots.txt": [404, "text/plain", ""],
+      "https://www.whistlepigwhiskey.com/WP_%20Logo_256x256.jpg": [200, "image/jpeg", jpegBytes(256, 256, 28_000)],
+      "https://www.whistlepigwhiskey.com": [200, "text/html", html("/WP_%20Logo_256x256.jpg")],
+    });
+    const got = await websiteLogo(logo, "https://www.whistlepigwhiskey.com", () => true, "WhistlePig");
+    expect(got?.contentType).toBe("image/jpeg");
+    const photo = ctx({
+      "https://www.whistlepigwhiskey.com/robots.txt": [404, "text/plain", ""],
+      "https://www.whistlepigwhiskey.com/barn.jpg": [200, "image/jpeg", jpegBytes(256, 256, 120_000)],
+      "https://www.whistlepigwhiskey.com": [200, "text/html", html("/barn.jpg")],
+    });
+    expect(await websiteLogo(photo, "https://www.whistlepigwhiskey.com", () => true, "WhistlePig")).toBeNull();
+  });
+
+  it("websiteLogo takes Proper No. Twelve's icon from properwhiskey.com", async () => {
+    const c = ctx({
+      "https://www.properwhiskey.com/robots.txt": [404, "text/plain", ""],
+      "https://www.properwhiskey.com/webclip.png": [200, "image/png", pngBytes(256, 256)],
+      "https://www.properwhiskey.com": [200, "text/html", '<html><head><link rel="apple-touch-icon" href="/webclip.png"></head><body>Proper No. Twelve</body></html>'],
+    });
+    expect(await websiteLogo(c, "https://www.properwhiskey.com", () => true, "Proper No. Twelve")).not.toBeNull();
+  });
+
+  it("commonsLogo keeps Elsburn's Wikidata Glen-Els-Logo.jpg", async () => {
+    const c = ctx({
+      "https://commons.wikimedia.org/w/api.php": [200, "application/json", commonsInfo("File:Glen-Els-Logo.jpg", "image/jpeg", "Logos of companies|Simple text logos", { w: 392, h: 218, bytes: 39_013 })],
+      "https://upload.wikimedia.org/": [200, "image/jpeg", jpegBytes(256, 142, 20_000)],
+    });
+    const got = await commonsLogo(c, "Glen-Els-Logo.jpg");
+    expect(got?.contentType).toBe("image/jpeg");
+  });
+
+  it("Commons context: brand-named and country company-logo categories (suntory, ballantines)", () => {
+    expect(commonsContextMatches("With trademark|PD textlogo|SVG logos of Suntory|Cyan text logos", "", "Suntory")).toBe(true);
+    expect(commonsContextMatches("Logos of companies of Scotland|With trademark|PD textlogo|SVG text logos", "Ballantine's logo", "Ballantine's", "Scotland")).toBe(true);
+    expect(commonsContextMatches("Logos of companies of Scotland|With trademark", "", "Ballantine's", "Japan")).toBe(false);
+  });
+
+  it("Commons context: right-to-drop look-alikes stay refused (hibiki anime agency, cambus, highland park LA)", () => {
+    expect(commonsContextMatches("Text logos|With trademark|Bushiroad Group|PD textlogo|Logos of talent agencies", "ブシロードの声優プロダクション、響のロゴ", "Hibiki", "Japan")).toBe(false);
+    expect(commonsContextMatches("Text logos|With trademark|PD textlogo|Cambus (Iowa)", "This is the logo for Cambus.", "Cambus", "UK")).toBe(false);
+    expect(commonsContextMatches("Highland Park, Los Angeles|Self-published work", "Happening In Highland Park", "Highland Park", "UK")).toBe(false);
+  });
+
+  it("commonsSearchLogo finds Suntory's SVG logo via its brand category", async () => {
+    const c = ctx({
+      "https://commons.wikimedia.org/w/api.php?action=query&format=json&list=search": [200, "application/json", JSON.stringify({ query: { search: [{ title: "File:SUNTORY logo.svg" }] } })],
+      "https://commons.wikimedia.org/w/api.php?action=query&format=json&prop=imageinfo": [200, "application/json", commonsInfo("File:SUNTORY logo.svg", "image/svg+xml", "With trademark|PD textlogo|SVG logos of Suntory")],
+      "https://upload.wikimedia.org/": [200, "image/png", pngBytes(256, 38)],
+    });
+    expect(await commonsSearchLogo(c, "Suntory", "Japan")).not.toBeNull();
+  });
+
+  it("commonsSearchLogo refuses the Hibiki anime-agency logo", async () => {
+    const c = ctx({
+      "https://commons.wikimedia.org/w/api.php?action=query&format=json&list=search": [200, "application/json", JSON.stringify({ query: { search: [{ title: "File:Hibiki Logo.png" }] } })],
+      "https://commons.wikimedia.org/w/api.php?action=query&format=json&prop=imageinfo": [200, "application/json", commonsInfo("File:Hibiki Logo.png", "image/png", "Text logos|With trademark|Bushiroad Group|PD textlogo|Logos of talent agencies")],
+      "https://upload.wikimedia.org/": [200, "image/png", pngBytes(256, 118)],
+    });
+    expect(await commonsSearchLogo(c, "Hibiki", "Japan")).toBeNull();
+  });
+
+  it("commonsSearchLogo refuses the Highland Park (Los Angeles) JPEG", async () => {
+    const c = ctx({
+      "https://commons.wikimedia.org/w/api.php?action=query&format=json&list=search": [200, "application/json", JSON.stringify({ query: { search: [{ title: "File:Highland Park Logo.jpg" }] } })],
+      "https://commons.wikimedia.org/w/api.php?action=query&format=json&prop=imageinfo": [200, "application/json", commonsInfo("File:Highland Park Logo.jpg", "image/jpeg", "Highland Park, Los Angeles|Self-published work", { w: 3122, h: 3122, bytes: 945_493 })],
+      "https://upload.wikimedia.org/": [200, "image/jpeg", jpegBytes(256, 256, 9_000)],
+    });
+    expect(await commonsSearchLogo(c, "Highland Park", "UK")).toBeNull();
   });
 });

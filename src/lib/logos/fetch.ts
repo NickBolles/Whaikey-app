@@ -1,4 +1,4 @@
-import { coreName, type WikidataCandidate } from "./match";
+import { coreName, normalizeCountry, normalizeName, type WikidataCandidate } from "./match";
 import { commonsLicense, NOMINATIVE_USE, type LogoLicense } from "./license";
 import type { BrandLogoSource } from "@/db/schema";
 
@@ -147,6 +147,9 @@ interface CommonsInfo {
         url?: string;
         descriptionurl?: string;
         mime?: string;
+        size?: number;
+        width?: number;
+        height?: number;
         extmetadata?: Record<string, { value?: string } | undefined>;
       }>;
     }>;
@@ -157,7 +160,53 @@ const stripHtml = (s: string | undefined) => (s ?? "").replace(/<[^>]+>/g, "").r
 
 /** A Commons file as a 256px-wide PNG thumbnail plus its license, or null. */
 /** Words a whisky producer's logo file is categorised/described with on Commons. */
-const DRINKS_CONTEXT = /whisk(?:e)?y|distill|bourbon|scotch|\brye\b|spirits?\b|liquor|liqueur|alcoholic|beverage|drinks?\b|brewer|single malt|blended malt|islay|speyside/i;
+const DRINKS_CONTEXT = /whisk(?:e)?y|distill|bourbon|scotch|\brye\b|spirits?\b|liquor|liqueur|alcoholic|beverage|drinks?\b|brewer|single malt|blended malt|islay|speyside|\bgin\b|\bvodka\b|\brum\b|\bwine|liquor brand|beverage compan/i;
+
+/**
+ * Whether a Commons file's categories place it with this brand (#139). The
+ * plain drinks vocabulary above, OR a category that names the brand itself
+ * ("SVG logos of Suntory", "Ballantine's"), OR a company-logo category of the
+ * brand's own country ("Logos of companies of Scotland" for a Scotch brand).
+ * "With trademark" / "Text logos" alone are NOT enough: the anime agency
+ * "Hibiki" and the Iowa bus system "Cambus" carry exactly those.
+ * A category naming the brand with a disambiguator ("Cambus (Iowa)",
+ * "Highland Park, Los Angeles") is another entity and does not count.
+ */
+export function commonsContextMatches(categories: string, extra: string, brandName?: string, country?: string | null): boolean {
+  if (DRINKS_CONTEXT.test(`${categories} ${extra}`)) return true;
+  if (!brandName) return false;
+  const core = coreName(brandName);
+  if (!core) return false;
+  const esc = core.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const cats = categories.split("|").map((c) => c.trim()).filter(Boolean);
+  const brandCat = new RegExp(`^(?:(?:svg|png) )?(?:logos|wordmarks|trademarks|brands|products) of ${esc}$|^${esc}(?: (?:logos?|brand|brands|wordmarks?|products|trademarks?))?$`);
+  for (const raw of cats) {
+    if (/[(,]/.test(raw)) continue; // "Cambus (Iowa)", "Highland Park, Los Angeles"
+    const c = coreName(raw);
+    if (brandCat.test(c)) return true;
+    const m = /^logos of (?:companies|brands) of (.+)$/.exec(normalizeName(raw));
+    const want = normalizeCountry(country);
+    if (m && want && normalizeCountry(m[1]) === want) return true;
+  }
+  return false;
+}
+
+/**
+ * A JPEG may be a logo when its name says so AND it looks like flat artwork,
+ * not a photo (#139: WhistlePig's `WP_ Logo_256x256.jpg` icon, Glen Els's
+ * `Glen-Els-Logo.jpg`). "Flat" = few bytes per pixel (flat colour compresses
+ * far better than a photo at the same size) and, for Commons files, not a
+ * huge camera-sized frame. Bottle shots and distillery photos stay refused.
+ */
+export const MAX_LOGO_JPEG_BYTES_PER_PIXEL = 0.75;
+export function jpegLooksLikeLogo(label: string, bytes: number, width: number | null, height: number | null, opts: { maxSide?: number } = {}): boolean {
+  const name = decodeURIComponent(label.split("?")[0]!.split("/").pop() ?? label).replace(/[_-]+/g, " ");
+  if (!/logo|wordmark|emblem/i.test(name)) return false;
+  if (/photo|bottle|bild|foto|img_\d|dsc/i.test(name)) return false;
+  if (!width || !height) return false;
+  if (opts.maxSide && Math.max(width, height) > opts.maxSide) return false;
+  return bytes / (width * height) <= MAX_LOGO_JPEG_BYTES_PER_PIXEL;
+}
 
 /** Original-file MIME types that are photographs, never logos (#136: bottle shots, distillery photos). */
 export function isPhotoMime(mime: string | undefined | null): boolean {
@@ -173,21 +222,28 @@ export interface CommonsLogoOptions {
    * producer entity.
    */
   requireDrinksContext?: boolean;
+  /** Brand name/country for the broadened category check (#139). */
+  brandName?: string;
+  country?: string | null;
 }
 
 export async function commonsLogo(ctx: FetchContext, fileName: string, source: BrandLogoSource = "wikidata", opts: CommonsLogoOptions = {}): Promise<FetchedLogo | null> {
   const title = fileName.startsWith("File:") ? fileName : `File:${fileName}`;
-  const api = `https://commons.wikimedia.org/w/api.php?action=query&format=json&prop=imageinfo&iiprop=url|mime|extmetadata&iiurlwidth=256&titles=${encodeURIComponent(title)}`;
+  const api = `https://commons.wikimedia.org/w/api.php?action=query&format=json&prop=imageinfo&iiprop=url|mime|size|extmetadata&iiurlwidth=256&titles=${encodeURIComponent(title)}`;
   const info = await getJson<CommonsInfo>(ctx, api);
   const page = Object.values(info?.query?.pages ?? {})[0];
   const ii = page?.imageinfo?.[0];
   if (!page || page.missing != null || !ii) return null;
   const meta = ii.extmetadata ?? {};
   // Photos (bottle details, distillery buildings) are never a logo.
-  if (isPhotoMime(ii.mime) || /\.(jpe?g|tiff?)$/i.test(page.title ?? title)) return null;
+  // A JPEG is only kept when it is named as a logo and is flat artwork (#139).
+  const jpegFile = isPhotoMime(ii.mime) || /\.(jpe?g|tiff?)$/i.test(page.title ?? title);
+  if (jpegFile && !/^image\/p?jpe?g$/i.test((ii.mime ?? "image/jpeg").trim())) return null; // TIFF/HEIC
+  if (jpegFile && !jpegLooksLikeLogo(page.title ?? title, ii.size ?? Number.POSITIVE_INFINITY, ii.width ?? null, ii.height ?? null, { maxSide: 2000 })) return null;
   if (opts.requireDrinksContext) {
-    const context = [meta.Categories?.value, meta.ImageDescription?.value, meta.ObjectName?.value].map((v) => v ?? "").join(" ");
-    if (!DRINKS_CONTEXT.test(stripHtml(context) ?? "")) return null;
+    const cats = stripHtml(meta.Categories?.value) ?? "";
+    const extra = [meta.ImageDescription?.value, meta.ObjectName?.value].map((v) => stripHtml(v) ?? "").join(" ");
+    if (!commonsContextMatches(cats, extra, opts.brandName, opts.country)) return null;
   }
   const license = commonsLicense(meta.LicenseShortName?.value, meta.AttributionRequired?.value);
   if (!license) return null;
@@ -196,7 +252,8 @@ export async function commonsLogo(ctx: FetchContext, fileName: string, source: B
   const img = await politeFetch(ctx, imageUrl, "image/png,image/*", MAX_LOGO_BYTES);
   if (!img) return null;
   const sniffed = sniffImage(img.body);
-  if (!sniffed || sniffed.type === "image/svg+xml" || sniffed.type === "image/jpeg") return null;
+  if (!sniffed || sniffed.type === "image/svg+xml") return null;
+  if (sniffed.type === "image/jpeg" && !jpegFile) return null;
   const artist = stripHtml(meta.Artist?.value);
   const credit = stripHtml(meta.Credit?.value);
   return {
@@ -221,13 +278,13 @@ export function isLogoFileFor(title: string, brandName: string): boolean {
 }
 
 /** Search Commons for an exact "<brand> logo" file not linked from Wikidata. */
-export async function commonsSearchLogo(ctx: FetchContext, brandName: string): Promise<FetchedLogo | null> {
+export async function commonsSearchLogo(ctx: FetchContext, brandName: string, country?: string | null): Promise<FetchedLogo | null> {
   const q = `intitle:"${brandName.replace(/"/g, "")}" intitle:logo`;
   const api = `https://commons.wikimedia.org/w/api.php?action=query&format=json&list=search&srnamespace=6&srlimit=10&srsearch=${encodeURIComponent(q)}`;
   const data = await getJson<{ query?: { search?: Array<{ title: string }> } }>(ctx, api);
   for (const hit of data?.query?.search ?? []) {
     if (!isLogoFileFor(hit.title, brandName)) continue;
-    const logo = await commonsLogo(ctx, hit.title, "commons", { requireDrinksContext: true });
+    const logo = await commonsLogo(ctx, hit.title, "commons", { requireDrinksContext: true, brandName, country });
     if (logo) return logo;
   }
   return null;
@@ -372,20 +429,63 @@ export async function robotsAllowsUrl(ctx: FetchContext, cache: Map<string, stri
 }
 
 /**
- * Does a host name carry the brand? `talisker` ↛ `malts.com` (Diageo's shared
- * site, whose icon is not Talisker's mark); `old elk` → `oldelk.com`;
- * `heaven hill` → `heavenhilldistillery.com`. Compared on letters/digits only,
- * ignoring `www.` and the public suffix.
+ * Group/portfolio domains whose icon is the parent's mark, never one brand's
+ * (#136/#139: Beam on Booker's, Adelphi on Ardnamurchan, Hombo on Mars
+ * Tsunuki, Wakatsuru on Saburomaru, Diageo's malts.com). Refused even when a
+ * Wikidata P856 points there.
  */
-export function hostMatchesBrand(host: string, brandName: string): boolean {
-  const core = coreName(brandName).replace(/[^a-z0-9]/g, "");
-  if (core.length < 3) return false;
+export const PARENT_GROUP_HOSTS = [
+  "malts.com", "diageo.com", "beamdistilling.com", "beamsuntory.com", "suntoryglobalspirits.com", "adelphidistillery.com",
+  "hombo.co.jp", "wakatsuru.co.jp", "pernod-ricard.com", "edrington.com", "brown-forman.com", "bacardilimited.com",
+  "sazerac.com", "williamgrant.com", "distell.co.za", "lamartiniquaise.com", "heavenhill.com",
+];
+
+function hostBody(host: string): string {
   const labels = host.toLowerCase().replace(/^www\./, "").split(".");
   // Drop the public suffix (one label, or two for e.g. co.uk / com.au).
   const body = labels.length > 2 && /^(co|com|org|net|ac|gov)$/.test(labels[labels.length - 2]!) ? labels.slice(0, -2) : labels.slice(0, -1);
-  const squashed = body.join("").replace(/[^a-z0-9]/g, "");
-  return squashed.includes(core);
+  return body.join("").replace(/[^a-z0-9]/g, "");
 }
+
+export function isParentGroupHost(host: string): boolean {
+  const h = host.toLowerCase().replace(/^www\./, "");
+  return PARENT_GROUP_HOSTS.some((p) => h === p || h.endsWith(`.${p}`));
+}
+
+/**
+ * Does a host name carry the brand? `talisker` ↛ `malts.com` (Diageo's shared
+ * site, whose icon is not Talisker's mark); `old elk` → `oldelk.com`;
+ * `heaven hill` → `heavenhilldistillery.com`. Compared on letters/digits only,
+ * ignoring `www.` and the public suffix. Since #139 also: any alias, and a
+ * leading-token prefix of ≥5 letters that STARTS the domain (`proper no
+ * twelve` → `properwhiskey.com`, `eden mill st andrews` → `edenmill.com`),
+ * unless the first token alone is generic (`highland`, `black`).
+ */
+export function hostMatchesBrand(host: string, brandName: string, aliases: string[] = []): boolean {
+  if (isParentGroupHost(host)) return false;
+  const squashed = hostBody(host).replace(/^the(?=[a-z0-9]{5})/, "");
+  for (const name of [brandName, ...aliases]) {
+    const tokens = coreName(name).split(" ").filter(Boolean);
+    const core = tokens.join("");
+    if (core.length < 3) continue;
+    if (squashed.includes(core) || hostBody(host).includes(core)) return true;
+    for (let k = 1; k < tokens.length; k++) {
+      const prefix = tokens.slice(0, k).join("");
+      if (prefix.length < 5) continue;
+      if (k === 1 && GENERIC_HOST_TOKENS.has(tokens[0]!)) continue;
+      if (squashed.startsWith(prefix)) return true;
+    }
+  }
+  return false;
+}
+
+/** First tokens too common to stand for a brand in a domain on their own. */
+const GENERIC_HOST_TOKENS = new Set([
+  "highland", "black", "white", "royal", "great", "grand", "old", "single", "island", "mountain", "golden", "silver",
+  "speyside", "islay", "lowland", "kentucky", "tennessee", "scotch", "irish", "american", "crown", "craft", "spirit",
+  "spirits", "whisky", "whiskey", "distillery", "james", "william", "george", "thomas", "henry", "robert", "charles",
+  "small", "batch", "barrel", "glens", "river", "valley", "north", "south", "east", "west", "first", "smoky",
+]);
 
 /** Site icon of an official website, under nominative use — or null. */
 export async function websiteLogo(
@@ -393,6 +493,7 @@ export async function websiteLogo(
   website: string,
   pageIsBrand: (html: string) => boolean = () => true,
   brandName?: string,
+  aliases: string[] = [],
 ): Promise<FetchedLogo | null> {
   let home: URL;
   try {
@@ -402,14 +503,14 @@ export async function websiteLogo(
   }
   if (home.protocol !== "https:") return null;
   // Website icons are only trusted on the brand's own domain (#136).
-  if (brandName != null && !hostMatchesBrand(home.hostname, brandName)) return null;
+  if (brandName != null && !hostMatchesBrand(home.hostname, brandName, aliases)) return null;
   const robotsCache = new Map<string, string>();
   if (!(await robotsAllowsUrl(ctx, robotsCache, home.toString()))) return null;
   const page = await politeFetch(ctx, home.toString(), "text/html", MAX_PAGE_BYTES).catch(() => null);
   if (!page || !page.type.includes("html")) return null;
   // A redirect may land on another origin with its own policy.
   if (!(await robotsAllowsUrl(ctx, robotsCache, page.url))) return null;
-  if (brandName != null && !hostMatchesBrand(new URL(page.url).hostname, brandName)) return null;
+  if (brandName != null && !hostMatchesBrand(new URL(page.url).hostname, brandName, aliases)) return null;
   const html = new TextDecoder().decode(page.body);
   if (!pageIsBrand(html)) return null;
   for (const c of iconCandidates(html, page.url).slice(0, 4)) {
@@ -419,8 +520,9 @@ export async function websiteLogo(
     if (img.url !== c.url && !(await robotsAllowsUrl(ctx, robotsCache, img.url))) continue;
     const sniffed = sniffImage(img.body);
     if (!sniffed) continue;
-    // JPEG "icons" are photos (hero shots, bottle crops), not marks.
-    if (sniffed.type === "image/jpeg") continue;
+    // JPEG "icons" are usually photos (hero shots, bottle crops); keep one only
+    // when its URL names it a logo and it compresses like flat artwork (#139).
+    if (sniffed.type === "image/jpeg" && !jpegLooksLikeLogo(img.url, img.body.byteLength, sniffed.width, sniffed.height)) continue;
     if (sniffed.type !== "image/svg+xml" && Math.min(sniffed.width ?? 0, sniffed.height ?? 0) < MIN_RASTER_PX) continue;
     return {
       source: "website",
