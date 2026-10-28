@@ -71,6 +71,11 @@ describe("robotsAllows", () => {
     expect(robotsAllows("User-agent: *\nDisallow: /*.png$\n", "/icon.png")).toBe(false);
     expect(robotsAllows("User-agent: *\nDisallow: /*.png$\n", "/icon.png?v=2")).toBe(true);
   });
+  it("keeps every user agent of a group (a later agent line doesn't drop our match)", () => {
+    expect(robotsAllows("User-agent: CaskfolkLogoBot\nUser-agent: OtherBot\nDisallow: /\n", "/")).toBe(false);
+    expect(robotsAllows("User-agent: OtherBot\nUser-agent: *\nDisallow: /x\n\nUser-agent: Third\nAllow: /\n", "/x")).toBe(false);
+    expect(robotsAllows("User-agent: CaskfolkLogoBot\nDisallow: /a\nUser-agent: Other\nDisallow: /b\n", "/b")).toBe(true);
+  });
 });
 
 describe("isLogoFileFor", () => {
@@ -132,6 +137,18 @@ describe("websiteLogo", () => {
     routes["https://brand.example/apple.png"] = [200, "image/png", pngBytes(180, 180)];
     expect(await websiteLogo(ctx(routes), "https://brand.example/", () => false)).toBeNull();
     expect(await websiteLogo(ctx(routes), "http://brand.example/")).toBeNull();
+  });
+  it("checks a cross-origin icon against its own origin's robots.txt", async () => {
+    const cdnHome = '<html><head><link rel="apple-touch-icon" href="https://cdn.example/apple.png"></head><body>Old Elk</body></html>';
+    const routes = {
+      "https://brand.example/robots.txt": [200, "text/plain", "User-agent: *\nAllow: /"],
+      "https://cdn.example/robots.txt": [200, "text/plain", "User-agent: *\nDisallow: /"],
+      "https://cdn.example/apple.png": [200, "image/png", pngBytes(180, 180)],
+      "https://brand.example/": [200, "text/html", cdnHome],
+    } as Record<string, [number, string, string | Uint8Array]>;
+    expect(await websiteLogo(ctx(routes), "https://brand.example/")).toBeNull();
+    routes["https://cdn.example/robots.txt"] = [404, "text/plain", ""];
+    expect(await websiteLogo(ctx(routes), "https://brand.example/")).toMatchObject({ source: "website", pageUrl: "https://cdn.example/apple.png" });
   });
 });
 

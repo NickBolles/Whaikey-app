@@ -170,6 +170,11 @@ export function planBrands(
   for (const p of producers) {
     const key = brandKey(p.label);
     if (!isMatchableCore(coreName(p.label))) continue;
+    // A curated/distillery plan already owns this key: its identity was
+    // resolved (or deliberately left null) above via pickWikidataEntity, so
+    // a same-named producer that failed that check must not enrich it with
+    // another entity's website/logo files.
+    if (plans.has(key)) continue;
     upsert({
       key,
       name: p.label.replace(/\s+(distillery|distilleries)$/i, ""),

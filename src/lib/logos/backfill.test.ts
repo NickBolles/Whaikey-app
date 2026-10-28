@@ -51,6 +51,14 @@ describe("logo backfill", () => {
     expect(plans.find((p) => p.key === "old-elk")?.website).toBe("https://www.oldelk.com");
   });
 
+  it("never enriches a curated/distillery plan with a producer that failed identity checks", () => {
+    // Same name, wrong country: pickWikidataEntity rejects it, so the
+    // distillery plan must not inherit its website or logo files later.
+    const wrong: WikidataProducer = { id: "Q999", label: "Glenfiddich", aliases: [], countries: ["Japan"], instanceOf: ["Q10373548"], logoFiles: ["Other logo.svg"], website: "https://other.example" };
+    const plans = planBrands([{ id: "glenfiddich", name: "Glenfiddich", country: "Scotland" }], [], [wrong]);
+    expect(plans.find((p) => p.key === "glenfiddich")).toMatchObject({ distilleryId: "glenfiddich", wikidataId: null, website: null, logoFiles: [] });
+  });
+
   it("files bottles, stores license-gated logos, and is idempotent", async () => {
     const opts = { apply: true, producers, seeds: [{ name: "Old Elk", country: "USA", website: "https://www.oldelk.com" }], limiter: noWait, now: new Date("2026-10-28T00:00:00Z") };
     const first = await runLogoBackfill(db, { ...opts, fetchImpl: routes() });

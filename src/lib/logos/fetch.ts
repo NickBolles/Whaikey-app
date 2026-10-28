@@ -280,11 +280,16 @@ export function robotsRuleMatches(rule: string, path: string): boolean {
 }
 
 export function robotsAllows(robots: string, path: string): boolean {
-  let applies = false;
+  // RFC 9309 groups: consecutive `User-agent` lines form one group, and its
+  // rules apply when ANY listed agent matches (a later agent line must not
+  // drop an earlier match). A new group starts at the first agent line after
+  // a rule.
+  let groupForUs = false;
+  let groupStar = false;
+  let inAgents = false;
   let anyGroupForUs = false;
   const rules: Array<{ allow: boolean; path: string }> = [];
   const starRules: Array<{ allow: boolean; path: string }> = [];
-  let inStar = false;
   for (const raw of robots.split(/\r?\n/)) {
     const line = raw.replace(/#.*$/, "").trim();
     const m = /^([a-z-]+)\s*:\s*(.*)$/i.exec(line);
@@ -292,14 +297,22 @@ export function robotsAllows(robots: string, path: string): boolean {
     const [, k, v] = m;
     const key = k!.toLowerCase();
     if (key === "user-agent") {
-      const ua = v!.toLowerCase();
-      applies = ua.includes("caskfolklogobot");
-      inStar = ua === "*";
-      if (applies) anyGroupForUs = true;
+      if (!inAgents) {
+        groupForUs = false;
+        groupStar = false;
+        inAgents = true;
+      }
+      const ua = v!.trim().toLowerCase();
+      if (ua.includes("caskfolklogobot")) groupForUs = true;
+      if (ua === "*") groupStar = true;
+      if (groupForUs) anyGroupForUs = true;
     } else if (key === "allow" || key === "disallow") {
+      inAgents = false;
       const rule = { allow: key === "allow", path: v! };
-      if (applies) rules.push(rule);
-      else if (inStar) starRules.push(rule);
+      if (groupForUs) rules.push(rule);
+      if (groupStar) starRules.push(rule);
+    } else {
+      inAgents = false;
     }
   }
   const use = anyGroupForUs ? rules : starRules;
@@ -309,6 +322,28 @@ export function robotsAllows(robots: string, path: string): boolean {
     if (robotsRuleMatches(r.path, path) && (!best || r.path.length > best.path.length)) best = r;
   }
   return best ? best.allow : true;
+}
+
+/**
+ * Per-origin robots.txt cache for one lookup: every URL we fetch (including a
+ * cross-origin icon/CDN and any redirect destination) is checked against its
+ * OWN origin's policy, never the homepage's.
+ */
+export async function robotsAllowsUrl(ctx: FetchContext, cache: Map<string, string>, url: string): Promise<boolean> {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return false;
+  }
+  if (u.protocol !== "https:") return false;
+  let text = cache.get(u.origin);
+  if (text === undefined) {
+    const r = await politeFetch(ctx, `${u.origin}/robots.txt`, "text/plain", 200_000).catch(() => null);
+    text = r ? new TextDecoder().decode(r.body) : "";
+    cache.set(u.origin, text);
+  }
+  return robotsAllows(text, `${u.pathname || "/"}${u.search}`);
 }
 
 /** Site icon of an official website, under nominative use — or null. */
@@ -324,17 +359,19 @@ export async function websiteLogo(
     return null;
   }
   if (home.protocol !== "https:") return null;
-  const robots = await politeFetch(ctx, `${home.origin}/robots.txt`, "text/plain", 200_000).catch(() => null);
-  const robotsText = robots ? new TextDecoder().decode(robots.body) : "";
-  if (!robotsAllows(robotsText, home.pathname || "/")) return null;
+  const robotsCache = new Map<string, string>();
+  if (!(await robotsAllowsUrl(ctx, robotsCache, home.toString()))) return null;
   const page = await politeFetch(ctx, home.toString(), "text/html", MAX_PAGE_BYTES).catch(() => null);
   if (!page || !page.type.includes("html")) return null;
+  // A redirect may land on another origin with its own policy.
+  if (!(await robotsAllowsUrl(ctx, robotsCache, page.url))) return null;
   const html = new TextDecoder().decode(page.body);
   if (!pageIsBrand(html)) return null;
   for (const c of iconCandidates(html, page.url).slice(0, 4)) {
-    if (!robotsAllows(robotsText, new URL(c.url).pathname)) continue;
+    if (!(await robotsAllowsUrl(ctx, robotsCache, c.url))) continue;
     const img = await politeFetch(ctx, c.url, "image/png,image/svg+xml,image/*", MAX_LOGO_BYTES).catch(() => null);
     if (!img) continue;
+    if (img.url !== c.url && !(await robotsAllowsUrl(ctx, robotsCache, img.url))) continue;
     const sniffed = sniffImage(img.body);
     if (!sniffed) continue;
     if (sniffed.type !== "image/svg+xml" && Math.min(sniffed.width ?? 0, sniffed.height ?? 0) < MIN_RASTER_PX) continue;
