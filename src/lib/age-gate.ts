@@ -233,6 +233,9 @@ const UNGATED_ROOTS = [
   "/terms",
   "/privacy",
   "/support",
+  // Credits for the open data in the catalog: attribution has to be readable
+  // by anyone, and the Terms link here as the carve-out from "don't copy".
+  "/sources",
   // Account deletion (Google Play's web-deletion requirement): leaving must
   // never require answering the gate first.
   "/delete-account",

@@ -215,6 +215,13 @@ export default function PrivacyPage() {
           </Link>
           .
         </p>
+        {/* DRAFT — owner + legal review (docs/TOS_DATA_REUSE.md). */}
+        <p>
+          Search engines and other crawlers are told, in our robots.txt, not to read share links,
+          profiles, outings or flights, and crawlers that collect pages to train AI models are told
+          not to read anything. That is a request well-behaved crawlers honour, not a lock — the
+          lock is your visibility setting. Our Terms forbid scraping.
+        </p>
       </Section>
 
       <Section title={`Where it goes outside ${BRAND_NAME}`}>
