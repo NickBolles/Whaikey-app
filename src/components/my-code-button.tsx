@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import QRCode from "qrcode";
 import { Check, QrCode, Share2, X } from "lucide-react";
@@ -32,6 +32,9 @@ export function MyCodeButton({ handle: knownHandle, variant = "icon" }: { handle
   const [qr, setQr] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const titleId = useId();
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const wasOpen = useRef(false);
   const handle = loaded?.handle ?? null;
   // Hold the page behind the sheet still, and put it back where it was (DESIGN.md rule 13).
   useScrollLock(open);
@@ -72,12 +75,37 @@ export function MyCodeButton({ handle: knownHandle, variant = "icon" }: { handle
     setLoaded((cur) => (cur && cur.handle === null && cur.reason === "error" ? null : cur));
   }
 
+  // A modal sheet: focus moves in on open, Tab cycles inside it, Escape
+  // closes, and focus returns to the trigger afterwards.
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      if (wasOpen.current) triggerRef.current?.focus();
+      wasOpen.current = false;
+      return;
+    }
+    wasOpen.current = true;
+    dialogRef.current?.querySelector<HTMLElement>("[data-autofocus]")?.focus();
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      setOpen(false);
-      setLoaded((cur) => (cur && cur.handle === null && cur.reason === "error" ? null : cur));
+      if (event.key === "Escape") {
+        setOpen(false);
+        setLoaded((cur) => (cur && cur.handle === null && cur.reason === "error" ? null : cur));
+        return;
+      }
+      if (event.key !== "Tab" || !dialogRef.current) return;
+      const focusable = Array.from(
+        dialogRef.current.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), input, [tabindex]:not([tabindex="-1"])'),
+      );
+      if (focusable.length === 0) return;
+      const first = focusable[0]!;
+      const last = focusable[focusable.length - 1]!;
+      const active = document.activeElement;
+      if (event.shiftKey && (active === first || !dialogRef.current.contains(active))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (active === last || !dialogRef.current.contains(active))) {
+        event.preventDefault();
+        first.focus();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -101,6 +129,7 @@ export function MyCodeButton({ handle: knownHandle, variant = "icon" }: { handle
   const trigger =
     variant === "icon" ? (
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen(true)}
         aria-label="My code"
@@ -111,6 +140,7 @@ export function MyCodeButton({ handle: knownHandle, variant = "icon" }: { handle
       </button>
     ) : (
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen(true)}
         aria-haspopup="dialog"
@@ -127,6 +157,7 @@ export function MyCodeButton({ handle: knownHandle, variant = "icon" }: { handle
         createPortal(
           <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 sm:items-center" onClick={close}>
             <div
+              ref={dialogRef}
               role="dialog"
               aria-modal="true"
               aria-labelledby={titleId}
@@ -140,6 +171,7 @@ export function MyCodeButton({ handle: knownHandle, variant = "icon" }: { handle
                 <button
                   type="button"
                   onClick={close}
+                  data-autofocus
                   aria-label="Close"
                   className="flex h-11 w-11 items-center justify-center rounded-lg text-muted hover:bg-surface-raised hover:text-foreground"
                 >
