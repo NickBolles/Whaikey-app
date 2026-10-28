@@ -26,7 +26,7 @@ export function SocialTabs({ unread, handle }: { unread: number; handle?: string
   const pathname = usePathname() ?? "/friends";
   return (
     <div className="flex items-center justify-between gap-2">
-      <nav aria-label="Social sections" className="flex min-w-0 gap-0.5 overflow-x-auto rounded-xl bg-surface-raised p-1">
+      <nav aria-label="Social sections" className="flex min-w-0 gap-0.5 rounded-xl bg-surface-raised p-1">
         {SOCIAL_TABS.map((tab) => {
           const active = tab.href === "/friends" ? pathname === "/friends" : pathname.startsWith(tab.href);
           return (
@@ -34,7 +34,7 @@ export function SocialTabs({ unread, handle }: { unread: number; handle?: string
               key={tab.href}
               href={tab.href}
               aria-current={active ? "page" : undefined}
-              className={`tap-target shrink-0 rounded-lg px-2.5 py-1.5 text-sm transition-colors ${
+              className={`tap-target whitespace-nowrap rounded-lg px-2.5 py-1.5 text-sm transition-colors ${
                 active ? "bg-surface text-foreground shadow-sm" : "text-muted hover:text-foreground"
               }`}
             >

@@ -32,6 +32,8 @@ describe("MyCodeButton", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "My code" }));
     expect(screen.getByRole("dialog", { name: "My code" })).toBeInTheDocument();
+    // Focus moves into the sheet on open.
+    expect(screen.getByRole("button", { name: "Close" })).toHaveFocus();
     const img = await screen.findByRole("img", { name: /add @nick/i });
     expect(img).toHaveAttribute("src", expect.stringContaining("/add/nick"));
     expect(screen.getByText("@nick")).toBeInTheDocument();
@@ -39,8 +41,15 @@ describe("MyCodeButton", () => {
     await userEvent.click(screen.getByRole("button", { name: /Share link/ }));
     expect(share).toHaveBeenCalledWith(expect.objectContaining({ url: expect.stringContaining("/add/nick") }));
 
+    // Tab stays in the sheet.
+    for (let i = 0; i < 4; i++) await userEvent.tab();
+    expect(screen.getByRole("dialog").contains(document.activeElement)).toBe(true);
+    await userEvent.tab({ shift: true });
+    expect(screen.getByRole("dialog").contains(document.activeElement)).toBe(true);
+
     await userEvent.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "My code" })).toHaveFocus();
   });
 
   it("copies the link when there is no share sheet", async () => {
