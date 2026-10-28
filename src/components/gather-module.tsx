@@ -88,7 +88,7 @@ function GatherTile({ href, icon, label, detail }: { href: string; icon: ReactNo
         <span className="text-accent">{icon}</span>
         <span>
           <span className="block truncate text-[13px] font-medium leading-tight">{label}</span>
-          <span className="block truncate text-[11px] text-muted">{detail}</span>
+          <span className="block truncate text-xs text-muted">{detail}</span>
         </span>
       </Link>
     </li>

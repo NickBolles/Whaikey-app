@@ -66,10 +66,18 @@ export function MyCodeButton({ handle: knownHandle, variant = "icon" }: { handle
     };
   }, [open, handle, qr]);
 
+  /** Closing after a failed read clears it, so reopening tries again. */
+  function close() {
+    setOpen(false);
+    setLoaded((cur) => (cur && cur.handle === null && cur.reason === "error" ? null : cur));
+  }
+
   useEffect(() => {
     if (!open) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key !== "Escape") return;
+      setOpen(false);
+      setLoaded((cur) => (cur && cur.handle === null && cur.reason === "error" ? null : cur));
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -117,7 +125,7 @@ export function MyCodeButton({ handle: knownHandle, variant = "icon" }: { handle
       {trigger}
       {open &&
         createPortal(
-          <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 sm:items-center" onClick={() => setOpen(false)}>
+          <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 sm:items-center" onClick={close}>
             <div
               role="dialog"
               aria-modal="true"
@@ -131,7 +139,7 @@ export function MyCodeButton({ handle: knownHandle, variant = "icon" }: { handle
                 </h2>
                 <button
                   type="button"
-                  onClick={() => setOpen(false)}
+                  onClick={close}
                   aria-label="Close"
                   className="flex h-11 w-11 items-center justify-center rounded-lg text-muted hover:bg-surface-raised hover:text-foreground"
                 >
