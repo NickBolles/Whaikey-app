@@ -131,7 +131,7 @@ export function MyCodeButton({ handle: knownHandle, variant = "icon" }: { handle
               aria-modal="true"
               aria-labelledby={titleId}
               onClick={(event) => event.stopPropagation()}
-              className="w-full max-w-sm rounded-t-2xl border border-border bg-surface p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-lg sm:rounded-2xl"
+              className="max-h-[100dvh] w-full max-w-sm overflow-y-auto overscroll-contain rounded-t-2xl border border-border bg-surface p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-lg sm:rounded-2xl"
             >
               <div className="flex items-center justify-between gap-2">
                 <h2 id={titleId} className="font-display text-lg font-semibold">
