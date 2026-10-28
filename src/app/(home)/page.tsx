@@ -143,7 +143,9 @@ export default async function HomePage() {
       {/* Ask & learn — the concierge and Whiskey School lead Home (owner
           feedback 2026-10-26: "could be emphasized higher"). */}
       <section aria-label="Ask and learn" className="flex flex-col gap-2.5">
-        <HomeConcierge aiConfigured={isAiConfigured()} />
+        {/* Unconfigured, the concierge's notice would lead Home with an
+            apology, so only a working concierge takes the top slot. */}
+        {isAiConfigured() && <HomeConcierge aiConfigured />}
         <Link
           href="/learn"
           className="card-flat flex min-h-11 items-center gap-3 px-4 py-3 transition-colors hover:bg-surface-raised"

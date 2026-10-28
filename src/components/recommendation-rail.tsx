@@ -190,23 +190,27 @@ function RecCard({ rec, mode }: { rec: Recommendation; mode: RecommendationRailP
         href={`/bottles/${rec.bottleId}`}
         className="flex flex-col gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 rounded-xl"
       >
-        {highlight && (
-          <span data-testid="discover-highlight" className="chip chip-active inline-flex max-w-full items-center gap-1 self-start px-2 py-0.5 text-[11px] font-medium text-accent">
-            <Compass size={12} strokeWidth={2} aria-hidden className="shrink-0" />
-            <span className="truncate">{highlight.text}</span>
-          </span>
+        {(highlight || showMatch) && (
+          <div className="flex items-center justify-between gap-2">
+            {highlight ? (
+              <span data-testid="discover-highlight" className="chip chip-active inline-flex min-w-0 items-center gap-1 px-2 py-0.5 text-[11px] font-medium text-accent">
+                <Compass size={12} strokeWidth={2} aria-hidden className="shrink-0" />
+                <span className="truncate">{highlight.text}</span>
+              </span>
+            ) : (
+              <span />
+            )}
+            {showMatch && (
+              <span className="chip shrink-0 px-2 py-0.5 text-[11px] font-medium text-accent whitespace-nowrap">
+                {rec.matchPercent}% match
+              </span>
+            )}
+          </div>
         )}
         <div className="flex items-start gap-3">
           <BottleArt name={rec.name} category={rec.category} distillery={rec.distillery} region={rec.region} country={rec.country} height={64} />
           <div className="flex min-w-0 flex-1 flex-col gap-1">
-            <div className="flex items-start justify-between gap-2">
-              <span className="font-medium text-foreground leading-snug">{rec.name}</span>
-              {showMatch && (
-                <span className="chip chip-active shrink-0 px-2 py-0.5 text-[11px] font-medium text-accent whitespace-nowrap">
-                  {rec.matchPercent}% match
-                </span>
-              )}
-            </div>
+            <span className="font-medium text-foreground leading-snug line-clamp-2">{rec.name}</span>
             {meta && <span className="text-xs text-muted line-clamp-2">{meta}</span>}
             {rec.avgPrice != null && (
               <span className="stat-number text-base text-accent">${Math.round(rec.avgPrice)}</span>
