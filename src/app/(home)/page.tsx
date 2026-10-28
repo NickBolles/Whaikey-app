@@ -18,6 +18,8 @@ import { RecommendationRail } from "@/components/recommendation-rail";
 import { FriendsModule, type FriendFeedItem } from "@/components/friends-module";
 import { LatestBadgeCard, pickLatestBadge } from "@/components/latest-badge-card";
 import { getPassport } from "@/lib/passport";
+import { EMPTY_GATHERINGS, getGatherings } from "@/lib/gather";
+import { GatherModule } from "@/components/gather-module";
 import { withFallback } from "@/lib/settle";
 import { ChevronRight, GraduationCap, Star } from "lucide-react";
 import { BRAND_NAME } from "@/lib/brand";
@@ -66,7 +68,7 @@ export default async function HomePage() {
   // other widget goes through `withFallback`, so one slow or failing read
   // renders that widget empty instead of holding the whole page (2026-10-27:
   // a stuck read here kept signed-in Home spinning to the 300 s limit).
-  const [onboarding, dashboard, recentPours, ownProfile, following, friendFeed, passport] = await Promise.all([
+  const [onboarding, dashboard, recentPours, ownProfile, following, friendFeed, passport, gatherings] = await Promise.all([
     cookieStore.get(ONBOARDING_COOKIE) ? false : needsOnboarding(db, user.id),
     getDashboard(db, user.id, appNow()),
     withFallback(db
@@ -86,6 +88,7 @@ export default async function HomePage() {
     withFallback(listFollowing(db, user.id), [], "home:following"),
     withFallback(getFriendFeed(db, user.id, { limit: 3 }), [], "home:friend-feed"),
     withFallback(getPassport(db, user.id), null, "home:passport"),
+    withFallback(getGatherings(db, user.id, appNow()), EMPTY_GATHERINGS, "home:gatherings"),
   ]);
   if (onboarding) redirect("/welcome");
 
@@ -136,6 +139,10 @@ export default async function HomePage() {
       <Dashboard data={dashboard} userName={user.name} userImage={user.image} />
 
       <HomeHero bottleCount={bottleCount} pourCount={pourCount} />
+
+      {/* Outings, clubs, tasting nights and trails — the people side of
+          Caskfolk, high on Home (owner feedback 2026-10-26). */}
+      <GatherModule data={gatherings} />
 
       {/* Discovery pairs with tonight's pick: both answer "what's next?" —
           which is Home's job. My Bar stays about the bottles you own. */}

@@ -339,6 +339,16 @@ test.describe("signed in (demo collector)", () => {
     await page.getByRole("list", { name: "Recent bottles" }).getByText(/Eagle Rare 10/i).first().click();
     await expect(page.getByTestId("pour-bottle")).toBeVisible();
     await settle(page);
+    // The flavor wheel and pour size are above the fold — above the sticky
+    // Save bar — with no extra tap (owner feedback 2026-10-26).
+    const viewport = page.viewportSize()!;
+    if (viewport.width < 500) {
+      const saveTop = (await page.locator("[data-sticky]").boundingBox())!.y;
+      const wheel = (await page.getByRole("application", { name: "Flavor wheel" }).boundingBox())!;
+      const size = (await page.getByRole("slider", { name: "Pour size" }).boundingBox())!;
+      expect(size.y + size.height).toBeLessThanOrEqual(saveTop);
+      expect(wheel.y + wheel.height).toBeLessThanOrEqual(saveTop);
+    }
     await expect(page).toHaveScreenshot(shot("pour-step-rate"), { fullPage: true });
   });
 
@@ -346,8 +356,7 @@ test.describe("signed in (demo collector)", () => {
     await page.goto("/pour");
     await settle(page);
     await page.getByRole("list", { name: "Recent bottles" }).getByText(/Eagle Rare 10/i).first().click();
-    // Notes, the wheel and visibility expand in place (design board S5).
-    await page.getByRole("button", { name: /Add notes/ }).click();
+    // Notes, the wheel and visibility are all on the sheet (owner feedback 2026-10-26).
     await expect(page.getByRole("button", { name: /Auto-fill|Extract/i })).toBeVisible();
     // Typed text drives the on-device flavor pass, which is the part of this
     // surface that renders without any network call.

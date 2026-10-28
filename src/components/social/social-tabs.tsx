@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Bell } from "lucide-react";
 import { TRAIL } from "@/lib/challenges/term";
+import { MyCodeButton } from "@/components/my-code-button";
 
 /**
  * The Friends tab's sub-navigation (design board decision C1: Feed · Clubs ·
@@ -17,11 +18,15 @@ export const SOCIAL_TABS = [
   { href: "/friends/people", label: "People" },
 ] as const;
 
-export function SocialTabs({ unread }: { unread: number }) {
+/**
+ * `handle` (when the page has it) skips the sheet's profile read; the "My
+ * code" QR button sits beside the bell on every Social sub-page.
+ */
+export function SocialTabs({ unread, handle }: { unread: number; handle?: string | null }) {
   const pathname = usePathname() ?? "/friends";
   return (
     <div className="flex items-center justify-between gap-2">
-      <nav aria-label="Social sections" className="flex gap-1 rounded-xl bg-surface-raised p-1">
+      <nav aria-label="Social sections" className="flex min-w-0 gap-0.5 rounded-xl bg-surface-raised p-1">
         {SOCIAL_TABS.map((tab) => {
           const active = tab.href === "/friends" ? pathname === "/friends" : pathname.startsWith(tab.href);
           return (
@@ -29,7 +34,7 @@ export function SocialTabs({ unread }: { unread: number }) {
               key={tab.href}
               href={tab.href}
               aria-current={active ? "page" : undefined}
-              className={`tap-target rounded-lg px-3 py-1.5 text-sm transition-colors ${
+              className={`tap-target whitespace-nowrap rounded-lg px-2.5 py-1.5 text-sm transition-colors ${
                 active ? "bg-surface text-foreground shadow-sm" : "text-muted hover:text-foreground"
               }`}
             >
@@ -38,6 +43,8 @@ export function SocialTabs({ unread }: { unread: number }) {
           );
         })}
       </nav>
+      <div className="flex shrink-0 items-center">
+      <MyCodeButton handle={handle} />
       <Link
         href="/notifications"
         aria-label={unread > 0 ? `Notifications, ${unread} unread` : "Notifications"}
@@ -53,6 +60,7 @@ export function SocialTabs({ unread }: { unread: number }) {
           </span>
         )}
       </Link>
+      </div>
     </div>
   );
 }

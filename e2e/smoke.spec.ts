@@ -527,7 +527,6 @@ test.describe("flavor wheel touch gesture", () => {
   }) => {
     await signIn(context, baseURL!, SCAN_SESSION_TOKEN);
     await page.goto("/pour?bottleId=eagle-rare-10");
-    await page.getByRole("button", { name: /Add notes/ }).click();
 
     const wheel = page.getByRole("application", { name: "Flavor wheel" });
     // Centred, not merely "if needed": the pour sheet's sticky Save bar
