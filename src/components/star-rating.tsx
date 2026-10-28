@@ -64,6 +64,10 @@ export interface StarRatingProps {
 export function StarRating({ value, onChange, size = 44 }: StarRatingProps) {
   const current = value ?? 0;
   const set = (v: number) => onChange(value === v ? null : v);
+  // Smaller stars keep a 44px-tall hit area: the half-star buttons reach past
+  // the drawn star vertically (DESIGN.md rule 8).
+  const pad = Math.max(0, (44 - size) / 2);
+  const hit = pad > 0 ? { top: -pad, bottom: -pad } : undefined;
   return (
     <div role="group" aria-label="Rating" className="flex items-center gap-1">
       {[1, 2, 3, 4, 5].map((n) => {
@@ -76,6 +80,7 @@ export function StarRating({ value, onChange, size = 44 }: StarRatingProps) {
               aria-label={value === n - 0.5 ? `Clear rating` : `Rate ${n - 0.5} stars`}
               aria-pressed={current === n - 0.5}
               onClick={() => set(n - 0.5)}
+              style={hit}
               className="absolute inset-y-0 left-0 w-1/2 cursor-pointer rounded-l-md focus-visible:outline-2 focus-visible:outline-accent"
             />
             <button
@@ -83,6 +88,7 @@ export function StarRating({ value, onChange, size = 44 }: StarRatingProps) {
               aria-label={value === n ? `Clear rating` : `Rate ${n} stars`}
               aria-pressed={current === n}
               onClick={() => set(n)}
+              style={hit}
               className="absolute inset-y-0 right-0 w-1/2 cursor-pointer rounded-r-md focus-visible:outline-2 focus-visible:outline-accent"
             />
           </span>
