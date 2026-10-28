@@ -81,7 +81,8 @@ describe("Better Auth 1.7 upgrade", () => {
       expect(getCookies({ ...auth.options, baseURL: "https://whaikey-app.vercel.app" }).sessionToken.name).toBe(
         "__Secure-better-auth.session_token",
       );
-      expect(auth.options.advanced?.cookiePrefix).toBeUndefined();
+      // No `advanced` block at all: no cookiePrefix / cookie-name override to drift.
+      expect("advanced" in auth.options).toBe(false);
     });
 
     it("honours a session cookie signed the way 1.6 signed it", async () => {
