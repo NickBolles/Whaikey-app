@@ -107,7 +107,7 @@ const LOOKUPS: Source[] = [
 
 export default function SourcesPage() {
   return (
-    <div className="px-4 py-8 max-w-2xl mx-auto w-full flex flex-col gap-6 text-sm text-muted">
+    <div className="px-3 py-4 max-w-2xl mx-auto w-full flex flex-col gap-3 text-sm text-muted">
       <header className="flex flex-col gap-2">
         <h1 className="font-display text-3xl font-semibold tracking-tight text-foreground">Sources and credits</h1>
         <p>
