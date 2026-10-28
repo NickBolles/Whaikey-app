@@ -44,7 +44,7 @@ export default function TermsPage() {
           licence needed to store it and show it to the people you chose, for as long as you leave
           it visible.
         </p>
-        {/* DRAFT — owner + legal review (docs/TOS_DATA_REUSE.md §3.4). */}
+        {/* DRAFT — owner + legal review (docs/TOS_DATA_REUSE.md). */}
         <p>
           Put formally: you give us a non-exclusive, worldwide, royalty-free licence to host, copy,
           resize, display and transmit what you post, only to run {BRAND_NAME} and only to the
