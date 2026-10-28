@@ -923,3 +923,39 @@ export async function seedDemoBrandLogo(db: DB): Promise<void> {
     .onConflictDoNothing();
   await db.update(schema.bottles).set({ brandKey: DEMO_BRAND_LOGO_KEY }).where(eq(schema.bottles.id, "lagavulin-16"));
 }
+
+// ── demo white-on-transparent logo (visual baseline for the dark plate, PR #141) ──
+// Append-only fence. A drawn white ring + triangle on a transparent ground (not
+// a real trademark), standing in for marks like Bowmore/Bushmills/Penderyn that
+// would vanish on the white plate. Linked to bowmore-15 so its detail page in
+// the light theme shows ProducerLogo's dark-plate state (#138).
+export const DEMO_LIGHT_LOGO_KEY = "demo-bowmore";
+const DEMO_LIGHT_LOGO_PNG =
+  "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAABZ0lEQVR42u1bSQ7DQAgLVv//5empl0pVSAYMpPYDAhgDs+U4BEEQhP+FMY2ttZbbMTN7BAFXgq4gw7oGzSLDpgSeRQQmBh9pz9jOeDLHbJbGCHzHyWwbaY5ldO4Mm5gSvOe7d/qCRQbPWrxE+gFWdqK7eckY/OUsM/Meu1dIRWXwn2/uzPRdEjAx85EkoMrpb+fYK0k3Ad2zv6sCRBrb7Se7KqAthJ4EsHd4Z99k2wRb/t3OCagl4M0ucyKgywFHFflgyf8qoRmrQ02BKgLuZpNRhlJA1+yzVCAFdM4+QwVSQPfsZ6sAXaRYRRY6rPoqV4fqARP285n2MXnvH7E5QpcarbKDzoEy/MJd+VSf63vtn5Xxi1Fn46dAxCVkhfQ9ScFuhqtJ2L25CjkTrCIh4tpOz+QyjGc2xGjbKZejVZuhO8TrnSC7Hh/1UrR6EkT0GnRypsKe/heYMK/H/THSobkJgiAIDrwBCh1T/ZLMaegAAAAASUVORK5CYII=";
+
+export async function seedDemoLightLogo(db: DB): Promise<void> {
+  await db
+    .insert(schema.brandLogos)
+    .values({
+      key: DEMO_LIGHT_LOGO_KEY,
+      name: "Bowmore",
+      country: "Scotland",
+      distilleryId: "bowmore",
+      status: "ok",
+      logoUrl: "https://commons.wikimedia.org/wiki/File:Demo_white_logo.png",
+      logoSource: "commons",
+      license: "PD-textlogo",
+      attribution: "Wikimedia Commons",
+      attributionUrl: "https://commons.wikimedia.org/wiki/File:Demo_white_logo.png",
+      attributionRequired: false,
+      contentType: "image/png",
+      logoData: DEMO_LIGHT_LOGO_PNG,
+      width: 64,
+      height: 64,
+      checkedAt: new Date("2026-07-01T00:00:00Z"),
+      createdAt: new Date("2026-07-01T00:00:00Z"),
+      updatedAt: new Date("2026-07-01T00:00:00Z"),
+    })
+    .onConflictDoNothing();
+  await db.update(schema.bottles).set({ brandKey: DEMO_LIGHT_LOGO_KEY }).where(eq(schema.bottles.id, "bowmore-15"));
+}

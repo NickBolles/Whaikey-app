@@ -149,6 +149,17 @@ test.describe("signed out", () => {
     await expect(page).toHaveScreenshot(shot("bottle-detail-eagle-rare"), { fullPage: true });
   });
 
+  test("bottle detail, light theme, white-on-transparent logo (dark plate, #138)", async ({ page }) => {
+    await page.goto("/bottles/bowmore-15");
+    await page.evaluate(() => document.documentElement.setAttribute("data-theme", "light"));
+    const logo = page.getByTestId("producer-logo").first();
+    await expect(logo.locator("img")).toBeVisible();
+    // The plate swaps once the mark is sampled on load.
+    await expect(logo).toHaveClass(/bg-\[#2b2620\]/);
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("bottle-detail-light-white-logo"), { fullPage: true });
+  });
+
   test("learn hub", async ({ page }) => {
     await page.goto("/learn");
     await expect(page.getByRole("heading", { name: /Learn whiskey/i })).toBeVisible();
