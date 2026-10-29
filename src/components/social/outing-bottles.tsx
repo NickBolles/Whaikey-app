@@ -70,10 +70,21 @@ export function useOutingQueue(code: string) {
   const router = useRouter();
   const raw = useSyncExternalStore(
     subscribeQueue,
-    () => window.localStorage.getItem(queueKey(code)) ?? "",
+    () => {
+      try {
+        return window.localStorage.getItem(queueKey(code)) ?? "";
+      } catch {
+        return ""; // storage denied by browser policy: no offline queue, but the page still works
+      }
+    },
     () => "",
   );
-  const pending: QueueItem[] = raw ? (JSON.parse(raw) as QueueItem[]) : [];
+  let pending: QueueItem[] = [];
+  try {
+    pending = raw ? (JSON.parse(raw) as QueueItem[]) : [];
+  } catch {
+    /* a corrupt entry shows nothing rather than crashing the outing */
+  }
 
   const flush = useCallback(async () => {
     const items = readQueue(code);

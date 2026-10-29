@@ -138,4 +138,12 @@ describe("OutingBottleBoard", () => {
     expect(fetchMock).not.toHaveBeenCalled();
     expect(window.localStorage.getItem("caskfolk:outing-queue:abc123def4:p1")).not.toBeNull();
   });
+  it("still renders when the browser denies local storage", () => {
+    const spy = vi.spyOn(window, "localStorage", "get").mockImplementation(() => {
+      throw new DOMException("denied", "SecurityError");
+    });
+    render(<OutingBottleBoard code="abc123def4" board={[bottle()]} canAdd canPour participantId="p1" />);
+    expect(screen.getByText("Eagle Rare 10")).toBeTruthy();
+    spy.mockRestore();
+  });
 });
