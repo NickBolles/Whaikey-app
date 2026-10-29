@@ -109,4 +109,20 @@ describe("OutingBottleBoard", () => {
     expect(screen.queryByRole("button", { name: "Add a bottle" })).toBeNull();
     expect(screen.queryByRole("button", { name: /rating|Rate/ })).toBeNull();
   });
+  it("remove: only the adder or the host sees it; it deletes the list entry and refreshes", async () => {
+    const fetchMock = vi.fn(async () => new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { rerender } = render(<OutingBottleBoard code="abc123def4" board={[bottle()]} canAdd canPour />);
+    expect(screen.queryByRole("button", { name: "Remove" })).toBeNull();
+    rerender(<OutingBottleBoard code="abc123def4" board={[bottle({ addedByMe: true })]} canAdd canPour />);
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, { method: string }];
+    expect(url).toBe("/api/outings/abc123def4/bottles/e1");
+    expect(init.method).toBe("DELETE");
+    rerender(<OutingBottleBoard code="abc123def4" board={[bottle()]} canAdd canPour isHost />);
+    expect(screen.getByRole("button", { name: "Remove" })).toBeTruthy();
+    rerender(<OutingBottleBoard code="abc123def4" board={[bottle({ entryId: null })]} canAdd canPour isHost />);
+    expect(screen.queryByRole("button", { name: "Remove" })).toBeNull();
+  });
 });

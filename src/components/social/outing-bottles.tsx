@@ -52,7 +52,7 @@ function subscribeQueue(onChange: () => void) {
 }
 
 /** Send one write. `"retry"` = network trouble or a 5xx (keep it queued); otherwise the final status. */
-async function attempt(item: Pick<QueueItem, "url" | "method" | "body">): Promise<number | "retry"> {
+async function attempt(item: { url: string; method: QueueItem["method"] | "DELETE"; body: unknown }): Promise<number | "retry"> {
   try {
     const res = await fetch(item.url, { method: item.method, headers: { "content-type": "application/json" }, body: JSON.stringify(item.body) });
     return res.status >= 500 ? "retry" : res.status;
@@ -267,6 +267,7 @@ function BottleCard({
   bottle,
   canRate,
   canPour,
+  canRemove,
   send,
   onNotice,
 }: {
@@ -274,10 +275,24 @@ function BottleCard({
   bottle: OutingBoardBottle;
   canRate: boolean;
   canPour: boolean;
+  /** The viewer added it, or hosts the outing. Ratings already given stay. */
+  canRemove: boolean;
   send: ReturnType<typeof useOutingQueue>["send"];
   onNotice: (msg: string) => void;
 }) {
   const [rating, setRating] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const router = useRouter();
+  async function remove() {
+    if (!bottle.entryId) return;
+    setRemoving(true);
+    const r = await attempt({ url: `/api/outings/${encodeURIComponent(code)}/bottles/${encodeURIComponent(bottle.entryId)}`, method: "DELETE", body: undefined });
+    setRemoving(false);
+    if (typeof r === "number" && r < 300) {
+      onNotice(`Removed ${bottle.label} from the list.`);
+      router.refresh();
+    } else onNotice(r === "retry" ? "No signal — try removing it again when you're back online." : `Couldn't remove ${bottle.label}.`);
+  }
   return (
     <li className={`card-flat flex flex-col gap-2 p-3 ${bottle.favourite ? "border border-accent" : ""}`} aria-label={bottle.label}>
       <div className="flex items-start justify-between gap-2">
@@ -332,6 +347,11 @@ function BottleCard({
               Log a pour →
             </Link>
           )}
+          {canRemove && bottle.entryId && (
+            <button type="button" onClick={remove} disabled={removing} className="tap-target ml-auto px-2 py-2 text-xs text-muted hover:text-foreground">
+              {removing ? "Removing…" : "Remove"}
+            </button>
+          )}
         </div>
       )}
       {rating && (
@@ -354,9 +374,12 @@ export function OutingBottleBoard({
   board,
   canAdd,
   canPour,
+  isHost = false,
 }: {
   code: string;
   board: OutingBoardBottle[];
+  /** The host may take any bottle off the list. */
+  isHost?: boolean;
   /** On the trip and the outing is open. */
   canAdd: boolean;
   /** Signed in with an account (guests can rate but have no journal). */
@@ -412,7 +435,7 @@ export function OutingBottleBoard({
       ) : (
         <ul className="flex flex-col gap-2">
           {board.map((b) => (
-            <BottleCard key={b.key} code={code} bottle={b} canRate={canAdd} canPour={canPour} send={send} onNotice={setNotice} />
+            <BottleCard key={b.key} code={code} bottle={b} canRate={canAdd} canPour={canPour} canRemove={canAdd && (b.addedByMe || isHost)} send={send} onNotice={setNotice} />
           ))}
         </ul>
       )}
