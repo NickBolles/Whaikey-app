@@ -7,7 +7,7 @@ import {
   buildBrandIndex,
   coreName,
   isMatchableCore,
-  matchBottleBrand,
+  matchBottleBrandVia,
   normalizeName,
   pickWikidataEntity,
   type BrandRef,
@@ -43,6 +43,8 @@ export interface BrandSeed {
   country?: string;
   website?: string;
   wikidata?: string;
+  /** Bottler/range names matched anywhere in a bottle name ("Old Particular"). */
+  markers?: string[];
 }
 
 export interface LogoBackfillOptions {
@@ -96,6 +98,29 @@ export interface LogoBackfillReport {
   found: Record<string, number>;
   failures: number;
   coverage: LogoCoverage | null;
+  /** Brand filing (bottles.brand_key) before → after this run, plus a sample of new filings to audit. */
+  filing?: BrandFilingReport;
+}
+
+export interface BrandFilingReport {
+  bottles: number;
+  withBrandBefore: number;
+  withBrandAfter: number;
+  newlyFiled: number;
+  refiled: number;
+  unfiled: number;
+  byVia: Record<string, number>;
+  /** Up to 50 newly-filed bottles, a stable pseudo-random sample by id. */
+  sample: Array<{ id: string; name: string; key: string; via: string }>;
+  /** Brands that gain bottles this run, busiest first (key → new bottles). */
+  gains: Record<string, number>;
+}
+
+/** Stable 32-bit hash for a deterministic sample. */
+function hash32(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
+  return h >>> 0;
 }
 
 interface BrandPlan extends BrandRef {
@@ -136,6 +161,8 @@ export function planBrands(
     const prev = plans.get(plan.key);
     if (!prev) return void plans.set(plan.key, plan);
     prev.aliases = [...new Set([...(prev.aliases ?? []), ...(plan.aliases ?? [])])];
+    prev.markers = [...new Set([...(prev.markers ?? []), ...(plan.markers ?? [])])];
+    prev.anywhere ||= plan.anywhere;
     prev.distilleryId ??= plan.distilleryId;
     prev.country ??= plan.country;
     prev.wikidataId ??= plan.wikidataId;
@@ -149,6 +176,8 @@ export function planBrands(
       key: brandKey(s.name),
       name: s.name,
       aliases: s.aliases ?? [],
+      markers: s.markers ?? [],
+      anywhere: true,
       distilleryId: null,
       country: s.country ?? null,
       wikidataId: wd?.id ?? null,
@@ -168,6 +197,7 @@ export function planBrands(
       key,
       name: seeded?.name ?? base,
       aliases,
+      anywhere: true,
       distilleryId: d.id,
       country: d.country,
       wikidataId: wd?.id ?? null,
@@ -234,6 +264,8 @@ export async function runLogoBackfill(db: DB, opts: LogoBackfillOptions = {}): P
   // 2. File bottles under brands, in id order, a page at a time.
   const counts = new Map<string, number>();
   let reassigned = 0;
+  const filing: BrandFilingReport = { bottles: 0, withBrandBefore: 0, withBrandAfter: 0, newlyFiled: 0, refiled: 0, unfiled: 0, byVia: {}, sample: [], gains: {} };
+  const sampled: Array<{ h: number; id: string; name: string; key: string; via: string }> = [];
   let cursor = "";
   for (;;) {
     const page = await db
@@ -246,8 +278,22 @@ export async function runLogoBackfill(db: DB, opts: LogoBackfillOptions = {}): P
     cursor = page[page.length - 1]!.id;
     const changes: Array<{ id: string; key: string | null }> = [];
     for (const b of page) {
-      const key = matchBottleBrand(b, index);
+      const m = matchBottleBrandVia(b, index);
+      const key = m?.key ?? null;
       if (key) counts.set(key, (counts.get(key) ?? 0) + 1);
+      filing.bottles++;
+      if (b.brandKey) filing.withBrandBefore++;
+      if (m) {
+        filing.withBrandAfter++;
+        filing.byVia[m.via] = (filing.byVia[m.via] ?? 0) + 1;
+      }
+      if (m && !b.brandKey) {
+        filing.newlyFiled++;
+        filing.gains[m.key] = (filing.gains[m.key] ?? 0) + 1;
+        sampled.push({ h: hash32(b.id), id: b.id, name: b.name, key: m.key, via: m.via });
+        if (sampled.length > 400) sampled.sort((x, y) => x.h - y.h).splice(50);
+      } else if (!m && b.brandKey) filing.unfiled++;
+      else if (m && b.brandKey && m.key !== b.brandKey) filing.refiled++;
       if (key !== b.brandKey) changes.push({ id: b.id, key });
     }
     reassigned += changes.length;
@@ -260,6 +306,9 @@ export async function runLogoBackfill(db: DB, opts: LogoBackfillOptions = {}): P
     }
   }
   log(`bottles reassigned: ${reassigned}`);
+  filing.sample = sampled.sort((x, y) => x.h - y.h).slice(0, 50).map((r) => ({ id: r.id, name: r.name, key: r.key, via: r.via }));
+  filing.gains = Object.fromEntries(Object.entries(filing.gains).sort((a, b) => b[1] - a[1]));
+  log(`brand filing: ${filing.withBrandBefore} → ${filing.withBrandAfter} of ${filing.bottles} (new ${filing.newlyFiled}, refiled ${filing.refiled}, unfiled ${filing.unfiled}) via ${JSON.stringify(filing.byVia)}`);
 
   // 3. Brand rows for brands that file at least one bottle (or are a distillery).
   const live = plans.filter((p) => (counts.get(p.key) ?? 0) > 0 || p.distilleryId);
@@ -384,7 +433,7 @@ export async function runLogoBackfill(db: DB, opts: LogoBackfillOptions = {}): P
   }
 
   const coverage = apply ? await logoCoverage(db) : null;
-  return { apply, producers: producers.length, brands: live.length, bottlesReassigned: reassigned, checked: queue.length, found, failures, coverage };
+  return { apply, producers: producers.length, brands: live.length, bottlesReassigned: reassigned, checked: queue.length, found, failures, coverage, filing };
 }
 
 function logoHash(data: Uint8Array): string {
@@ -511,6 +560,14 @@ export function coverageMarkdown(r: LogoBackfillReport): string {
     "",
     `Found this run: ${Object.entries(r.found).map(([k, v]) => `${k} ${v}`).join(", ") || "—"}`,
   ];
+  const f = r.filing;
+  if (f) {
+    lines.push(
+      "",
+      `Brand filing: ${f.withBrandBefore} → ${f.withBrandAfter} of ${f.bottles} bottles (${pct(f.withBrandBefore, f.bottles)} → ${pct(f.withBrandAfter, f.bottles)}) · new ${f.newlyFiled}, refiled ${f.refiled}, unfiled ${f.unfiled} · via ${Object.entries(f.byVia).map(([k, v]) => `${k} ${v}`).join(", ")}`,
+      `Top gains: ${Object.entries(f.gains).slice(0, 25).map(([k, v]) => `${k} +${v}`).join(", ") || "—"}`,
+    );
+  }
   if (c) {
     lines.push(
       "",

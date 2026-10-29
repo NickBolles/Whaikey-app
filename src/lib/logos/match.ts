@@ -10,8 +10,13 @@
  *    and no country contradiction.
  * 2. `matchBottleBrand`: file a catalog bottle under a brand — the distillery
  *    link when there is one, otherwise the longest known brand name the
- *    bottle's own name STARTS with ("Glenfiddich 12 Year" → glenfiddich).
- *    Generic one-word names ("Old", "John", "Single") never match.
+ *    bottle's own name STARTS with ("Glenfiddich 12 Year" → glenfiddich),
+ *    after dropping a leading vintage/age ("1990 Caol Ila" → caol-ila).
+ *    Then a curated bottler/range marker anywhere in the name ("Caol Ila
+ *    1990 Signatory Vintage", "Old Particular Mortlach" → douglas-laing), and
+ *    last a multi-word curated/distillery name anywhere ("Single Cask Caol
+ *    Ila 12" → caol-ila). Generic one-word names ("Old", "John", "Single")
+ *    never match, and Wikidata-only names only ever match as a prefix.
  */
 
 const STOP_WORDS = new Set([
@@ -72,6 +77,31 @@ export interface BrandRef {
   name: string;
   aliases?: string[];
   distilleryId?: string | null;
+  /** Bottler/range names that file a bottle wherever they appear in its name. */
+  markers?: string[];
+  /** Curated or distillery brand: a multi-word name may match anywhere in a bottle name. */
+  anywhere?: boolean;
+}
+
+/** Words that make a multi-word name too descriptive to match mid-name. */
+const DESCRIPTORS = new Set([
+  "year", "years", "yo", "aged", "age", "proof", "strength", "finish", "finished", "port", "sherry", "wood", "oak",
+  "release", "collection", "selection", "series", "bottling", "bottled", "distilled", "matured", "single", "malt",
+  "grain", "scotch", "bourbon", "rye", "cask", "casks", "barrel", "barrels", "batch", "of", "for", "by", "in",
+]);
+
+/** Whether a core may be matched in the middle of a bottle name. */
+export function isAnywhereCore(core: string): boolean {
+  if (!isMatchableCore(core)) return false;
+  const words = core.split(" ");
+  if (words.length < 2 || core.length < 7) return false;
+  const distinctive = words.filter((w) => !GENERIC.has(w) && !DESCRIPTORS.has(w) && !/^[0-9]+$/.test(w));
+  return distinctive.length >= 1 && distinctive.some((w) => w.length >= 4);
+}
+
+/** Drop a leading vintage / age so "1990 Caol Ila" and "12 Year Old Caol Ila" prefix-match. */
+function stripLeadingNoise(core: string): string {
+  return core.replace(/^(?:(?:19|20)[0-9]{2} |[0-9]{1,2} (?:year old |years old |year |yo )?)+/, "");
 }
 
 export interface BrandIndex {
@@ -79,6 +109,8 @@ export interface BrandIndex {
   byCore: Map<string, string>;
   cores: string[];
   byDistillery: Map<string, string>;
+  /** Marker / anywhere cores, longest first. */
+  anywhere: Array<{ core: string; key: string; via: "marker" | "anywhere" }>;
 }
 
 export function buildBrandIndex(brands: BrandRef[]): BrandIndex {
@@ -95,21 +127,65 @@ export function buildBrandIndex(brands: BrandRef[]): BrandIndex {
     }
   }
   const cores = [...byCore.keys()].sort((a, b) => b.length - a.length || a.localeCompare(b));
-  return { byCore, cores, byDistillery };
+  const seen = new Set<string>();
+  const anywhere: BrandIndex["anywhere"] = [];
+  for (const b of brands) {
+    for (const m of b.markers ?? []) {
+      const base = coreName(m);
+      if (!isMatchableCore(base)) continue;
+      // Also the possessive: "Hunter Laing's" normalizes to "hunter laings".
+      for (const core of base.endsWith("s") ? [base] : [base, `${base}s`]) {
+        if (seen.has(core)) continue;
+        seen.add(core);
+        anywhere.push({ core, key: b.key, via: "marker" });
+      }
+    }
+  }
+  for (const b of brands) {
+    if (!b.anywhere) continue;
+    for (const n of [b.name, ...(b.aliases ?? [])]) {
+      const core = coreName(n);
+      // Only the brand that owns the core (first writer) may claim it mid-name.
+      if (!isAnywhereCore(core) || seen.has(core) || byCore.get(core) !== b.key) continue;
+      seen.add(core);
+      anywhere.push({ core, key: b.key, via: "anywhere" });
+    }
+  }
+  // A bottler's marker beats the distillery it bottled ("Hunter Laing's Old &
+  // Rare Highland Park" → hunter-laing); longest first within each tier.
+  anywhere.sort((a, b) => (a.via === b.via ? b.core.length - a.core.length || a.core.localeCompare(b.core) : a.via === "marker" ? -1 : 1));
+  return { byCore, cores, byDistillery, anywhere };
 }
+
+export type BrandMatchVia = "distillery" | "prefix" | "marker" | "anywhere";
 
 /** The brand key a bottle is filed under, or null for no confident match. */
 export function matchBottleBrand(
   bottle: { name: string; distilleryId?: string | null },
   index: BrandIndex,
 ): string | null {
+  return matchBottleBrandVia(bottle, index)?.key ?? null;
+}
+
+/** `matchBottleBrand` plus which rule matched (for the dry-run sample). */
+export function matchBottleBrandVia(
+  bottle: { name: string; distilleryId?: string | null },
+  index: BrandIndex,
+): { key: string; via: BrandMatchVia } | null {
   if (bottle.distilleryId) {
     const viaDistillery = index.byDistillery.get(bottle.distilleryId);
-    if (viaDistillery) return viaDistillery;
+    if (viaDistillery) return { key: viaDistillery, via: "distillery" };
   }
-  const name = ` ${coreName(bottle.name)} `;
-  for (const core of index.cores) {
-    if (name.startsWith(` ${core} `)) return index.byCore.get(core)!;
+  const core = coreName(bottle.name);
+  for (const candidate of new Set([core, stripLeadingNoise(core)])) {
+    const name = ` ${candidate} `;
+    for (const c of index.cores) {
+      if (name.startsWith(` ${c} `)) return { key: index.byCore.get(c)!, via: "prefix" };
+    }
+  }
+  const name = ` ${core} `;
+  for (const a of index.anywhere ?? []) {
+    if (name.includes(` ${a.core} `)) return { key: a.key, via: a.via };
   }
   return null;
 }
