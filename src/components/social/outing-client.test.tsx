@@ -237,18 +237,18 @@ describe("OutingWatcher", () => {
     const calls = mockFetch(() => Response.json({ state: "open", stamp }));
     render(<OutingWatcher code="c0de000000" stamp="s1" />);
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(12_500);
+      await vi.advanceTimersByTimeAsync(5_500);
     });
     expect(calls).toHaveLength(1);
     expect(refresh).not.toHaveBeenCalled();
     stamp = "s2";
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(12_000);
+      await vi.advanceTimersByTimeAsync(5_000);
     });
     expect(refresh).toHaveBeenCalledTimes(1);
     const vis = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(12_000);
+      await vi.advanceTimersByTimeAsync(5_000);
     });
     expect(calls).toHaveLength(2);
     vis.mockRestore();
