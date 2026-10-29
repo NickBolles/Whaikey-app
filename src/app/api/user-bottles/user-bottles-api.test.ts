@@ -103,6 +103,29 @@ describe("/api/user-bottles", () => {
     expect(rows).toHaveLength(1);
   });
 
+  it("POST with keepExisting never demotes an owned bottle to the wishlist", async () => {
+    const own = await POST(
+      jsonRequest("/api/user-bottles", "POST", { bottleId: bottle.id, relationship: "own", store: "Shop" }),
+    );
+    expect(own.status).toBe(201);
+    const wish = await POST(
+      jsonRequest("/api/user-bottles", "POST", { bottleId: bottle.id, relationship: "wishlist", keepExisting: true }),
+    );
+    expect(wish.status).toBe(200);
+    const row = await wish.json();
+    expect(row.relationship).toBe("own");
+    expect(row.store).toBe("Shop");
+    expect(row.status).toBe("sealed");
+  });
+
+  it("POST with keepExisting adds to the wishlist when the bottle isn't on the shelf (201)", async () => {
+    const res = await POST(
+      jsonRequest("/api/user-bottles", "POST", { bottleId: bottle.id, relationship: "wishlist", keepExisting: true }),
+    );
+    expect(res.status).toBe(201);
+    expect((await res.json()).relationship).toBe("wishlist");
+  });
+
   it("POST rejects an invalid relationship (400)", async () => {
     const res = await POST(
       jsonRequest("/api/user-bottles", "POST", { bottleId: bottle.id, relationship: "borrowed" }),

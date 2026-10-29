@@ -7,11 +7,11 @@ import { PourFlow, type BottlePick, type EditEntry } from "./pour-flow";
 
 export const dynamic = "force-dynamic";
 
-export default async function PourPage({ searchParams }: { searchParams: Promise<{ bottleId?: string | string[]; edit?: string | string[] }> }) {
+export default async function PourPage({ searchParams }: { searchParams: Promise<{ bottleId?: string | string[]; edit?: string | string[]; outing?: string | string[] }> }) {
   const user = await getSessionUser();
   if (!user) return <div className="flex flex-col items-center justify-center min-h-[60dvh] px-6 text-center gap-5"><div aria-hidden className="text-5xl drop-shadow-[0_0_24px_rgba(210,123,62,0.25)]">🥃</div><div><h1 className="font-display text-2xl font-semibold">The bar is open</h1><p className="text-muted mt-2 max-w-sm">Sign in to log a pour and build your tasting journal.</p></div><Link href="/sign-in" className="btn-primary px-8 py-3">Sign in</Link></div>;
 
-  const { bottleId: bottleIdParam, edit: editParam } = await searchParams;
+  const { bottleId: bottleIdParam, edit: editParam, outing: outingParam } = await searchParams;
   const editId = Array.isArray(editParam) ? editParam[0] : editParam;
   // Journal ⋯ → Edit (STORYBOARD §3.8): the same sheet, prefilled. Owner-scoped:
   // somebody else's id reads as no entry and the sheet opens blank.
@@ -45,5 +45,7 @@ export default async function PourPage({ searchParams }: { searchParams: Promise
 
   // A queued pour is stamped with its author so a flush after someone else
   // signs in on the same browser can't hand them this note.
-  return <PourFlow userId={user.id} initialBottle={initialBottle} initialBottleMissing={Boolean(bottleId && !initialBottle)} />;
+  const outingRaw = Array.isArray(outingParam) ? outingParam[0] : outingParam;
+  const outingCode = outingRaw && /^[a-z0-9]{1,40}$/i.test(outingRaw) ? outingRaw : null;
+  return <PourFlow userId={user.id} initialBottle={initialBottle} initialBottleMissing={Boolean(bottleId && !initialBottle)} outingCode={outingCode} />;
 }

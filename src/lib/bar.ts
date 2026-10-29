@@ -44,6 +44,12 @@ export const userBottleCreateSchema = z.object({
    * than the add.
    */
   fromShareId: z.string().min(1).optional(),
+  /**
+   * Add only if the bottle isn't on the shelf yet. "Add to my wishlist" from an
+   * outing sends this so an owned (or tried) bottle is never demoted to the
+   * wishlist; the existing row comes back unchanged with 200.
+   */
+  keepExisting: z.boolean().optional(),
   ...editableFields,
 });
 
@@ -97,6 +103,7 @@ export async function upsertUserBottle(
     ),
   });
 
+  if (existing && input.keepExisting) return { row: existing, created: false };
   if (existing) {
     const [row] = await db
       .update(schema.userBottles)
@@ -120,7 +127,16 @@ export async function upsertUserBottle(
       ...ownDefaults,
       ...values,
     })
+    .onConflictDoNothing({ target: [schema.userBottles.userId, schema.userBottles.bottleId] })
     .returning();
+  if (!row) {
+    // A concurrent add won the race: never overwrite it from a keep-existing add.
+    const winner = await db.query.userBottles.findFirst({
+      where: and(eq(schema.userBottles.userId, userId), eq(schema.userBottles.bottleId, input.bottleId)),
+    });
+    if (winner && input.keepExisting) return { row: winner, created: false };
+    if (winner) return upsertUserBottle(db, userId, input);
+  }
   return { row, created: true };
 }
 

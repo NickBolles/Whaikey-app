@@ -530,6 +530,13 @@ export const pours = pgTable(
      */
     clientId: text("client_id"),
     /**
+     * The outing this pour was logged from ("Log a pour →" on an outing's
+     * bottle list), so the pour and the group tasting can be shown together.
+     * Only set when the pourer holds a seat on that outing; cleared if the
+     * outing is deleted. Says where, never how much.
+     */
+    outingId: text("outing_id").references(() => outings.id, { onDelete: "set null" }),
+    /**
      * Last time the owner edited the entry itself (rating, serving, note).
      * Null for a pour never edited. The snapshot columns above are never
      * touched by an edit — they describe the moment of the pour, and an
