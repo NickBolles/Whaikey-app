@@ -117,6 +117,7 @@ describe("matchBottleBrand — bottler markers and mid-name names", () => {
   });
   it("matches a distinctive multi-word curated name mid-name", () => {
     expect(matchBottleBrandVia({ name: "Single Cask Caol Ila 12" }, index)).toEqual({ key: "caol-ila", via: "anywhere" });
+    expect(matchBottleBrand({ name: "Mortlach Big Peat Caol Ila Edition" }, index)).toBe("douglas-laing"); // marker beats a longer name
   });
   it("still prefers the distillery link and the prefix", () => {
     expect(matchBottleBrandVia({ name: "Caol Ila 1990 Signatory", distilleryId: "caol-ila" }, index)?.via).toBe("distillery");

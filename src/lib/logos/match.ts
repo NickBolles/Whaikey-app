@@ -147,8 +147,9 @@ export function buildBrandIndex(brands: BrandRef[]): BrandIndex {
       anywhere.push({ core, key: b.key, via: "anywhere" });
     }
   }
-  // Markers before plain names at equal length; longer cores first overall.
-  anywhere.sort((a, b) => b.core.length - a.core.length || (a.via === b.via ? a.core.localeCompare(b.core) : a.via === "marker" ? -1 : 1));
+  // A bottler's marker beats the distillery it bottled ("Hunter Laing's Old &
+  // Rare Highland Park" → hunter-laing); longest first within each tier.
+  anywhere.sort((a, b) => (a.via === b.via ? b.core.length - a.core.length || a.core.localeCompare(b.core) : a.via === "marker" ? -1 : 1));
   return { byCore, cores, byDistillery, anywhere };
 }
 

@@ -1,7 +1,7 @@
 {
   "_comment": "Curated brands the logo backfill (scripts/brand-logos.ts) files bottles under, beyond our distilleries and Wikidata's whisky producers. Mostly independent bottlers and US brands with many catalog bottles. `website` is the official site; the backfill only takes its icon when the homepage names the brand (guards against a stale/parked domain). docs/DATA_SOURCES.md §5.4.",
   "brands": [
-    { "name": "Gordon & MacPhail", "country": "Scotland", "website": "https://www.gordonandmacphail.com", "markers": ["Gordon & MacPhail", "Gordon and MacPhail", "G&M", "Connoisseurs Choice", "Connoisseur's Choice"] },
+    { "name": "Gordon & MacPhail", "country": "Scotland", "website": "https://www.gordonandmacphail.com", "markers": ["Gordon & MacPhail", "Gordon and MacPhail", "Gordon & Mac Phail", "G&M", "Connoisseurs Choice", "Connoisseur's Choice"] },
     { "name": "Signatory Vintage", "country": "Scotland", "aliases": ["Signatory"], "markers": ["Signatory Vintage", "Signatory", "Un-Chillfiltered Collection"] },
     { "name": "Duncan Taylor", "country": "Scotland", "website": "https://www.duncantaylor.com", "markers": ["Duncan Taylor", "Rarest of the Rare"] },
     { "name": "Old Elk", "country": "USA", "website": "https://www.oldelk.com" },
