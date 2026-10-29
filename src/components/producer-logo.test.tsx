@@ -9,7 +9,7 @@ vi.mock("next/image", () => ({
   ),
 }));
 
-import { markTone, ProducerLogo } from "@/components/producer-logo";
+import { markTone, plateWidth, ProducerLogo } from "@/components/producer-logo";
 import { RemoteBottleImage } from "@/components/remote-bottle-image";
 
 afterEach(cleanup);
@@ -53,6 +53,20 @@ describe("ProducerLogo", () => {
     spy.mockReturnValue(null);
     expect(markTone(document.createElement("img"))).toBe("dark");
     spy.mockRestore();
+  });
+  it("widens the plate to a wide wordmark's aspect ratio, capped by maxWidth", () => {
+    render(<ProducerLogo logoKey="wide-mark" name="Wide" size={30} maxWidth={96} />);
+    const img = screen.getByRole("img");
+    Object.defineProperty(img, "naturalWidth", { value: 400 });
+    Object.defineProperty(img, "naturalHeight", { value: 100 });
+    fireEvent.load(img);
+    // inner height 22 × 4 + padding 8 = 96 (the cap)
+    expect(screen.getByTestId("producer-logo").style.width).toBe("96px");
+    expect(screen.getByTestId("producer-logo").style.height).toBe("30px");
+    expect(plateWidth(2, 30, 4, 96)).toBe(52);
+    expect(plateWidth(0.5, 30, 4, 96)).toBe(30); // tall marks stay square
+    expect(plateWidth(undefined, 18, 2, 54)).toBe(18);
+    expect(plateWidth(10, 18, 2, 54)).toBe(54);
   });
   it("falls back to the monogram when the logo fails, or to nothing on cards", () => {
     const { rerender } = render(<ProducerLogo logoKey="x" name="Buffalo Trace" />);

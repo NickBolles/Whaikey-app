@@ -54,7 +54,7 @@ export function BottleCard({ bottle }: BottleCardProps) {
           <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-sm text-muted">
             {/* The producer's mark, small, when we hold a licensed one; the
                 silhouette already carries the monogram, so no fallback here. */}
-            <ProducerLogo logoKey={bottle.brandLogo} name={bottle.distillery ?? bottle.name} size={18} fallback="none" />
+            <ProducerLogo logoKey={bottle.brandLogo} name={bottle.distillery ?? bottle.name} size={18} maxWidth={54} fallback="none" />
             {origin && <span className="truncate">{origin}</span>}
           </div>
         )}
