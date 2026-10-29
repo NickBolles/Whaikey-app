@@ -4,7 +4,9 @@ import {
   buildBrandIndex,
   coreName,
   isMatchableCore,
+  isAnywhereCore,
   matchBottleBrand,
+  matchBottleBrandVia,
   normalizeCountry,
   pickWikidataEntity,
   type WikidataCandidate,
@@ -91,5 +93,41 @@ describe("pickWikidataEntity", () => {
   it("never matches a person or place of the same name", () => {
     const human = cand({ id: "Qh", label: "Johnnie Walker", instanceOf: ["Q5"] });
     expect(pickWikidataEntity({ name: "Johnnie Walker" }, [human])).toBeNull();
+  });
+});
+
+describe("matchBottleBrand — bottler markers and mid-name names", () => {
+  const index = buildBrandIndex([
+    { key: "signatory-vintage", name: "Signatory Vintage", markers: ["Signatory Vintage", "Signatory", "Un-Chillfiltered Collection"], anywhere: true },
+    { key: "douglas-laing", name: "Douglas Laing", markers: ["Old Particular", "Big Peat"], anywhere: true },
+    { key: "gordon-macphail", name: "Gordon & MacPhail", markers: ["G&M", "Connoisseurs Choice"], anywhere: true },
+    { key: "caol-ila", name: "Caol Ila", distilleryId: "caol-ila", anywhere: true },
+    { key: "cask-strength", name: "Cask Strength", anywhere: true }, // descriptive: never mid-name
+    { key: "wd-only", name: "Rare Breed" }, // Wikidata-only: prefix only
+  ]);
+  it("drops a leading vintage or age before the prefix match", () => {
+    expect(matchBottleBrandVia({ name: "1990 Caol Ila Single Malt" }, index)).toEqual({ key: "caol-ila", via: "prefix" });
+    expect(matchBottleBrand({ name: "12 Year Old Caol Ila" }, index)).toBe("caol-ila");
+  });
+  it("files a bottler marker anywhere in the name", () => {
+    expect(matchBottleBrandVia({ name: "Mortlach 1995 Signatory Vintage Cask 123" }, index)).toEqual({ key: "signatory-vintage", via: "marker" });
+    expect(matchBottleBrand({ name: "Mortlach 20 Year Old Particular" }, index)).toBe("douglas-laing");
+    expect(matchBottleBrand({ name: "Linkwood 1999 Connoisseurs Choice" }, index)).toBe("gordon-macphail");
+    expect(matchBottleBrand({ name: "Glen Elgin G&M 2008" }, index)).toBe("gordon-macphail");
+  });
+  it("matches a distinctive multi-word curated name mid-name", () => {
+    expect(matchBottleBrandVia({ name: "Single Cask Caol Ila 12" }, index)).toEqual({ key: "caol-ila", via: "anywhere" });
+  });
+  it("still prefers the distillery link and the prefix", () => {
+    expect(matchBottleBrandVia({ name: "Caol Ila 1990 Signatory", distilleryId: "caol-ila" }, index)?.via).toBe("distillery");
+    expect(matchBottleBrand({ name: "Caol Ila 1990 Signatory" }, index)).toBe("caol-ila");
+  });
+  it("never matches descriptive or Wikidata-only names mid-name", () => {
+    expect(matchBottleBrand({ name: "Buffalo Trace Cask Strength" }, index)).toBeNull();
+    expect(matchBottleBrand({ name: "Wild Turkey Rare Breed" }, index)).toBeNull();
+    expect(matchBottleBrand({ name: "Particular Old Reserve" }, index)).toBeNull();
+    expect(isAnywhereCore("cask strength")).toBe(false);
+    expect(isAnywhereCore("single malt")).toBe(false);
+    expect(isAnywhereCore("caol ila")).toBe(true);
   });
 });
