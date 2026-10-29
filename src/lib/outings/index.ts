@@ -276,6 +276,8 @@ export async function claimOutingGuestSeat(db: DB, outingId: string, guestToken:
   }
   await db.update(schema.outingTastings).set({ participantId: mine.participantId }).where(eq(schema.outingTastings.participantId, guest.participantId));
   await db.update(schema.outingNotes).set({ participantId: mine.participantId }).where(eq(schema.outingNotes.participantId, guest.participantId));
+  // Bottles the guest put on the shared list move with them (the FK would cascade-delete them).
+  await db.update(schema.outingBottles).set({ participantId: mine.participantId }).where(eq(schema.outingBottles.participantId, guest.participantId));
   await db.delete(schema.outingParticipants).where(eq(schema.outingParticipants.id, guest.participantId));
   return true;
 }

@@ -22,7 +22,12 @@ import type { OutingBoardBottle } from "@/lib/outings";
 
 type QueueItem = { qid: string; url: string; method: "POST" | "PATCH"; body: unknown; label: string; kind: "bottle" | "rating" };
 
-const queueKey = (code: string) => `caskfolk:outing-queue:${code}`;
+/**
+ * Keyed by outing AND participant: on a shared phone, a queued write must only
+ * ever be shown to and replayed by the person who made it (never sent with the
+ * next account's cookies).
+ */
+const queueKey = (scope: string) => `caskfolk:outing-queue:${scope}`;
 const QUEUE_EVENT = "caskfolk-outing-queue";
 
 function readQueue(code: string): QueueItem[] {
@@ -337,12 +342,14 @@ function BottleCard({
         </ul>
       )}
       {bottle.notYet.length > 0 && <p className="text-xs text-muted">Not yet: {bottle.notYet.join(", ")}</p>}
-      {canRate && (
+      {(canRate || (canRemove && bottle.entryId)) && (
         <div className="flex flex-wrap items-center gap-2">
+          {canRate && (
           <button type="button" aria-expanded={rating} onClick={() => setRating((o) => !o)} className="btn-secondary px-4 py-2 text-sm">
             {bottle.mine ? "Edit my rating" : "Rate"}
           </button>
-          {canPour && bottle.bottleId && (
+          )}
+          {canRate && canPour && bottle.bottleId && (
             <Link href={`/pour?bottleId=${encodeURIComponent(bottle.bottleId)}`} className="tap-target px-2 py-2 text-sm text-accent">
               Log a pour →
             </Link>
@@ -375,17 +382,20 @@ export function OutingBottleBoard({
   canAdd,
   canPour,
   isHost = false,
+  participantId = null,
 }: {
   code: string;
   board: OutingBoardBottle[];
   /** The host may take any bottle off the list. */
   isHost?: boolean;
+  /** The viewer's seat; scopes the offline queue to this person. */
+  participantId?: string | null;
   /** On the trip and the outing is open. */
   canAdd: boolean;
   /** Signed in with an account (guests can rate but have no journal). */
   canPour: boolean;
 }) {
-  const { pending, send } = useOutingQueue(code);
+  const { pending, send } = useOutingQueue(`${code}:${participantId ?? "none"}`);
   const [adding, setAdding] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const pendingBottles = pending.filter((p) => p.kind === "bottle" && !board.some((b) => b.label === p.label));
@@ -435,7 +445,7 @@ export function OutingBottleBoard({
       ) : (
         <ul className="flex flex-col gap-2">
           {board.map((b) => (
-            <BottleCard key={b.key} code={code} bottle={b} canRate={canAdd} canPour={canPour} canRemove={canAdd && (b.addedByMe || isHost)} send={send} onNotice={setNotice} />
+            <BottleCard key={b.key} code={code} bottle={b} canRate={canAdd} canPour={canPour} canRemove={isHost || (!!participantId && b.addedByMe)} send={send} onNotice={setNotice} />
           ))}
         </ul>
       )}

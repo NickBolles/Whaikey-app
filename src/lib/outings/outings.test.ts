@@ -272,6 +272,13 @@ describe("outings (D22)", () => {
     const later = await person(db, "later_e");
     expect(await claimOutingGuestSeat(db, outing.id, g.token!, later.id, now)).toBe(true);
     expect((await getOutingView(db, outing, later.id, await findOutingSeat(db, outing.id, { userId: later.id }))).feed[0]).toMatchObject({ label: "Guest sample", mine: true });
+    // Claiming into an account that already has a seat merges: the guest's bottle additions move too.
+    const g3 = await joinOutingAsGuest(db, outing.id, adult, now);
+    const g3Seat = (await findOutingSeat(db, outing.id, { guestToken: g3.token }, now))!;
+    await addTasting(db, outing, g3Seat, { label: "Guest-only cask", rating: 4 });
+    expect(await claimOutingGuestSeat(db, outing.id, g3.token!, friend.id, now)).toBe(true);
+    const moved = (await db.select().from(schema.outingBottles)).filter((b) => b.participantId === friendSeat.participantId);
+    expect(moved.length).toBeGreaterThan(0);
 
     const g2 = await joinOutingAsGuest(db, outing.id, adult, now);
     await sweepOutingGuests(db, new Date(now.getTime() + 25 * 3600_000));

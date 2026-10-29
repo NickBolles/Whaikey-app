@@ -114,7 +114,7 @@ describe("OutingBottleBoard", () => {
     vi.stubGlobal("fetch", fetchMock);
     const { rerender } = render(<OutingBottleBoard code="abc123def4" board={[bottle()]} canAdd canPour />);
     expect(screen.queryByRole("button", { name: "Remove" })).toBeNull();
-    rerender(<OutingBottleBoard code="abc123def4" board={[bottle({ addedByMe: true })]} canAdd canPour />);
+    rerender(<OutingBottleBoard code="abc123def4" board={[bottle({ addedByMe: true })]} canAdd canPour participantId="p1" />);
     fireEvent.click(screen.getByRole("button", { name: "Remove" }));
     await waitFor(() => expect(refresh).toHaveBeenCalled());
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, { method: string }];
@@ -124,5 +124,18 @@ describe("OutingBottleBoard", () => {
     expect(screen.getByRole("button", { name: "Remove" })).toBeTruthy();
     rerender(<OutingBottleBoard code="abc123def4" board={[bottle({ entryId: null })]} canAdd canPour isHost />);
     expect(screen.queryByRole("button", { name: "Remove" })).toBeNull();
+  });
+  it("the offline queue belongs to one participant: another seat on the same phone never sees or replays it", async () => {
+    window.localStorage.setItem(
+      "caskfolk:outing-queue:abc123def4:p1",
+      JSON.stringify([{ qid: "q1", url: "/api/outings/abc123def4/bottles", method: "POST", body: { label: "Secret cask" }, label: "Secret cask", kind: "bottle" }]),
+    );
+    const fetchMock = vi.fn(async () => new Response("{}", { status: 201 }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<OutingBottleBoard code="abc123def4" board={[]} canAdd canPour participantId="p2" />);
+    await act(async () => {});
+    expect(screen.queryByText("Secret cask")).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(window.localStorage.getItem("caskfolk:outing-queue:abc123def4:p1")).not.toBeNull();
   });
 });

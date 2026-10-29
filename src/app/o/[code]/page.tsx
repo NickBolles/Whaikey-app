@@ -204,7 +204,7 @@ export default async function OutingPage({
       )}
 
       {onTrip && (open || view.board.length > 0) && (
-        <OutingBottleBoard code={code} board={view.board} canAdd={!!seat && open} canPour={!!user && !!seat && !seat.guest} isHost={view.isHost} />
+        <OutingBottleBoard code={code} board={view.board} canAdd={!!seat && open} canPour={!!user && !!seat && !seat.guest} isHost={view.isHost} participantId={seat?.participantId ?? null} />
       )}
 
       {seat && open && <QuickAddTasting code={code} signedIn={!!user && !seat.guest} initialBottle={initialBottle} />}
