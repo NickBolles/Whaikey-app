@@ -752,7 +752,20 @@ export function buildBottleBoard(
   if (fav) fav.favourite = true;
   return out
     .sort((a, c) => a.at - c.at)
-    .map(({ mean: _m, raters: _r, at: _a, ...rest }) => rest);
+    .map((x): OutingBoardBottle => ({
+      key: x.key,
+      entryId: x.entryId,
+      label: x.label,
+      bottleId: x.bottleId,
+      addedBy: x.addedBy,
+      addedByMe: x.addedByMe,
+      votes: x.votes,
+      notYet: x.notYet,
+      average: x.average,
+      groupTags: x.groupTags,
+      favourite: x.favourite,
+      mine: x.mine,
+    }));
 }
 
 export async function getOutingView(db: DB, outing: schema.Outing, viewerUserId: string | null, seat: OutingSeat | null): Promise<OutingView> {

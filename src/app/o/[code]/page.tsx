@@ -21,6 +21,7 @@ import {
   QuickAddTasting,
   RideReminder,
 } from "@/components/social/outing-client";
+import { OutingBottleBoard } from "@/components/social/outing-bottles";
 import { BRAND_NAME } from "@/lib/brand";
 
 export const dynamic = "force-dynamic";
@@ -106,15 +107,16 @@ export default async function OutingPage({
 
       {!seat && !view.isHost && open && !guestSeatToClaim &&
         (user ? (
-          <div className="flex justify-center">
+          <div className="flex flex-col items-center gap-2">
             <JoinOutingButton code={code} />
+            <p className="text-center text-xs text-muted">Everyone on the outing sees each other&rsquo;s ratings and notes for the bottles you share. Amounts are never shown.</p>
           </div>
         ) : (
           <GuestJoinForm
             code={code}
             markets={OFFERED_MARKETS}
             endpoint="/api/outings/join"
-            intro="Join as a guest — no account needed for the day. What you log is kept for 24 hours unless you create one."
+            intro="Join as a guest — no account needed for the day. Everyone on the outing sees each other's ratings and notes for the bottles you share; amounts are never shown. What you log is kept for 24 hours unless you create one."
             submitLabel="Join the outing"
             closedCopy="This outing has ended or the link is wrong."
           />
@@ -199,6 +201,10 @@ export default async function OutingPage({
             </a>
           </div>
         </section>
+      )}
+
+      {onTrip && (open || view.board.length > 0) && (
+        <OutingBottleBoard code={code} board={view.board} canAdd={!!seat && open} canPour={!!user && !!seat && !seat.guest} />
       )}
 
       {seat && open && <QuickAddTasting code={code} signedIn={!!user && !seat.guest} initialBottle={initialBottle} />}
