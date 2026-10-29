@@ -57,6 +57,7 @@ const baseView = (over: Partial<OutingView> = {}): OutingView => ({
   people: [{ name: "@jordan", guest: false }],
   feed: [],
   recap: null,
+  board: [],
   stamp: "s",
   ...over,
 });

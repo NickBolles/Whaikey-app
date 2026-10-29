@@ -506,7 +506,7 @@ export function OutingWatcher({ code, stamp }: { code: string; stamp: string }) 
         router.refresh();
       }
     };
-    const id = window.setInterval(() => void tick(), 12000);
+    const id = window.setInterval(() => void tick(), 5000);
     return () => {
       live = false;
       window.clearInterval(id);

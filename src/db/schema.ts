@@ -2597,6 +2597,33 @@ export const outingTastings = pgTable(
   (t) => [index("outing_tastings_outing_idx").on(t.outingId), index("outing_tastings_participant_idx").on(t.participantId)],
 );
 
+/**
+ * The outing's shared bottle list ("the flight"): anyone on the trip adds a
+ * bottle — by search, barcode or label scan, or a typed name for a cask
+ * sample — and it appears for everyone. `dedupeKey` (`b:<bottleId>` or
+ * `l:<normalised label>`) makes the same bottle added twice one entry. Who
+ * added it is the participant; nothing here records amounts.
+ */
+export const outingBottles = pgTable(
+  "outing_bottles",
+  {
+    id: id(),
+    outingId: text("outing_id")
+      .notNull()
+      .references(() => outings.id, { onDelete: "cascade" }),
+    participantId: text("participant_id")
+      .notNull()
+      .references(() => outingParticipants.id, { onDelete: "cascade" }),
+    bottleId: text("bottle_id").references(() => bottles.id, { onDelete: "set null" }),
+    label: text("label").notNull(),
+    dedupeKey: text("dedupe_key").notNull(),
+    /** Set by the host removing it from the list (moderation hook). */
+    hiddenAt: timestamp("hidden_at", { withTimezone: true, mode: "date" }),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("outing_bottles_outing_key_uq").on(t.outingId, t.dedupeKey), index("outing_bottles_participant_idx").on(t.participantId)],
+);
+
 /** A line on the outing's shared feed ("the warehouse tour was the highlight"). */
 export const outingNotes = pgTable(
   "outing_notes",
