@@ -1,5 +1,6 @@
+// @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 const refresh = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh, push: vi.fn(), replace: vi.fn() }) }));
@@ -38,7 +39,10 @@ describe("OutingBottleBoard", () => {
     window.localStorage.clear();
     refresh.mockReset();
   });
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
 
   it("shows everyone's verdict, the group average, the favourite and who hasn't rated — never amounts", () => {
     const { container } = render(<OutingBottleBoard code="abc123def4" board={[bottle()]} canAdd canPour />);

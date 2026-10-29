@@ -59,7 +59,7 @@ describe("outing bottle list", () => {
 
     const view = await getOutingView(db, outing, host.id, hostSeat);
     expect(view.board.map((x) => x.label)).toEqual(["Eagle Rare 10", "Cask 1142  Sample", "Blanton's"]);
-    expect(view.board[0]).toMatchObject({ addedBy: "You", addedByMe: true, notYet: ["You", "@friend_l"], votes: [] });
+    expect(view.board[0]).toMatchObject({ addedBy: "You", addedByMe: true, notYet: ["You", "friend_l"], votes: [] });
     expect(view.board[2].addedBy).not.toBe("You");
 
     await endOuting(db, host.id, outing.id);
@@ -89,12 +89,12 @@ describe("outing bottle list", () => {
     expect(erRow.average).toBe(4.5);
     expect(erRow.favourite).toBe(true);
     expect(erRow.votes.map((v) => [v.who, v.rating])).toEqual([
-      ["@host_g", 4],
+      ["host_g", 4],
       ["You", 5],
     ]);
     expect(erRow.votes[0].note).toBe("Cherry cola");
     expect(erRow.groupTags[0]).toBe("Vanilla");
-    expect(erRow.notYet).toEqual(["@third_g"]);
+    expect(erRow.notYet).toEqual(["third_g"]);
     expect(erRow.mine).toMatchObject({ rating: 5 });
     expect(view.board.find((x) => x.label === "Buffalo Trace")!.favourite).toBe(false);
     // Responsible-drinking hard rules: nothing on the board is a tally or an amount.
