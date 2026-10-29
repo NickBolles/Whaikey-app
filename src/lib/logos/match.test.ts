@@ -102,6 +102,8 @@ describe("matchBottleBrand — bottler markers and mid-name names", () => {
     { key: "douglas-laing", name: "Douglas Laing", markers: ["Old Particular", "Big Peat"], anywhere: true },
     { key: "gordon-macphail", name: "Gordon & MacPhail", markers: ["G&M", "Connoisseurs Choice"], anywhere: true },
     { key: "caol-ila", name: "Caol Ila", distilleryId: "caol-ila", anywhere: true },
+    { key: "hunter-laing", name: "Hunter Laing", markers: ["Hunter Laing", "Hepburn's Choice"], anywhere: true },
+    { key: "highland-park", name: "Highland Park", distilleryId: "highland-park", anywhere: true },
     { key: "cask-strength", name: "Cask Strength", anywhere: true }, // descriptive: never mid-name
     { key: "wd-only", name: "Rare Breed" }, // Wikidata-only: prefix only
   ]);
@@ -114,6 +116,10 @@ describe("matchBottleBrand — bottler markers and mid-name names", () => {
     expect(matchBottleBrand({ name: "Mortlach 20 Year Old Particular" }, index)).toBe("douglas-laing");
     expect(matchBottleBrand({ name: "Linkwood 1999 Connoisseurs Choice" }, index)).toBe("gordon-macphail");
     expect(matchBottleBrand({ name: "Glen Elgin G&M 2008" }, index)).toBe("gordon-macphail");
+  });
+  it("matches a bottler marker in the possessive", () => {
+    expect(matchBottleBrandVia({ name: "Hunter Laing's Old & Rare Highland Park" }, index)).toEqual({ key: "hunter-laing", via: "marker" });
+    expect(matchBottleBrand({ name: "Ardbeg 1999 Hunter Laing's Old Malt Cask" }, index)).toBe("hunter-laing");
   });
   it("matches a distinctive multi-word curated name mid-name", () => {
     expect(matchBottleBrandVia({ name: "Single Cask Caol Ila 12" }, index)).toEqual({ key: "caol-ila", via: "anywhere" });

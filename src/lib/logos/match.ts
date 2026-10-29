@@ -131,10 +131,14 @@ export function buildBrandIndex(brands: BrandRef[]): BrandIndex {
   const anywhere: BrandIndex["anywhere"] = [];
   for (const b of brands) {
     for (const m of b.markers ?? []) {
-      const core = coreName(m);
-      if (!isMatchableCore(core) || seen.has(core)) continue;
-      seen.add(core);
-      anywhere.push({ core, key: b.key, via: "marker" });
+      const base = coreName(m);
+      if (!isMatchableCore(base)) continue;
+      // Also the possessive: "Hunter Laing's" normalizes to "hunter laings".
+      for (const core of base.endsWith("s") ? [base] : [base, `${base}s`]) {
+        if (seen.has(core)) continue;
+        seen.add(core);
+        anywhere.push({ core, key: b.key, via: "marker" });
+      }
     }
   }
   for (const b of brands) {
