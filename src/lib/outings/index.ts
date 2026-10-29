@@ -78,6 +78,14 @@ export const tastingUpdateSchema = z
   })
   .strict();
 
+export const outingBottleSchema = z
+  .object({
+    bottleId: z.string().min(1).max(128).optional(),
+    label: z.string().trim().min(2).max(120).optional(),
+  })
+  .strict()
+  .refine((v) => !!v.bottleId || !!v.label, "a bottle or a name");
+
 export const outingNoteSchema = z.object({ body: z.string().trim().min(1).max(280) }).strict();
 
 export { guestJoinSchema };
@@ -274,7 +282,7 @@ export async function claimOutingGuestSeat(db: DB, outingId: string, guestToken:
 
 export type AddTastingResult = { id: string } | { error: "not_open" | "bottle_not_found" | "too_many" };
 
-async function atCap(db: DB, table: typeof schema.outingTastings | typeof schema.outingNotes, participantId: string) {
+async function atCap(db: DB, table: typeof schema.outingTastings | typeof schema.outingNotes | typeof schema.outingBottles, participantId: string) {
   const [row] = await db.select({ n: sql<number>`count(*)` }).from(table).where(eq(table.participantId, participantId));
   return Number(row?.n ?? 0) >= OUTING_ITEM_CAP;
 }
@@ -313,6 +321,8 @@ export async function addTasting(
       note: input.note || null,
     })
     .returning({ id: schema.outingTastings.id });
+  // A tasting puts its bottle on the group's list too, so it fills in for everyone.
+  await addOutingBottle(db, outing, seat, bottleId ? { bottleId } : { label }).catch(() => null);
   return { id: row.id };
 }
 
@@ -338,6 +348,67 @@ export async function deleteOwnItem(db: DB, outing: schema.Outing, seat: OutingS
     .delete(table)
     .where(and(eq(table.id, id), eq(table.outingId, outing.id), eq(table.participantId, seat.participantId)))
     .returning({ id: table.id });
+  return rows.length > 0;
+}
+
+/** One entry per bottle: a catalog bottle by id, anything else by its normalised name. */
+export const outingBottleKey = (bottleId: string | null | undefined, label: string) => (bottleId ? `b:${bottleId}` : `l:${normLabel(label)}`);
+
+export type AddOutingBottleResult = { id: string; existed: boolean } | { error: "not_open" | "bottle_not_found" | "too_many" };
+
+/**
+ * Put a bottle on the outing's shared list. Idempotent per bottle: adding one
+ * that's already there returns the existing entry (`existed`), so two people
+ * scanning the same bottle — or an offline retry — make one entry.
+ */
+export async function addOutingBottle(
+  db: DB,
+  outing: schema.Outing,
+  seat: OutingSeat,
+  input: z.infer<typeof outingBottleSchema>,
+): Promise<AddOutingBottleResult> {
+  if (outing.state !== "open") return { error: "not_open" };
+  let label = input.label ?? "";
+  let bottleId: string | null = null;
+  if (input.bottleId) {
+    const bottle = await db.query.bottles.findFirst({ where: eq(schema.bottles.id, input.bottleId) });
+    if (!bottle || !canViewBottle(bottle, seat.userId ?? undefined)) return { error: "bottle_not_found" };
+    bottleId = bottle.id;
+    label = bottle.name;
+  }
+  const dedupeKey = outingBottleKey(bottleId, label);
+  const existing = await db.query.outingBottles.findFirst({
+    columns: { id: true },
+    where: and(eq(schema.outingBottles.outingId, outing.id), eq(schema.outingBottles.dedupeKey, dedupeKey)),
+  });
+  if (existing) return { id: existing.id, existed: true };
+  if (await atCap(db, schema.outingBottles, seat.participantId)) return { error: "too_many" };
+  const [row] = await db
+    .insert(schema.outingBottles)
+    .values({ id: crypto.randomUUID(), outingId: outing.id, participantId: seat.participantId, bottleId, label, dedupeKey })
+    .onConflictDoNothing()
+    .returning({ id: schema.outingBottles.id });
+  if (row) return { id: row.id, existed: false };
+  const raced = await db.query.outingBottles.findFirst({
+    columns: { id: true },
+    where: and(eq(schema.outingBottles.outingId, outing.id), eq(schema.outingBottles.dedupeKey, dedupeKey)),
+  });
+  return raced ? { id: raced.id, existed: true } : { error: "not_open" };
+}
+
+/** Remove a bottle you added (or, host, anyone's) from the list. Tastings stay. */
+export async function removeOutingBottle(db: DB, outing: schema.Outing, seat: OutingSeat | null, isHost: boolean, id: string) {
+  const own = seat ? eq(schema.outingBottles.participantId, seat.participantId) : sql`false`;
+  const rows = isHost
+    ? await db
+        .update(schema.outingBottles)
+        .set({ hiddenAt: new Date() })
+        .where(and(eq(schema.outingBottles.id, id), eq(schema.outingBottles.outingId, outing.id)))
+        .returning({ id: schema.outingBottles.id })
+    : await db
+        .delete(schema.outingBottles)
+        .where(and(eq(schema.outingBottles.id, id), eq(schema.outingBottles.outingId, outing.id), own))
+        .returning({ id: schema.outingBottles.id });
   return rows.length > 0;
 }
 
@@ -480,6 +551,8 @@ export interface OutingView {
   /** Only for the host and people on the trip — a bystander with the link sees the join screen. */
   feed: OutingFeedItem[];
   recap: OutingRecap | null;
+  /** The shared bottle list with everyone's verdicts (trip members only). */
+  board: OutingBoardBottle[];
   /** Changes whenever something visible changes — the client polls it. */
   stamp: string;
 }
@@ -558,6 +631,130 @@ export function buildRecap(rows: Array<{ label: string; bottleId: string | null;
   };
 }
 
+export interface OutingBoardVote {
+  who: string;
+  mine: boolean;
+  rating: number | null;
+  note: string | null;
+  tags: string[];
+}
+
+/**
+ * One bottle on the outing's shared list with what everyone thought of it.
+ * Ratings, notes and descriptors only — no pours, amounts or per-person
+ * counts exist here to show (docs/RESPONSIBLE hard rules).
+ */
+export interface OutingBoardBottle {
+  key: string;
+  /** The list entry; null for a bottle only known from a tasting logged before the list existed. */
+  entryId: string | null;
+  label: string;
+  bottleId: string | null;
+  addedBy: string | null;
+  addedByMe: boolean;
+  votes: OutingBoardVote[];
+  /** People on the trip who haven't rated it yet. */
+  notYet: string[];
+  average: number | null;
+  /** Descriptors across everyone's wheels, most-named first. */
+  groupTags: string[];
+  favourite: boolean;
+  /** The viewer's own tasting of this bottle, to edit in place. */
+  mine: { id: string; rating: number | null; flavorTags: Record<string, number> | null; note: string | null } | null;
+}
+
+interface BoardEntryRow {
+  id: string;
+  participantId: string;
+  bottleId: string | null;
+  label: string;
+  dedupeKey: string;
+  createdAt: Date;
+}
+interface BoardTastingRow {
+  id: string;
+  participantId: string;
+  bottleId: string | null;
+  label: string;
+  rating: number | null;
+  flavorTags: Record<string, number> | null;
+  note: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/**
+ * Pure: the per-bottle group view. `people` is the visible trip (participant
+ * id → display name); rows from anyone outside it must already be filtered.
+ * One voice per person per bottle — their latest tasting.
+ */
+export function buildBottleBoard(
+  entries: BoardEntryRow[],
+  tastings: BoardTastingRow[],
+  people: Array<{ participantId: string; name: string }>,
+  viewerParticipantId: string | null,
+): OutingBoardBottle[] {
+  const names = new Map(people.map((p) => [p.participantId, p.name]));
+  const byKey = new Map<string, { entry: BoardEntryRow | null; label: string; bottleId: string | null; at: number }>();
+  for (const e of [...entries].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())) {
+    if (!byKey.has(e.dedupeKey)) byKey.set(e.dedupeKey, { entry: e, label: e.label, bottleId: e.bottleId, at: e.createdAt.getTime() });
+  }
+  const latest = new Map<string, Map<string, BoardTastingRow>>();
+  for (const t of tastings) {
+    const key = outingBottleKey(t.bottleId, t.label);
+    if (!byKey.has(key)) byKey.set(key, { entry: null, label: t.label, bottleId: t.bottleId, at: t.createdAt.getTime() });
+    const per = latest.get(key) ?? new Map<string, BoardTastingRow>();
+    const prev = per.get(t.participantId);
+    if (!prev || prev.updatedAt.getTime() < t.updatedAt.getTime()) per.set(t.participantId, t);
+    latest.set(key, per);
+  }
+  const out: Array<OutingBoardBottle & { mean: number | null; raters: number; at: number }> = [];
+  for (const [key, b] of byKey) {
+    const per = latest.get(key) ?? new Map<string, BoardTastingRow>();
+    const votes: OutingBoardVote[] = [];
+    const tagPeople = new Map<string, number>();
+    const ratings: number[] = [];
+    for (const p of people) {
+      const t = per.get(p.participantId);
+      if (!t) continue;
+      votes.push({ who: p.name, mine: p.participantId === viewerParticipantId, rating: t.rating, note: t.note, tags: tagNames(t.flavorTags) });
+      if (t.rating != null) ratings.push(t.rating);
+      for (const tag of Object.keys(t.flavorTags ?? {})) tagPeople.set(tag, (tagPeople.get(tag) ?? 0) + 1);
+    }
+    const mean = ratings.length ? ratings.reduce((a, c) => a + c, 0) / ratings.length : null;
+    const own = viewerParticipantId ? per.get(viewerParticipantId) : undefined;
+    out.push({
+      key,
+      entryId: b.entry?.id ?? null,
+      label: b.label,
+      bottleId: b.bottleId,
+      addedBy: b.entry ? (names.get(b.entry.participantId) ?? null) : null,
+      addedByMe: !!b.entry && b.entry.participantId === viewerParticipantId,
+      votes,
+      notYet: people.filter((p) => !per.has(p.participantId)).map((p) => p.name),
+      average: mean == null ? null : Math.round(mean * 10) / 10,
+      groupTags: [...tagPeople.entries()]
+        .sort((a, c) => c[1] - a[1])
+        .slice(0, 5)
+        .map(([t]) => leafLabel(t) ?? t),
+      favourite: false,
+      mine: own ? { id: own.id, rating: own.rating, flavorTags: own.flavorTags, note: own.note } : null,
+      mean,
+      raters: ratings.length,
+      at: b.at,
+    });
+  }
+  // Group favourite: best unrounded mean among bottles two or more people rated,
+  // else the best rated at all (ties: more raters, then name).
+  const rank = (a: (typeof out)[number], c: (typeof out)[number]) =>
+    (c.mean ?? 0) - (a.mean ?? 0) || c.raters - a.raters || a.label.localeCompare(c.label, undefined, { sensitivity: "base" });
+  const fav = out.filter((x) => x.raters >= 2).sort(rank)[0] ?? out.filter((x) => x.mean != null).sort(rank)[0];
+  if (fav) fav.favourite = true;
+  return out
+    .sort((a, c) => a.at - c.at)
+    .map(({ mean: _m, raters: _r, at: _a, ...rest }) => rest);
+}
+
 export async function getOutingView(db: DB, outing: schema.Outing, viewerUserId: string | null, seat: OutingSeat | null): Promise<OutingView> {
   const isHost = viewerUserId === outing.hostId;
   const hostProfile = await db.query.userProfiles.findFirst({
@@ -601,6 +798,7 @@ export async function getOutingView(db: DB, outing: schema.Outing, viewerUserId:
   const onTrip = !!seat || isHost;
   let feed: OutingFeedItem[] = [];
   let recap: OutingRecap | null = null;
+  let board: OutingBoardBottle[] = [];
   let stamp = `${outing.state}`;
   if (onTrip) {
     const tastings = (
@@ -636,7 +834,21 @@ export async function getOutingView(db: DB, outing: schema.Outing, viewerUserId:
     }
     for (const f of feed) if (f.kind === "tasting" && f.bottleId && !linkable.has(f.bottleId)) f.bottleId = null;
     recap = buildRecap(tastings.map((t) => ({ ...t, bottleId: t.bottleId && linkable.has(t.bottleId) ? t.bottleId : null })));
-    stamp = [outing.state, feed.length, ...feed.slice(0, 3).map((f) => f.id), tastings.reduce((m, t) => Math.max(m, t.updatedAt.getTime()), 0), people.length].join(":");
+    const entries = (
+      await db.select().from(schema.outingBottles).where(eq(schema.outingBottles.outingId, outing.id)).orderBy(asc(schema.outingBottles.createdAt))
+    ).filter((e) => e.hiddenAt == null && visible.has(e.participantId));
+    for (const id of new Set(entries.map((e) => e.bottleId).filter((x): x is string => !!x && !ids.includes(x)))) {
+      const b = await db.query.bottles.findFirst({ columns: { status: true, submittedBy: true }, where: eq(schema.bottles.id, id) });
+      if (b && canViewBottle(b, viewerUserId ?? undefined)) linkable.add(id);
+    }
+    board = buildBottleBoard(
+      entries,
+      tastings,
+      people.map((p) => ({ participantId: p.participantId, name: p.participantId === seat?.participantId ? "You" : nameOf(p.participantId) })),
+      seat?.participantId ?? null,
+    );
+    for (const b of board) if (b.bottleId && !linkable.has(b.bottleId)) b.bottleId = null;
+    stamp = [outing.state, feed.length, entries.length, entries.at(-1)?.id ?? "", ...feed.slice(0, 3).map((f) => f.id), tastings.reduce((m, t) => Math.max(m, t.updatedAt.getTime()), 0), people.length].join(":");
   }
 
   return {
@@ -656,6 +868,7 @@ export async function getOutingView(db: DB, outing: schema.Outing, viewerUserId:
     people: people.map((p) => ({ name: p.handle ? `@${p.handle}` : (p.guestName ?? "Guest"), guest: !p.userId })),
     feed,
     recap,
+    board,
     stamp,
   };
 }

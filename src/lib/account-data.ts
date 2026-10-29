@@ -25,6 +25,7 @@ import {
   flightEntries,
   flightParticipants,
   flights,
+  outingBottles,
   outingNotes,
   outingParticipants,
   outingTastings,
@@ -1332,6 +1333,33 @@ export const ACCOUNT_DATA: readonly DataSlice[] = [
     where: (db, userId) =>
       and(inArray(outingTastings.outingId, ownOutingIds(db, userId)), notInArray(outingTastings.participantId, ownOutingSeatIds(db, userId))),
     notExported: "Other people's words, not yours.",
+  },
+  {
+    key: "outing_bottles",
+    table: outingBottles,
+    description: "Bottles you put on outing bottle lists.",
+    onDelete: "deleted",
+    why: "Your additions; the outing's list loses them.",
+    where: (db, userId) => inArray(outingBottles.participantId, ownOutingSeatIds(db, userId)),
+    export: {
+      columns: ["outingId", "bottleId", "label", "createdAt"],
+      rows: (db, userId) =>
+        db
+          .select({ outingId: outingBottles.outingId, bottleId: outingBottles.bottleId, label: outingBottles.label, createdAt: outingBottles.createdAt })
+          .from(outingBottles)
+          .where(inArray(outingBottles.participantId, ownOutingSeatIds(db, userId)))
+          .orderBy(outingBottles.createdAt),
+    },
+  },
+  {
+    key: "outing_bottles_by_others",
+    table: outingBottles,
+    description: "Bottles other people put on the outings you planned.",
+    onDelete: "deleted",
+    why: "They belong to an outing that is deleted with you.",
+    where: (db, userId) =>
+      and(inArray(outingBottles.outingId, ownOutingIds(db, userId)), notInArray(outingBottles.participantId, ownOutingSeatIds(db, userId))),
+    notExported: "Other people's additions, not yours.",
   },
   {
     key: "outing_notes",
