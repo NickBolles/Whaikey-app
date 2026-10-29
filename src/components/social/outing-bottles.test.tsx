@@ -51,7 +51,7 @@ describe("OutingBottleBoard", () => {
     expect(screen.getByText("Not yet: @lee")).toBeTruthy();
     expect(screen.getByText(/Cherry cola/)).toBeTruthy();
     expect(screen.getByText(/sees each other.s ratings and notes/)).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Log a pour →" }).getAttribute("href")).toBe("/pour?bottleId=b1");
+    expect(screen.getByRole("link", { name: "Log a pour →" }).getAttribute("href")).toBe("/pour?bottleId=b1&outing=abc123def4");
     expect(container.textContent).not.toMatch(/\bml\b|\boz\b|pours? (logged|count)|streak/i);
   });
 
