@@ -298,7 +298,30 @@ function BottleCard({
 }) {
   const [rating, setRating] = useState(false);
   const [removing, setRemoving] = useState(false);
+  const [wishing, setWishing] = useState(false);
   const router = useRouter();
+  /** Wishlist without ever demoting a bottle already owned or tried (keepExisting). */
+  async function wishlist() {
+    if (!bottle.bottleId || wishing) return;
+    setWishing(true);
+    try {
+      const res = await fetch("/api/user-bottles", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bottleId: bottle.bottleId, relationship: "wishlist", keepExisting: true }),
+      });
+      if (res.status === 201) onNotice(`Added ${bottle.label} to your wishlist.`);
+      else if (res.ok) {
+        const row = (await res.json().catch(() => null)) as { relationship?: string } | null;
+        const where = row?.relationship === "own" ? "on your shelf" : row?.relationship === "tried" ? "in your tried list" : "on your wishlist";
+        onNotice(`${bottle.label} is already ${where}.`);
+      } else onNotice(`Couldn't add ${bottle.label} to your wishlist.`);
+    } catch {
+      onNotice("No signal — try the wishlist again when you're back online.");
+    } finally {
+      setWishing(false);
+    }
+  }
   async function remove() {
     if (!bottle.entryId) return;
     setRemoving(true);
@@ -353,7 +376,7 @@ function BottleCard({
         </ul>
       )}
       {bottle.notYet.length > 0 && <p className="text-xs text-muted">Not yet: {bottle.notYet.join(", ")}</p>}
-      {(canRate || (canRemove && bottle.entryId)) && (
+      {(canRate || (canRemove && bottle.entryId) || (canPour && bottle.bottleId)) && (
         <div className="flex flex-wrap items-center gap-2">
           {canRate && (
           <button type="button" aria-expanded={rating} onClick={() => setRating((o) => !o)} className="btn-secondary px-4 py-2 text-sm">
@@ -361,9 +384,14 @@ function BottleCard({
           </button>
           )}
           {canRate && canPour && bottle.bottleId && (
-            <Link href={`/pour?bottleId=${encodeURIComponent(bottle.bottleId)}`} className="tap-target px-2 py-2 text-sm text-accent">
+            <Link href={`/pour?bottleId=${encodeURIComponent(bottle.bottleId)}&outing=${encodeURIComponent(code)}`} className="tap-target px-2 py-2 text-sm text-accent">
               Log a pour →
             </Link>
+          )}
+          {canPour && bottle.bottleId && (
+            <button type="button" onClick={() => void wishlist()} disabled={wishing} className="tap-target px-2 py-2 text-sm text-accent disabled:opacity-60">
+              {wishing ? "Adding…" : "Add to my wishlist"}
+            </button>
           )}
           {canRemove && bottle.entryId && (
             <button type="button" onClick={remove} disabled={removing} className="tap-target ml-auto px-2 py-2 text-xs text-muted hover:text-foreground">
