@@ -12,7 +12,10 @@ import { monogram } from "@/lib/bottle-art";
  * mode — and the mark itself is never recoloured. A white-on-transparent mark
  * (Bowmore, Bushmills, Penderyn…) would vanish on white, so once it loads we
  * sample it ({@link markTone}) and swap to a dark plate (#138). `object-contain` inside a fixed box: a logo is never
- * stretched or cropped. Lazy and async-decoded with explicit size hints. If
+ * stretched or cropped. A wide wordmark (Bowmore, Glenfiddich) would read tiny
+ * in a square, so once it loads the plate widens to the mark's aspect ratio
+ * ({@link plateWidth}), capped per context by `maxWidth` (card vs bottle
+ * header); height stays `size`. Lazy and async-decoded with explicit size hints. If
  * the request fails the plate becomes the monogram roundel (`fallback`), or
  * disappears (`fallback="none"`) where the silhouette already carries one.
  */
@@ -20,6 +23,19 @@ const LIGHT_PLATE = "border-black/10 bg-white";
 const DARK_PLATE = "border-white/10 bg-[#2b2620]";
 /** Per-key result, so a list of the same brand samples it once per page. */
 const toneCache = new Map<string, "light" | "dark">();
+/** Per-key natural aspect ratio (width / height) of the loaded mark. */
+const aspectCache = new Map<string, number>();
+
+/**
+ * Plate width for a mark of `aspect` (w/h) in a plate `size` tall with
+ * `pad` padding: the mark fills the inner height, the plate grows to fit it,
+ * never narrower than a square and never wider than `maxWidth`.
+ */
+export function plateWidth(aspect: number | undefined, size: number, pad: number, maxWidth: number): number {
+  if (!aspect || !Number.isFinite(aspect) || aspect <= 1) return size;
+  const inner = size - pad * 2;
+  return Math.round(Math.min(Math.max(size, inner * aspect + pad * 2), Math.max(size, maxWidth)));
+}
 
 /**
  * "light" when the mark's opaque pixels are almost all near-white (alpha-
@@ -57,6 +73,7 @@ export function ProducerLogo({
   size = 20,
   color = "#4c4438",
   fallback = "monogram",
+  maxWidth,
   className = "",
 }: {
   logoKey: string | null | undefined;
@@ -64,15 +81,20 @@ export function ProducerLogo({
   size?: number;
   color?: string;
   fallback?: "monogram" | "none";
+  /** Widest the plate may grow for a wide wordmark (default 2.5 × size). */
+  maxWidth?: number;
   className?: string;
 }) {
   const [failed, setFailed] = useState(false);
   const [tone, setTone] = useState<"light" | "dark" | undefined>(undefined);
+  const [aspect, setAspect] = useState<number | undefined>(undefined);
   const sample = useCallback(
     (img: HTMLImageElement) => {
       if (!logoKey) return;
       if (!toneCache.has(logoKey)) toneCache.set(logoKey, markTone(img));
       setTone(toneCache.get(logoKey));
+      if (img.naturalWidth > 0 && img.naturalHeight > 0) aspectCache.set(logoKey, img.naturalWidth / img.naturalHeight);
+      setAspect(aspectCache.get(logoKey));
     },
     [logoKey],
   );
@@ -88,17 +110,18 @@ export function ProducerLogo({
   if (logoKey && !failed) {
     const plate = (tone ?? toneCache.get(logoKey)) === "light" ? DARK_PLATE : LIGHT_PLATE;
     const pad = Math.max(2, Math.round(size * 0.12));
+    const width = plateWidth(aspect ?? aspectCache.get(logoKey), size, pad, maxWidth ?? Math.round(size * 2.5));
     return (
       <span
         className={`inline-flex shrink-0 items-center justify-center overflow-hidden rounded-[6px] border ${plate} ${className}`}
-        style={{ width: size, height: size, padding: pad }}
+        style={{ width, height: size, padding: pad }}
         data-testid="producer-logo"
       >
         {/* eslint-disable-next-line @next/next/no-img-element -- own-origin, pre-sized and CDN-cached; the optimizer would only spend quota */}
         <img
           src={`/api/brand-logo/${logoKey}`}
           alt={name ? `${name} logo` : ""}
-          width={size - pad * 2}
+          width={width - pad * 2}
           height={size - pad * 2}
           loading="lazy"
           decoding="async"

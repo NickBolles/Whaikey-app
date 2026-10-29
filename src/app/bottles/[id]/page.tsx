@@ -244,7 +244,7 @@ export default async function BottleDetailPage({
             </h1>
             {(distillery || shownLogo) && (
               <p className="text-sm text-muted mt-1 flex items-center gap-2">
-                <ProducerLogo logoKey={shownLogo?.key} name={shownLogo?.name ?? distillery?.name} size={30} fallback="none" />
+                <ProducerLogo logoKey={shownLogo?.key} name={shownLogo?.name ?? distillery?.name} size={30} maxWidth={96} fallback="none" />
                 <span>{distillery?.name ?? shownLogo?.name}</span>
               </p>
             )}

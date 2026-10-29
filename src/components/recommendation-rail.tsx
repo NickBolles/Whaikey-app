@@ -214,7 +214,7 @@ function RecCard({ rec, mode }: { rec: Recommendation; mode: RecommendationRailP
             <span className="font-medium text-foreground leading-snug line-clamp-2">{rec.name}</span>
             {(meta || rec.brandLogo) && (
               <span className="flex min-w-0 items-start gap-1.5 text-xs text-muted">
-                <ProducerLogo logoKey={rec.brandLogo} name={rec.distillery ?? rec.name} size={18} fallback="none" />
+                <ProducerLogo logoKey={rec.brandLogo} name={rec.distillery ?? rec.name} size={18} maxWidth={54} fallback="none" />
                 {meta && <span className="line-clamp-2">{meta}</span>}
               </span>
             )}

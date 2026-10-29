@@ -161,6 +161,21 @@ test.describe("signed out", () => {
     await expect(page).toHaveScreenshot(shot("bottle-detail-light-white-logo"), { fullPage: true });
   });
 
+  test("bottle detail, wide wordmark logo (widened plate, #145)", async ({ page }) => {
+    await page.goto("/bottles/glenfiddich-18");
+    const logo = page.getByTestId("producer-logo").filter({ has: page.getByAltText("Glenfiddich logo") }).first();
+    await expect(logo).toBeVisible();
+    // The plate widens once the mark's aspect ratio is read on load.
+    await expect
+      .poll(async () => {
+        const box = await logo.boundingBox();
+        return box ? box.width / box.height : 0;
+      })
+      .toBeGreaterThan(1.5);
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("bottle-detail-wide-logo"), { fullPage: true });
+  });
+
   test("learn hub", async ({ page }) => {
     await page.goto("/learn");
     await expect(page.getByRole("heading", { name: /Learn whiskey/i })).toBeVisible();

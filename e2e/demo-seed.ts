@@ -959,3 +959,39 @@ export async function seedDemoLightLogo(db: DB): Promise<void> {
     .onConflictDoNothing();
   await db.update(schema.bottles).set({ brandKey: DEMO_LIGHT_LOGO_KEY }).where(eq(schema.bottles.id, "bowmore-15"));
 }
+
+// ── demo wide wordmark (visual baseline for the widened plate, PR #145) ──
+// Append-only fence. A drawn 4:1 ring + bar "wordmark" (not a real trademark),
+// standing in for wide marks like Glenfiddich's that read tiny in a square.
+// Linked to glenfiddich-18 so its detail page shows ProducerLogo's widened
+// plate (aspect-ratio width, capped by the header's maxWidth).
+export const DEMO_WIDE_LOGO_KEY = "demo-glenfiddich";
+const DEMO_WIDE_LOGO_PNG =
+  "iVBORw0KGgoAAAANSUhEUgAAAMgAAAAyCAYAAAAZUZThAAABuElEQVR42u3c2XWDMBAFUJtC0kE6SPnpwB2kkeQ3JydmGWa0mHu/QQg8z5IM+HYDAAAAAGBi96yGPt7fvre2+Xx83V1yLhOQPaEQFi4XkDPBEBRmsvQMR0V70G0E2SrmtdHgzL4wfECeFXiksDPbgu4B+a+gM4q5ql1otgaJFnH0Z19rEqYJSItveCFhyinWmXD83jeyT1YY14J2pO1IYKPtZ/er+jyzjlPVz7M1tDsgPT7w6MllXcCMkSzafna/qs8z6zhV/YzW0pLdkb/7ZrYFwy3SK9Ydlcc5Gqpn22eFM9p+dr+qzzPrOFX9jO6/jHRxYPgRZLRiFi6GnmKd+RUqUuhuFDLdGgQEpME0yHQJIwgICAhI6vTKNAsjCFwtIGvf+Nl3dY0wDB+Q0e5DuC/ClFOsXs/GwHABaVXM1Y+XH9k+a+SKtp/dr+rzzDpOVT9TH3ffaqz6SVfTK0YReqOw4gUbbxTW9MsbhUVvFPZeJxg9GH4N0qtIhYPhp1iZQ2LrdqFpQNamW/5ZEQHZuSbx37xcOiBVC3fhYMpFeotiFg5eagTJGk0Eg5cPyNGwCAUAAAAAQLYf+1pTJPxNbZEAAAAASUVORK5CYII=";
+
+export async function seedDemoWideLogo(db: DB): Promise<void> {
+  await db
+    .insert(schema.brandLogos)
+    .values({
+      key: DEMO_WIDE_LOGO_KEY,
+      name: "Glenfiddich",
+      country: "Scotland",
+      distilleryId: "glenfiddich",
+      status: "ok",
+      logoUrl: "https://commons.wikimedia.org/wiki/File:Demo_wide_logo.png",
+      logoSource: "commons",
+      license: "PD-textlogo",
+      attribution: "Wikimedia Commons",
+      attributionUrl: "https://commons.wikimedia.org/wiki/File:Demo_wide_logo.png",
+      attributionRequired: false,
+      contentType: "image/png",
+      logoData: DEMO_WIDE_LOGO_PNG,
+      width: 200,
+      height: 50,
+      checkedAt: new Date("2026-07-01T00:00:00Z"),
+      createdAt: new Date("2026-07-01T00:00:00Z"),
+      updatedAt: new Date("2026-07-01T00:00:00Z"),
+    })
+    .onConflictDoNothing();
+  await db.update(schema.bottles).set({ brandKey: DEMO_WIDE_LOGO_KEY }).where(eq(schema.bottles.id, "glenfiddich-18"));
+}
