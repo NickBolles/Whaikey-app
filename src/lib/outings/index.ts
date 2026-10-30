@@ -634,6 +634,8 @@ export function buildRecap(rows: Array<{ label: string; bottleId: string | null;
 }
 
 export interface OutingBoardVote {
+  /** The outing tasting behind this verdict (the target of replies and reactions). */
+  tastingId?: string;
   who: string;
   mine: boolean;
   rating: number | null;
@@ -719,7 +721,7 @@ export function buildBottleBoard(
     for (const p of people) {
       const t = per.get(p.participantId);
       if (!t) continue;
-      votes.push({ who: p.name, mine: p.participantId === viewerParticipantId, rating: t.rating, note: t.note, tags: tagNames(t.flavorTags) });
+      votes.push({ tastingId: t.id, who: p.name, mine: p.participantId === viewerParticipantId, rating: t.rating, note: t.note, tags: tagNames(t.flavorTags) });
       if (t.rating != null) ratings.push(t.rating);
       for (const tag of Object.keys(t.flavorTags ?? {})) tagPeople.set(tag, (tagPeople.get(tag) ?? 0) + 1);
     }
@@ -897,6 +899,25 @@ export async function getOutingView(db: DB, outing: schema.Outing, viewerUserId:
     board,
     stamp,
   };
+}
+
+/**
+ * A cheap raw change marker for the live stream: counts and latest write
+ * times across the outing's tables in one round trip. It is never sent to a
+ * client — the stream only uses it to decide when to compute the viewer's
+ * filtered stamp, so activity from someone the viewer is blocked with never
+ * shows up as an update.
+ */
+export async function outingChangeMarker(db: DB, outingId: string): Promise<string> {
+  const rows = (await db.execute(sql`select concat_ws(':',
+    (select state from outings where id = ${outingId}),
+    (select count(*) || '/' || coalesce(max(extract(epoch from updated_at)), 0) || '/' || count(hidden_at) from outing_tastings where outing_id = ${outingId}),
+    (select count(*) || '/' || coalesce(max(extract(epoch from created_at)), 0) || '/' || count(hidden_at) from outing_notes where outing_id = ${outingId}),
+    (select count(*) || '/' || coalesce(max(extract(epoch from created_at)), 0) || '/' || count(hidden_at) from outing_bottles where outing_id = ${outingId}),
+    (select count(*) from outing_participants where outing_id = ${outingId})
+  ) as m`)) as unknown as { rows?: Array<{ m: string }> } | Array<{ m: string }>;
+  const list = Array.isArray(rows) ? rows : (rows.rows ?? []);
+  return String(list[0]?.m ?? "");
 }
 
 /** What the outing's poll returns: just enough to know whether to refresh. */

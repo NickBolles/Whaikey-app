@@ -483,10 +483,12 @@ export function ClaimOutingSeatButton({ code }: { code: string }) {
 }
 
 /**
- * New tastings from the group appear without a reload: a light poll of an
- * opaque stamp while the page is visible. Paused in the background, stopped
- * when the outing ends. It carries no presence — nobody learns who has the
- * page open.
+ * New bottles, ratings and notes from the group appear without a reload. The
+ * page listens to a Server-Sent Events stream (/live) that pushes the
+ * viewer's stamp the moment something they can see changes; when streaming
+ * isn't available (old WebView, proxy, error loop) it falls back to a light
+ * poll of the same stamp. Paused in the background, stopped when the outing
+ * ends. It carries no presence — nobody learns who has the page open.
  */
 export function OutingWatcher({ code, stamp }: { code: string; stamp: string }) {
   const router = useRouter();
@@ -496,20 +498,71 @@ export function OutingWatcher({ code, stamp }: { code: string; stamp: string }) 
   }, [stamp]);
   useEffect(() => {
     let live = true;
+    let source: EventSource | null = null;
+    let pollId: number | null = null;
+    let failures = 0;
+    const seen = (next: string) => {
+      if (live && next && next !== last.current) {
+        last.current = next;
+        router.refresh();
+      }
+    };
     const tick = async () => {
       if (document.visibilityState !== "visible") return;
       const res = await fetch(`/api/outings/${code}/state`, { cache: "no-store" }).catch(() => null);
       if (!live || !res?.ok) return;
       const data = (await res.json()) as { stamp: string };
-      if (data.stamp !== last.current) {
-        last.current = data.stamp;
+      seen(data.stamp);
+    };
+    const startPoll = () => {
+      if (pollId == null) pollId = window.setInterval(() => void tick(), 5000);
+    };
+    const stopStream = () => {
+      source?.close();
+      source = null;
+    };
+    const startStream = () => {
+      if (!live || source || typeof window.EventSource !== "function" || document.visibilityState !== "visible") return;
+      const es = new window.EventSource(`/api/outings/${code}/live`);
+      source = es;
+      es.addEventListener("stamp", (e) => {
+        failures = 0;
+        try {
+          seen((JSON.parse((e as MessageEvent).data) as { stamp: string }).stamp);
+        } catch {
+          /* ignore a malformed frame */
+        }
+      });
+      es.addEventListener("ended", () => {
+        stopStream();
         router.refresh();
+      });
+      es.onerror = () => {
+        // EventSource reconnects by itself after a window closes; repeated
+        // errors mean streaming doesn't work here, so poll instead.
+        failures += 1;
+        if (failures >= 3) {
+          stopStream();
+          startPoll();
+        }
+      };
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
+        void tick();
+        if (pollId == null) startStream();
+      } else {
+        stopStream();
       }
     };
-    const id = window.setInterval(() => void tick(), 5000);
+    if (typeof window.EventSource === "function") startStream();
+    else startPoll();
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       live = false;
-      window.clearInterval(id);
+      stopStream();
+      if (pollId != null) window.clearInterval(pollId);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [code, router]);
   return null;
