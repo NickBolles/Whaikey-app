@@ -58,42 +58,41 @@ export function NextOutingCard({ data }: { data: Gatherings }) {
   const { nextOuting } = data;
   if (nextOuting) {
     return (
-        <Link
-          href={`/o/${nextOuting.joinCode}`}
-
-          data-testid="gather-next-outing"
-          className="card flex items-center gap-3 border-accent/50 p-3.5 transition-colors hover:bg-surface-raised"
-        >
-          <span aria-hidden className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-accent/15 text-accent">
-            <MapPin size={20} strokeWidth={1.8} />
+      <Link
+        href={`/o/${nextOuting.joinCode}`}
+        data-testid="gather-next-outing"
+        className="card flex items-center gap-3 border-accent/50 p-3.5 transition-colors hover:bg-surface-raised"
+      >
+        <span aria-hidden className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-accent/15 text-accent">
+          <MapPin size={20} strokeWidth={1.8} />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-xs font-medium text-accent">
+            {nextOuting.dayLabel} · Outing
           </span>
-          <span className="min-w-0 flex-1">
-            <span className="block text-xs font-medium text-accent">
-              {nextOuting.dayLabel} · Outing
-            </span>
-            <span className="block truncate font-display text-[17px] font-semibold leading-tight">{nextOuting.title}</span>
-            <span className="block truncate text-xs text-muted">
-              {outingDetail(nextOuting)}
-            </span>
+          <span className="block truncate font-display text-[17px] font-semibold leading-tight">{nextOuting.title}</span>
+          <span className="block truncate text-xs text-muted">
+            {outingDetail(nextOuting)}
           </span>
-          <ChevronRight size={18} strokeWidth={1.8} className="shrink-0 text-muted" aria-hidden />
-        </Link>
+        </span>
+        <ChevronRight size={18} strokeWidth={1.8} className="shrink-0 text-muted" aria-hidden />
+      </Link>
     );
   }
   return (
-        <Link
-          href="/outings/new"
-          className="card flex items-center gap-3 p-3.5 transition-colors hover:bg-surface-raised"
-        >
-          <span aria-hidden className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-accent/15 text-accent">
-            <MapPin size={20} strokeWidth={1.8} />
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block font-display text-[16px] font-semibold leading-tight">Plan a distillery outing</span>
-            <span className="block text-xs text-muted">Pick a day and a place. Guests join by QR.</span>
-          </span>
-          <ChevronRight size={18} strokeWidth={1.8} className="shrink-0 text-muted" aria-hidden />
-        </Link>
+      <Link
+        href="/outings/new"
+        className="card flex items-center gap-3 p-3.5 transition-colors hover:bg-surface-raised"
+      >
+        <span aria-hidden className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-accent/15 text-accent">
+          <MapPin size={20} strokeWidth={1.8} />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block font-display text-[16px] font-semibold leading-tight">Plan a distillery outing</span>
+          <span className="block text-xs text-muted">Pick a day and a place. Guests join by QR.</span>
+        </span>
+        <ChevronRight size={18} strokeWidth={1.8} className="shrink-0 text-muted" aria-hidden />
+      </Link>
       );
 }
 
