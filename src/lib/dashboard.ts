@@ -11,7 +11,7 @@
  * grow by paying attention rather than by drinking more.
  */
 
-import { and, desc, eq, gte, lt, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNotNull, lt, sql } from "drizzle-orm";
 import type { DB } from "@/db";
 import { schema } from "@/db";
 import { getFlavorCalibration } from "@/lib/bar";
@@ -51,6 +51,10 @@ export interface DashboardData {
   risingWedgeId: string | null;
   topCategories: DashboardCategory[];
   runningLow: RunningLowRow[];
+  /** The descriptor named most strongly this month (leaf id), or null. */
+  topNoteLeafId: string | null;
+  /** Highest-rated bottle this month (ties: most recent), or null without a rating. */
+  favoriteBottle: { bottleId: string; name: string; rating: number } | null;
   /**
    * All-time pour count. NEVER rendered — it only gates the greyed skeleton
    * ("is there enough logged to describe a month yet"). Displaying it, or a
@@ -79,6 +83,8 @@ interface MonthNotes {
   descriptors: Set<string>;
   /** Distinct bottles those notes were written on. */
   bottleIds: Set<string>;
+  /** Leaf id -> summed intensity, for the month's top note. */
+  leaves: Map<string, number>;
 }
 
 /** One user's tagged notes in [from, to), reduced to the shapes the page needs. */
@@ -97,6 +103,7 @@ async function monthNotes(db: DB, userId: string, from: Date, to: Date): Promise
   const wedges = new Map<string, number>();
   const descriptors = new Set<string>();
   const bottleIds = new Set<string>();
+  const leaves = new Map<string, number>();
   for (const row of rows) {
     let tagged = false;
     for (const [leafId, intensity] of Object.entries(row.flavorTags ?? {})) {
@@ -104,11 +111,33 @@ async function monthNotes(db: DB, userId: string, from: Date, to: Date): Promise
       if (!wedgeId || typeof intensity !== "number") continue;
       wedges.set(wedgeId, (wedges.get(wedgeId) ?? 0) + intensity);
       descriptors.add(leafId);
+      leaves.set(leafId, (leaves.get(leafId) ?? 0) + intensity);
       tagged = true;
     }
     if (tagged) bottleIds.add(row.bottleId);
   }
-  return { wedges, descriptors, bottleIds };
+  return { wedges, descriptors, bottleIds, leaves };
+}
+
+/** Strongest leaf of the month; ties break alphabetically so output is stable. */
+export function pickTopNote(leaves: Map<string, number>): string | null {
+  let best: string | null = null;
+  let bestTotal = -Infinity;
+  for (const [leafId, total] of leaves) {
+    if (total > bestTotal || (total === bestTotal && best !== null && leafId < best)) {
+      best = leafId;
+      bestTotal = total;
+    }
+  }
+  return best;
+}
+
+/**
+ * Whether the month has anything worth summarising. Home hides the month
+ * section entirely without it — no empty tiles, no grey bars.
+ */
+export function hasMonthData(d: Pick<DashboardData, "descriptorsNamed" | "newBottles" | "favoriteBottle" | "bottlesNoted">): boolean {
+  return d.descriptorsNamed > 0 || d.bottlesNoted > 0 || d.newBottles > 0 || d.favoriteBottle != null;
 }
 
 export async function getDashboard(db: DB, userId: string, now: Date): Promise<DashboardData> {
@@ -123,6 +152,7 @@ export async function getDashboard(db: DB, userId: string, now: Date): Promise<D
     prevMonth,
     calibration,
     lowRows,
+    favoriteRows,
   ] = await Promise.all([
     db
       .select({ count: sql<number>`count(*)` })
@@ -163,6 +193,21 @@ export async function getDashboard(db: DB, userId: string, now: Date): Promise<D
         ),
       )
       .orderBy(schema.userBottles.fillLevel, desc(schema.userBottles.updatedAt)),
+    // Favourite of the month: the best-rated pour. A rating, never a count.
+    db
+      .select({ bottleId: schema.pours.bottleId, name: schema.bottles.name, rating: schema.pours.rating })
+      .from(schema.pours)
+      .innerJoin(schema.bottles, eq(schema.pours.bottleId, schema.bottles.id))
+      .where(
+        and(
+          eq(schema.pours.userId, userId),
+          gte(schema.pours.createdAt, thisStart),
+          lt(schema.pours.createdAt, now),
+          isNotNull(schema.pours.rating),
+        ),
+      )
+      .orderBy(desc(schema.pours.rating), desc(schema.pours.createdAt))
+      .limit(1),
   ]);
 
   // Shares of this month's tagged intensity, top 3, whole percents.
@@ -213,6 +258,11 @@ export async function getDashboard(db: DB, userId: string, now: Date): Promise<D
       name: row.name,
       fillLevel: row.fillLevel ?? 0,
     })),
+    topNoteLeafId: pickTopNote(thisMonth.leaves),
+    favoriteBottle:
+      favoriteRows[0] && favoriteRows[0].rating != null
+        ? { bottleId: favoriteRows[0].bottleId, name: favoriteRows[0].name, rating: favoriteRows[0].rating }
+        : null,
     totalPours: Number(totalRow?.count ?? 0),
   };
 }

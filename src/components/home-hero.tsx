@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
-import { GlassWater, ScanLine, Search } from "lucide-react";
+import { GlassWater, NotebookPen, ScanLine, Search } from "lucide-react";
 import { categoryLabel } from "@/components/category-chip";
 import { getTonightPourContext } from "@/components/recommendation-rail";
 import type { Recommendation } from "@/lib/recommend";
@@ -127,21 +127,20 @@ function TonightHero({ bottleCount, pourCount }: { bottleCount: number; pourCoun
   // No pick (nothing open yet, no rated pours, or the fetch failed): the
   // manual core loop is never blocked — fall back to log/add actions.
   if (!pick) {
+    // No pour count here: a running total reads as a score to grow.
+    void pourCount;
     const bottles = `${bottleCount} bottle${bottleCount === 1 ? "" : "s"} on your shelf`;
-    const pours = `${pourCount} pour${pourCount === 1 ? "" : "s"} logged`;
     return (
-      <section aria-label="Your next pour" className="card p-5">
-        <h2 className="font-display text-xl font-semibold">Your next pour</h2>
-        <p className="mt-1 text-sm text-muted">
-          {bottles} · {pours}
-        </p>
+      <section aria-label="Your next tasting" className="card p-5">
+        <h2 className="font-display text-xl font-semibold">Your next tasting</h2>
+        <p className="mt-1 text-sm text-muted">{bottles}</p>
         <div className="mt-4 grid grid-cols-2 gap-2">
           <Link
             href="/pour"
             className="btn-primary flex min-h-11 items-center justify-center gap-2 px-3 py-3 text-sm"
           >
             <GlassWater size={18} strokeWidth={1.8} aria-hidden />
-            Log a pour
+            Log a tasting
           </Link>
           <Link
             href="/search"
@@ -183,21 +182,29 @@ function TonightHero({ bottleCount, pourCount }: { bottleCount: number; pourCoun
         </div>
         <Link
           href={`/pour?bottleId=${pick.bottleId}`}
-          className="btn-primary inline-flex min-h-11 shrink-0 items-center gap-2 px-4 py-2.5 text-sm"
+          className="btn-secondary inline-flex min-h-11 shrink-0 items-center gap-2 px-4 py-2.5 text-sm"
         >
-          <GlassWater size={18} strokeWidth={1.8} aria-hidden />
-          Log this pour
+          <NotebookPen size={18} strokeWidth={1.8} aria-hidden />
+          Log a tasting
         </Link>
       </div>
 
       <div className="mt-2.5 flex items-end justify-between gap-3">
         <p className="min-w-0 flex-1 text-[13px] leading-relaxed text-muted">{pick.reason}</p>
-        <Link
-          href="/pour"
-          className="tap-target shrink-0 text-xs text-muted transition-colors hover:text-foreground"
-        >
-          Pick another
-        </Link>
+        <span className="flex shrink-0 flex-col items-end gap-1">
+          <Link
+            href={`/bottles/${pick.bottleId}`}
+            className="tap-target text-xs text-muted transition-colors hover:text-foreground"
+          >
+            About this bottle
+          </Link>
+          <Link
+            href="/pour"
+            className="tap-target text-xs text-muted transition-colors hover:text-foreground"
+          >
+            Pick another
+          </Link>
+        </span>
       </div>
     </section>
   );

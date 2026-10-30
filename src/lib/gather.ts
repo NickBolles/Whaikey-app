@@ -16,6 +16,10 @@ export interface NextOuting {
   joinCode: string;
   /** "Today", "Tomorrow", or e.g. "Thu, Oct 29". */
   dayLabel: string;
+  /** People on the outing (members and guests), when known. */
+  goingCount?: number;
+  /** Bottles on the shared list, when known. */
+  bottleCount?: number;
 }
 
 export interface Gatherings {
@@ -27,7 +31,15 @@ export interface Gatherings {
 
 export const EMPTY_GATHERINGS: Gatherings = { nextOuting: null, clubCount: 0, openNights: 0 };
 
-type OutingRow = { title: string; distilleryName: string | null; visitOn: string; joinCode: string; state: string };
+type OutingRow = {
+  title: string;
+  distilleryName: string | null;
+  visitOn: string;
+  joinCode: string;
+  state: string;
+  goingCount?: number;
+  bottleCount?: number;
+};
 
 /** UTC calendar day of `now`, matching how `visitOn` (YYYY-MM-DD) is stored and shown. */
 export function isoDay(now: Date): string {
@@ -49,7 +61,14 @@ export function pickNextOuting(rows: OutingRow[], now: Date): NextOuting | null 
   const next = upcoming[0];
   if (!next) return null;
   const dayLabel = next.visitOn === today ? "Today" : next.visitOn === addDays(today, 1) ? "Tomorrow" : formatVisitDay(next.visitOn);
-  return { title: next.title, distilleryName: next.distilleryName, joinCode: next.joinCode, dayLabel };
+  return {
+    title: next.title,
+    distilleryName: next.distilleryName,
+    joinCode: next.joinCode,
+    dayLabel,
+    ...(next.goingCount != null ? { goingCount: next.goingCount } : {}),
+    ...(next.bottleCount != null ? { bottleCount: next.bottleCount } : {}),
+  };
 }
 
 export async function getGatherings(db: DB, userId: string, now: Date): Promise<Gatherings> {

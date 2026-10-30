@@ -9,7 +9,7 @@ import { ONBOARDING_COOKIE, needsOnboarding } from "@/lib/onboarding";
 import { getFriendFeed, getOwnProfile, listFollowing } from "@/lib/social";
 import { getPalateMatches } from "@/lib/taste-twins";
 import { appNow } from "@/lib/clock";
-import { getDashboard } from "@/lib/dashboard";
+import { getDashboard, hasMonthData } from "@/lib/dashboard";
 import { Dashboard } from "@/components/dashboard";
 import { HomeConcierge } from "@/components/home-concierge";
 import { HomeHero } from "@/components/home-hero";
@@ -19,7 +19,8 @@ import { FriendsModule, type FriendFeedItem } from "@/components/friends-module"
 import { LatestBadgeCard, pickLatestBadge } from "@/components/latest-badge-card";
 import { getPassport } from "@/lib/passport";
 import { EMPTY_GATHERINGS, getGatherings } from "@/lib/gather";
-import { GatherModule } from "@/components/gather-module";
+import { GatherModule, NextOutingCard } from "@/components/gather-module";
+import { HomeStartHere, pickStartActions } from "@/components/home-start-here";
 import { withFallback } from "@/lib/settle";
 import { ChevronRight, GraduationCap, Star } from "lucide-react";
 import { BottleArt } from "@/components/bottle-art";
@@ -135,49 +136,52 @@ export default async function HomePage() {
   const latestBadge = passport ? pickLatestBadge(passport) : null;
   const bottleCount = dashboard.shelfTotal;
   const pourCount = dashboard.totalPours;
+  const monthEmpty = !hasMonthData(dashboard);
+  const startActions = pickStartActions({
+    bottleCount,
+    hasTastedEver: pourCount > 0,
+    hasNextOuting: gatherings.nextOuting != null,
+  });
 
   return (
     <div className="flex flex-col gap-7 px-4 pt-5">
-      {/* Home's upper half is the month in review — greyed skeleton and all,
-          it renders for everyone; the skeleton is what motivates the first log. */}
-      {/* Ask & learn — the concierge and Whiskey School lead Home (owner
-          feedback 2026-10-26: "could be emphasized higher"). */}
-      <section aria-label="Ask and learn" className="flex flex-col gap-2.5">
-        {/* Unconfigured, the concierge's notice would lead Home with an
-            apology, so only a working concierge takes the top slot. */}
-        {isAiConfigured() && <HomeConcierge aiConfigured />}
-        <Link
-          href="/learn"
-          className="card-flat flex min-h-11 items-center gap-3 px-4 py-3 transition-colors hover:bg-surface-raised"
-        >
-          <span aria-hidden className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent/15 text-accent">
-            <GraduationCap size={18} strokeWidth={1.8} />
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block text-sm font-medium">Whiskey School</span>
-            <span className="block truncate text-xs text-muted">Short lessons on styles, casks and the flavor wheel</span>
-          </span>
-          <ChevronRight size={18} strokeWidth={1.8} className="shrink-0 text-muted" aria-hidden />
-        </Link>
-      </section>
-
+      {/* Home order (owner feedback 2026-10-29, supersedes 2026-10-26's
+          "concierge and School first"): the month first, then what's next,
+          then suggestions, then the people side; Ask and School stay
+          reachable as a compact row at the bottom. */}
       <Dashboard data={dashboard} userName={user.name} userImage={user.image} />
 
-      <HomeHero bottleCount={bottleCount} pourCount={pourCount} />
-
-      {/* Outings, clubs, tasting nights and trails — the people side of
-          Caskfolk, high on Home (owner feedback 2026-10-26). */}
-      <GatherModule data={gatherings} />
-
-      {/* Discovery pairs with tonight's pick: both answer "what's next?" —
-          which is Home's job. My Bar stays about the bottles you own. */}
-      {bottleCount > 0 && (
-        <RecommendationRail
-          mode="discovery"
-          title="Discover"
-          subtitle="Something new for your palate — and the badge it would move."
-        />
+      {monthEmpty ? (
+        <>
+          {gatherings.nextOuting && (
+            <section aria-label="What's next" className="flex flex-col gap-2.5">
+              <h2 className="section-label">What&rsquo;s next</h2>
+              <NextOutingCard data={gatherings} />
+            </section>
+          )}
+          <HomeStartHere actions={startActions} />
+        </>
+      ) : (
+        <section aria-label="What's next" className="flex flex-col gap-2.5">
+          <h2 className="section-label">What&rsquo;s next</h2>
+          <NextOutingCard data={gatherings} />
+        </section>
       )}
+
+      <section aria-label="Suggestions" className="flex flex-col gap-4">
+        <h2 className="section-label">Suggestions</h2>
+        <HomeHero bottleCount={bottleCount} pourCount={pourCount} />
+        {/* Discovery pairs with tonight's pick: both answer "what's next?". */}
+        {bottleCount > 0 && (
+          <RecommendationRail
+            mode="discovery"
+            title="Try something new"
+            subtitle="New bottles that fit what you rate highly."
+          />
+        )}
+      </section>
+
+      <GatherModule data={gatherings} showOuting={false} />
 
       {latestBadge && <LatestBadgeCard badge={latestBadge} />}
 
@@ -222,6 +226,21 @@ export default async function HomePage() {
           </ul>
         </section>
       )}
+
+      {/* Ask and School: still one tap away, no longer the lead. */}
+      <section aria-label="Ask and learn" className="flex flex-col gap-2.5 pb-2">
+        {isAiConfigured() && <HomeConcierge aiConfigured />}
+        <Link
+          href="/learn"
+          className="card-flat flex min-h-11 items-center gap-3 px-4 py-2.5 transition-colors hover:bg-surface-raised"
+        >
+          <GraduationCap size={18} strokeWidth={1.8} className="shrink-0 text-accent" aria-hidden />
+          <span className="min-w-0 flex-1 text-sm">
+            Whiskey School <span className="text-muted">· styles, casks, the flavor wheel</span>
+          </span>
+          <ChevronRight size={18} strokeWidth={1.8} className="shrink-0 text-muted" aria-hidden />
+        </Link>
+      </section>
     </div>
   );
 }

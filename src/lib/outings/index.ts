@@ -915,6 +915,7 @@ export async function listMyOutings(db: DB, userId: string) {
   if (await isSuspended(db, userId)) return [];
   return db
     .select({
+      id: schema.outings.id,
       title: schema.outings.title,
       distilleryName: schema.outings.distilleryName,
       visitOn: schema.outings.visitOn,
@@ -938,6 +939,7 @@ export async function nextOutingFor(db: DB, userId: string, today: string) {
   if (await isSuspended(db, userId)) return null;
   const [row] = await db
     .select({
+      id: schema.outings.id,
       title: schema.outings.title,
       distilleryName: schema.outings.distilleryName,
       visitOn: schema.outings.visitOn,
@@ -949,7 +951,22 @@ export async function nextOutingFor(db: DB, userId: string, today: string) {
     .where(and(eq(schema.outingParticipants.userId, userId), eq(schema.outings.state, "open"), gte(schema.outings.visitOn, today), hostVisibleSql(userId)))
     .orderBy(asc(schema.outings.visitOn), asc(schema.outings.createdAt))
     .limit(1);
-  return row ?? null;
+  if (!row) return null;
+  // "Who's coming" and the bottle list, as counts only: names would need the
+  // per-viewer block predicate, and Home only needs the shape of the plan.
+  const [[going], [listed]] = await Promise.all([
+    db
+      .select({ count: sql<number>`count(*)` })
+      .from(schema.outingParticipants)
+      .where(eq(schema.outingParticipants.outingId, row.id)),
+    db
+      .select({ count: sql<number>`count(*)` })
+      .from(schema.outingBottles)
+      .where(and(eq(schema.outingBottles.outingId, row.id), isNull(schema.outingBottles.hiddenAt))),
+  ]);
+  const { id: _id, ...rest } = row;
+  void _id;
+  return { ...rest, goingCount: Number(going?.count ?? 0), bottleCount: Number(listed?.count ?? 0) };
 }
 
 /** Nightly + opportunistic: guest seats past 24 h, and what they logged with them (D20). */
