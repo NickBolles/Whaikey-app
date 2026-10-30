@@ -133,7 +133,7 @@ describe("outings (D22)", () => {
     const later = await createOuting(db, host.id, { ...input, title: "Later", visitOn: "2026-11-20" });
     const soon = await createOuting(db, host.id, { ...input, title: "Soon", visitOn: "2026-10-29" });
     await createOuting(db, host.id, { ...input, title: "Past", visitOn: "2026-10-01" });
-    expect((await nextOutingFor(db, host.id, "2026-10-27"))?.joinCode).toBe(soon.joinCode);
+    expect(await nextOutingFor(db, host.id, "2026-10-27")).toMatchObject({ joinCode: soon.joinCode, goingCount: 1, bottleCount: 0 });
     await endOuting(db, host.id, soon.id);
     expect((await nextOutingFor(db, host.id, "2026-10-27"))?.joinCode).toBe(later.joinCode);
     expect(await nextOutingFor(db, host.id, "2026-12-01")).toBeNull();

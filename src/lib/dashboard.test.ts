@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
 import { createTestBottle, createTestUser, setupTestDb, uid } from "@/test/helpers";
-import { getDashboard } from "./dashboard";
+import { getDashboard, hasMonthData, pickTopNote } from "./dashboard";
 
 const NOW = new Date("2026-07-19T19:30:00Z");
 
@@ -146,5 +146,28 @@ describe("getDashboard", () => {
     const data = await getDashboard(db, user.id, NOW);
     expect(data.newBottles).toBe(1);
     expect(data.shelfTotal).toBe(2);
+  });
+
+  it("names the month's top note and favourite bottle; an empty month has no data", async () => {
+    const user = await createTestUser(db);
+    const empty = await getDashboard(db, user.id, NOW);
+    expect(empty.topNoteLeafId).toBeNull();
+    expect(empty.favoriteBottle).toBeNull();
+    expect(hasMonthData(empty)).toBe(false);
+
+    const a = await createTestBottle(db, { name: "Alpha" });
+    const b = await createTestBottle(db, { name: "Beta" });
+    await seedPour(db, user.id, a.id, "2026-07-02T12:00:00Z", { vanilla: 2, oak: 1 }, 3.5);
+    await seedPour(db, user.id, b.id, "2026-07-03T12:00:00Z", { vanilla: 2 }, 4.5);
+    await seedPour(db, user.id, a.id, "2026-06-03T12:00:00Z", { oak: 9 }, 5);
+    const data = await getDashboard(db, user.id, NOW);
+    expect(data.topNoteLeafId).toBe("vanilla");
+    expect(data.favoriteBottle).toMatchObject({ bottleId: b.id, name: "Beta", rating: 4.5 });
+    expect(hasMonthData(data)).toBe(true);
+  });
+
+  it("pickTopNote breaks ties alphabetically", () => {
+    expect(pickTopNote(new Map([["oak", 2], ["honey", 2], ["peat", 1]]))).toBe("honey");
+    expect(pickTopNote(new Map())).toBeNull();
   });
 });

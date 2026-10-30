@@ -129,7 +129,7 @@ function comparisonLine(
   if (agreed.length > 0) clauses.push(`you agreed on ${joinAnd(agreed)}`);
   if (theirsOnly.length > 0) clauses.push(`they got ${theirsOnly[0]} you didn't`);
 
-  if (clauses.length === 0) return "You tasted this too — different descriptors, same bottle.";
+  if (clauses.length === 0) return "You tasted this too, with different notes.";
   return `You tasted this too — ${clauses.join(", ")}.`;
 }
 
@@ -247,8 +247,8 @@ export function FeedCard({ item }: { item: FriendFeedItem }) {
             : isWishlisted
               ? "On your wishlist."
               : item.viewerBottleRelationship === "own" || item.viewerBottleRelationship === "tried"
-                ? "You've had this one — no flavor notes of yours to compare yet."
-                : "New to you — see what they thought."}
+                ? "You've had this one. Add flavor notes to compare."
+                : "New to you. See what they thought."}
         </p>
         <span className="flex shrink-0 items-center gap-3">
           {showWishlistAction && (

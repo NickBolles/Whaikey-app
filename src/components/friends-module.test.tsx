@@ -56,7 +56,7 @@ describe("FriendsModule", () => {
 
   it("renders discovery framing when the viewer has no notes on the bottle", () => {
     render(<FriendsModule items={[item({ viewerTags: null })]} hasProfile={true} hasFollows={true} />);
-    expect(screen.getByText("New to you — see what they thought.")).toBeInTheDocument();
+    expect(screen.getByText("New to you. See what they thought.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "See the note →" })).toHaveAttribute("href", "/notes/pour-1");
   });
 

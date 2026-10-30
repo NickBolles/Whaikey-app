@@ -74,13 +74,13 @@ function subscribeToLocalTime(onStoreChange: () => void) {
 const EMPTY_COPY: Record<RecommendationRailProps["mode"], EmptyCopy> = {
   discovery: {
     emoji: "🧭",
-    headline: "Tag a few flavors and I’ll learn your taste.",
-    sub: "Rate or tag what you try, and picks for somewhere new show up here.",
+    headline: "Tag a few flavors to get picks.",
+    sub: "Rate or tag what you try. Picks from styles you haven’t tried show up here.",
   },
   tonight: {
     emoji: "🥃",
-    headline: "No open bottles yet — crack one open.",
-    sub: "Mark a bottle in your bar as open and I’ll help you choose.",
+    headline: "No open bottles in your bar.",
+    sub: "Mark a bottle as open in My Bar to get a pick here.",
   },
 };
 

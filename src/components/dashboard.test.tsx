@@ -4,7 +4,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import type { DashboardData } from "@/lib/dashboard";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
-import { Dashboard } from "./dashboard";
+import { Dashboard, monthFacts } from "./dashboard";
 
 afterEach(cleanup);
 
@@ -27,91 +27,87 @@ function data(overrides: Partial<DashboardData> = {}): DashboardData {
     runningLow: [
       { userBottleId: "ub-2", bottleId: "lagavulin-16", name: "Lagavulin 16", fillLevel: 15 },
     ],
+    topNoteLeafId: "raisin",
+    favoriteBottle: { bottleId: "lagavulin-16", name: "Lagavulin 16", rating: 4.5 },
     totalPours: 5,
     ...overrides,
   };
 }
 
+const EMPTY: Partial<DashboardData> = {
+  totalPours: 0,
+  descriptorsNamed: 0,
+  bottlesNoted: 0,
+  hadPrevMonth: false,
+  agreement: null,
+  risingWedgeId: null,
+  topCategories: [],
+  runningLow: [],
+  newBottles: 0,
+  shelfTotal: 12,
+  topNoteLeafId: null,
+  favoriteBottle: null,
+};
+
+// Copy that turns the month into a consumption scoreboard or a poem.
+const FORBIDDEN = [/pours?\b/i, /\bdrams?\b/i, /\bml\b|\boz\b/i, /streak/i, /blank/i, /writes it/i, /journey/i, /unlock/i, /elevate/i, /—/];
+
 describe("Dashboard", () => {
-  it("headlines the month with a palate fact, not a pour count", () => {
+  it("leads with plain facts about the month: bottles tasted, new bottles, top note", () => {
     render(<Dashboard data={data()} userName="Jordan Rivers" />);
-    expect(screen.getByText("JULY")).toBeInTheDocument();
-    expect(
-      screen.getByText("Peaty / Smoky rose the most on your palate since June."),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "July" })).toBeInTheDocument();
+    expect(screen.getByTestId("month-facts")).toHaveTextContent("3 bottles tasted · 1 new on the shelf · top note:");
+    expect(screen.getByText("Peaty / Smoky is up since June.")).toBeInTheDocument();
   });
 
-  it("measures the month in descriptor breadth, never in pours or a delta", () => {
+  it("shows the favourite bottle and flavor highlight, never a pour count or volume", () => {
     const { container } = render(<Dashboard data={data()} userName="Jordan" />);
-    expect(screen.getByText("9")).toBeInTheDocument();
-    expect(screen.getByText("flavors named")).toBeInTheDocument();
-    expect(screen.getByText("across 3 bottles")).toBeInTheDocument();
-    expect(screen.getByText("4 on the shelf")).toBeInTheDocument();
-    expect(screen.getByText("50%")).toBeInTheDocument();
-    expect(screen.getByText("with the label")).toBeInTheDocument();
-
-    // Guardrail: nothing frames pouring more as progress (AGENTS.md).
-    expect(container.textContent).not.toMatch(/pours? this month/i);
-    expect(container.textContent).not.toMatch(/vs June/);
+    expect(screen.getByRole("link", { name: /Lagavulin 16.*4\.5/ })).toHaveAttribute("href", "/bottles/lagavulin-16");
+    expect(screen.getByText("46% of your notes")).toBeInTheDocument();
+    expect(screen.getByText("50% agree")).toBeInTheDocument();
+    for (const re of FORBIDDEN) expect(container.textContent).not.toMatch(re);
     expect(container.textContent).not.toMatch(/[+−]\d/);
   });
 
-  it("draws the reached-for categories with right-aligned percentages", () => {
+  it("monthFacts never mentions pours, volume or a blank page", () => {
+    expect(monthFacts(data({ ...EMPTY }))).toBeNull();
+    const facts = monthFacts(data({ bottlesNoted: 1, newBottles: 0, topNoteLeafId: null })) ?? "";
+    expect(facts).toBe("1 bottle tasted");
+    for (const re of FORBIDDEN) expect(facts).not.toMatch(re);
+  });
+
+  it("draws flavor bars only when there are several tagged families", () => {
     render(<Dashboard data={data()} userName="Jordan" />);
+    expect(screen.getByText("Flavors this month")).toBeInTheDocument();
     expect(screen.getByText("46%")).toBeInTheDocument();
-    expect(screen.getByText("Peaty / Smoky")).toBeInTheDocument();
   });
 
   it("lists running-low bottles by level, with a restock action and no pour prompt", () => {
     const { container } = render(<Dashboard data={data()} userName="Jordan" />);
-    expect(screen.getByText("Lagavulin 16")).toBeInTheDocument();
     expect(screen.getByText("15% left")).toBeInTheDocument();
-
-    // Restocking is inventory; a Pour CTA here would be a finish-the-bottle nudge.
-    expect(screen.getByRole("link", { name: /Restock/ })).toHaveAttribute(
-      "href",
-      "/search?q=Lagavulin%2016",
-    );
+    expect(screen.getByRole("link", { name: /Restock/ })).toHaveAttribute("href", "/search?q=Lagavulin%2016");
     expect(screen.queryByRole("button", { name: /Log a pour/ })).not.toBeInTheDocument();
     expect(container.textContent).not.toMatch(/pours? to go/i);
   });
 
   it("drops the running-low section entirely when nothing is low", () => {
-    const { container } = render(<Dashboard data={data({ runningLow: [] })} userName="Jordan" />);
-    // An empty section was a heading reporting a non-event, directly under the
-    // month's headline. No bottles low, no section.
+    render(<Dashboard data={data({ runningLow: [] })} userName="Jordan" />);
     expect(screen.queryByText("Running low")).not.toBeInTheDocument();
-    expect(container.textContent).not.toMatch(/Nothing running low/i);
   });
 
-  it("renders the greyed skeleton — never hides — under 3 lifetime pours", () => {
-    render(
-      <Dashboard
-        data={data({
-          totalPours: 0,
-          descriptorsNamed: 0,
-          bottlesNoted: 0,
-          hadPrevMonth: false,
-          agreement: null,
-          risingWedgeId: null,
-          topCategories: [],
-          runningLow: [],
-          newBottles: 0,
-          shelfTotal: 0,
-        })}
-        userName="Jordan"
-      />,
-    );
-    // Same skeleton, same order: header, tiles, tracks, plus the unlock card.
-    expect(screen.getByText(/still blank — the first note writes it/)).toBeInTheDocument();
-    expect(screen.getByText("What you reached for")).toBeInTheDocument();
-    expect(screen.getByText("One note fills this in")).toBeInTheDocument();
-    // Running low is inventory news, not part of the skeleton: a new account
-    // has nothing low, and the unlock card already promises the section.
-    expect(screen.queryByText("Running low")).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Scan a bottle/ })).toHaveAttribute("href", "/scan");
-    expect(screen.getByText("needs tagged pours")).toBeInTheDocument();
-    // The unlock card explains what tagging reveals, never "finish this bottle".
-    expect(screen.queryByText(/rescuing/i)).not.toBeInTheDocument();
+  it("zero state: one plain line, no tiles, no empty grey bars", () => {
+    const { container } = render(<Dashboard data={data(EMPTY)} userName="Jordan" />);
+    expect(screen.getByRole("heading", { name: "July · no tastings yet" })).toBeInTheDocument();
+    expect(screen.queryByTestId("month-facts")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Flavors this month|What you reached for/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Favourite|Top flavor|agree/)).not.toBeInTheDocument();
+    expect(container.querySelectorAll("li")).toHaveLength(0);
+    for (const re of FORBIDDEN) expect(container.textContent).not.toMatch(re);
+  });
+
+  it("a month with only a new bottle still shows the summary, without empty flavor sections", () => {
+    render(<Dashboard data={data({ ...EMPTY, newBottles: 2 })} userName="Jordan" />);
+    expect(screen.getByTestId("month-facts")).toHaveTextContent("2 new on the shelf");
+    expect(screen.queryByText("Flavors this month")).not.toBeInTheDocument();
   });
 });

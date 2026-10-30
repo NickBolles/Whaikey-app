@@ -57,6 +57,7 @@ describe("HomeHero", () => {
     expect(screen.getByText(/Islay Distillers/)).toBeInTheDocument();
     expect(screen.getByText(/smoky and woody drams/i)).toBeInTheDocument();
 
+    // Owner decision 2026-10-29: "Log this pour" stays the pick's primary CTA.
     expect(screen.getByRole("link", { name: /Log this pour/ })).toHaveAttribute(
       "href",
       "/pour?bottleId=b1",
@@ -85,7 +86,9 @@ describe("HomeHero", () => {
     await waitFor(() =>
       expect(screen.getByRole("heading", { name: "Your next pour" })).toBeInTheDocument(),
     );
-    expect(screen.getByText("7 bottles on your shelf · 12 pours logged")).toBeInTheDocument();
+    expect(screen.getByText("7 bottles on your shelf")).toBeInTheDocument();
+    // No running pour count: it reads as a score to grow.
+    expect(screen.queryByText(/pours? logged/)).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Log a pour/ })).toHaveAttribute("href", "/pour");
     expect(screen.getByRole("link", { name: /Add a bottle/ })).toHaveAttribute("href", "/search");
     expect(screen.queryByRole("link", { name: /Log this pour/ })).not.toBeInTheDocument();
@@ -98,7 +101,7 @@ describe("HomeHero", () => {
     await waitFor(() =>
       expect(screen.getByRole("heading", { name: "Your next pour" })).toBeInTheDocument(),
     );
-    expect(screen.getByText("1 bottle on your shelf · 1 pour logged")).toBeInTheDocument();
+    expect(screen.getByText("1 bottle on your shelf")).toBeInTheDocument();
   });
 
   it("switches to the stock-your-bar variant, without fetching, when the user owns no bottles", () => {
