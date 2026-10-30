@@ -22,6 +22,7 @@ import {
   RideReminder,
 } from "@/components/social/outing-client";
 import { OutingBottleBoard } from "@/components/social/outing-bottles";
+import { OutingInsightsPanel, OutingRecognitions } from "@/components/social/outing-insights";
 import { BRAND_NAME } from "@/lib/brand";
 
 export const dynamic = "force-dynamic";
@@ -192,6 +193,7 @@ export default async function OutingPage({
               </div>
             </>
           )}
+          <OutingRecognitions items={view.recognitions ?? []} />
           <div className="flex flex-wrap items-center gap-3">
             {seat && !seat.guest && recap.bottles.length > 0 && (
               <ShareCardButton body={{ kind: "outing", code }} title={`${view.title} — recap`} label="Share the recap card" />
@@ -204,8 +206,10 @@ export default async function OutingPage({
       )}
 
       {onTrip && (open || view.board.length > 0) && (
-        <OutingBottleBoard code={code} board={view.board} canAdd={!!seat && open} canPour={!!user && !!seat && !seat.guest} isHost={view.isHost} participantId={seat?.participantId ?? null} />
+        <OutingBottleBoard code={code} board={view.board} canAdd={!!seat && open} canPour={!!user && !!seat && !seat.guest} isHost={view.isHost} participantId={seat?.participantId ?? null} social={view.social} />
       )}
+
+      {onTrip && view.board.length > 0 && <OutingInsightsPanel insights={view.insights} />}
 
       {seat && open && <QuickAddTasting code={code} signedIn={!!user && !seat.guest} initialBottle={initialBottle} />}
 

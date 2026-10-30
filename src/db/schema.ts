@@ -2649,6 +2649,62 @@ export const outingNotes = pgTable(
   (t) => [index("outing_notes_outing_idx").on(t.outingId), index("outing_notes_participant_idx").on(t.participantId)],
 );
 
+/**
+ * A short reply on an outing — on a bottle on the shared list (`target_kind`
+ * "bottle", `target_id` = the board key, e.g. `b:<bottleId>`) or on one
+ * person's rating ("tasting", the outing tasting id). Visible to the people on
+ * the outing only, under the same block / suspension filter as the board.
+ * `mentions` holds participant ids of people on the outing named with @.
+ */
+export const outingComments = pgTable(
+  "outing_comments",
+  {
+    id: id(),
+    outingId: text("outing_id")
+      .notNull()
+      .references(() => outings.id, { onDelete: "cascade" }),
+    participantId: text("participant_id")
+      .notNull()
+      .references(() => outingParticipants.id, { onDelete: "cascade" }),
+    targetKind: text("target_kind").$type<"bottle" | "tasting">().notNull(),
+    targetId: text("target_id").notNull(),
+    body: text("body").notNull(),
+    mentions: jsonb("mentions").$type<string[]>(),
+    editedAt: timestamp("edited_at", { withTimezone: true, mode: "date" }),
+    /** Set by the host hiding it (moderation hook). */
+    hiddenAt: timestamp("hidden_at", { withTimezone: true, mode: "date" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("outing_comments_outing_idx").on(t.outingId), index("outing_comments_participant_idx").on(t.participantId)],
+);
+
+/**
+ * A small fixed reaction on a bottle or a rating (`agree`, `surprised`,
+ * `want_to_try`, `great_note`), one of each kind per person per target. Words,
+ * not drinking emoji.
+ */
+export const outingReactions = pgTable(
+  "outing_reactions",
+  {
+    id: id(),
+    outingId: text("outing_id")
+      .notNull()
+      .references(() => outings.id, { onDelete: "cascade" }),
+    participantId: text("participant_id")
+      .notNull()
+      .references(() => outingParticipants.id, { onDelete: "cascade" }),
+    targetKind: text("target_kind").$type<"bottle" | "tasting">().notNull(),
+    targetId: text("target_id").notNull(),
+    kind: text("kind").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("outing_reactions_one_uq").on(t.participantId, t.targetKind, t.targetId, t.kind),
+    index("outing_reactions_outing_idx").on(t.outingId),
+  ],
+);
+
 // ── Track C: breadth challenges and friend boards (§7.12–7.13, D16–D17) ──────
 
 /**

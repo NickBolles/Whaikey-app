@@ -27,6 +27,8 @@ import {
   flights,
   outingBottles,
   outingNotes,
+  outingComments,
+  outingReactions,
   outingParticipants,
   outingTastings,
   outings,
@@ -1387,6 +1389,72 @@ export const ACCOUNT_DATA: readonly DataSlice[] = [
     where: (db, userId) =>
       and(inArray(outingNotes.outingId, ownOutingIds(db, userId)), notInArray(outingNotes.participantId, ownOutingSeatIds(db, userId))),
     notExported: "Other people's words, not yours.",
+  },
+  {
+    key: "outing_comments",
+    table: outingComments,
+    description: "Replies you posted on outing bottles and ratings.",
+    onDelete: "deleted",
+    why: "Your words.",
+    where: (db, userId) => inArray(outingComments.participantId, ownOutingSeatIds(db, userId)),
+    export: {
+      columns: ["outingId", "targetKind", "targetId", "body", "createdAt"],
+      rows: (db, userId) =>
+        db
+          .select({
+            outingId: outingComments.outingId,
+            targetKind: outingComments.targetKind,
+            targetId: outingComments.targetId,
+            body: outingComments.body,
+            createdAt: outingComments.createdAt,
+          })
+          .from(outingComments)
+          .where(inArray(outingComments.participantId, ownOutingSeatIds(db, userId)))
+          .orderBy(outingComments.createdAt),
+    },
+  },
+  {
+    key: "outing_comments_by_others",
+    table: outingComments,
+    description: "Replies other people posted on the outings you planned.",
+    onDelete: "deleted",
+    why: "They belong to an outing that is deleted with you.",
+    where: (db, userId) =>
+      and(inArray(outingComments.outingId, ownOutingIds(db, userId)), notInArray(outingComments.participantId, ownOutingSeatIds(db, userId))),
+    notExported: "Other people's words, not yours.",
+  },
+  {
+    key: "outing_reactions",
+    table: outingReactions,
+    description: "Reactions you left on outing bottles and ratings.",
+    onDelete: "deleted",
+    why: "Your reactions.",
+    where: (db, userId) => inArray(outingReactions.participantId, ownOutingSeatIds(db, userId)),
+    export: {
+      columns: ["outingId", "targetKind", "targetId", "kind", "createdAt"],
+      rows: (db, userId) =>
+        db
+          .select({
+            outingId: outingReactions.outingId,
+            targetKind: outingReactions.targetKind,
+            targetId: outingReactions.targetId,
+            kind: outingReactions.kind,
+            createdAt: outingReactions.createdAt,
+          })
+          .from(outingReactions)
+          .where(inArray(outingReactions.participantId, ownOutingSeatIds(db, userId)))
+          .orderBy(outingReactions.createdAt),
+    },
+  },
+  {
+    key: "outing_reactions_by_others",
+    table: outingReactions,
+    description: "Reactions other people left on the outings you planned.",
+    onDelete: "deleted",
+    why: "They belong to an outing that is deleted with you.",
+    where: (db, userId) =>
+      and(inArray(outingReactions.outingId, ownOutingIds(db, userId)), notInArray(outingReactions.participantId, ownOutingSeatIds(db, userId))),
+    notExported: "Other people's reactions, not yours.",
   },
 
   // --- Social M2: challenges and the friend board (Track C, §7.12–7.13) ----

@@ -276,6 +276,14 @@ async function seedFootprint(db: DB, subject: schema.User, counterpart: schema.U
     { id: uid("ob"), outingId: theirOuting, participantId: myOutingSeat, label: "Cask sample #7", dedupeKey: `l:${tag}-cask-7` },
     { id: uid("ob"), outingId: myOuting, participantId: theirOutingSeatAtMine, bottleId: catalog.id, label: "Catalog", dedupeKey: `b:${catalog.id}` },
   ]);
+  await db.insert(schema.outingComments).values([
+    { id: uid("oco"), outingId: theirOuting, participantId: myOutingSeat, targetKind: "bottle", targetId: `l:${tag}-cask-7`, body: `${tag} my reply` },
+    { id: uid("oco"), outingId: myOuting, participantId: theirOutingSeatAtMine, targetKind: "bottle", targetId: `b:${catalog.id}`, body: `${tag} their reply` },
+  ]);
+  await db.insert(schema.outingReactions).values([
+    { id: uid("orx"), outingId: theirOuting, participantId: myOutingSeat, targetKind: "bottle", targetId: `l:${tag}-cask-7`, kind: "agree" },
+    { id: uid("orx"), outingId: myOuting, participantId: theirOutingSeatAtMine, targetKind: "bottle", targetId: `b:${catalog.id}`, kind: "want_to_try" },
+  ]);
 
   // --- Challenges (social M2)
   const challengeId = uid("ch");

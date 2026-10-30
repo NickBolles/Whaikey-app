@@ -10,6 +10,22 @@ import { getRole, newCode, toCsv } from "@/lib/clubs";
 import { GUEST_HOURS, guestJoinSchema, hashGuestToken } from "@/lib/flights";
 import { notify } from "@/lib/notify";
 import { acceptedFollowSql, isSuspended } from "@/lib/social";
+import { buildInsights, buildRecognitions, type InsightTasting, type OutingInsights, type Recognition } from "@/lib/outings/insights";
+import { loadOutingSocial, targetRef, type OutingSocial } from "@/lib/outings/social";
+
+/** A short digest of replies/reactions so the stamp moves when they do. */
+function socialDigest(s: OutingSocial) {
+  let n = 0;
+  let h = 0;
+  for (const [ref, cs] of Object.entries(s.comments))
+    for (const c of cs) {
+      n++;
+      for (const ch of `${ref}${c.id}${c.body}${c.edited}`) h = (h * 31 + ch.charCodeAt(0)) | 0;
+    }
+  for (const [ref, rs] of Object.entries(s.reactions))
+    for (const r of rs) for (const ch of `${ref}${r.kind}${r.who.join()}`) h = (h * 31 + ch.charCodeAt(0)) | 0;
+  return `${n}.${h >>> 0}`;
+}
 
 /**
  * Outings — a group distillery visit (docs/SOCIAL.md §7.15, D22).
@@ -278,6 +294,11 @@ export async function claimOutingGuestSeat(db: DB, outingId: string, guestToken:
   await db.update(schema.outingNotes).set({ participantId: mine.participantId }).where(eq(schema.outingNotes.participantId, guest.participantId));
   // Bottles the guest put on the shared list move with them (the FK would cascade-delete them).
   await db.update(schema.outingBottles).set({ participantId: mine.participantId }).where(eq(schema.outingBottles.participantId, guest.participantId));
+  await db.update(schema.outingComments).set({ participantId: mine.participantId }).where(eq(schema.outingComments.participantId, guest.participantId));
+  // A reaction both seats left on the same thing collapses to one (unique per person).
+  await db.execute(sql`delete from outing_reactions g where g.participant_id = ${guest.participantId} and exists (
+    select 1 from outing_reactions m where m.participant_id = ${mine.participantId} and m.target_kind = g.target_kind and m.target_id = g.target_id and m.kind = g.kind)`);
+  await db.update(schema.outingReactions).set({ participantId: mine.participantId }).where(eq(schema.outingReactions.participantId, guest.participantId));
   await db.delete(schema.outingParticipants).where(eq(schema.outingParticipants.id, guest.participantId));
   return true;
 }
@@ -555,6 +576,12 @@ export interface OutingView {
   recap: OutingRecap | null;
   /** The shared bottle list with everyone's verdicts (trip members only). */
   board: OutingBoardBottle[];
+  /** Replies and reactions by target ref (`bottle:<key>` / `tasting:<id>`), trip members only. */
+  social: OutingSocial;
+  /** Live palate insights (trip members only); each part has its own minimum. */
+  insights: OutingInsights | null;
+  /** The recap's earned recognitions, once the outing has ended. */
+  recognitions: Recognition[];
   /** Changes whenever something visible changes — the client polls it. */
   stamp: string;
 }
@@ -787,20 +814,17 @@ function participantVisibleSql(viewer: string) {
   )!;
 }
 
-export async function getOutingView(db: DB, outing: schema.Outing, viewerUserId: string | null, seat: OutingSeat | null): Promise<OutingView> {
-  const isHost = viewerUserId === outing.hostId;
-  const hostProfile = await db.query.userProfiles.findFirst({
-    columns: { handle: true, displayName: true },
-    where: eq(schema.userProfiles.userId, outing.hostId),
-  });
-  const club = outing.clubId
-    ? ((await db.query.clubs.findFirst({ columns: { id: true, name: true }, where: eq(schema.clubs.id, outing.clubId) })) ?? null)
-    : null;
-
+/**
+ * Who's on the trip as this viewer may see them: minus anyone the viewer is
+ * blocked with, suspended or stepped-back accounts, and expired guests — the
+ * same filter as a table. Every outing read (board, replies, insights) and
+ * every reply/reaction write goes through it.
+ */
+export async function visibleOutingPeople(db: DB, outing: schema.Outing, viewerUserId: string | null) {
   // Who's on the trip, minus anyone the viewer is blocked with, suspended or
   // stepped-back accounts, and expired guests — the same filter as a table.
   const viewer = viewerUserId ?? "";
-  const people = await db
+  return db
     .select({
       participantId: schema.outingParticipants.id,
       userId: schema.outingParticipants.userId,
@@ -817,6 +841,29 @@ export async function getOutingView(db: DB, outing: schema.Outing, viewerUserId:
       ),
     )
     .orderBy(asc(schema.outingParticipants.joinedAt));
+}
+
+/** The visible people shaped for replies and @mentions. */
+export async function outingMembers(db: DB, outing: schema.Outing, viewerUserId: string | null) {
+  const people = await visibleOutingPeople(db, outing, viewerUserId);
+  return people.map((p) => ({
+    participantId: p.participantId,
+    name: p.handle ? p.displayName || `@${p.handle}` : (p.guestName ?? "Guest"),
+    handle: p.handle,
+  }));
+}
+
+export async function getOutingView(db: DB, outing: schema.Outing, viewerUserId: string | null, seat: OutingSeat | null): Promise<OutingView> {
+  const isHost = viewerUserId === outing.hostId;
+  const hostProfile = await db.query.userProfiles.findFirst({
+    columns: { handle: true, displayName: true },
+    where: eq(schema.userProfiles.userId, outing.hostId),
+  });
+  const club = outing.clubId
+    ? ((await db.query.clubs.findFirst({ columns: { id: true, name: true }, where: eq(schema.clubs.id, outing.clubId) })) ?? null)
+    : null;
+
+  const people = await visibleOutingPeople(db, outing, viewerUserId);
   const visible = new Map(people.map((p) => [p.participantId, p]));
   const nameOf = (pid: string) => {
     const p = visible.get(pid)!;
@@ -828,6 +875,9 @@ export async function getOutingView(db: DB, outing: schema.Outing, viewerUserId:
   let recap: OutingRecap | null = null;
   let board: OutingBoardBottle[] = [];
   let stamp = `${outing.state}`;
+  let social: OutingSocial = { comments: {}, reactions: {} };
+  let insights: OutingInsights | null = null;
+  let recognitions: Recognition[] = [];
   if (onTrip) {
     const tastings = (
       await db.select().from(schema.outingTastings).where(eq(schema.outingTastings.outingId, outing.id)).orderBy(desc(schema.outingTastings.createdAt))
@@ -876,7 +926,35 @@ export async function getOutingView(db: DB, outing: schema.Outing, viewerUserId:
       seat?.participantId ?? null,
     );
     for (const b of board) if (b.bottleId && !linkable.has(b.bottleId)) b.bottleId = null;
-    stamp = [outing.state, feed.length, entries.length, entries.at(-1)?.id ?? "", ...feed.slice(0, 3).map((f) => f.id), tastings.reduce((m, t) => Math.max(m, t.updatedAt.getTime()), 0), people.length].join(":");
+    const members = people.map((p) => ({ participantId: p.participantId, name: nameOf(p.participantId), handle: p.handle }));
+    const liveTargets = new Set<string>([
+      ...board.map((b) => targetRef("bottle", b.key)),
+      ...board.flatMap((b) => b.votes.map((v) => targetRef("tasting", v.tastingId ?? ""))),
+    ]);
+    social = await loadOutingSocial(db, outing.id, members, seat?.participantId ?? null, liveTargets);
+    // Insights read each person's latest verdict per bottle, from visible people only.
+    const latest = new Map<string, InsightTasting>();
+    for (const t of tastings) {
+      const key = outingBottleKey(t.bottleId, t.label);
+      const id = `${t.participantId}|${key}`;
+      const prev = latest.get(id);
+      if (!prev || prev.at < t.updatedAt.getTime())
+        latest.set(id, { participantId: t.participantId, key, label: t.label, rating: t.rating, tags: Object.keys(t.flavorTags ?? {}), note: t.note, at: t.updatedAt.getTime() });
+    }
+    const insightPeople = people.map((p) => ({ participantId: p.participantId, name: p.participantId === seat?.participantId ? "You" : nameOf(p.participantId) }));
+    insights = buildInsights([...latest.values()], insightPeople, seat?.participantId ?? null);
+    if (outing.state === "ended") {
+      const appreciation = new Map<string, { participantId: string; label: string; count: number }>();
+      for (const b of board)
+        for (const v of b.votes) {
+          if (!v.tastingId || !v.note) continue;
+          const n = (social.reactions[targetRef("tasting", v.tastingId)] ?? []).filter((r) => r.kind === "great_note" || r.kind === "learned").reduce((s, r) => s + r.count, 0);
+          const pid = tastings.find((t) => t.id === v.tastingId)?.participantId;
+          if (pid && n > 0) appreciation.set(v.tastingId, { participantId: pid, label: b.label, count: n });
+        }
+      recognitions = buildRecognitions(insights, [...latest.values()], insightPeople, [...appreciation.values()]);
+    }
+    stamp = [outing.state, feed.length, entries.length, entries.at(-1)?.id ?? "", ...feed.slice(0, 3).map((f) => f.id), tastings.reduce((m, t) => Math.max(m, t.updatedAt.getTime()), 0), people.length, socialDigest(social)].join(":");
   }
 
   return {
@@ -897,6 +975,9 @@ export async function getOutingView(db: DB, outing: schema.Outing, viewerUserId:
     feed,
     recap,
     board,
+    social,
+    insights,
+    recognitions,
     stamp,
   };
 }
@@ -914,7 +995,9 @@ export async function outingChangeMarker(db: DB, outingId: string): Promise<stri
     (select count(*) || '/' || coalesce(max(extract(epoch from updated_at)), 0) || '/' || count(hidden_at) from outing_tastings where outing_id = ${outingId}),
     (select count(*) || '/' || coalesce(max(extract(epoch from created_at)), 0) || '/' || count(hidden_at) from outing_notes where outing_id = ${outingId}),
     (select count(*) || '/' || coalesce(max(extract(epoch from created_at)), 0) || '/' || count(hidden_at) from outing_bottles where outing_id = ${outingId}),
-    (select count(*) from outing_participants where outing_id = ${outingId})
+    (select count(*) from outing_participants where outing_id = ${outingId}),
+    (select count(*) || '/' || coalesce(max(extract(epoch from updated_at)), 0) || '/' || count(hidden_at) from outing_comments where outing_id = ${outingId}),
+    (select count(*) || '/' || coalesce(max(extract(epoch from created_at)), 0) from outing_reactions where outing_id = ${outingId})
   ) as m`)) as unknown as { rows?: Array<{ m: string }> } | Array<{ m: string }>;
   const list = Array.isArray(rows) ? rows : (rows.rows ?? []);
   return String(list[0]?.m ?? "");
