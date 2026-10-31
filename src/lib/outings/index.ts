@@ -770,6 +770,21 @@ export function buildBottleBoard(
     }));
 }
 
+/**
+ * The participants a viewer may see on an outing: guests (unexpired), the
+ * viewer themself, and social-enabled, unsuspended accounts with no block
+ * either way. Shared by the outing view and Home's counts so both agree.
+ */
+function participantVisibleSql(viewer: string) {
+  return and(
+    sql`(${schema.outingParticipants.userId} is null or ${schema.outingParticipants.userId} = ${viewer} or (
+          exists (select 1 from user_profiles fp where fp.user_id = ${schema.outingParticipants.userId} and fp.social_enabled = true and fp.suspended_at is null)
+          and not exists (select 1 from blocks b where (b.blocker_id = ${viewer} and b.blocked_id = ${schema.outingParticipants.userId}) or (b.blocker_id = ${schema.outingParticipants.userId} and b.blocked_id = ${viewer}))
+        ))`,
+    sql`(${schema.outingParticipants.userId} is not null or ${schema.outingParticipants.expiresAt} > now())`,
+  )!;
+}
+
 export async function getOutingView(db: DB, outing: schema.Outing, viewerUserId: string | null, seat: OutingSeat | null): Promise<OutingView> {
   const isHost = viewerUserId === outing.hostId;
   const hostProfile = await db.query.userProfiles.findFirst({
@@ -796,11 +811,7 @@ export async function getOutingView(db: DB, outing: schema.Outing, viewerUserId:
     .where(
       and(
         eq(schema.outingParticipants.outingId, outing.id),
-        sql`(${schema.outingParticipants.userId} is null or ${schema.outingParticipants.userId} = ${viewer} or (
-          exists (select 1 from user_profiles fp where fp.user_id = ${schema.outingParticipants.userId} and fp.social_enabled = true and fp.suspended_at is null)
-          and not exists (select 1 from blocks b where (b.blocker_id = ${viewer} and b.blocked_id = ${schema.outingParticipants.userId}) or (b.blocker_id = ${schema.outingParticipants.userId} and b.blocked_id = ${viewer}))
-        ))`,
-        sql`(${schema.outingParticipants.userId} is not null or ${schema.outingParticipants.expiresAt} > now())`,
+        participantVisibleSql(viewer),
       ),
     )
     .orderBy(asc(schema.outingParticipants.joinedAt));
@@ -915,6 +926,7 @@ export async function listMyOutings(db: DB, userId: string) {
   if (await isSuspended(db, userId)) return [];
   return db
     .select({
+      id: schema.outings.id,
       title: schema.outings.title,
       distilleryName: schema.outings.distilleryName,
       visitOn: schema.outings.visitOn,
@@ -938,6 +950,7 @@ export async function nextOutingFor(db: DB, userId: string, today: string) {
   if (await isSuspended(db, userId)) return null;
   const [row] = await db
     .select({
+      id: schema.outings.id,
       title: schema.outings.title,
       distilleryName: schema.outings.distilleryName,
       visitOn: schema.outings.visitOn,
@@ -949,7 +962,24 @@ export async function nextOutingFor(db: DB, userId: string, today: string) {
     .where(and(eq(schema.outingParticipants.userId, userId), eq(schema.outings.state, "open"), gte(schema.outings.visitOn, today), hostVisibleSql(userId)))
     .orderBy(asc(schema.outings.visitOn), asc(schema.outings.createdAt))
     .limit(1);
-  return row ?? null;
+  if (!row) return null;
+  // "Who's coming" and the bottle list, as counts only: names would need the
+  // per-viewer block predicate, and Home only needs the shape of the plan.
+  const [[going], [listed]] = await Promise.all([
+    db
+      .select({ count: sql<number>`count(*)` })
+      .from(schema.outingParticipants)
+      .where(and(eq(schema.outingParticipants.outingId, row.id), participantVisibleSql(userId))),
+    // Only entries from participants this viewer can see, as on the outing page.
+    db
+      .select({ count: sql<number>`count(*)` })
+      .from(schema.outingBottles)
+      .innerJoin(schema.outingParticipants, eq(schema.outingParticipants.id, schema.outingBottles.participantId))
+      .where(and(eq(schema.outingBottles.outingId, row.id), isNull(schema.outingBottles.hiddenAt), participantVisibleSql(userId))),
+  ]);
+  const { id: _id, ...rest } = row;
+  void _id;
+  return { ...rest, goingCount: Number(going?.count ?? 0), bottleCount: Number(listed?.count ?? 0) };
 }
 
 /** Nightly + opportunistic: guest seats past 24 h, and what they logged with them (D20). */

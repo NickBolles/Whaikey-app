@@ -19,7 +19,7 @@ export default async function HistoryPage({
           📖
         </div>
         <div>
-          <h1 className="font-display text-2xl font-semibold">Your journal awaits</h1>
+          <h1 className="font-display text-2xl font-semibold">Your tasting journal</h1>
           <p className="text-muted mt-2 max-w-sm">Sign in to see your tasting journal.</p>
         </div>
         <Link href="/sign-in" className="btn-primary px-8 py-3">

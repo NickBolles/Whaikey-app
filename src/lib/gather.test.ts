@@ -15,4 +15,8 @@ describe("pickNextOuting", () => {
     expect(pickNextOuting([row("2026-10-29", "ended"), row("2026-10-01")], now)).toBeNull();
     expect(pickNextOuting([], now)).toBeNull();
   });
+  it("carries who's coming and the bottle list through", () => {
+    expect(pickNextOuting([{ ...row("2026-10-29"), goingCount: 5, bottleCount: 7 }], now)).toMatchObject({ goingCount: 5, bottleCount: 7 });
+    expect(pickNextOuting([row("2026-10-29")], now)).not.toHaveProperty("goingCount");
+  });
 });

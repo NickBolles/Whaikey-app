@@ -856,16 +856,16 @@ function FlavorMapSection({
           <div aria-hidden className="text-3xl">{isPalate ? "📖" : "🎯"}</div>
           <p className="font-display text-base font-semibold">
             {isPalate
-              ? "Your palate is still a blank page"
+              ? "No flavor profile yet"
               : lens === "mine"
                 ? "No personal flavor notes yet"
                 : "No published flavor notes yet"}
           </p>
           <p className="text-sm text-muted max-w-[30ch] leading-relaxed">
             {isPalate
-              ? "Rate a few pours and your flavor fingerprint appears here."
+              ? "Rate and tag a few bottles to see which flavors you like most."
               : lens === "mine"
-                ? `Log a pour and tag what you taste to map ${scopeBlurb}.`
+                ? `Log a tasting and tag what you taste to map ${scopeBlurb}.`
                 : "Published bottle notes appear here as the catalog and scanner are enriched."}
           </p>
         </div>

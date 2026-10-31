@@ -145,7 +145,7 @@ describe("RecommendationRail", () => {
     render(<RecommendationRail mode="discovery" title="Bottles for you" />);
 
     await waitFor(() =>
-      expect(screen.getByText(/learn your taste/i)).toBeInTheDocument(),
+      expect(screen.getByText(/Tag a few flavors to get picks/i)).toBeInTheDocument(),
     );
     expect(screen.queryByText("Smoky Match")).not.toBeInTheDocument();
   });

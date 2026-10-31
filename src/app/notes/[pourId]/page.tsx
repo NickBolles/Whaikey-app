@@ -54,8 +54,8 @@ export default async function NotePage({ params }: Props) {
           🥃
         </div>
         <div>
-          <h1 className="font-display text-2xl font-semibold">A tasting note awaits</h1>
-          <p className="mt-2 max-w-sm text-muted">Sign in to see this note and join the conversation.</p>
+          <h1 className="font-display text-2xl font-semibold">Sign in to read this note</h1>
+          <p className="mt-2 max-w-sm text-muted">Notes are shared with friends on Caskfolk.</p>
         </div>
         <Link href="/sign-in" className="btn-primary px-8 py-3">
           Sign in

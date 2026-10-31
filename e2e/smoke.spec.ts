@@ -777,3 +777,46 @@ test.describe("policies, support and the queue", () => {
     await expect(page.getByRole("region", { name: /submission status/i })).toHaveCount(0);
   });
 });
+
+/**
+ * Home order (owner feedback 2026-10-29): the month first, then what's next,
+ * then suggestions; Ask and School are a compact row at the bottom. A month
+ * without tastings is one plain line plus "Start here" — no blank-page copy,
+ * no empty grey bars.
+ */
+test.describe("home: month first, what's next", () => {
+  test("a user with tastings sees plain month facts and the upcoming outing", async ({ page, context, baseURL }) => {
+    await signIn(context, baseURL!);
+    await page.goto("/");
+    const month = page.getByRole("region", { name: "Your month" });
+    await expect(month.getByTestId("month-facts")).toBeVisible();
+    await expect(month.getByTestId("month-facts")).toContainText("tasted");
+    await expect(month).not.toContainText(/pours?\b|blank|writes it/i);
+
+    const next = page.getByRole("region", { name: "What's next" });
+    await expect(next.getByTestId("gather-next-outing")).toContainText("Bourbon Trail Saturday");
+    await expect(next.getByTestId("gather-next-outing")).toContainText("3 going");
+    await expect(page.getByRole("region", { name: "Start here" })).toHaveCount(0);
+
+    // Order: month, what's next, suggestions … Ask and learn last.
+    const order = await page.locator("main section[aria-label]").evaluateAll((els) =>
+      els.map((e) => e.getAttribute("aria-label")).filter((l) => ["Your month", "What's next", "Suggestions", "Get together", "Ask and learn"].includes(l ?? "")),
+    );
+    expect(order).toEqual(["Your month", "What's next", "Suggestions", "Get together", "Ask and learn"]);
+  });
+
+  test("a new user with no tastings gets a plain zero state with one primary action", async ({ page, context, baseURL }) => {
+    await signIn(context, baseURL!, OPERATOR_SESSION_TOKEN);
+    // The operator account has no pours; skip the first-run tour so Home renders.
+    await context.addCookies([{ name: "whaikey_onboarded", value: "1", domain: new URL(baseURL!).hostname, path: "/" }]);
+    await page.goto("/");
+    await expect(page.getByRole("heading", { name: /^July · no tastings yet$/ })).toBeVisible();
+    await expect(page.getByTestId("month-facts")).toHaveCount(0);
+    await expect(page.getByText(/What you reached for|page is still blank|first note writes it/)).toHaveCount(0);
+    const start = page.getByRole("region", { name: "Start here" });
+    await expect(start).toBeVisible();
+    await expect(start.getByTestId("start-primary")).toHaveCount(1);
+    await expect(start.getByRole("link")).toHaveCount(3);
+    await expect(start).not.toContainText(/streak|pours? (this|logged)/i);
+  });
+});

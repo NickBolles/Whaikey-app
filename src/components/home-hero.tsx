@@ -127,14 +127,13 @@ function TonightHero({ bottleCount, pourCount }: { bottleCount: number; pourCoun
   // No pick (nothing open yet, no rated pours, or the fetch failed): the
   // manual core loop is never blocked — fall back to log/add actions.
   if (!pick) {
+    // No pour count here: a running total reads as a score to grow.
+    void pourCount;
     const bottles = `${bottleCount} bottle${bottleCount === 1 ? "" : "s"} on your shelf`;
-    const pours = `${pourCount} pour${pourCount === 1 ? "" : "s"} logged`;
     return (
       <section aria-label="Your next pour" className="card p-5">
         <h2 className="font-display text-xl font-semibold">Your next pour</h2>
-        <p className="mt-1 text-sm text-muted">
-          {bottles} · {pours}
-        </p>
+        <p className="mt-1 text-sm text-muted">{bottles}</p>
         <div className="mt-4 grid grid-cols-2 gap-2">
           <Link
             href="/pour"

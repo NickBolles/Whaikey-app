@@ -283,7 +283,7 @@ test.describe("social: signed-out visitor", () => {
   test("a friends-visible note shows the sign-in hero, never the content", async ({ page }) => {
     const response = await page.goto(`/notes/${SASHA_LAGAVULIN_POUR_ID}`);
     expect(response?.status()).toBe(200);
-    await expect(page.getByRole("heading", { name: "A tasting note awaits" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Sign in to read this note" })).toBeVisible();
     await expect(page.getByText(SASHA_COMMENT_TEXT)).toHaveCount(0);
   });
 

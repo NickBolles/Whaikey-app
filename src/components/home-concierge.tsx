@@ -48,7 +48,7 @@ export function HomeConcierge({ aiConfigured }: { aiConfigured: boolean }) {
           value={message}
           onChange={(event) => setMessage(event.target.value)}
           aria-label="Ask about your bar"
-          placeholder="Ask about your bar — a pour, a bottle, a pairing…"
+          placeholder="Ask about your bar: a bottle, a style, a pairing"
           className="min-w-0 flex-1 bg-transparent px-1 py-2.5 text-sm placeholder:text-muted focus:outline-none"
         />
         <button

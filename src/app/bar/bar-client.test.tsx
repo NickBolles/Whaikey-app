@@ -425,7 +425,7 @@ describe("BarClient palate as a weighting of Mine", () => {
         calibration={calibrationMatrix()} palate={palate} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Weight by rating" }));
-    expect(screen.getByText("Your palate is still a blank page")).toBeInTheDocument();
+    expect(screen.getByText("No flavor profile yet")).toBeInTheDocument();
     expect(screen.queryByTestId("bar-flavor-wheel")).not.toBeInTheDocument();
   });
 
@@ -443,7 +443,7 @@ describe("BarClient palate as a weighting of Mine", () => {
         calibration={calibrationMatrix()} palate={cancelled} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Weight by rating" }));
-    expect(screen.queryByText("Your palate is still a blank page")).not.toBeInTheDocument();
+    expect(screen.queryByText("No flavor profile yet")).not.toBeInTheDocument();
     expect(screen.getByTestId("bar-flavor-wheel")).toBeInTheDocument();
   });
 });
