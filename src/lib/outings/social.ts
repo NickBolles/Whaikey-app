@@ -89,7 +89,9 @@ async function targetExists(db: DB, outingId: string, kind: OutingTargetKind, id
     columns: { hiddenAt: true, participantId: true },
     where: and(eq(schema.outingBottles.outingId, outingId), eq(schema.outingBottles.dedupeKey, id)),
   });
-  if (entry) return entry.hiddenAt == null && visible.has(entry.participantId);
+  // A hidden or not-visible entry can still be on the board via a visible
+  // tasting, so fall through to the tastings rather than rejecting.
+  if (entry && entry.hiddenAt == null && visible.has(entry.participantId)) return true;
   const rows = await db
     .select({ bottleId: schema.outingTastings.bottleId, label: schema.outingTastings.label, participantId: schema.outingTastings.participantId })
     .from(schema.outingTastings)

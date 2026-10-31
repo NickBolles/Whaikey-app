@@ -115,3 +115,16 @@ describe("buildRecognitions", () => {
   });
 });
 
+describe("learn from — detail is a rate, not a total", () => {
+  it("two long notes beat many short ones", () => {
+    const short = "pear and a little smoke here";
+    const long = Array.from({ length: 40 }, (_, i) => `word${i}`).join(" ");
+    const ts = [
+      ...["l:a", "l:b", "l:c", "l:d", "l:e", "l:f"].map((k) => t("a", k, 3, [], short)),
+      t("b", "l:a", 3, [], long),
+      t("b", "l:b", 3, [], long),
+    ];
+    const i = buildInsights(ts, people, null);
+    expect(i.learnFrom?.name).toBe("Ben");
+  });
+});

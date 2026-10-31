@@ -186,10 +186,12 @@ export function buildInsights(tastings: InsightTasting[], people: InsightPerson[
     const detail = ids
       .map((pid) => {
         const notes = byPerson.get(pid)!.filter((t) => (t.note ?? "").trim().length >= 12);
-        return { pid, notes: notes.length, words: notes.reduce((s, t) => s + (t.note ?? "").trim().split(/\s+/).length, 0) };
+        const words = notes.reduce((s, t) => s + (t.note ?? "").trim().split(/\s+/).length, 0);
+        // A rate, not a total: words per note, so logging more never wins it.
+        return { pid, notes: notes.length, perNote: notes.length ? words / notes.length : 0 };
       })
       .filter((d) => d.notes >= 2)
-      .sort((x, y) => y.words - x.words || x.pid.localeCompare(y.pid))[0];
+      .sort((x, y) => y.perNote - x.perNote || x.pid.localeCompare(y.pid))[0];
     if (detail) learnFrom = { participantId: detail.pid, name: names.get(detail.pid)!, why: "Wrote the most detailed tasting notes of the group." };
   }
 

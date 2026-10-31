@@ -933,13 +933,24 @@ export async function getOutingView(db: DB, outing: schema.Outing, viewerUserId:
     ]);
     social = await loadOutingSocial(db, outing.id, members, seat?.participantId ?? null, liveTargets);
     // Insights read each person's latest verdict per bottle, from visible people only.
-    const latest = new Map<string, InsightTasting>();
+    // "Latest" is chosen by last edit, but `at` (who said it first) is when
+    // the tasting was logged, so fixing a typo never moves credit around.
+    const latest = new Map<string, InsightTasting & { edited: number }>();
     for (const t of tastings) {
       const key = outingBottleKey(t.bottleId, t.label);
       const id = `${t.participantId}|${key}`;
       const prev = latest.get(id);
-      if (!prev || prev.at < t.updatedAt.getTime())
-        latest.set(id, { participantId: t.participantId, key, label: t.label, rating: t.rating, tags: Object.keys(t.flavorTags ?? {}), note: t.note, at: t.updatedAt.getTime() });
+      if (!prev || prev.edited < t.updatedAt.getTime())
+        latest.set(id, {
+          participantId: t.participantId,
+          key,
+          label: t.label,
+          rating: t.rating,
+          tags: Object.keys(t.flavorTags ?? {}),
+          note: t.note,
+          at: t.createdAt.getTime(),
+          edited: t.updatedAt.getTime(),
+        });
     }
     const insightPeople = people.map((p) => ({ participantId: p.participantId, name: p.participantId === seat?.participantId ? "You" : nameOf(p.participantId) }));
     insights = buildInsights([...latest.values()], insightPeople, seat?.participantId ?? null);

@@ -52,10 +52,11 @@ export async function GET(req: Request, ctx: Ctx) {
         req.signal.addEventListener("abort", close);
         // Reconnect quickly after the window ends.
         controller.enqueue(enc.encode("retry: 1500\n\n"));
-        let marker = "";
+        // Read the marker before the stamp: a write that lands in between then
+        // shows up as a changed marker on the next tick instead of being lost.
+        let marker = await outingChangeMarker(db, outing.id).catch(() => "");
         let stamp = await outingStamp(db, outing, viewerId, seat);
         send("stamp", { stamp });
-        marker = await outingChangeMarker(db, outing.id).catch(() => marker);
         while (!closed && Date.now() - started < LIVE_WINDOW_MS) {
           await new Promise((r) => setTimeout(r, LIVE_TICK_MS));
           if (closed) break;
