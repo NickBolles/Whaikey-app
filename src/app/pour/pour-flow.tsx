@@ -91,7 +91,7 @@ async function patchEntry(pourId: string, edit: EntryEdit): Promise<{ previous: 
   return { previous: body.previous };
 }
 
-export function PourFlow({ userId, initialBottle = null, initialBottleMissing = false, editEntry = null }: { userId?: string; initialBottle?: BottlePick | null; initialBottleMissing?: boolean; editEntry?: EditEntry | null }) {
+export function PourFlow({ userId, initialBottle = null, initialBottleMissing = false, editEntry = null, outingCode = null }: { userId?: string; initialBottle?: BottlePick | null; initialBottleMissing?: boolean; editEntry?: EditEntry | null; /** Logged from an outing's bottle list: tags the pour with that outing. */ outingCode?: string | null }) {
   const router = useRouter();
   const toast = useToast();
   // Edit mode: the same sheet, prefilled; no draft, no bottle change, and
@@ -364,6 +364,7 @@ export function PourFlow({ userId, initialBottle = null, initialBottleMissing = 
       visibility,
       clientId,
       expectedUserId: userId,
+      ...(outingCode ? { outingCode } : {}),
     };
 
     try {

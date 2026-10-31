@@ -172,7 +172,7 @@ export default function PrivacyPage() {
           <li>
             <strong className="text-foreground">Outings</strong> — the distillery trips you plan (name, the
             distillery and where it is, the day) and, for everyone on one, what they logged: the bottle or the
-            name they typed, a rating, descriptors, a note, the bottles they put on the group&rsquo;s list, and short posts on the outing&rsquo;s feed. No
+            name they typed, a rating, descriptors, a note, the bottles they put on the group&rsquo;s list, short posts on the outing&rsquo;s feed, and replies and reactions on bottles and ratings (seen only by the people on that outing). No
             device location is read and no amounts are recorded. A guest without an account gives a first name
             and a birth date; we check the date and keep only the name and what they logged, for 24 hours,
             unless they create an account.

@@ -404,3 +404,37 @@ describe("visible-write guards (docs/SOCIAL.md §11 / US-11)", () => {
     expect(updated?.visibility).toBe("private");
   });
 });
+
+describe("logPour from an outing (?outing=<code>)", () => {
+  let db: DB;
+  beforeEach(async () => {
+    db = await setupTestDb();
+  });
+
+  async function outingWith(hostId: string) {
+    const id = uid("outing");
+    const joinCode = `c${id.slice(-8)}`.toLowerCase();
+    await db.insert(schema.outings).values({ id, hostId, title: "Trip", distilleryName: "Buffalo Trace", visitOn: "2026-10-29", joinCode });
+    await db.insert(schema.outingParticipants).values({ id: uid("seat"), outingId: id, userId: hostId });
+    return { id, joinCode };
+  }
+
+  it("tags the pour with the outing when the pourer has a seat", async () => {
+    const user = await createTestUser(db);
+    const bottle = await createTestBottle(db);
+    const o = await outingWith(user.id);
+    const { pour } = await logPour(db, user.id, { bottleId: bottle.id, outingCode: o.joinCode });
+    expect(pour.outingId).toBe(o.id);
+  });
+
+  it("saves the pour untagged when the pourer isn't on that outing or the code is unknown", async () => {
+    const host = await createTestUser(db);
+    const other = await createTestUser(db);
+    const bottle = await createTestBottle(db);
+    const o = await outingWith(host.id);
+    const a = await logPour(db, other.id, { bottleId: bottle.id, outingCode: o.joinCode });
+    expect(a.pour.outingId).toBeNull();
+    const b = await logPour(db, other.id, { bottleId: bottle.id, outingCode: "nope" });
+    expect(b.pour.outingId).toBeNull();
+  });
+});

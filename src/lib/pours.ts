@@ -77,6 +77,11 @@ export const pourInputSchema = z.object({
    */
   clientId: z.string().min(1).max(100).optional(),
   /**
+   * Join code of the outing this pour was logged from. Ignored (the pour still
+   * saves, untagged) unless the pourer has a seat on that outing.
+   */
+  outingCode: z.string().min(1).max(40).optional(),
+  /**
    * Who the client believes it is writing as. The server refuses the write if
    * that isn't the session making it.
    *
@@ -135,6 +140,17 @@ export function visiblePourRateLimitCondition(userId: string, since: Date) {
  * back to the device would otherwise log the dram twice and take the fill
  * level down twice with it.
  */
+/** The outing's id when `userId` has a seat on the outing with this join code; else null. */
+async function seatedOutingId(db: DB, userId: string, code: string): Promise<string | null> {
+  const [row] = await db
+    .select({ id: schema.outings.id })
+    .from(schema.outings)
+    .innerJoin(schema.outingParticipants, eq(schema.outingParticipants.outingId, schema.outings.id))
+    .where(and(eq(schema.outings.joinCode, code), eq(schema.outingParticipants.userId, userId)))
+    .limit(1);
+  return row?.id ?? null;
+}
+
 export async function logPour(db: DB, userId: string, input: PourInput): Promise<LoggedPour> {
   const parsed = pourInputSchema.parse(input);
 
@@ -165,6 +181,7 @@ export async function logPour(db: DB, userId: string, input: PourInput): Promise
    * promoted the note stays where it is until its owner chooses otherwise.
    */
   if (bottle.status === "user_submitted") visibility = "private";
+  const outingId = parsed.outingCode ? await seatedOutingId(db, userId, parsed.outingCode) : null;
   const { pour, note } = await db.transaction(async (tx) => {
     if (parsed.clientId) {
       // Serialize replays of the same key so two in-flight retries can't both
@@ -250,7 +267,7 @@ export async function logPour(db: DB, userId: string, input: PourInput): Promise
       .values({
         id: crypto.randomUUID(), userId, bottleId: parsed.bottleId, userBottleId: userBottle?.id ?? null, createdAt: loggedAt,
         rating: parsed.rating ?? null, servingStyle: parsed.servingStyle ?? null, amountMl, context: parsed.context ?? null,
-        visibility, clientId: parsed.clientId ?? null,
+        visibility, clientId: parsed.clientId ?? null, outingId,
         // Snapshots, written once and never updated (WP-19). `userBottle` is
         // the row this pour was logged against, so its relationship here is
         // what the shelf said AT POUR TIME — before a later purchase can flip

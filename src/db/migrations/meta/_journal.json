@@ -414,6 +414,20 @@
       "when": 1793242486598,
       "tag": "0058_outing_bottles",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1793246437735,
+      "tag": "0059_pour_outing",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1793334834098,
+      "tag": "0060_outing_social",
+      "breakpoints": true
     }
   ]
 }

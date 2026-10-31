@@ -336,6 +336,37 @@ body {
   background: transparent;
 }
 
+/* Outing live arrivals: a quiet highlight that fades, and a small toast above
+   the bottom nav. No confetti, no bounce. */
+@keyframes outing-arrival {
+  from {
+    background-color: color-mix(in srgb, var(--accent) 14%, transparent);
+    transform: translateY(4px);
+  }
+  to {
+    background-color: transparent;
+    transform: none;
+  }
+}
+.outing-arrival {
+  animation: outing-arrival 1.6s ease-out;
+}
+.outing-toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 5.5rem);
+  transform: translateX(-50%);
+  z-index: 40;
+  max-width: min(22rem, calc(100vw - 2rem));
+  padding: 0.5rem 0.875rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--surface, var(--background));
+  color: var(--foreground);
+  font-size: 0.8125rem;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.18);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

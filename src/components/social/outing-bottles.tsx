@@ -8,6 +8,9 @@ import { leafLabel } from "@/lib/flavor-wheel";
 import { PourScanSlot } from "@/components/pour/scan-slot";
 import { TABLE_TAGS } from "@/components/social/flight-client";
 import type { OutingBoardBottle } from "@/lib/outings";
+import { arrivalToast, boardArrivals } from "@/lib/outings/live";
+import type { OutingSocial } from "@/lib/outings/social";
+import { ReactionChips, Replies } from "@/components/social/outing-social";
 
 /**
  * The outing's shared bottle list (owner request 2026-10-28): anyone on the
@@ -278,6 +281,8 @@ function RateForm({
   );
 }
 
+const EMPTY_SOCIAL: OutingSocial = { comments: {}, reactions: {} };
+
 function BottleCard({
   code,
   bottle,
@@ -286,9 +291,16 @@ function BottleCard({
   canRemove,
   send,
   onNotice,
+  fresh = false,
+  social = EMPTY_SOCIAL,
+  isHost = false,
 }: {
+  social?: OutingSocial;
+  isHost?: boolean;
   code: string;
   bottle: OutingBoardBottle;
+  /** Just arrived from someone else: a brief highlight. */
+  fresh?: boolean;
   canRate: boolean;
   canPour: boolean;
   /** The viewer added it, or hosts the outing. Ratings already given stay. */
@@ -298,7 +310,30 @@ function BottleCard({
 }) {
   const [rating, setRating] = useState(false);
   const [removing, setRemoving] = useState(false);
+  const [wishing, setWishing] = useState(false);
   const router = useRouter();
+  /** Wishlist without ever demoting a bottle already owned or tried (keepExisting). */
+  async function wishlist() {
+    if (!bottle.bottleId || wishing) return;
+    setWishing(true);
+    try {
+      const res = await fetch("/api/user-bottles", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bottleId: bottle.bottleId, relationship: "wishlist", keepExisting: true }),
+      });
+      if (res.status === 201) onNotice(`Added ${bottle.label} to your wishlist.`);
+      else if (res.ok) {
+        const row = (await res.json().catch(() => null)) as { relationship?: string } | null;
+        const where = row?.relationship === "own" ? "on your shelf" : row?.relationship === "tried" ? "in your tried list" : "on your wishlist";
+        onNotice(`${bottle.label} is already ${where}.`);
+      } else onNotice(`Couldn't add ${bottle.label} to your wishlist.`);
+    } catch {
+      onNotice("No signal — try the wishlist again when you're back online.");
+    } finally {
+      setWishing(false);
+    }
+  }
   async function remove() {
     if (!bottle.entryId) return;
     setRemoving(true);
@@ -310,7 +345,7 @@ function BottleCard({
     } else onNotice(r === "retry" ? "No signal — try removing it again when you're back online." : `Couldn't remove ${bottle.label}.`);
   }
   return (
-    <li className={`card-flat flex flex-col gap-2 p-3 ${bottle.favourite ? "border border-accent" : ""}`} aria-label={bottle.label}>
+    <li className={`card-flat flex flex-col gap-2 p-3 ${bottle.favourite ? "border border-accent" : ""} ${fresh ? "outing-arrival" : ""}`} aria-label={bottle.label}>
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           {bottle.favourite && (
@@ -348,12 +383,28 @@ function BottleCard({
               {v.rating != null && <span className="ml-1.5 text-accent">★ {v.rating}</span>}
               {v.tags.length > 0 && <span className="ml-1.5 text-xs text-muted">{v.tags.join(" · ")}</span>}
               {v.note && <span className="block text-xs italic text-muted">&ldquo;{v.note}&rdquo;</span>}
+              {v.tastingId && (
+                <div className="mt-0.5 pl-2">
+                  <ReactionChips code={code} targetKind="tasting" targetId={v.tastingId} reactions={social.reactions[`tasting:${v.tastingId}`] ?? []} canReact={canRate && !v.mine} compact />
+                  <Replies
+                    code={code}
+                    targetKind="tasting"
+                    targetId={v.tastingId}
+                    comments={social.comments[`tasting:${v.tastingId}`] ?? []}
+                    canReply={canRate}
+                    isHost={isHost}
+                    about={v.mine ? "your rating" : `${v.who}'s rating`}
+                  />
+                </div>
+              )}
             </li>
           ))}
         </ul>
       )}
       {bottle.notYet.length > 0 && <p className="text-xs text-muted">Not yet: {bottle.notYet.join(", ")}</p>}
-      {(canRate || (canRemove && bottle.entryId)) && (
+      <ReactionChips code={code} targetKind="bottle" targetId={bottle.key} reactions={social.reactions[`bottle:${bottle.key}`] ?? []} canReact={canRate} />
+      <Replies code={code} targetKind="bottle" targetId={bottle.key} comments={social.comments[`bottle:${bottle.key}`] ?? []} canReply={canRate} isHost={isHost} about={bottle.label} />
+      {(canRate || (canRemove && bottle.entryId) || (canPour && bottle.bottleId)) && (
         <div className="flex flex-wrap items-center gap-2">
           {canRate && (
           <button type="button" aria-expanded={rating} onClick={() => setRating((o) => !o)} className="btn-secondary px-4 py-2 text-sm">
@@ -361,9 +412,14 @@ function BottleCard({
           </button>
           )}
           {canRate && canPour && bottle.bottleId && (
-            <Link href={`/pour?bottleId=${encodeURIComponent(bottle.bottleId)}`} className="tap-target px-2 py-2 text-sm text-accent">
+            <Link href={`/pour?bottleId=${encodeURIComponent(bottle.bottleId)}&outing=${encodeURIComponent(code)}`} className="tap-target px-2 py-2 text-sm text-accent">
               Log a pour →
             </Link>
+          )}
+          {canPour && bottle.bottleId && (
+            <button type="button" onClick={() => void wishlist()} disabled={wishing} className="tap-target px-2 py-2 text-sm text-accent disabled:opacity-60">
+              {wishing ? "Adding…" : "Add to my wishlist"}
+            </button>
           )}
           {canRemove && bottle.entryId && (
             <button type="button" onClick={remove} disabled={removing} className="tap-target ml-auto px-2 py-2 text-xs text-muted hover:text-foreground">
@@ -394,9 +450,12 @@ export function OutingBottleBoard({
   canPour,
   isHost = false,
   participantId = null,
+  social = EMPTY_SOCIAL,
 }: {
   code: string;
   board: OutingBoardBottle[];
+  /** Replies and reactions, by target ref. */
+  social?: OutingSocial;
   /** The host may take any bottle off the list. */
   isHost?: boolean;
   /** The viewer's seat; scopes the offline queue to this person. */
@@ -411,6 +470,27 @@ export function OutingBottleBoard({
   const [notice, setNotice] = useState<string | null>(null);
   const pendingBottles = pending.filter((p) => p.kind === "bottle" && !board.some((b) => b.label === p.label));
   const pendingRatings = pending.filter((p) => p.kind === "rating");
+  // Live arrivals: diff the board against the last render (derived during
+  // render, the React-recommended way to react to a prop change).
+  const [prevBoard, setPrevBoard] = useState(board);
+  const [fresh, setFresh] = useState<Set<string>>(() => new Set());
+  const [toast, setToast] = useState<string | null>(null);
+  if (prevBoard !== board) {
+    const arrivals = boardArrivals(prevBoard, board);
+    setPrevBoard(board);
+    if (arrivals.length) {
+      setFresh(new Set(arrivals.map((a) => a.key)));
+      setToast(arrivalToast(arrivals));
+    }
+  }
+  useEffect(() => {
+    if (!toast) return;
+    const id = window.setTimeout(() => {
+      setToast(null);
+      setFresh(new Set());
+    }, 4500);
+    return () => window.clearTimeout(id);
+  }, [toast]);
 
   return (
     <section aria-labelledby="bottles-heading" className="flex flex-col gap-2">
@@ -451,12 +531,17 @@ export function OutingBottleBoard({
           ))}
         </ul>
       )}
+      {toast && (
+        <p role="status" aria-live="polite" className="outing-toast">
+          {toast}
+        </p>
+      )}
       {board.length === 0 && pendingBottles.length === 0 ? (
         <p className="text-sm text-muted">No bottles yet — add what&rsquo;s being poured and it shows up for everyone.</p>
       ) : (
         <ul className="flex flex-col gap-2">
           {board.map((b) => (
-            <BottleCard key={b.key} code={code} bottle={b} canRate={canAdd} canPour={canPour} canRemove={isHost || (!!participantId && b.addedByMe)} send={send} onNotice={setNotice} />
+            <BottleCard key={b.key} code={code} bottle={b} fresh={fresh.has(b.key)} social={social} isHost={isHost} canRate={canAdd} canPour={canPour} canRemove={isHost || (!!participantId && b.addedByMe)} send={send} onNotice={setNotice} />
           ))}
         </ul>
       )}
