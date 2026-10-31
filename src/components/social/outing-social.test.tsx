@@ -57,6 +57,22 @@ describe("ReactionChips", () => {
     expect(refresh).toHaveBeenCalled();
   });
 
+  it("releasing a long press shows who without toggling the reaction", async () => {
+    vi.useFakeTimers();
+    render(<ReactionChips code="abc" targetKind="bottle" targetId="b:1" reactions={[agree]} canReact />);
+    const chip = screen.getByRole("button", { name: /Agree.*2 people/ });
+    fireEvent.pointerDown(chip);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+    fireEvent.pointerUp(chip);
+    fireEvent.click(chip);
+    expect(screen.getByText("Agree: @ana, You")).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+    fireEvent.click(chip);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("long-press reveals who; read-only viewers can't react; nothing renders when empty", () => {
     vi.useFakeTimers();
     const { unmount } = render(<ReactionChips code="abc" targetKind="tasting" targetId="t1" reactions={[{ ...agree, mine: false }]} canReact={false} compact />);

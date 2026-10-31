@@ -58,8 +58,15 @@ export function ReactionChips({
     setPicking(false);
     router.refresh();
   }
+  // A recognised hold only shows who reacted; the click that follows its
+  // release must not toggle the reaction.
+  const held = useRef(false);
   const startHold = (kind: string) => {
-    hold.current = window.setTimeout(() => setShowWho(kind), 450);
+    held.current = false;
+    hold.current = window.setTimeout(() => {
+      held.current = true;
+      setShowWho(kind);
+    }, 450);
   };
   const endHold = () => {
     if (hold.current != null) window.clearTimeout(hold.current);
@@ -82,7 +89,13 @@ export function ReactionChips({
               disabled={!canReact || busy != null}
               title={`${hint}${who}`}
               aria-label={`${hint}${r.count ? `, ${r.count} ${r.count === 1 ? "person" : "people"}` : ""}${who}`}
-              onClick={() => void toggle(r.kind)}
+              onClick={() => {
+                if (held.current) {
+                  held.current = false;
+                  return;
+                }
+                void toggle(r.kind);
+              }}
               onPointerDown={() => startHold(r.kind)}
               onPointerUp={endHold}
               onPointerLeave={endHold}
@@ -241,7 +254,7 @@ export function Replies({
             className="rounded-lg border border-border-subtle bg-surface px-3 py-2 text-base"
           />
           <div className="flex items-center gap-2">
-            <button type="submit" disabled={busy || !text.trim()} className="btn-primary px-3 py-1.5 text-xs disabled:opacity-60">
+            <button type="submit" disabled={busy || !text.trim()} className="btn-primary tap-target min-h-11 px-3 py-1.5 text-xs disabled:opacity-60">
               {busy ? "Posting…" : editing ? "Save" : "Post reply"}
             </button>
             <button
