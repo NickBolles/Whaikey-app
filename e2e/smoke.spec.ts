@@ -807,6 +807,8 @@ test.describe("home: month first, what's next", () => {
 
   test("a new user with no tastings gets a plain zero state with one primary action", async ({ page, context, baseURL }) => {
     await signIn(context, baseURL!, OPERATOR_SESSION_TOKEN);
+    // The operator account has no pours; skip the first-run tour so Home renders.
+    await context.addCookies([{ name: "whaikey_onboarded", value: "1", domain: new URL(baseURL!).hostname, path: "/" }]);
     await page.goto("/");
     await expect(page.getByRole("heading", { name: /^July · no tastings yet$/ })).toBeVisible();
     await expect(page.getByTestId("month-facts")).toHaveCount(0);
