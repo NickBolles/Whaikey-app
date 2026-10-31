@@ -39,7 +39,7 @@ export interface DashboardData {
   prevMonthName: string;
   /** Distinct flavor descriptors named this month — palate breadth, not volume. */
   descriptorsNamed: number;
-  /** Distinct bottles those descriptors came from. */
+  /** Distinct bottles tasted this month (any pour, tagged or not). */
   bottlesNoted: number;
   /** Whether the previous month has tagged notes to compare against. */
   hadPrevMonth: boolean;
@@ -153,6 +153,7 @@ export async function getDashboard(db: DB, userId: string, now: Date): Promise<D
     calibration,
     lowRows,
     favoriteRows,
+    [tastedRow],
   ] = await Promise.all([
     db
       .select({ count: sql<number>`count(*)` })
@@ -208,6 +209,12 @@ export async function getDashboard(db: DB, userId: string, now: Date): Promise<D
       )
       .orderBy(desc(schema.pours.rating), desc(schema.pours.createdAt))
       .limit(1),
+    // Distinct bottles tasted this month, from pours themselves: a tasting
+    // with no rating, tags or note still counts as tasted.
+    db
+      .select({ count: sql<number>`count(distinct ${schema.pours.bottleId})` })
+      .from(schema.pours)
+      .where(and(eq(schema.pours.userId, userId), gte(schema.pours.createdAt, thisStart), lt(schema.pours.createdAt, now))),
   ]);
 
   // Shares of this month's tagged intensity, top 3, whole percents.
@@ -245,7 +252,7 @@ export async function getDashboard(db: DB, userId: string, now: Date): Promise<D
     monthName: monthName(now),
     prevMonthName: monthName(prevStart),
     descriptorsNamed: thisMonth.descriptors.size,
-    bottlesNoted: thisMonth.bottleIds.size,
+    bottlesNoted: Number(tastedRow?.count ?? 0),
     hadPrevMonth: prevTotal > 0,
     newBottles: Number(newBottlesRow?.count ?? 0),
     shelfTotal: Number(shelfRow?.count ?? 0),

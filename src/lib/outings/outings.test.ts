@@ -27,6 +27,7 @@ import {
   listInvitableFriends,
   listMyOutings,
   nextOutingFor,
+  addOutingBottle,
   outingCsv,
   sweepOutingGuests,
   updateTasting,
@@ -139,6 +140,18 @@ describe("outings (D22)", () => {
     expect(await nextOutingFor(db, host.id, "2026-12-01")).toBeNull();
     await db.update(schema.userProfiles).set({ suspendedAt: new Date() }).where(eq(schema.userProfiles.userId, host.id));
     expect(await nextOutingFor(db, host.id, "2026-10-27")).toBeNull();
+  });
+
+  it("nextOutingFor counts only the people and bottles the viewer would see on the outing", async () => {
+    const host = await person(db, "host_cnt");
+    const friend = await person(db, "friend_cnt");
+    const outing = await createOuting(db, host.id, { ...input, visitOn: "2026-10-29" });
+    await joinOutingAsUser(db, outing.id, friend.id);
+    const friendSeat = (await findOutingSeat(db, outing.id, { userId: friend.id }))!;
+    await addOutingBottle(db, outing, friendSeat, { label: "Cask 1142 sample" });
+    expect(await nextOutingFor(db, host.id, "2026-10-27")).toMatchObject({ goingCount: 2, bottleCount: 1 });
+    await blockUser(db, host.id, friend.id);
+    expect(await nextOutingFor(db, host.id, "2026-10-27")).toMatchObject({ goingCount: 1, bottleCount: 0 });
   });
 
   it("one voice per person per bottle: a second taste never weighs the consensus", () => {

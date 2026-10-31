@@ -112,6 +112,15 @@ describe("getDashboard", () => {
     expect(data.shelfTotal).toBe(4);
   });
 
+  it("counts a bottle as tasted even when the pour has no rating or tags", async () => {
+    const user = await createTestUser(db);
+    const bottle = await createTestBottle(db, { name: "Plain" });
+    await seedPour(db, user.id, bottle.id, "2026-07-03T12:00:00Z");
+    const data = await getDashboard(db, user.id, NOW);
+    expect(data.bottlesNoted).toBe(1);
+    expect(hasMonthData(data)).toBe(true);
+  });
+
   it("reports no agreement before any label comparison exists", async () => {
     const user = await createTestUser(db);
     const data = await getDashboard(db, user.id, NOW);
