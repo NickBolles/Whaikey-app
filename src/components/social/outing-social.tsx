@@ -22,7 +22,7 @@ async function call(url: string, method: string, body?: unknown) {
 
 function Who({ r }: { r: OutingReactionView }) {
   return (
-    <span className="text-[11px] text-muted">
+    <span className="text-xs text-muted">
       {r.label}: {r.who.join(", ")}
     </span>
   );
@@ -90,7 +90,7 @@ export function ReactionChips({
                 e.preventDefault();
                 setShowWho(r.kind);
               }}
-              className={`tap-target inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] leading-5 ${
+              className={`tap-target inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs leading-5 ${
                 r.mine ? "border-accent text-accent" : "border-border text-foreground/80"
               } disabled:opacity-70`}
             >
@@ -107,7 +107,7 @@ export function ReactionChips({
             type="button"
             aria-expanded={picking}
             onClick={() => setPicking((p) => !p)}
-            className="tap-target rounded-full px-2 py-0.5 text-[11px] leading-5 text-muted hover:text-foreground"
+            className="tap-target rounded-full px-2 py-0.5 text-xs leading-5 text-muted hover:text-foreground"
           >
             {picking ? "Close" : "React"}
           </button>
@@ -186,7 +186,7 @@ export function Replies({
           {comments.map((c) => (
             <li key={c.id} className="text-xs">
               <span className={c.mine ? "font-medium" : "font-medium text-foreground/90"}>{c.who}</span>
-              {c.mentionsMe && <span className="ml-1 text-[10px] uppercase tracking-wide text-accent">mentioned you</span>}
+              {c.mentionsMe && <span className="ml-1 text-xs uppercase tracking-wide text-accent">mentioned you</span>}
               <span className="block text-foreground/85">
                 <Body text={c.body} />
                 {c.edited && <span className="ml-1 text-muted">(edited)</span>}
@@ -196,7 +196,7 @@ export function Replies({
                   {c.mine && canReply && (
                     <button
                       type="button"
-                      className="tap-target text-[11px] text-muted hover:text-foreground"
+                      className="tap-target text-xs text-muted hover:text-foreground"
                       onClick={() => {
                         setEditing(c.id);
                         setText(c.body);
@@ -206,7 +206,7 @@ export function Replies({
                       Edit
                     </button>
                   )}
-                  <button type="button" className="tap-target text-[11px] text-muted hover:text-foreground" onClick={() => void remove(c.id)}>
+                  <button type="button" className="tap-target text-xs text-muted hover:text-foreground" onClick={() => void remove(c.id)}>
                     {c.mine ? "Delete" : "Hide"}
                   </button>
                 </span>
@@ -255,7 +255,7 @@ export function Replies({
             >
               Cancel
             </button>
-            <span className="ml-auto text-[11px] tabular-nums text-muted">{OUTING_COMMENT_MAX - text.length}</span>
+            <span className="ml-auto text-xs tabular-nums text-muted">{OUTING_COMMENT_MAX - text.length}</span>
           </div>
         </form>
       )}

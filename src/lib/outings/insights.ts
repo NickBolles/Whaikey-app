@@ -174,7 +174,11 @@ export function buildInsights(tastings: InsightTasting[], people: InsightPerson[
   let learnFrom: OutingInsights["learnFrom"] = null;
   const bestAdopter = [...adopted.entries()].sort((x, y) => y[1].length - x[1].length || x[0].localeCompare(y[0]))[0];
   if (bestAdopter) {
-    const [pid, picks] = bestAdopter;
+    const [pid, allPicks] = bestAdopter;
+    // Explain one bottle only, so the descriptors and follower count all
+    // describe what happened on that bottle.
+    const top = [...allPicks].sort((x, y) => y.followers - x.followers || x.label.localeCompare(y.label))[0];
+    const picks = allPicks.filter((p) => p.label === top.label);
     const tags = [...new Set(picks.map((p) => tagLabel(p.tag)))].slice(0, 3);
     const followers = Math.max(...picks.map((p) => p.followers));
     learnFrom = {
