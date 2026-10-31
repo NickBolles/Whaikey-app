@@ -538,8 +538,16 @@ export function OutingWatcher({ code, stamp }: { code: string; stamp: string }) 
         router.refresh();
       });
       es.onerror = () => {
-        // EventSource reconnects by itself after a window closes; repeated
-        // errors mean streaming doesn't work here, so poll instead.
+        // A CLOSED source won't retry (a 409 after the outing ended, or a
+        // non-stream proxy response): poll now. Otherwise EventSource
+        // reconnects by itself; repeated errors mean streaming doesn't work
+        // here, so poll instead.
+        if (es.readyState === 2) {
+          stopStream();
+          void tick();
+          startPoll();
+          return;
+        }
         failures += 1;
         if (failures >= 3) {
           stopStream();

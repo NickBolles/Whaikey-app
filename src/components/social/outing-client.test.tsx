@@ -253,4 +253,28 @@ describe("OutingWatcher", () => {
     expect(calls).toHaveLength(2);
     vis.mockRestore();
   });
+
+  it("falls back to polling at once when the stream is closed for good", async () => {
+    const sources: { readyState: number; onerror: (() => void) | null; close: () => void }[] = [];
+    class FakeES {
+      readyState = 0;
+      onerror: (() => void) | null = null;
+      constructor() {
+        sources.push(this);
+      }
+      addEventListener() {}
+      close() {}
+    }
+    vi.stubGlobal("EventSource", FakeES);
+    const calls = mockFetch(() => Response.json({ state: "ended", stamp: "s2" }));
+    render(<OutingWatcher code="c0de000000" stamp="s1" />);
+    expect(sources).toHaveLength(1);
+    sources[0].readyState = 2;
+    await act(async () => {
+      sources[0].onerror?.();
+    });
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+    expect(calls.length).toBeGreaterThanOrEqual(1);
+    vi.unstubAllGlobals();
+  });
 });
