@@ -447,6 +447,65 @@ test.describe("trails: the old /challenges address", () => {
 // friend without the app joins from the host's link as a guest, logs a cask
 // sample that is in no catalog, and sees the group recap when the host ends it.
 test.describe("outing: guest link → log a cask sample → recap", () => {
+  test("two people, live: a bottle and a rating arrive without reloading; replies, reactions and insights", async ({ browser, baseURL }) => {
+    const hostCtx = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    await signIn(hostCtx, baseURL!, DEMO_SESSION_TOKEN);
+    const created = await hostCtx.request.post(`${baseURL}/api/outings`, {
+      data: { title: "E2E live outing", distilleryName: "Buffalo Trace", location: "Frankfort, KY", visitOn: "2026-10-31" },
+    });
+    expect(created.status()).toBe(201);
+    const { path, joinCode } = (await created.json()) as { path: string; joinCode: string };
+    const host = await hostCtx.newPage();
+    await host.goto(path);
+
+    const guestCtx = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const guest = await guestCtx.newPage();
+    await guest.goto(path);
+    await guest.getByLabel("First name").fill("Robin");
+    await guest.getByLabel("Date of birth").fill("1990-05-05");
+    await guest.getByRole("button", { name: "Join the outing" }).click();
+    await expect(guest.getByText(/You’re a guest|You're a guest/)).toBeVisible({ timeout: 15000 });
+
+    // A adds a bottle → B sees it (and the arrival toast) without reloading.
+    const add = await hostCtx.request.post(`${baseURL}/api/outings/${joinCode}/bottles`, { data: { label: "Live cask one" } });
+    expect(add.status()).toBe(201);
+    await expect(guest.getByText("Live cask one").first()).toBeVisible({ timeout: 20000 });
+    await expect(guest.locator(".outing-toast")).toBeVisible({ timeout: 20000 });
+
+    // B rates → A sees it without reloading.
+    const rate = await guestCtx.request.post(`${baseURL}/api/outings/${joinCode}/tastings`, { data: { label: "Live cask one", rating: 4, note: "Pear drops" } });
+    expect(rate.status()).toBe(201);
+    const { id: tastingId } = (await rate.json()) as { id: string };
+    await expect(host.getByText("Pear drops").first()).toBeVisible({ timeout: 20000 });
+
+    // A replies to B's rating and reacts; B sees both live.
+    const reply = await hostCtx.request.post(`${baseURL}/api/outings/${joinCode}/comments`, { data: { targetKind: "tasting", targetId: tastingId, body: "Same pear here @Robin" } });
+    expect(reply.status()).toBe(201);
+    const react = await hostCtx.request.post(`${baseURL}/api/outings/${joinCode}/reactions`, { data: { targetKind: "tasting", targetId: tastingId, kind: "great_note", on: true } });
+    expect(react.status()).toBe(200);
+    await expect(guest.getByText("Same pear here").first()).toBeVisible({ timeout: 20000 });
+    await expect(guest.getByRole("button", { name: /Great note.*1 person/ }).first()).toBeVisible({ timeout: 20000 });
+
+    // Insights wait for two shared bottles, then appear.
+    await expect(host.getByText(/Insights show up once two people have rated at least 2 of the same bottles/)).toBeVisible({ timeout: 20000 });
+    for (const [ctx, label, rating] of [
+      [hostCtx, "Live cask one", 5],
+      [hostCtx, "Live cask two", 3],
+      [guestCtx, "Live cask two", 3],
+    ] as const) {
+      const r = await ctx.request.post(`${baseURL}/api/outings/${joinCode}/tastings`, { data: { label, rating } });
+      expect(r.status()).toBe(201);
+    }
+    await expect(host.getByText("Your closest palate")).toBeVisible({ timeout: 20000 });
+    await expect(host.getByText("Group favourite so far")).toBeVisible();
+    // Never amounts or pour counts.
+    await expect(host.getByText(/\b\d+\s*(ml|oz|pours?|drinks?)\b/i)).toHaveCount(0);
+
+    expect((await hostCtx.request.delete(`${baseURL}/api/outings/${joinCode}`)).status()).toBe(200);
+    await hostCtx.close();
+    await guestCtx.close();
+  });
+
   test("a signed-out guest joins after the age check, logs by name, and sees the recap", async ({ browser, baseURL }) => {
     const hostCtx = await browser.newContext();
     await signIn(hostCtx, baseURL!, DEMO_SESSION_TOKEN);

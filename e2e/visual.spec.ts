@@ -28,6 +28,12 @@ async function settle(page: Page) {
   });
 }
 
+// The outing page holds a Server-Sent Events stream open, so networkidle would
+// never arrive. Refuse it: the client falls back to its short /state poll.
+test.beforeEach(async ({ page }) => {
+  await page.route("**/api/outings/*/live", (route) => route.abort());
+});
+
 function shot(name: string) {
   return `${name}.png`;
 }
