@@ -933,8 +933,10 @@ export async function getOutingView(db: DB, outing: schema.Outing, viewerUserId:
     ]);
     social = await loadOutingSocial(db, outing.id, members, seat?.participantId ?? null, liveTargets);
     // Insights read each person's latest verdict per bottle, from visible people only.
-    // "Latest" is chosen by last edit, but `at` (who said it first) is when
-    // the tasting was logged, so fixing a typo never moves credit around.
+    // "Latest" is chosen by last edit. `at` (who said it first) is when the
+    // tasting was logged, unless the rating or descriptors may have changed
+    // since: without that history, an edited verdict counts from its edit, so
+    // it can lose a first-occurrence claim but never backdate one.
     const latest = new Map<string, InsightTasting & { edited: number }>();
     for (const t of tastings) {
       const key = outingBottleKey(t.bottleId, t.label);
@@ -948,7 +950,7 @@ export async function getOutingView(db: DB, outing: schema.Outing, viewerUserId:
           rating: t.rating,
           tags: Object.keys(t.flavorTags ?? {}),
           note: t.note,
-          at: t.createdAt.getTime(),
+          at: (t.updatedAt.getTime() - t.createdAt.getTime() > 1000 ? t.updatedAt : t.createdAt).getTime(),
           edited: t.updatedAt.getTime(),
         });
     }

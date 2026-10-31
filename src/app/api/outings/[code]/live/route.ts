@@ -11,6 +11,7 @@ type Ctx = { params: Promise<{ code: string }> };
 /** How often the stream looks for changes, and how long one stream lives before the browser reconnects. */
 export const LIVE_TICK_MS = 1200;
 export const LIVE_WINDOW_MS = 50_000;
+export const LIVE_RECHECK_MS = 5_000;
 
 /**
  * GET — a Server-Sent Events stream for people on an open outing. It sends
@@ -57,12 +58,18 @@ export async function GET(req: Request, ctx: Ctx) {
         let marker = await outingChangeMarker(db, outing.id).catch(() => "");
         let stamp = await outingStamp(db, outing, viewerId, seat);
         send("stamp", { stamp });
+        let lastCheck = Date.now();
         while (!closed && Date.now() - started < LIVE_WINDOW_MS) {
           await new Promise((r) => setTimeout(r, LIVE_TICK_MS));
           if (closed) break;
           const next = await outingChangeMarker(db, outing.id).catch(() => null);
-          if (next == null || next === marker) continue;
-          marker = next;
+          // Blocks, suspensions, stepping back and guest expiry don't touch the
+          // marker, so re-check access and the filtered stamp at least every
+          // LIVE_RECHECK_MS (the old poll cadence) even when nothing moved.
+          const due = Date.now() - lastCheck >= LIVE_RECHECK_MS;
+          if ((next == null || next === marker) && !due) continue;
+          if (next != null) marker = next;
+          lastCheck = Date.now();
           // Re-check access on every change: leaving, a new block or the host
           // ending the outing all close the stream.
           const fresh = await visibleOutingByCode(getDb(), code, viewerId).catch(() => null);
