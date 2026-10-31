@@ -58,6 +58,9 @@ const baseView = (over: Partial<OutingView> = {}): OutingView => ({
   feed: [],
   recap: null,
   board: [],
+  social: { comments: {}, reactions: {} },
+  insights: null,
+  recognitions: [],
   stamp: "s",
   ...over,
 });
