@@ -958,11 +958,19 @@ export async function getOutingView(db: DB, outing: schema.Outing, viewerUserId:
     insights = buildInsights([...latest.values()], insightPeople, seat?.participantId ?? null);
     if (outing.state === "ended") {
       const appreciation = new Map<string, { participantId: string; label: string; count: number }>();
+      // Count only visible people's great-note/learned reactions, never the
+      // author's own (older rows, or anything that slipped past the write check).
+      const praise = (
+        await db
+          .select({ targetId: schema.outingReactions.targetId, participantId: schema.outingReactions.participantId, kind: schema.outingReactions.kind })
+          .from(schema.outingReactions)
+          .where(and(eq(schema.outingReactions.outingId, outing.id), eq(schema.outingReactions.targetKind, "tasting")))
+      ).filter((r) => (r.kind === "great_note" || r.kind === "learned") && visible.has(r.participantId));
       for (const b of board)
         for (const v of b.votes) {
           if (!v.tastingId || !v.note) continue;
-          const n = (social.reactions[targetRef("tasting", v.tastingId)] ?? []).filter((r) => r.kind === "great_note" || r.kind === "learned").reduce((s, r) => s + r.count, 0);
           const pid = tastings.find((t) => t.id === v.tastingId)?.participantId;
+          const n = praise.filter((r) => r.targetId === v.tastingId && r.participantId !== pid).length;
           if (pid && n > 0) appreciation.set(v.tastingId, { participantId: pid, label: b.label, count: n });
         }
       recognitions = buildRecognitions(insights, [...latest.values()], insightPeople, [...appreciation.values()]);

@@ -162,6 +162,14 @@ export async function setOutingReaction(db: DB, outing: schema.Outing, participa
   if (outing.state !== "open") return { error: "not_open" as const };
   const visible = new Set(members.map((m) => m.participantId));
   if (!(await targetExists(db, outing.id, input.targetKind, input.targetId, visible))) return { error: "not_found" as const };
+  // No reacting to your own tasting: appreciation has to come from others.
+  if (input.targetKind === "tasting") {
+    const own = await db.query.outingTastings.findFirst({
+      columns: { participantId: true },
+      where: and(eq(schema.outingTastings.id, input.targetId), eq(schema.outingTastings.outingId, outing.id)),
+    });
+    if (own?.participantId === participantId) return { error: "not_found" as const };
+  }
   const where = and(
     eq(schema.outingReactions.participantId, participantId),
     eq(schema.outingReactions.targetKind, input.targetKind),

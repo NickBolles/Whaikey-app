@@ -70,6 +70,14 @@ describe("outing replies and reactions", () => {
     expect(after.social.comments[`tasting:${tastingId}`]).toBeUndefined();
   });
 
+  it("nobody can react to their own tasting", async () => {
+    const { ana, ben, outing, tastingId } = await trip();
+    setSessionUser(ana);
+    expect((await REACT(jsonRequest("/x", "POST", { targetKind: "tasting", targetId: tastingId, kind: "great_note", on: true }), p(outing.joinCode))).status).toBe(404);
+    setSessionUser(ben);
+    expect((await REACT(jsonRequest("/x", "POST", { targetKind: "tasting", targetId: tastingId, kind: "great_note", on: true }), p(outing.joinCode))).status).toBe(200);
+  });
+
   it("outsiders can't reply; blocked people never see each other's replies or reactions", async () => {
     const { ana, ben, outing, tastingId, key } = await trip();
     const stranger = await person(db, "stranger_s");
