@@ -2567,6 +2567,8 @@ export const outingParticipants = pgTable(
       .$defaultFn(() => new Date())
       .notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }),
+    /** Last heartbeat from the outing page ("here now", 2-minute window). Never about pours. */
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true, mode: "date" }),
   },
   (t) => [
     uniqueIndex("outing_participants_outing_user_uq").on(t.outingId, t.userId),

@@ -1277,15 +1277,15 @@ export const ACCOUNT_DATA: readonly DataSlice[] = [
   {
     key: "outing_seats",
     table: outingParticipants,
-    description: "The outings you joined, and when.",
+    description: "The outings you joined, when, and when you last had one open in the app.",
     onDelete: "deleted",
     why: "Your place on the trip; the outing carries on for everyone else.",
     where: (_db, userId) => eq(outingParticipants.userId, userId),
     export: {
-      columns: ["outingId", "joinedAt"],
+      columns: ["outingId", "joinedAt", "lastSeenAt"],
       rows: (db, userId) =>
         db
-          .select({ outingId: outingParticipants.outingId, joinedAt: outingParticipants.joinedAt })
+          .select({ outingId: outingParticipants.outingId, joinedAt: outingParticipants.joinedAt, lastSeenAt: outingParticipants.lastSeenAt })
           .from(outingParticipants)
           .where(eq(outingParticipants.userId, userId))
           .orderBy(outingParticipants.joinedAt),

@@ -428,6 +428,13 @@
       "when": 1793334834098,
       "tag": "0060_outing_social",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1793570801223,
+      "tag": "0061_outing_presence",
+      "breakpoints": true
     }
   ]
 }

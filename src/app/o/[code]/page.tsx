@@ -22,6 +22,7 @@ import {
   RideReminder,
 } from "@/components/social/outing-client";
 import { OutingBottleBoard } from "@/components/social/outing-bottles";
+import { OutingPeople } from "@/components/social/outing-people";
 import { OutingInsightsPanel, OutingRecognitions } from "@/components/social/outing-insights";
 import { BRAND_NAME } from "@/lib/brand";
 
@@ -82,6 +83,8 @@ export default async function OutingPage({
           {onTrip && view.people.length > 0 && <> · {view.people.map((p) => p.name).join(", ")}</>}
         </p>
       </header>
+
+      {onTrip && view.members.length > 0 && <OutingPeople code={code} members={view.members} heartbeat={!!seat && open} />}
 
       {view.isHost && (
         <section aria-label="Host controls" className="card-flat flex flex-col gap-3 p-3">
