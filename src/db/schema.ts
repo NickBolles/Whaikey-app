@@ -2569,8 +2569,6 @@ export const outingParticipants = pgTable(
     expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }),
     /** Last heartbeat from the outing page ("here now", 2-minute window). Never about pours. */
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true, mode: "date" }),
-    /** "Show when I'm here" switched off for this seat: no heartbeat is stored and no dot is shown. */
-    presenceHidden: boolean("presence_hidden").notNull().default(false),
   },
   (t) => [
     uniqueIndex("outing_participants_outing_user_uq").on(t.outingId, t.userId),

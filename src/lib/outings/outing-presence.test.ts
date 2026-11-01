@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import type { DB } from "@/db";
 import * as schema from "@/db/schema";
-import { createTestUser, jsonRequest, mockSessionModule, setSessionUser, setupTestDb } from "@/test/helpers";
+import { createTestUser, mockSessionModule, setSessionUser, setupTestDb } from "@/test/helpers";
 
 vi.mock("@/lib/session", async () => mockSessionModule());
 
@@ -17,8 +17,7 @@ async function person(db: DB, handle: string) {
 }
 const input = { title: "Distillery Sunday", distilleryName: "Buffalo Trace", visitOn: "2026-11-01", rideReminder: true };
 const p = (code: string) => ({ params: Promise.resolve({ code }) }) as never;
-const beat = (code: string, body?: unknown) =>
-  PRESENCE(body === undefined ? new Request(`http://t/api/outings/${code}/presence`, { method: "POST" }) : jsonRequest(`/api/outings/${code}/presence`, "POST", body), p(code));
+const beat = (code: string) => PRESENCE(new Request(`http://t/api/outings/${code}/presence`, { method: "POST" }), p(code));
 
 describe("outing presence + members (route, real database)", () => {
   let db: DB;
@@ -44,7 +43,7 @@ describe("outing presence + members (route, real database)", () => {
     const res = await beat(outing.joinCode);
     expect(res.status).toBe(200);
     const anaSeat = await seat(ana.id);
-    expect(await res.json()).toEqual({ here: [anaSeat.participantId], show: true });
+    expect(await res.json()).toEqual({ here: [anaSeat.participantId] });
     const row = await db.query.outingParticipants.findFirst({ where: eq(schema.outingParticipants.id, anaSeat.participantId) });
     expect(row?.lastSeenAt).toBeInstanceOf(Date);
 
@@ -56,7 +55,7 @@ describe("outing presence + members (route, real database)", () => {
     const byName = Object.fromEntries(view.members.map((m) => [m.handle, m]));
     expect(byName.ana_p).toMatchObject({ hereNow: true, friend: "add", isHost: false });
     expect(byName.host_p).toMatchObject({ hereNow: false, isHost: true });
-    expect(byName.ben_p).toMatchObject({ isYou: true, friend: "you", showPresence: true });
+    expect(byName.ben_p).toMatchObject({ isYou: true, friend: "you" });
     expect(JSON.stringify(view.members)).not.toMatch(/pour|amount|volume/i);
     void host;
   });
@@ -70,34 +69,11 @@ describe("outing presence + members (route, real database)", () => {
     expect(body.here).not.toContain(anaSeat.participantId);
   });
 
-  it("outsiders and signed-out callers get 404; a bad body is 400", async () => {
-    const { ana, outing } = await trip();
+  it("outsiders and signed-out callers get 404", async () => {
+    const { outing } = await trip();
     expect((await beat(outing.joinCode)).status).toBe(404);
     setSessionUser(await person(db, "stranger_p"));
     expect((await beat(outing.joinCode)).status).toBe(404);
-    setSessionUser(ana);
-    expect((await beat(outing.joinCode, { show: "yes" })).status).toBe(400);
-  });
-
-  it("'Show when I'm here' off clears last_seen and hides the dot; on brings it back", async () => {
-    const { ana, ben, outing, seat } = await trip();
-    const anaSeat = await seat(ana.id);
-    setSessionUser(ana);
-    await beat(outing.joinCode);
-    const off = (await (await beat(outing.joinCode, { show: false })).json()) as { here: string[]; show: boolean };
-    expect(off).toEqual({ here: [], show: false });
-    const row = await db.query.outingParticipants.findFirst({ where: eq(schema.outingParticipants.id, anaSeat.participantId) });
-    expect(row).toMatchObject({ lastSeenAt: null, presenceHidden: true });
-    await beat(outing.joinCode); // a plain heartbeat while off stores nothing
-    expect((await db.query.outingParticipants.findFirst({ where: eq(schema.outingParticipants.id, anaSeat.participantId) }))?.lastSeenAt).toBeNull();
-
-    setSessionUser(ben);
-    expect(((await (await beat(outing.joinCode)).json()) as { here: string[] }).here).not.toContain(anaSeat.participantId);
-
-    setSessionUser(ana);
-    const on = (await (await beat(outing.joinCode, { show: true })).json()) as { here: string[]; show: boolean };
-    expect(on.show).toBe(true);
-    expect(on.here).toContain(anaSeat.participantId);
   });
 
   it("blocked people never see each other's presence; ended outings stop recording", async () => {

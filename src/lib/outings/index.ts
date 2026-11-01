@@ -833,7 +833,6 @@ export async function visibleOutingPeople(db: DB, outing: schema.Outing, viewerU
       userId: schema.outingParticipants.userId,
       guestName: schema.outingParticipants.guestName,
       lastSeenAt: schema.outingParticipants.lastSeenAt,
-      presenceHidden: schema.outingParticipants.presenceHidden,
       handle: schema.userProfiles.handle,
       displayName: schema.userProfiles.displayName,
     })
@@ -1160,8 +1159,7 @@ export async function buildOutingMembers(
       guest: !p.userId,
       isHost: !!p.userId && p.userId === outing.hostId,
       isYou,
-      hereNow: !p.presenceHidden && (isYou || isHereNow(p.lastSeenAt, now)),
-      showPresence: isYou ? !p.presenceHidden : undefined,
+      hereNow: isYou || isHereNow(p.lastSeenAt, now),
       friend: memberFriendState({
         isSelf: isYou,
         hasAccount: !!p.userId,
@@ -1175,38 +1173,23 @@ export async function buildOutingMembers(
 }
 
 /**
- * The heartbeat's write filter: this seat, presence not switched off, and
- * not bumped in the last 20 s. The cutoff goes through the column-aware
- * `lt()` so postgres-js gets an encoded timestamp, not a bare Date (the same
- * driver issue as native-auth's expiry sweep).
+ * The heartbeat's write filter: this seat, not bumped in the last 20 s. The
+ * cutoff goes through the column-aware `lt()` so postgres-js gets an encoded
+ * timestamp, not a bare Date (the same driver issue as native-auth's expiry
+ * sweep).
  */
 export function presenceBumpWhere(participantId: string, cutoff: Date) {
   return and(
     eq(schema.outingParticipants.id, participantId),
-    eq(schema.outingParticipants.presenceHidden, false),
     or(isNull(schema.outingParticipants.lastSeenAt), lt(schema.outingParticipants.lastSeenAt, cutoff)),
   );
 }
 
 /**
  * Heartbeat: mark the caller's seat as having the outing open (throttled to
- * one write per 20 s) and return which visible members are "here now". With
- * `show: false` the seat stops sharing presence and its last heartbeat is
- * cleared; `show: true` turns it back on.
+ * one write per 20 s) and return which visible members are "here now".
  */
-export async function touchOutingPresence(
-  db: DB,
-  outing: schema.Outing,
-  viewerUserId: string | null,
-  seat: OutingSeat,
-  opts: { show?: boolean; now?: Date } = {},
-) {
-  const now = opts.now ?? new Date();
-  if (opts.show === false) {
-    await db.update(schema.outingParticipants).set({ presenceHidden: true, lastSeenAt: null }).where(eq(schema.outingParticipants.id, seat.participantId));
-  } else if (opts.show === true) {
-    await db.update(schema.outingParticipants).set({ presenceHidden: false }).where(eq(schema.outingParticipants.id, seat.participantId));
-  }
+export async function touchOutingPresence(db: DB, outing: schema.Outing, viewerUserId: string | null, seat: OutingSeat, now: Date = new Date()) {
   if (outing.state === "open") {
     await db
       .update(schema.outingParticipants)
@@ -1214,10 +1197,5 @@ export async function touchOutingPresence(
       .where(presenceBumpWhere(seat.participantId, new Date(now.getTime() - 20_000)));
   }
   const people = await visibleOutingPeople(db, outing, viewerUserId);
-  const mine = people.find((p) => p.participantId === seat.participantId);
-  const show = mine ? !mine.presenceHidden : opts.show !== false;
-  const here = people
-    .filter((p) => !p.presenceHidden && (p.participantId === seat.participantId || isHereNow(p.lastSeenAt, now)))
-    .map((p) => p.participantId);
-  return { here, show };
+  return people.filter((p) => p.participantId === seat.participantId || isHereNow(p.lastSeenAt, now)).map((p) => p.participantId);
 }

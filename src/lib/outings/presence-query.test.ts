@@ -16,6 +16,5 @@ describe("presenceBumpWhere", () => {
     expect(q.params).toContain(cutoff.toISOString());
     expect(q.params.some((p) => p instanceof Date)).toBe(false);
     expect(q.sql).toMatch(/"last_seen_at" is null or .*"last_seen_at" < \$/);
-    expect(q.sql).toContain('"presence_hidden" = $');
   });
 });

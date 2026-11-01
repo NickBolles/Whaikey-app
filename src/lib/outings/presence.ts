@@ -53,7 +53,5 @@ export interface OutingMember {
   isHost: boolean;
   isYou: boolean;
   hereNow: boolean;
-  /** Only on the viewer's own row: their "Show when I'm here" setting for this outing. */
-  showPresence?: boolean;
   friend: MemberFriendState;
 }
