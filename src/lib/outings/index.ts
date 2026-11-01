@@ -12,6 +12,7 @@ import { notify } from "@/lib/notify";
 import { acceptedFollowSql, isSuspended } from "@/lib/social";
 import { buildInsights, buildRecognitions, type InsightTasting, type OutingInsights, type Recognition } from "@/lib/outings/insights";
 import { loadOutingSocial, targetRef, type OutingSocial } from "@/lib/outings/social";
+import { isHereNow, memberFriendState, type OutingMember } from "@/lib/outings/presence";
 
 /** A short digest of replies/reactions so the stamp moves when they do. */
 function socialDigest(s: OutingSocial) {
@@ -571,6 +572,8 @@ export interface OutingView {
   club: { id: string; name: string } | null;
   seat: OutingSeat | null;
   people: Array<{ name: string; guest: boolean }>;
+  /** Trip members with host badge, "here now" and friend-button state (trip members only). */
+  members: OutingMember[];
   /** Only for the host and people on the trip — a bystander with the link sees the join screen. */
   feed: OutingFeedItem[];
   recap: OutingRecap | null;
@@ -829,6 +832,7 @@ export async function visibleOutingPeople(db: DB, outing: schema.Outing, viewerU
       participantId: schema.outingParticipants.id,
       userId: schema.outingParticipants.userId,
       guestName: schema.outingParticipants.guestName,
+      lastSeenAt: schema.outingParticipants.lastSeenAt,
       handle: schema.userProfiles.handle,
       displayName: schema.userProfiles.displayName,
     })
@@ -993,6 +997,7 @@ export async function getOutingView(db: DB, outing: schema.Outing, viewerUserId:
     club,
     seat,
     people: people.map((p) => ({ name: p.handle ? `@${p.handle}` : (p.guestName ?? "Guest"), guest: !p.userId })),
+    members: onTrip ? await buildOutingMembers(db, outing, people, viewerUserId, seat) : [],
     feed,
     recap,
     board,
@@ -1112,4 +1117,77 @@ export async function sweepOutingGuests(db: DB, now = new Date()): Promise<void>
   await db
     .delete(schema.outingParticipants)
     .where(and(isNull(schema.outingParticipants.userId), lt(schema.outingParticipants.expiresAt, now)));
+}
+
+type VisiblePerson = Awaited<ReturnType<typeof visibleOutingPeople>>[number];
+
+/**
+ * The trip's member list for the People sheet: host badge, "here now" (page
+ * open in the last 2 minutes — never anything about pours) and the viewer's
+ * friend-button state per person. Only built for people on the trip.
+ */
+export async function buildOutingMembers(
+  db: DB,
+  outing: schema.Outing,
+  people: VisiblePerson[],
+  viewerUserId: string | null,
+  seat: OutingSeat | null,
+  now: Date = new Date(),
+): Promise<OutingMember[]> {
+  const others = people.map((p) => p.userId).filter((id): id is string => !!id && id !== viewerUserId);
+  const outgoing = new Map<string, "pending" | "accepted">();
+  const incoming = new Map<string, "pending" | "accepted">();
+  if (viewerUserId && others.length > 0) {
+    const rows = await db
+      .select({ followerId: schema.follows.followerId, followeeId: schema.follows.followeeId, state: schema.follows.state })
+      .from(schema.follows)
+      .where(
+        sql`(${schema.follows.followerId} = ${viewerUserId} and ${schema.follows.followeeId} in (${sql.join(others.map((o) => sql`${o}`), sql`, `)}))
+          or (${schema.follows.followeeId} = ${viewerUserId} and ${schema.follows.followerId} in (${sql.join(others.map((o) => sql`${o}`), sql`, `)}))`,
+      );
+    for (const r of rows) {
+      if (r.followerId === viewerUserId) outgoing.set(r.followeeId, r.state);
+      else incoming.set(r.followerId, r.state);
+    }
+  }
+  return people.map((p) => {
+    const isYou = (!!seat && seat.participantId === p.participantId) || (!!viewerUserId && p.userId === viewerUserId);
+    return {
+      participantId: p.participantId,
+      name: p.handle ? p.displayName || `@${p.handle}` : (p.guestName ?? "Guest"),
+      handle: p.handle ?? null,
+      guest: !p.userId,
+      isHost: !!p.userId && p.userId === outing.hostId,
+      isYou,
+      hereNow: isYou || isHereNow(p.lastSeenAt, now),
+      friend: memberFriendState({
+        isSelf: isYou,
+        hasAccount: !!p.userId,
+        handle: p.handle ?? null,
+        viewerSignedIn: !!viewerUserId,
+        outgoing: p.userId ? (outgoing.get(p.userId) ?? null) : null,
+        incoming: p.userId ? (incoming.get(p.userId) ?? null) : null,
+      }),
+    };
+  });
+}
+
+/**
+ * Heartbeat: mark the caller's seat as having the outing open (throttled to
+ * one write per 20 s) and return which visible members are "here now".
+ */
+export async function touchOutingPresence(db: DB, outing: schema.Outing, viewerUserId: string | null, seat: OutingSeat, now: Date = new Date()) {
+  if (outing.state === "open") {
+    await db
+      .update(schema.outingParticipants)
+      .set({ lastSeenAt: now })
+      .where(
+        and(
+          eq(schema.outingParticipants.id, seat.participantId),
+          sql`(${schema.outingParticipants.lastSeenAt} is null or ${schema.outingParticipants.lastSeenAt} < ${new Date(now.getTime() - 20_000)})`,
+        ),
+      );
+  }
+  const people = await visibleOutingPeople(db, outing, viewerUserId);
+  return people.filter((p) => p.participantId === seat.participantId || isHereNow(p.lastSeenAt, now)).map((p) => p.participantId);
 }

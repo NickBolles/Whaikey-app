@@ -55,6 +55,7 @@ const baseView = (over: Partial<OutingView> = {}): OutingView => ({
   club: null,
   seat: null,
   people: [{ name: "@jordan", guest: false }],
+  members: [],
   feed: [],
   recap: null,
   board: [],
@@ -109,6 +110,39 @@ describe("/o/[code]", () => {
     view = baseView({ state: "ended" });
     await show();
     expect(screen.getByText("This outing has ended.")).toBeTruthy();
+  });
+
+  it("shows trip members a People strip; the sheet lists host, guests and friend buttons", async () => {
+    sessionUser = { id: "u2", name: "Sam", email: "s@x" };
+    seat = { participantId: "p2", userId: "u2", guest: false };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ here: ["p1", "p2"] }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    view = baseView({
+      seat,
+      members: [
+        { participantId: "p1", name: "Jordan", handle: "jordan", guest: false, isHost: true, isYou: false, hereNow: false, friend: "add" },
+        { participantId: "p2", name: "Sam", handle: "sam", guest: false, isHost: false, isYou: true, hereNow: true, friend: "you" },
+        { participantId: "p3", name: "Pat", handle: null, guest: true, isHost: false, isYou: false, hereNow: false, friend: "none" },
+      ],
+    });
+    await show();
+    const strip = screen.getByRole("button", { name: /People · 3/ });
+    strip.click();
+    const dialog = await screen.findByRole("dialog", { name: /People on this outing/ });
+    expect(dialog.textContent).toContain("Host");
+    expect(dialog.textContent).toContain("Pat");
+    expect(dialog.textContent).toContain("Guest");
+    expect(screen.getAllByRole("button", { name: "Add friend" })).toHaveLength(1);
+    expect(dialog.textContent).not.toMatch(/drink|pour/i);
+    expect(fetchMock).toHaveBeenCalledWith("/api/outings/abc123def4/presence", { method: "POST" });
+    vi.unstubAllGlobals();
+  });
+
+  it("shows no People strip to a visitor who isn't on the trip", async () => {
+    sessionUser = { id: "u9", name: "x", email: "x@x" };
+    view = baseView({ members: [] });
+    await show();
+    expect(screen.queryByRole("button", { name: /People ·/ })).toBeNull();
   });
 
   it("gives the host the QR, controls, ride card, quick add and the feed with hide", async () => {
