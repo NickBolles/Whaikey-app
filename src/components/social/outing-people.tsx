@@ -160,6 +160,8 @@ export function OutingPeople({ code, members, heartbeat }: { code: string; membe
   if (members.length === 0) return null;
   const people = members.map((m) => {
     if (m.isYou) return { ...m, hereNow: showMe && heartbeat };
+    // Once the outing ends the heartbeat stops; drop the cached set so dots don't linger.
+    if (!heartbeat) return { ...m, hereNow: false };
     return here ? { ...m, hereNow: here.has(m.participantId) } : m;
   });
   const hereCount = people.filter((m) => m.hereNow).length;
