@@ -1,5 +1,5 @@
 {
-  "id": "e5f7fc0e-d419-446e-b152-d5230b47339e",
+  "id": "f6d99eb2-4ab7-45f5-98a6-a0eb02c83b1e",
   "prevId": "f21ee85b-1d17-4351-af54-6b59d9554c5a",
   "version": "7",
   "dialect": "postgresql",
@@ -6174,6 +6174,13 @@
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
+        },
+        "presence_hidden": {
+          "name": "presence_hidden",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
         }
       },
       "indexes": {

@@ -4,6 +4,7 @@ import { useEffect, useId, useState } from "react";
 import { UserCheck, UserPlus, X } from "lucide-react";
 import type { MemberFriendState, OutingMember } from "@/lib/outings/presence";
 import { PRESENCE_HEARTBEAT_MS } from "@/lib/outings/presence";
+import { useScrollLock } from "@/lib/scroll-lock";
 
 const initial = (name: string) => (name.replace(/^@/, "").trim()[0] ?? "?").toUpperCase();
 
@@ -95,7 +96,32 @@ export function FriendButton({ handle, initial: start }: { handle: string | null
 export function OutingPeople({ code, members, heartbeat }: { code: string; members: OutingMember[]; heartbeat: boolean }) {
   const [open, setOpen] = useState(false);
   const [here, setHere] = useState<Set<string> | null>(null);
+  const me = members.find((m) => m.isYou);
+  const [showMe, setShowMe] = useState(me?.showPresence ?? true);
+  const [savingShow, setSavingShow] = useState(false);
   const titleId = useId();
+  useScrollLock(open);
+
+  async function toggleShowMe(next: boolean) {
+    setSavingShow(true);
+    const previous = showMe;
+    setShowMe(next);
+    try {
+      const res = await fetch(`/api/outings/${encodeURIComponent(code)}/presence`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ show: next }),
+      });
+      const body = (await res.json().catch(() => null)) as { here?: string[]; show?: boolean } | null;
+      if (!res.ok || !body) throw new Error();
+      if (body.here) setHere(new Set(body.here));
+      if (typeof body.show === "boolean") setShowMe(body.show);
+    } catch {
+      setShowMe(previous);
+    } finally {
+      setSavingShow(false);
+    }
+  }
 
   useEffect(() => {
     if (!heartbeat) return;
@@ -132,7 +158,10 @@ export function OutingPeople({ code, members, heartbeat }: { code: string; membe
   }, [open]);
 
   if (members.length === 0) return null;
-  const people = members.map((m) => (here ? { ...m, hereNow: m.isYou || here.has(m.participantId) } : m));
+  const people = members.map((m) => {
+    if (m.isYou) return { ...m, hereNow: showMe && heartbeat };
+    return here ? { ...m, hereNow: here.has(m.participantId) } : m;
+  });
   const hereCount = people.filter((m) => m.hereNow).length;
   const shown = people.slice(0, 6);
 
@@ -183,7 +212,20 @@ export function OutingPeople({ code, members, heartbeat }: { code: string; membe
                 <X size={18} strokeWidth={1.8} aria-hidden />
               </button>
             </div>
-            <p className="mt-1 text-xs text-muted">A green dot means they have this outing open in the app right now.</p>
+            <p className="mt-1 text-xs text-muted">A green dot means they have this outing open in the app right now. Only people on this outing see it.</p>
+            {heartbeat && me && (
+              <label className="mt-3 flex min-h-11 items-center justify-between gap-3 text-sm">
+                <span>Show when I&rsquo;m here</span>
+                <input
+                  type="checkbox"
+                  role="switch"
+                  checked={showMe}
+                  disabled={savingShow}
+                  onChange={(e) => void toggleShowMe(e.target.checked)}
+                  className="h-5 w-5 accent-[var(--color-accent)]"
+                />
+              </label>
+            )}
             <ul className="mt-3 flex flex-col divide-y divide-border-subtle">
               {people.map((m) => (
                 <li key={m.participantId} className="flex items-center gap-3 py-2.5">

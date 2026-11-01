@@ -1,1 +1,2 @@
-ALTER TABLE "outing_participants" ADD COLUMN "last_seen_at" timestamp with time zone;
+ALTER TABLE "outing_participants" ADD COLUMN "last_seen_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "outing_participants" ADD COLUMN "presence_hidden" boolean DEFAULT false NOT NULL;

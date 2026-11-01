@@ -121,7 +121,7 @@ describe("/o/[code]", () => {
       seat,
       members: [
         { participantId: "p1", name: "Jordan", handle: "jordan", guest: false, isHost: true, isYou: false, hereNow: false, friend: "add" },
-        { participantId: "p2", name: "Sam", handle: "sam", guest: false, isHost: false, isYou: true, hereNow: true, friend: "you" },
+        { participantId: "p2", name: "Sam", handle: "sam", guest: false, isHost: false, isYou: true, hereNow: true, showPresence: true, friend: "you" },
         { participantId: "p3", name: "Pat", handle: null, guest: true, isHost: false, isYou: false, hereNow: false, friend: "none" },
       ],
     });
@@ -135,6 +135,8 @@ describe("/o/[code]", () => {
     expect(screen.getAllByRole("button", { name: "Add friend" })).toHaveLength(1);
     expect(dialog.textContent).not.toMatch(/drink|pour/i);
     expect(fetchMock).toHaveBeenCalledWith("/api/outings/abc123def4/presence", { method: "POST" });
+    const toggle = screen.getByRole("switch", { name: "Show when I’m here" }) as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
     vi.unstubAllGlobals();
   });
 
