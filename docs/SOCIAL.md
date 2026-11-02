@@ -244,6 +244,8 @@ One more flow rule, restated from §7.3 because it's structural: **there is no c
 
 ### 7.3 The stream — a Home module and the Friends tab (S2; tab added 2026-10, D15)
 
+> **Amended 2026-11-02 (owner feedback: friend activity "takes up a lot of space" on Home).** Home's module is now the Friends side of the compact **Lately** feed (STORYBOARD §3.1): one line per friend (avatar, handle, what they rated or tasted, day-granular time), a friend's several notes collapsed into one row that opens their profile, "Show more" after 5. The comparison cards below live on the Friends tab, one tap away ("See all →"). Same sources and rules: `getFriendFeed` only (per-pour visibility, blocks, suspensions; the Home assembly re-checks the tier), no friend badges, no counts of pours, no "who's drinking now".
+
 The feed is where most social products go generic. Ours is constrained by one rule: **a card is only interesting if it lets you compare.** So the card is not "Nick drank a thing":
 
 ```
