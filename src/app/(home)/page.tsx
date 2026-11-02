@@ -7,34 +7,24 @@ import { getSessionUser } from "@/lib/session";
 import { isAiConfigured } from "@/lib/ai/client";
 import { ONBOARDING_COOKIE, needsOnboarding } from "@/lib/onboarding";
 import { getFriendFeed, getOwnProfile, listFollowing } from "@/lib/social";
-import { getPalateMatches } from "@/lib/taste-twins";
 import { appNow } from "@/lib/clock";
 import { getDashboard, hasMonthData } from "@/lib/dashboard";
 import { Dashboard } from "@/components/dashboard";
 import { HomeConcierge } from "@/components/home-concierge";
 import { HomeHero } from "@/components/home-hero";
-import { QuickPourButton } from "@/components/quick-pour-button";
 import { RecommendationRail } from "@/components/recommendation-rail";
-import { FriendsModule, type FriendFeedItem } from "@/components/friends-module";
-import { LatestBadgeCard, pickLatestBadge } from "@/components/latest-badge-card";
+import { pickLatestBadge } from "@/components/latest-badge-card";
+import { HomeLately, type HomeLatelyProps } from "@/components/home-lately";
+import { PASSPORT_TIER_SPECS, bottlesForTier, tierSpec } from "@/lib/passport-tiers";
 import { getPassport } from "@/lib/passport";
 import { EMPTY_GATHERINGS, getGatherings } from "@/lib/gather";
 import { GatherModule, NextOutingCard } from "@/components/gather-module";
 import { HomeStartHere, pickStartActions } from "@/components/home-start-here";
 import { withFallback } from "@/lib/settle";
-import { ChevronRight, GraduationCap, Star } from "lucide-react";
-import { BottleArt } from "@/components/bottle-art";
+import { ChevronRight, GraduationCap } from "lucide-react";
 import { MarketingLanding } from "@/components/marketing-landing";
 
 export const dynamic = "force-dynamic";
-
-/**
- * Deterministic (no clock, no locale surprises) date label for journal rows,
- * so server-rendered output stays stable under the pinned-clock visual suite.
- */
-function pourDateLabel(date: Date): string {
-  return date.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
-}
 
 export default async function HomePage() {
   const user = await getSessionUser();
@@ -88,10 +78,10 @@ export default async function HomePage() {
       .innerJoin(schema.bottles, eq(schema.pours.bottleId, schema.bottles.id))
       .where(eq(schema.pours.userId, user.id))
       .orderBy(desc(schema.pours.createdAt))
-      .limit(3), [], "home:recent-pours"),
+      .limit(8), [], "home:recent-pours"),
     withFallback(getOwnProfile(db, user.id), null, "home:own-profile"),
     withFallback(listFollowing(db, user.id), [], "home:following"),
-    withFallback(getFriendFeed(db, user.id, { limit: 3 }), [], "home:friend-feed"),
+    withFallback(getFriendFeed(db, user.id, { limit: 20 }), [], "home:friend-feed"),
     withFallback(getPassport(db, user.id), null, "home:passport"),
     withFallback(getGatherings(db, user.id, appNow()), EMPTY_GATHERINGS, "home:gatherings"),
   ]);
@@ -100,40 +90,48 @@ export default async function HomePage() {
   const hasProfile = Boolean(ownProfile?.socialEnabled);
   const hasFollows = following.some((f) => f.state === "accepted");
   const friendFeedRaw = hasFollows ? friendFeed : [];
-  // US-16: matches for exactly the authors on screen. Ranking the whole graph
-  // and keeping a top slice would drop the chip from a recent note whenever
-  // its author sat outside that slice — the feed picks by recency, not by
-  // match, so the two orderings must not be conflated.
-  const matchByUserId = await withFallback(
-    getPalateMatches(
-      db,
-      user.id,
-      friendFeedRaw.map((f) => f.author.userId),
-    ),
-    new Map<string, number>(),
-    "home:palate-matches",
-  );
-  const friendFeedItems: FriendFeedItem[] = friendFeedRaw.map((f) => ({
+  // "Lately" (owner feedback 2026-11-02): one compact feed. Friend rows come
+  // only from getFriendFeed (visibility tier, blocks, suspensions applied
+  // there); the feed assembly re-checks the tier. Badges are your own only.
+  const friendItems: HomeLatelyProps["friendItems"] = friendFeedRaw.map((f) => ({
     pourId: f.pourId,
     bottleId: f.bottleId,
     bottleName: f.bottleName,
-    author: f.author,
     rating: f.rating,
-    servingStyle: f.servingStyle,
     createdAt: f.createdAt.toISOString(),
-    nose: f.nose,
-    palate: f.palate,
-    finish: f.finish,
-    freeform: f.freeform,
-    flavorTags: f.flavorTags,
-    cheersCount: f.cheersCount,
-    commentCount: f.commentCount,
-    viewerTags: f.viewerTags,
-    viewerBottleRelationship: f.viewerBottleRelationship,
-    palateMatchPercent: matchByUserId.get(f.author.userId) ?? null,
+    visibility: f.visibility,
+    author: { userId: f.author.userId, handle: f.author.handle, displayName: f.author.displayName, avatarUrl: f.author.avatarUrl },
+  }));
+  const ownPours: HomeLatelyProps["pours"] = recentPours.map((p) => ({
+    id: p.id,
+    bottleId: p.bottleId,
+    bottleName: p.bottleName,
+    rating: p.rating,
+    createdAt: p.createdAt.toISOString(),
+    bottleCategory: p.bottleCategory,
+    bottleRegion: p.bottleRegion,
+    bottleCountry: p.bottleCountry,
+    bottleImageUrl: p.bottleImageUrl,
   }));
 
   const latestBadge = passport ? pickLatestBadge(passport) : null;
+  const badgeRow: HomeLatelyProps["badge"] = latestBadge
+    ? (() => {
+        const spec = tierSpec(latestBadge.heldTier);
+        const next = PASSPORT_TIER_SPECS.find((t) => t.tier === latestBadge.heldTier + 1) ?? null;
+        const nextAt = next ? bottlesForTier(next, latestBadge.catalogTotal) : null;
+        return {
+          label: latestBadge.label,
+          tierLabel: spec ? `${spec.name} ${spec.numeral}` : null,
+          // Distinct bottles met — never pours.
+          detail: `${latestBadge.metCount} distinct ${latestBadge.metCount === 1 ? "bottle" : "bottles"} met${next && nextAt != null && nextAt > latestBadge.metCount ? ` · ${next.name} at ${nextAt}` : ""}`,
+          href: `/passport/${latestBadge.family}/${encodeURIComponent(latestBadge.value)}`,
+          family: latestBadge.family,
+          value: latestBadge.value,
+          tier: latestBadge.heldTier,
+        };
+      })()
+    : null;
   const bottleCount = dashboard.shelfTotal;
   const pourCount = dashboard.totalPours;
   const monthEmpty = !hasMonthData(dashboard);
@@ -151,21 +149,18 @@ export default async function HomePage() {
           reachable as a compact row at the bottom. */}
       <Dashboard data={dashboard} userName={user.name} userImage={user.image} />
 
+      {/* A planned outing lives in "Get together" (owner feedback
+          2026-11-02); with none planned, the plan-one invitation keeps its
+          place here exactly as before. */}
       {monthEmpty ? (
-        <>
-          {gatherings.nextOuting && (
-            <section aria-label="What's next" className="flex flex-col gap-2.5">
-              <h2 className="section-label">What&rsquo;s next</h2>
-              <NextOutingCard data={gatherings} />
-            </section>
-          )}
-          <HomeStartHere actions={startActions} />
-        </>
+        <HomeStartHere actions={startActions} />
       ) : (
-        <section aria-label="What's next" className="flex flex-col gap-2.5">
-          <h2 className="section-label">What&rsquo;s next</h2>
-          <NextOutingCard data={gatherings} />
-        </section>
+        !gatherings.nextOuting && (
+          <section aria-label="What's next" className="flex flex-col gap-2.5">
+            <h2 className="section-label">What&rsquo;s next</h2>
+            <NextOutingCard data={gatherings} />
+          </section>
+        )
       )}
 
       <section aria-label="Suggestions" className="flex flex-col gap-4">
@@ -181,51 +176,16 @@ export default async function HomePage() {
         )}
       </section>
 
-      <GatherModule data={gatherings} showOuting={false} />
+      <GatherModule data={gatherings} showOuting={gatherings.nextOuting != null} />
 
-      {latestBadge && <LatestBadgeCard badge={latestBadge} />}
-
-      <FriendsModule items={friendFeedItems} hasProfile={hasProfile} hasFollows={hasFollows} />
-
-      {recentPours.length > 0 && (
-        <section aria-label="Your journal">
-          <div className="mb-3 flex items-baseline justify-between">
-            <h2 className="section-label">Your journal</h2>
-            <Link
-              href="/history"
-              className="tap-target text-sm text-muted transition-colors hover:text-foreground"
-            >
-              See all →
-            </Link>
-          </div>
-          <ul className="flex flex-col gap-2.5">
-            {recentPours.map((p) => (
-              <li key={p.id} className="card-flat flex items-center gap-3 px-3 py-2.5">
-                <BottleArt name={p.bottleName} category={p.bottleCategory} region={p.bottleRegion} country={p.bottleCountry} imageUrl={p.bottleImageUrl} height={44} />
-                <Link
-                  href={`/bottles/${p.bottleId}`}
-                  className="flex min-w-0 flex-1 items-center justify-between gap-3"
-                >
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate font-medium">{p.bottleName}</span>
-                    <span className="mt-0.5 block text-xs text-muted">
-                      {pourDateLabel(p.createdAt)}
-                    </span>
-                  </span>
-                  {p.rating != null && (
-                    <span className="flex shrink-0 items-center gap-1.5 text-accent">
-                      <Star size={14} fill="currentColor" aria-hidden />
-                      <span className="stat-number text-lg leading-none">{p.rating.toFixed(1)}</span>
-                    </span>
-                  )}
-                </Link>
-                {/* One tap re-logs the same dram — zero notes, zero score. */}
-                <QuickPourButton bottleId={p.bottleId} bottleName={p.bottleName} />
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+      <HomeLately
+        viewerId={user.id}
+        pours={ownPours}
+        badge={badgeRow}
+        friendItems={friendItems}
+        hasProfile={hasProfile}
+        hasFollows={hasFollows}
+      />
 
       {/* Ask and School: still one tap away, no longer the lead. */}
       <section aria-label="Ask and learn" className="flex flex-col gap-2.5 pb-2">

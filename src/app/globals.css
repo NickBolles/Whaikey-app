@@ -424,3 +424,56 @@ html.native-scanning [data-pour-sheet] {
 html.qr-scanning body > :not([data-qr-overlay]) {
   visibility: hidden;
 }
+
+/* Horizontal card rows (HScroller): a subtle right-edge fade, only while
+   there is more to scroll. Masking (not an overlay) keeps the cards
+   clickable under the fade and works on both themes. */
+.h-scroller {
+  scrollbar-width: none;
+}
+.h-scroller::-webkit-scrollbar {
+  display: none;
+}
+.h-scroller[data-more] {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent);
+}
+@media (prefers-reduced-transparency: reduce) {
+  .h-scroller[data-more] {
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+}
+
+/* Home "Lately" You | Friends switch: small segmented control. */
+.lately-toggle {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 9999px;
+  background: var(--surface);
+}
+.lately-toggle-btn {
+  position: relative;
+  min-width: 60px;
+  padding: 3px 12px;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+  transition: color 160ms ease, background-color 160ms ease;
+}
+/* Compact by design (rule 8): grow the hit area, not the control. */
+.lately-toggle-btn::after {
+  content: "";
+  position: absolute;
+  inset: -10px -2px;
+}
+.lately-toggle-btn[aria-pressed="true"] {
+  background: rgba(210, 123, 62, 0.14);
+  color: var(--accent);
+}
+.lately-toggle-btn:focus-visible {
+  outline: 2px solid rgba(210, 123, 62, 0.6);
+  outline-offset: 1px;
+}

@@ -793,16 +793,37 @@ test.describe("home: month first, what's next", () => {
     await expect(month.getByTestId("month-facts")).toContainText("tasted");
     await expect(month).not.toContainText(/pours?\b|blank|writes it/i);
 
-    const next = page.getByRole("region", { name: "What's next" });
-    await expect(next.getByTestId("gather-next-outing")).toContainText("Bourbon Trail Saturday");
-    await expect(next.getByTestId("gather-next-outing")).toContainText("3 going");
+    // A planned outing sits in Get together (owner feedback 2026-11-02).
+    const together = page.getByRole("region", { name: "Get together" });
+    await expect(together.getByTestId("gather-next-outing")).toContainText("Bourbon Trail Saturday");
+    await expect(together.getByTestId("gather-next-outing")).toContainText("3 going");
+    await expect(page.getByRole("region", { name: "What's next" })).toHaveCount(0);
     await expect(page.getByRole("region", { name: "Start here" })).toHaveCount(0);
 
     // Order: month, what's next, suggestions … Ask and learn last.
     const order = await page.locator("main section[aria-label]").evaluateAll((els) =>
-      els.map((e) => e.getAttribute("aria-label")).filter((l) => ["Your month", "What's next", "Suggestions", "Get together", "Ask and learn"].includes(l ?? "")),
+      els.map((e) => e.getAttribute("aria-label")).filter((l) => ["Your month", "What's next", "Suggestions", "Get together", "Lately", "Ask and learn"].includes(l ?? "")),
     );
-    expect(order).toEqual(["Your month", "What's next", "Suggestions", "Get together", "Ask and learn"]);
+    expect(order).toEqual(["Your month", "Suggestions", "Get together", "Lately", "Ask and learn"]);
+  });
+
+  test("the Try something new row starts on the page gutter, not the screen edge", async ({ page, context, baseURL }) => {
+    await signIn(context, baseURL!);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/");
+    const card = page.getByTestId("rec-card").first();
+    await expect(card).toBeVisible({ timeout: 15_000 });
+    const month = await page.getByRole("region", { name: "Your month" }).boundingBox();
+    const first = await card.boundingBox();
+    expect(Math.abs(first!.x - month!.x)).toBeLessThanOrEqual(1);
+    const scroller = page.getByTestId("h-scroller").first();
+    // Fade only while there is more to scroll.
+    const more = await scroller.evaluate((el) => el.scrollWidth > el.clientWidth + 2);
+    await expect(scroller).toHaveAttribute("data-more", more ? "" : /.*/);
+    if (more) {
+      await scroller.evaluate((el) => el.scrollTo({ left: el.scrollWidth }));
+      await expect(scroller).not.toHaveAttribute("data-more", /.*/);
+    }
   });
 
   test("a new user with no tastings gets a plain zero state with one primary action", async ({ page, context, baseURL }) => {
