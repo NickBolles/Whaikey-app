@@ -240,6 +240,15 @@ test.describe("signed in (demo collector)", () => {
     await expect(page).toHaveScreenshot(shot("home-dashboard"), { fullPage: true });
   });
 
+  test("home lately, friends side", async ({ page }) => {
+    await page.goto("/");
+    const lately = page.getByRole("region", { name: "Lately" });
+    await lately.getByRole("button", { name: "Friends" }).click();
+    await expect(lately.getByRole("button", { name: "Friends" })).toHaveAttribute("aria-pressed", "true");
+    await settle(page);
+    await expect(lately).toHaveScreenshot(shot("home-lately-friends"));
+  });
+
   test("add a bottle the catalog lacks", async ({ page }) => {
     await page.goto("/bottles/new?source=search&name=Barrell%20Dovetail");
     await expect(page.getByRole("heading", { name: "Add a bottle" })).toBeVisible();

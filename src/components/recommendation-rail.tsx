@@ -10,6 +10,7 @@ import { originLabel } from "@/lib/origin";
 import { Compass } from "lucide-react";
 import { BottleArt } from "@/components/bottle-art";
 import { ProducerLogo } from "@/components/producer-logo";
+import { HScroller } from "@/components/h-scroller";
 
 export interface RecommendationRailProps {
   mode: "discovery" | "tonight";
@@ -136,11 +137,11 @@ export function RecommendationRail({ mode, title, subtitle }: RecommendationRail
       {!error && recs !== null && recs.length === 0 && <EmptyState mode={mode} />}
 
       {!error && recs !== null && recs.length > 0 && (
-        <div className="-mx-4 px-4 flex gap-3 overflow-x-auto pb-1 snap-x snap-mandatory">
+        <HScroller label={`${heading}: bottles`}>
           {recs.map((rec) => (
             <RecCard key={rec.bottleId} rec={rec} mode={mode} />
           ))}
-        </div>
+        </HScroller>
       )}
     </section>
   );

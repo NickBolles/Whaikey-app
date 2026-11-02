@@ -9,7 +9,6 @@ import { DEMO_SESSION_TOKEN, SCAN_SESSION_TOKEN, signIn } from "./fixtures";
 // plus a second "friends"-visible highland-park-12 pour Jordan has never
 // tried, for the Home discovery card.
 const SASHA_LAGAVULIN_POUR_ID = "demo-friend-pour-1";
-const SASHA_HIGHLAND_PARK_POUR_ID = "demo-friend-pour-2";
 const SASHA_SHARE_CODE = "sashalagav16";
 const SASHA_COMMENT_TEXT = /Funny how much iodine hit me/;
 const JORDAN_REPLY_TEXT = /raisin and chocolate dominated/;
@@ -19,37 +18,29 @@ test.describe("social: signed in as Jordan (the demo user)", () => {
     await signIn(context, baseURL!, DEMO_SESSION_TOKEN);
   });
 
-  test("home's From your friends module shows Sasha's comparison and discovery cards", async ({ page }) => {
+  test("home's Lately feed shows Sasha as one compact Friends row, and remembers the tab", async ({ page }) => {
     await page.goto("/");
-    const friendsModule = page.getByRole("region", { name: "From your friends" });
-    await expect(friendsModule).toBeVisible();
+    const lately = page.getByRole("region", { name: "Lately" });
+    await expect(lately).toBeVisible();
+    // Default side is You.
+    await expect(lately.getByRole("button", { name: "You" })).toHaveAttribute("aria-pressed", "true");
+    await lately.getByRole("button", { name: "Friends" }).click();
+    const friends = lately.getByTestId("lately-friends");
+    // Everything Sasha shared collapses into one line (owner feedback 2026-11-02).
+    const sashaRow = friends.locator("li", { hasText: "@sasha" });
+    await expect(sashaRow).toHaveCount(1);
+    await expect(sashaRow.getByRole("link")).toHaveAttribute("href", /^\/(u\/sasha|notes\/)/);
+    // Compact: a feed row is one line, not a card.
+    const box = await sashaRow.boundingBox();
+    expect(box!.height).toBeLessThan(64);
 
-    // Comparison card: Jordan already has notes on lagavulin-16, so the CTA
-    // reads "Compare notes" and the comparison sentence names shared/only-hers descriptors.
-    const comparisonCard = friendsModule.locator("li", { hasText: "Lagavulin 16" });
-    await expect(comparisonCard.getByText("@sasha")).toBeVisible();
-    await expect(comparisonCard.getByRole("link", { name: /Compare notes/ })).toHaveAttribute(
-      "href",
-      `/notes/${SASHA_LAGAVULIN_POUR_ID}`,
-    );
-
-    // Discovery card: Jordan has never tried highland-park-12, so the CTA reads "See the note".
-    const discoveryCard = friendsModule.locator("li", { hasText: "Highland Park 12" });
-    await expect(discoveryCard.getByText("@sasha")).toBeVisible();
-    await expect(discoveryCard.getByRole("link", { name: /See the note/ })).toHaveAttribute(
-      "href",
-      `/notes/${SASHA_HIGHLAND_PARK_POUR_ID}`,
-    );
+    await page.reload();
+    await expect(page.getByRole("region", { name: "Lately" }).getByRole("button", { name: "Friends" })).toHaveAttribute("aria-pressed", "true");
   });
 
-  test("Compare notes navigates from Home into Sasha's note detail", async ({ page }) => {
-    await page.goto("/");
-    // Let the hero/discovery rails finish loading first: the dashboard and
-    // rails above the friends module reflow the page while they resolve, and
-    // a click during that reflow can land beside the link.
-    await expect(page.getByText("Finding bottles…")).toHaveCount(0, { timeout: 15_000 });
-    const friendsModule = page.getByRole("region", { name: "From your friends" });
-    await friendsModule.getByRole("link", { name: /Compare notes/ }).click();
+  test("Compare notes is still one tap from the Friends tab", async ({ page }) => {
+    await page.goto("/friends");
+    await page.getByRole("link", { name: /Compare notes/ }).first().click();
     await expect(page).toHaveURL(new RegExp(`/notes/${SASHA_LAGAVULIN_POUR_ID}$`));
     await expect(page.getByRole("link", { name: "Lagavulin 16" })).toBeVisible();
   });
