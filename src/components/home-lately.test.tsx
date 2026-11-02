@@ -5,7 +5,7 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }) }));
 vi.mock("@/components/toast", () => ({ useToast: () => ({ show: vi.fn() }) }));
 
-import { HomeLately, type HomeLatelyProps } from "@/components/home-lately";
+import { HomeLately, resetLatelyTabForTests, type HomeLatelyProps } from "@/components/home-lately";
 import { LATELY_TAB_STORAGE_KEY } from "@/lib/home-feed";
 import { measureMore } from "@/components/h-scroller";
 
@@ -43,7 +43,10 @@ function props(over: Partial<HomeLatelyProps> = {}): HomeLatelyProps {
   };
 }
 
-beforeEach(() => window.localStorage.clear());
+beforeEach(() => {
+  window.localStorage.clear();
+  resetLatelyTabForTests();
+});
 afterEach(cleanup);
 
 describe("HomeLately", () => {
@@ -81,6 +84,17 @@ describe("HomeLately", () => {
       fireEvent.click(screen.getByRole("button", { name: "You" }));
     });
     expect(window.localStorage.getItem(LATELY_TAB_STORAGE_KEY)).toBe("you");
+  });
+
+  it("still switches when storage writes throw", () => {
+    const spy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("QuotaExceededError");
+    });
+    render(<HomeLately {...props()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Friends" }));
+    expect(screen.getByRole("button", { name: "Friends" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("lately-friends")).toBeInTheDocument();
+    spy.mockRestore();
   });
 
   it("drops private friend pours and never shows a friend's badge", () => {

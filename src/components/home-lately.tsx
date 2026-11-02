@@ -54,7 +54,17 @@ function subscribeTab(onChange: () => void) {
   };
 }
 
+// This visit's choice, so the switch still works when storage is off or a
+// write throws (private mode, quota): the session value wins over storage.
+let sessionTab: LatelyTab | null = null;
+
+/** Test hook: forget this visit's choice. */
+export function resetLatelyTabForTests() {
+  sessionTab = null;
+}
+
 function readStoredTab(): LatelyTab {
+  if (sessionTab) return sessionTab;
   try {
     return parseLatelyTab(window.localStorage.getItem(LATELY_TAB_STORAGE_KEY));
   } catch {
@@ -63,6 +73,7 @@ function readStoredTab(): LatelyTab {
 }
 
 function storeTab(tab: LatelyTab) {
+  sessionTab = tab;
   try {
     window.localStorage.setItem(LATELY_TAB_STORAGE_KEY, tab);
   } catch {
