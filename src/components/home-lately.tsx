@@ -25,7 +25,7 @@ import {
 } from "@/lib/home-feed";
 
 export interface HomeOwnPour extends OwnPourInput {
-  bottleCategory: string | null;
+  bottleCategory: string;
   bottleRegion: string | null;
   bottleCountry: string | null;
   bottleImageUrl: string | null;
