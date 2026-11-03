@@ -113,6 +113,12 @@ export function DiscoverQuickMenu({
       <div
         role="menu"
         aria-label="Discover shortcuts"
+        // Fills the overlay (so it has a box), and a tap on its empty space
+        // is a tap on the scrim.
+        className="absolute inset-0"
+        onClick={(e) => {
+          if (e.target === e.currentTarget) onClose(true);
+        }}
         onKeyDown={(e) => {
           if (e.key === "Escape") {
             e.preventDefault();
