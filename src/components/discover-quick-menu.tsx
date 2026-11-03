@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Award, Disc3, GraduationCap, Search, Sparkles } from "lucide-react";
 import { useScrollLock } from "@/lib/scroll-lock";
 
@@ -104,7 +105,9 @@ export function DiscoverQuickMenu({
     refs.current[(from + delta + n) % n]?.focus();
   };
 
-  return (
+  // Portalled to <body>: the nav's backdrop-filter makes it the containing
+  // block for fixed descendants, which would clip the overlay to the bar.
+  return createPortal(
     <div className="fixed inset-0 z-[60]">
       <div aria-hidden data-testid="quick-menu-scrim" className="absolute inset-0 bg-black/60" onClick={() => onClose(true)} />
       <p className="sr-only" aria-live="polite">
@@ -166,6 +169,7 @@ export function DiscoverQuickMenu({
             </Link>
           ))}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
