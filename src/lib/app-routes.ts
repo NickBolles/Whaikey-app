@@ -16,9 +16,10 @@
 export const TABS = [
   { href: "/", label: "Home" },
   { href: "/bar", label: "My Bar" },
-  // Explore (STORYBOARD D10): catalog search is its front door until the
-  // Explore hub lands; Learn, Passport and the Concierge hang off it.
-  { href: "/search", label: "Explore" },
+  // Discover (STORYBOARD D10, amended 2026-11-02): the Explore hub, one
+  // scrolling page with Ask · Learn · Find. Search, the Concierge, Whiskey
+  // School and the Passport all light it (DISCOVER_SECTIONS below).
+  { href: "/discover", label: "Discover" },
   // The Social tab (design board C1): Feed · Clubs · Trails live under
   // /friends, owned by the social track. Chat left the nav (D1): it is an
   // affordance on Home and the bottle page.
@@ -26,6 +27,25 @@ export const TABS = [
 ] as const;
 
 export type TabHref = (typeof TABS)[number]["href"];
+
+/**
+ * Routes that live under the Discover tab without being the tab itself:
+ * they keep a back button (to Discover, or wherever you came from) but light
+ * the Discover tab in the bottom nav, so Ask and Learn always have a home.
+ */
+export const DISCOVER_SECTIONS = ["/search", "/chat", "/learn", "/passport"] as const;
+
+/**
+ * The bottom-nav tab a route belongs to (the one it lights), or null for a
+ * route under none of them (a bottle page, settings, the journal).
+ */
+export function activeTab(pathname: string): TabHref | null {
+  const path = normalize(pathname);
+  if (path === "/") return "/";
+  if (DISCOVER_SECTIONS.some((route) => matches(path, route))) return "/discover";
+  const tab = TABS.find((t) => t.href !== "/" && matches(path, t.href));
+  return tab ? tab.href : null;
+}
 
 /**
  * Routes that render with neither header nor nav.
@@ -150,6 +170,7 @@ export interface ParentContext {
 }
 
 const HOME: ParentRoute = { href: "/", label: "Home" };
+const DISCOVER: ParentRoute = { href: "/discover", label: "Discover" };
 
 /**
  * Where back goes when there is no in-app history — a deep link, a shared
@@ -170,13 +191,16 @@ export function parentRoute(pathname: string, ctx: ParentContext): ParentRoute {
       if (second && second !== "new" && third === "compare") {
         return { href: `/bottles/${second}`, label: "Bottle" };
       }
-      if (second === "new") return { href: "/search", label: "Explore" };
+      if (second === "new") return { href: "/search", label: "Search" };
       // Signed out, the catalog is the only shelf there is.
-      return ctx.signedIn ? { href: "/bar", label: "My Bar" } : { href: "/search", label: "Explore" };
+      return ctx.signedIn ? { href: "/bar", label: "My Bar" } : { href: "/search", label: "Search" };
     case "learn":
-      return second ? { href: "/learn", label: "Whiskey School" } : HOME;
+      return second ? { href: "/learn", label: "Whiskey School" } : DISCOVER;
+    case "search":
+    case "chat":
+      return DISCOVER;
     case "passport":
-      return ownProfile ?? HOME;
+      return ownProfile ?? DISCOVER;
     case "sharing":
       return ownProfile ?? { href: "/friends", label: "Friends" };
     case "settings":
@@ -190,7 +214,7 @@ export function parentRoute(pathname: string, ctx: ParentContext): ParentRoute {
     case "import":
       return ctx.signedIn ? { href: "/bar", label: "My Bar" } : HOME;
     default:
-      // Journal, search, pour, the policy pages, anything unknown.
+      // Journal, pour, the policy pages, anything unknown.
       return HOME;
   }
 }

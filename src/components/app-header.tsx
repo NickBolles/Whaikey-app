@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BookOpen, Search } from "lucide-react";
+import { BookOpen } from "lucide-react";
 import { UserAvatar } from "@/components/user-avatar";
 import { BackButton } from "@/components/back-button";
 import { isChromeless, isMarketingRoute, isTabRoute, parentRoute } from "@/lib/app-routes";
@@ -16,8 +16,8 @@ import { BrandLockup } from "@/components/brand-mark";
  * itself on chromeless routes (src/lib/app-routes.ts).
  *
  * Leading slot (docs/STORYBOARD.md §1.1): the wordmark on tab routes, a back
- * button everywhere else. The trailing icons stay until the IA pass moves
- * search and the journal out of the header (STORYBOARD §5 step 8).
+ * button everywhere else. Search moved into Discover → Find (STORYBOARD D10,
+ * amended 2026-11-02); the journal stays until the IA pass moves it.
  *
  * Deliberately NOT sticky: DESIGN.md rule 10 reserves stickiness for the
  * bottom nav so full-page screenshots stay honest.
@@ -53,9 +53,6 @@ export function AppHeader({
           <BackButton fallback={parentRoute(pathname, { signedIn: Boolean(user), profileHandle })} />
         )}
         <div className="flex shrink-0 items-center">
-          <HeaderAction href="/search" label="Search">
-            <Search size={20} strokeWidth={1.8} aria-hidden />
-          </HeaderAction>
           {user && (
             <>
               <HeaderAction href="/history" label="Journal">

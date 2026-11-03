@@ -11,6 +11,7 @@ import { PATH_HEADER } from "@/proxy";
 import { BRAND_BACKGROUND, BRAND_NAME, BRAND_TAGLINE } from "@/lib/brand";
 import { AppHeader } from "@/components/app-header";
 import { AppNav } from "@/components/app-nav";
+import { isAiConfigured } from "@/lib/ai/client";
 import { NativeShell } from "@/components/native-shell";
 import { PushOffer } from "@/components/push-offer";
 import { isPushConfigured } from "@/lib/push/send";
@@ -153,7 +154,11 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
                 profileHandle={profile?.handle ?? null}
               />
               <main className="flex-1">{children}</main>
-              <AppNav signedIn={Boolean(user)} />
+              <AppNav
+                signedIn={Boolean(user)}
+                aiEnabled={Boolean(user) && isAiConfigured()}
+                passportHref={profile?.handle ? `/u/${encodeURIComponent(profile.handle)}` : null}
+              />
             </div>
           )}
         </ToastProvider>

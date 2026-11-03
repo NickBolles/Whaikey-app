@@ -142,14 +142,14 @@ test.describe("signed-out smoke", () => {
     await expect(hero.locator("[aria-hidden='true'] svg")).toHaveCount(3);
   });
 
-  test("bottom nav is Home · Bar · ＋ · Explore · Social, and ＋ opens the pour sheet", async ({ page }) => {
+  test("bottom nav is Home · Bar · ＋ · Discover · Social, and ＋ opens the pour sheet", async ({ page }) => {
     // Signed out, `/` is the marketing landing and carries no app chrome
     // (owner feedback 2026-10-26); the nav is there on every app route.
     await page.goto("/");
     await expect(page.getByRole("navigation", { name: "Primary" })).toHaveCount(0);
     await page.goto("/search");
     const nav = page.getByRole("navigation", { name: "Primary" });
-    for (const label of ["Home", "Bar", "Explore", "Social"]) {
+    for (const label of ["Home", "Bar", "Discover", "Social"]) {
       await expect(nav.getByText(label, { exact: true })).toBeVisible();
     }
     await expect(nav.getByRole("link", { name: "Log a pour" })).toHaveAttribute("href", "/pour");
@@ -167,13 +167,15 @@ test.describe("app shell", () => {
     // dead end. Nothing in-app sits behind a fresh load, so back is a link.
     await page.goto("/bottles/eagle-rare-10");
     const back = page.getByTestId("header-back");
-    await expect(back).toHaveAccessibleName("Back to Explore");
+    await expect(back).toHaveAccessibleName("Back to Search");
     await expect(page.getByRole("link", { name: "Caskfolk" })).toHaveCount(0);
     await back.click();
     await expect(page).toHaveURL(/\/search$/);
+    // Search lights Discover in the nav, and keeps a back button to it.
+    await expect(page.getByRole("navigation", { name: "Primary" }).getByRole("link", { name: "Discover" })).toHaveAttribute("aria-current", "page");
     // A tab route gets the wordmark back instead. (Signed out, `/` is the
     // marketing landing with its own masthead, so use another tab.)
-    await page.goto("/search");
+    await page.goto("/discover");
     await expect(page.getByRole("link", { name: "Caskfolk" })).toBeVisible();
     await expect(page.getByTestId("header-back")).toHaveCount(0);
   });
@@ -181,37 +183,37 @@ test.describe("app shell", () => {
   test("back names the page you came from and returns to it through history", async ({ page }) => {
     // Signed out, `/` is the chromeless marketing landing: start on a page
     // that carries the header instead.
-    await page.goto("/learn");
-    await page.getByRole("link", { name: "Search" }).click();
+    await page.goto("/discover");
+    await page.getByRole("link", { name: "Search bottles" }).click();
     await expect(page).toHaveURL(/\/search$/);
     await page.getByRole("searchbox").first().fill("lagavulin 16");
     await page.getByRole("region", { name: "Search results" }).locator("a[href^='/bottles/']").first().click();
     await expect(page).toHaveURL(/\/bottles\//);
 
     const back = page.getByTestId("header-back");
-    await expect(back).toHaveAccessibleName("Back to Explore");
+    await expect(back).toHaveAccessibleName("Back to Search");
     await back.click();
     await expect(page).toHaveURL(/\/search/);
-    // Explore is a tab now, so it carries the wordmark rather than a back button.
-    await expect(page.getByTestId("header-back")).toHaveCount(0);
+    // Search sits under Discover: its back names the hub it came from.
+    await expect(page.getByTestId("header-back")).toHaveAccessibleName("Back to Discover");
   });
 
   test("the browser's own back (and so the iOS swipe) keeps the header's label honest", async ({ page }) => {
     // Signed out, `/` is the chromeless marketing landing: start on a page
     // that carries the header instead.
-    await page.goto("/learn");
-    await page.getByRole("link", { name: "Search" }).click();
+    await page.goto("/discover");
+    await page.getByRole("link", { name: "Search bottles" }).click();
     await expect(page).toHaveURL(/\/search$/);
     await page.getByRole("searchbox").first().fill("eagle rare");
     await page.getByRole("region", { name: "Search results" }).locator("a[href^='/bottles/']").first().click();
-    await expect(page.getByTestId("header-back")).toHaveAccessibleName("Back to Explore");
+    await expect(page.getByTestId("header-back")).toHaveAccessibleName("Back to Search");
 
     await page.goBack();
     await expect(page).toHaveURL(/\/search/);
     await page.getByRole("searchbox").first().fill("lagavulin");
     await page.getByRole("region", { name: "Search results" }).locator("a[href^='/bottles/']").first().click();
-    // Unwound, not pushed: back still names Explore, not the bottle left behind.
-    await expect(page.getByTestId("header-back")).toHaveAccessibleName("Back to Explore");
+    // Unwound, not pushed: back still names Search, not the bottle left behind.
+    await expect(page.getByTestId("header-back")).toHaveAccessibleName("Back to Search");
   });
 
   test("sign-in and share pages carry neither header nor nav (review UX-14)", async ({ page }) => {

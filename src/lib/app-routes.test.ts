@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isChromeless, isMarketingRoute, isTabRoute, parentRoute, routeLabel, TABS } from "@/lib/app-routes";
+import { activeTab, isChromeless, isMarketingRoute, isTabRoute, parentRoute, routeLabel, TABS } from "@/lib/app-routes";
 
 const SIGNED_IN = { signedIn: true, profileHandle: "ada" };
 const SIGNED_OUT = { signedIn: false, profileHandle: null };
@@ -37,7 +37,9 @@ describe("routeLabel", () => {
     expect(routeLabel("/")).toBe("Home");
     expect(routeLabel("/bar")).toBe("My Bar");
     expect(routeLabel("/friends")).toBe("Social");
-    expect(routeLabel("/search")).toBe("Explore");
+    expect(routeLabel("/discover")).toBe("Discover");
+    expect(routeLabel("/search")).toBe("Search");
+    expect(routeLabel("/chat")).toBe("Concierge");
   });
 
   it("names the places a back button most often returns to", () => {
@@ -65,7 +67,7 @@ describe("routeLabel", () => {
 describe("parentRoute — where back goes with no in-app history", () => {
   it("sends a bottle page to the viewer's bar, or to the catalog when signed out", () => {
     expect(parentRoute("/bottles/eagle-rare-10", SIGNED_IN)).toEqual({ href: "/bar", label: "My Bar" });
-    expect(parentRoute("/bottles/eagle-rare-10", SIGNED_OUT)).toEqual({ href: "/search", label: "Explore" });
+    expect(parentRoute("/bottles/eagle-rare-10", SIGNED_OUT)).toEqual({ href: "/search", label: "Search" });
   });
 
   it("sends a comparison to its own bottle", () => {
@@ -75,17 +77,19 @@ describe("parentRoute — where back goes with no in-app history", () => {
     });
   });
 
-  it("sends lessons to Whiskey School, and the school to Home", () => {
+  it("sends lessons to Whiskey School, and the school to Discover", () => {
     expect(parentRoute("/learn/what-is-whiskey", SIGNED_OUT)).toEqual({ href: "/learn", label: "Whiskey School" });
     expect(parentRoute("/learn/flavors", SIGNED_OUT)).toEqual({ href: "/learn", label: "Whiskey School" });
-    expect(parentRoute("/learn", SIGNED_OUT)).toEqual({ href: "/", label: "Home" });
+    expect(parentRoute("/learn", SIGNED_OUT)).toEqual({ href: "/discover", label: "Discover" });
+    expect(parentRoute("/search", SIGNED_OUT)).toEqual({ href: "/discover", label: "Discover" });
+    expect(parentRoute("/chat", SIGNED_IN)).toEqual({ href: "/discover", label: "Discover" });
   });
 
   it("sends a passport badge to the viewer's own profile when they have one", () => {
     expect(parentRoute("/passport/country/Scotland", SIGNED_IN)).toEqual({ href: "/u/ada", label: "Profile" });
     expect(parentRoute("/passport/country/Scotland", { signedIn: true, profileHandle: null })).toEqual({
-      href: "/",
-      label: "Home",
+      href: "/discover",
+      label: "Discover",
     });
   });
 
@@ -102,8 +106,25 @@ describe("parentRoute — where back goes with no in-app history", () => {
   });
 
   it("falls back to Home for the journal, the policies and anything unknown", () => {
-    for (const path of ["/history", "/search", "/pour", "/terms", "/nope/nothing"]) {
+    for (const path of ["/history", "/pour", "/terms", "/nope/nothing"]) {
       expect(parentRoute(path, SIGNED_IN)).toEqual({ href: "/", label: "Home" });
+    }
+  });
+});
+
+describe("activeTab — which nav tab a route lights", () => {
+  it("lights Discover on the hub and on every Discover section", () => {
+    for (const path of ["/discover", "/search", "/search?q=x", "/chat", "/learn", "/learn/flavors", "/passport/country/Scotland"]) {
+      expect(activeTab(path)).toBe("/discover");
+    }
+  });
+
+  it("lights the other tabs on themselves and their children, and nothing elsewhere", () => {
+    expect(activeTab("/")).toBe("/");
+    expect(activeTab("/bar")).toBe("/bar");
+    expect(activeTab("/friends/requests")).toBe("/friends");
+    for (const path of ["/friendship", "/scan", "/sharing", "/bottles/eagle-rare-10", "/history", "/learning", "/chats"]) {
+      expect(activeTab(path)).toBeNull();
     }
   });
 });
