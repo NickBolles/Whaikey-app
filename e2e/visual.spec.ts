@@ -182,6 +182,27 @@ test.describe("signed out", () => {
     await expect(page).toHaveScreenshot(shot("bottle-detail-wide-logo"), { fullPage: true });
   });
 
+  test("discover hub", async ({ page }) => {
+    await page.goto("/discover");
+    await expect(page.getByRole("heading", { name: "Find, ask, learn" })).toBeVisible();
+    await settle(page);
+    await expect(page).toHaveScreenshot(shot("discover-hub"), { fullPage: true });
+  });
+
+  test("discover quick menu", async ({ page }) => {
+    await page.goto("/discover");
+    await expect(page.getByRole("heading", { name: "Find, ask, learn" })).toBeVisible();
+    // Not settle(): it pins the nav into normal flow, and the arc anchors to
+    // the sticky tab the way a phone shows it.
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.waitForLoadState("networkidle");
+    await page.evaluate(() => document.fonts.ready);
+    // Second tap on the lit Discover tab opens the radial quick menu.
+    await page.getByRole("navigation", { name: "Primary" }).getByRole("link", { name: "Discover" }).click();
+    await expect(page.getByRole("menu", { name: "Discover shortcuts" })).toBeVisible();
+    await expect(page).toHaveScreenshot(shot("discover-quick-menu"));
+  });
+
   test("learn hub", async ({ page }) => {
     await page.goto("/learn");
     await expect(page.getByRole("heading", { name: /Learn whiskey/i })).toBeVisible();

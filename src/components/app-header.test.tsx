@@ -17,11 +17,12 @@ afterEach(() => {
 });
 
 describe("AppHeader", () => {
-  it("shows the wordmark plus search, journal and profile links when signed in with a social profile", () => {
+  it("shows the wordmark plus journal and profile links when signed in with a social profile", () => {
     render(<AppHeader user={{ name: "Ada", image: null }} profileHandle="ada" />);
 
     expect(screen.getByRole("link", { name: "Caskfolk" })).toHaveAttribute("href", "/");
-    expect(screen.getByRole("link", { name: "Search" })).toHaveAttribute("href", "/search");
+    // Search moved into Discover → Find (STORYBOARD D10, amended 2026-11-02).
+    expect(screen.queryByRole("link", { name: "Search" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Journal" })).toHaveAttribute("href", "/history");
     expect(screen.getByRole("link", { name: "Your profile" })).toHaveAttribute("href", "/u/ada");
   });
@@ -31,12 +32,12 @@ describe("AppHeader", () => {
     expect(screen.getByRole("link", { name: "Your profile" })).toHaveAttribute("href", "/friends");
   });
 
-  it("shows only the wordmark and search when signed out", () => {
-    pathname = "/search";
+  it("shows only the wordmark when signed out", () => {
+    pathname = "/discover";
     render(<AppHeader user={null} profileHandle={null} />);
 
     expect(screen.getByRole("link", { name: "Caskfolk" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Search" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Search" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Journal" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Your profile" })).not.toBeInTheDocument();
   });
@@ -59,7 +60,7 @@ describe("AppHeader", () => {
 
 /** Review UX-1: "No back navigation; iOS bottle page is a dead end". */
 describe("AppHeader back slot", () => {
-  it.each(["/", "/bar", "/search", "/friends"])("keeps the wordmark, not a back button, on the tab route %s", (path) => {
+  it.each(["/", "/bar", "/discover", "/friends"])("keeps the wordmark, not a back button, on the tab route %s", (path) => {
     pathname = path;
     render(<AppHeader user={{ name: "Ada", image: null }} profileHandle="ada" />);
     expect(screen.getByRole("link", { name: "Caskfolk" })).toBeInTheDocument();
@@ -72,7 +73,9 @@ describe("AppHeader back slot", () => {
 
     expect(screen.queryByRole("link", { name: "Caskfolk" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Back to My Bar" })).toHaveAttribute("href", "/bar");
-    expect(screen.getByRole("link", { name: "Search" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Journal" })).toBeInTheDocument();
+    // Search lives in Discover → Find now, not the header.
+    expect(screen.queryByRole("link", { name: "Search" })).not.toBeInTheDocument();
   });
 
   it("with no in-app history, is a plain link to the route's logical parent", () => {
@@ -80,7 +83,7 @@ describe("AppHeader back slot", () => {
     resetNavigation(pathname); // a deep link: nothing behind this page
     render(<AppHeader user={null} profileHandle={null} />);
 
-    const back = screen.getByRole("link", { name: "Back to Explore" });
+    const back = screen.getByRole("link", { name: "Back to Search" });
     expect(back).toHaveAttribute("href", "/search");
     fireEvent.click(back);
     // The Link navigates on its own; history is not touched, so back can
@@ -106,7 +109,7 @@ describe("AppHeader back slot", () => {
     pathname = "/bottles/eagle-rare-10";
     render(<AppHeader user={{ name: "Ada", image: null }} profileHandle="ada" />);
 
-    fireEvent.click(screen.getByRole("link", { name: "Back to Explore" }), { metaKey: true });
+    fireEvent.click(screen.getByRole("link", { name: "Back to Search" }), { metaKey: true });
     expect(router.back).not.toHaveBeenCalled();
   });
 
